@@ -8,15 +8,17 @@
 ### **EVERY 60 SECONDS (24/7)**
 **Task:** Continuous Market Scan & Signal Generation
 **Component:** `main.py` → Master Orchestrator → APScheduler
-**What happens:**
-- Fetch latest OHLCV data for 12 LSE leveraged ETPs (QQQ3.L, 3LUS.L, 3SEM.L, GPT3.L, NVD3.L, TSL3.L, TSM3.L, MU2.L, QQQS.L, 3USS.L, QQQ5.L, SP5L.L)
+**What happens (across 6 markets, 22 hours/day):**
+- **UK ISA (08:00-16:30 UTC):** Fetch 12 LSE leveraged ETPs (QQQ3.L, 3LUS.L, 3SEM.L, GPT3.L, NVD3.L, TSL3.L, MU2.L, QQQS.L, 3USS.L, QQQ5.L, SP5L.L, and more)
+- **US Market (09:30-16:00 UTC):** Fetch 18 US equities (NVDA, TSLA, MU, AMD, AVGO, MRVL, ARM, QCOM, LRCX, KLAC, ON, VRT, ANET, CRDO, SMCI, SNDK, TSM, ASML)
+- **Asia (22:00 UTC+):** Monitor TSM, ASML for Asia pre-market/open
 - Recalculate all technical indicators (RSI, MACD, Bollinger Bands, Chandelier, etc.)
 - Update regime classification (momentum vs mean-reversion, volatility regimes)
 - Run signal pipeline (8 timing defect fixes T-01 to T-08)
 - Check qualification gates (4 silent killer fixes SK-01 to SK-04)
-- Execute trades via IB Gateway (paper mode)
+- Execute trades via IB Gateway (paper mode, across all markets)
 - Log results to SQLite database
-- Send Telegram alerts on entries/exits
+- Send Telegram alerts on entries/exits (multi-market)
 
 **Duration:** ~2-5 seconds per cycle (leaves 55+ seconds for processing)
 

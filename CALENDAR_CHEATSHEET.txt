@@ -41,9 +41,14 @@ EVERY SUNDAY AT 22:00 UTC
 
   00:00 UTC     🌙 Midnight             Health checks every 10 min
   06:00 UTC     🌤️  Pre-market           System warming up
-  08:00 UTC     🎯 LSE OPENS             Trading begins
-  09:00-16:30   📈 PEAK TRADING          1-4 trades/day expected
+  08:00 UTC     🎯 LSE OPENS             UK ISA trading begins
+  09:00-16:30   📈 PEAK TRADING (UK ISA) 1-4 trades/day expected
   16:30 UTC     🏁 LSE CLOSES            Market ends
+  17:00 UTC     🌍 US PRE-MARKET OPENS   US equities trading begins
+  09:30 UTC     🎯 NYSE/NASDAQ OPENS     Full US market (18 tickers)
+  12:30 UTC     📈 US PEAK TRADING       Nasdaq most active
+  16:00 UTC     🏁 NYSE/NASDAQ CLOSE     US market ends
+  22:00 UTC     🌏 ASIA PRE-MARKET       Asia opens (TSM, ASML, etc.)
   23:00 UTC     🚀 NIGHTLY DEPLOY        Fresh code live (if on schedule)
   23:30 UTC     ✅ BACK ONLINE           Trading resumes with new code
 
@@ -51,8 +56,8 @@ EVERY SUNDAY AT 22:00 UTC
 │ 🎯 THE CONTINUOUS LOOP (Every 60 Seconds)                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-   1. INGEST     Fetch data (12 LSE ETPs)
-      ↓
+   1. INGEST     Fetch data (UK ISA: 12 ETPs + US: 18 equities + Asia)
+      ↓           = 6 markets traded across 22 hours/day
    2. PERCEIVE   Calculate indicators (RSI, MACD, Bollinger, etc.)
       ↓
    3. CLASSIFY   Market regime (momentum vs mean-reversion)
@@ -73,10 +78,10 @@ EVERY SUNDAY AT 22:00 UTC
 │ 📊 EXPECTED DAILY METRICS                                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-  Scans:          1,440 (every 60 sec)
+  Scans:          1,440 (every 60 sec, across 6 markets)
   Health checks:  144 (every 10 min)
-  Trades:         1-4 (during LSE hours)
-  P&L:            -£50 to +£100 (daily)
+  Trades:         2-8 (across 22 hours: UK 08:00-16:30 + US 09:30-16:00 + Asia)
+  P&L:            -£100 to +£200+ (daily, multi-market)
   Win rate:       40%+ (after validation)
   Sharpe ratio:   3-8 (after validation)
   Manual work:    0 ✅
