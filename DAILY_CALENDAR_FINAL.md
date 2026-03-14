@@ -334,15 +334,15 @@ Result: Universe never stale, always reflects current market reality
 
 ## 📊 DAILY EXECUTION SUMMARY
 
-### Phase 1: LSE + Europe (08:00-14:30, 6.5 hours)
-- **Markets Open:** UK ISA (12 ETPs) + European exposure
+### Phase 1: LSE + European Markets (08:00-14:30 UTC, 6.5 hours)
+- **Markets Open:** 12 LSE leveraged ETPs + European exposure
 - **Trading:** Continuous every 60 sec
-- **Ouroboros:** Real-time alpha analysis
+- **Ouroboros:** Real-time alpha analysis on 12 symbols
 - **Universe Scanner:** Monitoring LSE + Euro exchanges
 - **Expected Trades:** 1-2
 - **Expected P&L:** £50-150
 
-### Phase 2: LSE + US Overlap (14:30-16:00 UTC, 1.5 hours) ← PEAK ACTIVITY
+### Phase 2: LSE + US Peak Overlap (14:30-16:30 UTC, 2 hours) ← PEAK ACTIVITY
 - **Markets Open:** 12 LSE ETPs + 18 US equities (30 total)
 - **Trading:** Continuous every 60 sec (maximum universe)
 - **Ouroboros:** Analyzing 30 symbols simultaneously
@@ -350,23 +350,23 @@ Result: Universe never stale, always reflects current market reality
 - **Expected Trades:** 1-3 (most active period)
 - **Expected P&L:** £100-250
 
-### US Only Close (16:00-16:30 UTC, 30 minutes)
-- **Markets Open:** US equities only (LSE already closed at 16:30 UTC = 17:30 CET)
-- **Trading:** Final US trades before 16:00 UTC close
-- **Ouroboros:** Analyzing final US day trades
-- **Universe Scanner:** Monitoring final US activity
+### Phase 3: US Only Trading (16:30-21:00 UTC, 4.5 hours)
+- **Markets Open:** 18 US equities only (LSE closed at 16:30)
+- **Trading:** Continuous US trading (NYSE/NASDAQ still open)
+- **Ouroboros:** Real-time analysis on US universe
+- **Universe Scanner:** Monitoring US equities
+- **Expected Trades:** 1-2
+- **Expected P&L:** £50-150
+
+### US Close + Asia Warmup (21:00-22:00 UTC, 1 hour)
+- **Markets Open:** US market closes at 21:00 UTC (16:00 ET), Asia pre-market opens
+- **Trading:** Final US trades, Asia pre-market signals
+- **Ouroboros:** Analyzing US day close, Asia regime hunting
+- **Universe Scanner:** Transitioning to Asia focus
 - **Expected Trades:** 0-1
 - **Expected P&L:** £0-50
 
-### Maintenance (16:30-22:00 UTC, 5.5 hours) ← NO TRADING
-- **Markets Open:** NONE (US closed, LSE closed, Asia pre-market only)
-- **Trading:** Paused (no active markets)
-- **Ouroboros:** Deep analysis of daily trades, Asia pattern hunting
-- **Universe Scanner:** Preparing Asia universe for open
-- **Expected Trades:** 0
-- **Health Checks:** Every 10 min (continuous)
-
-### Phase 3: Asia Trading (22:00-08:00, 10 hours)
+### Phase 4: Asia Trading (22:00-08:00 UTC, 10 hours)
 - **Markets Open:** Asia full (TSM, ASML, indices)
 - **Trading:** Continuous every 60 sec
 - **Ouroboros:** Real-time alpha analysis on Asia universe
@@ -388,12 +388,12 @@ Health Checks:       144 per day (10-min cycles)
 Ouroboros Analysis:  ~288 per day (3-5 min cycles)
 Universe Scans:      ~144+ per day (continuous)
 
-Expected Trades:     2-8 per day
-  Phase 1 (LSE+Euro): 1-2 trades
-  Phase 2 (LSE+US):   1-3 trades (peak)
-  US Only Close:      0-1 trades
-  Maintenance:        0 trades (no markets)
-  Phase 3 (Asia):     1-2 trades
+Expected Trades:     3-9 per day
+  Phase 1 (LSE+Euro):      1-2 trades
+  Phase 2 (LSE+US):        1-3 trades (peak, 2 hours)
+  Phase 3 (US Only):       1-2 trades (4.5 hours)
+  Phase 4 (US Close):      0-1 trades
+  Phase 5 (Asia):          1-2 trades
 
 P&L Expected:        £200-550 per day (average £375)
   = £4,000-11,000 per month
