@@ -1,0 +1,111 @@
+name: 24/7 System Monitoring
+
+# Runs every 10 minutes during trading hours
+# Monitors system health, P&L, and alerts on issues
+on:
+  schedule:
+    # Every 10 minutes, 7 days a week (24/7 operation)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+env:
+  EC2_HOST: ubuntu@3.230.44.22
+  EC2_DIR: /home/ubuntu/nzt48-signals
+  DEPLOY_KEY_PATH: /tmp/deploy_key
+
+jobs:
+  monitor:
+    name: Monitor System Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > $DEPLOY_KEY_PATH
+          chmod 600 $DEPLOY_KEY_PATH
+          ssh-keyscan -H 3.230.44.22 >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Check container status
+        id: containers
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            echo "=== Container Status Check ==="
+
+            # Check each container
+            NZT48_STATUS=$(docker compose ps nzt48 --format='{{.State}}' 2>/dev/null || echo "missing")
+            REDIS_STATUS=$(docker compose ps redis --format='{{.State}}' 2>/dev/null || echo "missing")
+            IBGW_STATUS=$(docker compose ps ib-gateway --format='{{.State}}' 2>/dev/null || echo "missing")
+
+            echo "nzt48: $NZT48_STATUS"
+            echo "redis: $REDIS_STATUS"
+            echo "ib-gateway: $IBGW_STATUS"
+
+            # Alert if any are down
+            if [ "$NZT48_STATUS" != "Up" ]; then
+              echo "⚠️  ALERT: nzt48 is not running"
+              exit 1
+            fi
+          EOF
+
+      - name: Check system resources
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            echo "=== System Resources ==="
+            df -h | grep root
+            free -h | grep Mem
+            echo ""
+            echo "Docker stats:"
+            docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || echo "Stats unavailable"
+          EOF
+
+      - name: Check recent logs for errors
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            echo "=== Recent Errors (last 5 minutes) ==="
+            docker logs nzt48 --since 5m 2>/dev/null | grep -i "error\|failed\|exception" || echo "No errors found ✅"
+          EOF
+
+      - name: Verify signal generation
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            echo "=== Signal Activity (last 10 minutes) ==="
+            docker logs nzt48 --since 10m 2>/dev/null | grep -i "signal\|trade\|entry" | tail -5 || echo "No recent signals"
+          EOF
+
+      - name: Send alert on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: |
+            🚨 NZT-48 System Alert
+            Monitoring check FAILED
+            EC2: 3.230.44.22
+            Time: ${{ github.event.schedule }}
+
+            Action Required:
+            1. SSH to EC2
+            2. Check: docker compose ps
+            3. Check logs: docker logs nzt48
+            4. Restart if needed: docker compose up -d
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true
+
+      - name: Send success notification (hourly)
+        if: github.event_name == 'schedule' && contains(github.run_number, '6')  # Roughly hourly
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: |
+            ✅ NZT-48 System Healthy
+            All services running normally
+            Next check: 10 minutes
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true

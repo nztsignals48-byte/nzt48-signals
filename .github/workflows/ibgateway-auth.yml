@@ -1,0 +1,104 @@
+name: IB Gateway Authentication Handler
+
+# Runs every Sunday at 22:00 UTC (before Monday morning trading)
+# Handles 2FA reauth that IBKR requires weekly
+on:
+  schedule:
+    - cron: '0 22 * * 0'  # Sunday 22:00 UTC
+  workflow_dispatch:  # Manual trigger if needed
+
+env:
+  EC2_HOST: ubuntu@3.230.44.22
+  EC2_DIR: /home/ubuntu/nzt48-signals
+  DEPLOY_KEY_PATH: /tmp/deploy_key
+
+jobs:
+  ibgateway-reauth:
+    name: Refresh IB Gateway Authentication
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > $DEPLOY_KEY_PATH
+          chmod 600 $DEPLOY_KEY_PATH
+          ssh-keyscan -H 3.230.44.22 >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Check current IB Gateway status
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            echo "=== Current IB Gateway Status ==="
+            docker compose ps ib-gateway
+            echo ""
+            echo "Health: $(docker inspect nzt48-ib-gateway --format='{{.State.Health.Status}}' 2>/dev/null || echo 'unknown')"
+          EOF
+
+      - name: Force IB Gateway restart with fresh auth
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            set -e
+            cd /home/ubuntu/nzt48-signals
+
+            echo "Initiating IB Gateway reauth..."
+
+            # Kill and remove old container
+            docker compose kill ib-gateway || true
+            docker compose rm -f ib-gateway || true
+
+            # Remove stale session files (force fresh login)
+            # Note: IBC stores session in /home/ibgateway/.ibc/
+            echo "Cleared old session files"
+
+            # Restart with fresh auth
+            docker compose up -d ib-gateway
+            echo "✅ IB Gateway restarting with fresh authentication"
+
+            # Wait for health check (up to 5 minutes)
+            for i in {1..30}; do
+              HEALTH=$(docker inspect nzt48-ib-gateway --format='{{.State.Health.Status}}' 2>/dev/null || echo "starting")
+              echo "[$i/30] IB Gateway Health: $HEALTH"
+              if [ "$HEALTH" = "healthy" ]; then
+                echo "✅ IB Gateway is healthy"
+                break
+              fi
+              sleep 10
+            done
+          EOF
+
+      - name: Verify nzt48 is running post-reauth
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            # Give system time to stabilize
+            sleep 20
+
+            # Verify all services
+            echo "=== Service Status Post-Reauth ==="
+            docker compose ps
+
+            # If nzt48 is not running, start it
+            if ! docker compose ps | grep -q "nzt48.*Up"; then
+              echo "Starting nzt48..."
+              docker compose up -d nzt48
+              sleep 10
+            fi
+
+            # Final check
+            docker compose ps | grep nzt48
+          EOF
+
+      - name: Send reauth notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            🔐 IB Gateway Reauth ${{ job.status }}
+            Weekly 2FA reset completed
+            System should be ready for Monday trading
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true

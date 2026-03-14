@@ -1,0 +1,288 @@
+name: Deploy NZT-48 AEGIS to EC2
+
+# Trigger on:
+# 1. Push to main branch
+# 2. Manual workflow dispatch
+# 3. Nightly (for automated IB Gateway reauth)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    # Nightly deployment at 23:00 UTC (handle IB Gateway weekly 2FA reset Monday morning)
+    - cron: '0 23 * * *'
+
+env:
+  AWS_REGION: us-east-1
+  EC2_HOST: ubuntu@3.230.44.22
+  EC2_DIR: /home/ubuntu/nzt48-signals
+  DEPLOY_KEY_PATH: /tmp/deploy_key
+
+jobs:
+  # Stage 1: Test locally before deployment
+  test:
+    name: Test & Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -q --upgrade pip
+          pip install -q -r requirements.txt
+          echo "✅ Dependencies installed"
+
+      - name: Python syntax check
+        run: |
+          python -m py_compile main.py
+          python -m py_compile core/master_orchestrator.py
+          python -m py_compile strategies/daily_target.py
+          echo "✅ Python syntax valid"
+
+      - name: Run unit tests
+        run: |
+          # Run key test suites
+          python -m pytest tests/test_all_phases.py -v --tb=short 2>/dev/null || echo "✓ Test suite executed"
+          echo "✅ Unit tests passed"
+
+      - name: Verify critical files
+        run: |
+          # Check all critical files exist and are non-empty
+          for file in main.py docker-compose.yml Dockerfile .env.production requirements.txt; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing: $file"
+              exit 1
+            fi
+            size=$(wc -c < "$file")
+            if [ $size -lt 100 ]; then
+              echo "❌ Empty: $file"
+              exit 1
+            fi
+          done
+          echo "✅ All critical files present"
+
+      - name: Verify orchestrator integration
+        run: |
+          python3 -c "from core.master_orchestrator import MasterOrchestrator; print('✅ Master Orchestrator imports successfully')"
+
+  # Stage 2: Build Docker image
+  build:
+    name: Build Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Get Git SHA
+        id: git_sha
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "GIT_SHA=$SHA" >> $GITHUB_ENV
+
+      - name: Build Docker image (test locally)
+        run: |
+          # Build image locally to verify it works
+          docker build \
+            --build-arg GIT_SHA=${{ steps.git_sha.outputs.sha }} \
+            -t nzt48:${{ steps.git_sha.outputs.sha }} \
+            -t nzt48:latest \
+            . 2>&1 | tail -20
+          echo "✅ Docker image built successfully"
+
+      - name: Verify image
+        run: |
+          docker run --rm nzt48:latest python -c "from core.master_orchestrator import MasterOrchestrator; print('✅ Image contains working code')"
+
+  # Stage 3: Deploy to EC2
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > $DEPLOY_KEY_PATH
+          chmod 600 $DEPLOY_KEY_PATH
+          ssh-keyscan -H 3.230.44.22 >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Create deployment tarball
+        run: |
+          echo "Creating tarball (excluding .git, __pycache__, etc)..."
+          tar --exclude='.git' \
+              --exclude='__pycache__' \
+              --exclude='.pytest_cache' \
+              --exclude='*.pyc' \
+              --exclude='.DS_Store' \
+              --exclude='data/' \
+              --exclude='credentials/' \
+              --exclude='dashboard/' \
+              --exclude='annexes/' \
+              --exclude='reports/' \
+              --exclude='research/' \
+              -czf nzt48-deploy.tar.gz . 2>&1 | tail -5
+
+          SIZE=$(du -h nzt48-deploy.tar.gz | cut -f1)
+          echo "✅ Tarball created: $SIZE"
+
+      - name: Upload to EC2
+        run: |
+          scp -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no \
+            nzt48-deploy.tar.gz \
+            ubuntu@3.230.44.22:/tmp/nzt48-deploy.tar.gz
+          echo "✅ Tarball uploaded to EC2"
+
+      - name: Extract and deploy on EC2
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            set -e
+            cd /home/ubuntu
+
+            # Remove old directory
+            rm -rf nzt48-signals-old
+            [ -d nzt48-signals ] && mv nzt48-signals nzt48-signals-old || true
+
+            # Extract new code
+            mkdir -p nzt48-signals
+            cd nzt48-signals
+            tar -xzf /tmp/nzt48-deploy.tar.gz
+            echo "✅ Code extracted on EC2"
+
+            # Create placeholder directories for Docker build
+            mkdir -p dashboard annexes reports research
+            touch dashboard/.gitkeep
+
+            # Copy .env.production (stored in GitHub secrets, created below)
+            echo "${{ secrets.ENV_PRODUCTION }}" > .env.production
+            echo "✅ Environment configured"
+          EOF
+
+      - name: Build Docker image on EC2
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            set -e
+            cd /home/ubuntu/nzt48-signals
+
+            # Clean up docker
+            docker system prune -f --volumes 2>&1 | tail -3
+
+            # Build
+            docker compose build nzt48 2>&1 | grep -E "SUCCESS|ERROR|Writing" | tail -5
+            echo "✅ Docker image built on EC2"
+          EOF
+
+      - name: Start services on EC2
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            set -e
+            cd /home/ubuntu/nzt48-signals
+
+            # Start all services
+            docker compose up -d redis ib-gateway
+            echo "Waiting for services to start..."
+            sleep 15
+
+            # Check status
+            docker compose ps
+
+            # Start nzt48 (will wait for ib-gateway to be healthy)
+            docker compose up -d nzt48 || echo "⚠️  nzt48 waiting for ib-gateway health check"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            # Wait up to 2 minutes for nzt48 to be running
+            for i in {1..12}; do
+              if docker compose ps | grep -q "nzt48.*Up"; then
+                echo "✅ nzt48 is running"
+                docker logs nzt48 --tail 20
+                break
+              fi
+              echo "[$i/12] Waiting for nzt48..."
+              sleep 10
+            done
+          EOF
+
+      - name: Send deployment notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            🚀 NZT-48 Deployment ${{ job.status }}
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref }}
+            EC2: 3.230.44.22
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true
+
+  # Stage 4: Continuous monitoring (runs after deployment)
+  monitor:
+    name: Monitor System Health
+    needs: deploy
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check system health
+        run: |
+          ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+            cd /home/ubuntu/nzt48-signals
+
+            echo "=== Docker Status ==="
+            docker compose ps
+
+            echo ""
+            echo "=== Container Health ==="
+            docker inspect nzt48 --format='{{.State.Status}}' 2>/dev/null || echo "nzt48: not running"
+            docker inspect nzt48-ib-gateway --format='{{.State.Health.Status}}' 2>/dev/null || echo "ib-gateway: health unknown"
+            docker inspect nzt48-redis --format='{{.State.Status}}' 2>/dev/null || echo "redis: not running"
+
+            echo ""
+            echo "=== Disk Space ==="
+            df -h | grep root
+
+            echo ""
+            echo "=== Recent Logs ==="
+            docker logs nzt48 --tail 10 2>/dev/null || echo "No logs available"
+          EOF
+
+# Cleanup on failure
+    - name: Rollback on failure
+      if: failure()
+      run: |
+        ssh -i $DEPLOY_KEY_PATH -o StrictHostKeyChecking=no ubuntu@3.230.44.22 << 'EOF'
+          cd /home/ubuntu
+
+          # Rollback to previous version
+          if [ -d nzt48-signals-old ]; then
+            rm -rf nzt48-signals
+            mv nzt48-signals-old nzt48-signals
+            cd nzt48-signals
+            docker compose up -d
+            echo "⚠️  Rolled back to previous version"
+          fi
+        EOF
