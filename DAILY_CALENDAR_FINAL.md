@@ -297,12 +297,16 @@ WAL Reader:
 
 ---
 
-## 🔎 UNIVERSE SCANNER: SESSION TICKER SELECTION (15 Minutes Pre-Session)
+## 🔎 UNIVERSE SCANNER: DYNAMIC SESSION REFRESH
 
-Universe Scanner **decides the session tickers 15 minutes before each session starts**:
+Universe Scanner **opens with a 15-minute pre-session scan, then refreshes every 15 min in hour 1, then hourly to catch runners**:
 
 ```
-PHASE 1 PREP (07:45 UTC - 15 min before 08:00 open):
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 1: LSE + EUROPEAN MARKETS (08:00-14:30 UTC, 6.5 hours)
+═══════════════════════════════════════════════════════════════════════════════
+
+07:45 UTC - INITIAL UNIVERSE (15 min before open):
   ├─ Scan LSE for ALL tradeable leveraged ETPs (3x, 5x, bear variants)
   │  ├─ Check ISA eligibility (critical)
   │  ├─ Verify liquidity (spreads <0.5%)
@@ -312,52 +316,158 @@ PHASE 1 PREP (07:45 UTC - 15 min before 08:00 open):
   │  ├─ Check trading halts/suspensions
   │  ├─ Verify liquidity profiles
   │  └─ Select all liquid Euro stocks meeting criteria
-  ├─ DECISION: Final Phase 1 universe (20-30+ symbols)
+  ├─ DECISION: Initial Phase 1 universe (20-30+ symbols)
   └─ Provide to main engine by 08:00 UTC
 
-PHASE 2 PREP (14:15 UTC - 15 min before 14:30 open):
+08:15 UTC - HOUR 1 REFRESH #1:
+  ├─ Check for new LSE ETPs (3x/5x variants just listed)
+  ├─ Verify existing tickers still have acceptable spreads
+  ├─ Add any new European high-liquidity stocks
+  ├─ Remove any newly halted or illiquid tickers
+  └─ UPDATE universe if changes found → signal alert to main engine
+
+08:30 UTC - HOUR 1 REFRESH #2:
+  ├─ Scan for early-day momentum runners (fast movers, breakouts)
+  ├─ Check ISA eligibility on new LSE listings
+  ├─ Verify all previous tickers still tradeable
+  └─ UPDATE universe with new runners (add to watch list)
+
+08:45 UTC - HOUR 1 REFRESH #3:
+  ├─ Final first-hour scan before settling universe
+  ├─ Identify which tickers showed real momentum vs noise
+  ├─ Lock in Phase 1 universe for next 5.5 hours
+  └─ Notify main engine: "Phase 1 universe confirmed, no further changes"
+
+09:00-14:15 UTC - HOURLY REFRESHES (every hour on the hour):
+  ├─ 09:00: Check for new runners (1st hour momentum spreads to new stocks)
+  ├─ 10:00: Verify universe liquidity (spreads stable)
+  ├─ 11:00: Detect any new halts/corporate actions
+  ├─ 12:00: Scan for intraday momentum runners
+  ├─ 13:00: Check for afternoon reversal plays
+  ├─ 14:00: Pre-US open verification of Phase 1 tickers
+  └─ If new runner found: ADD to watch, ALERT to main engine
+
+14:15 UTC - PHASE 2 HANDOFF (transition to US markets):
+  └─ [See Phase 2 logic below]
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 2: LSE + US PEAK OVERLAP (14:30-16:30 UTC, 2 hours)
+═══════════════════════════════════════════════════════════════════════════════
+
+14:15 UTC - INITIAL UNIVERSE (15 min before open):
   ├─ Verify all Phase 1 LSE tickers still tradeable
   ├─ Scan US market for 18 equities
   │  ├─ Check pre-market activity
   │  ├─ Verify liquidity (bid-ask spreads)
   │  ├─ Detect any halts/corporate actions
   │  └─ Select 18 best liquid equities
-  ├─ DECISION: Final Phase 2 universe (30 symbols)
+  ├─ DECISION: Initial Phase 2 universe (30 symbols)
   └─ Provide to main engine by 14:30 UTC
 
-PHASE 3 PREP (16:15 UTC - 15 min before 16:30 close):
+14:45 UTC - HOUR 1 REFRESH #1:
+  ├─ Scan for US pre-market runners (gap-up moves, movers)
+  ├─ Check ISA eligibility on any new LSE listings
+  ├─ Verify spreads on all 30 tickers
+  └─ ADD any new runners to watch list
+
+15:00 UTC - HOUR 1 REFRESH #2:
+  ├─ NYSE/NASDAQ just opened (09:30 ET)
+  ├─ Identify momentum runners in first 30 min
+  ├─ Add high-volume breakouts to watch
+  └─ Lock in Phase 2 universe
+
+15:15 UTC - FINAL HOUR 1 REFRESH:
+  ├─ Phase 2 universe confirmed
+  ├─ No further ticker changes unless critical alert
+  └─ Hourly checks begin
+
+15:30-16:15 UTC - HOURLY REFRESHES:
+  ├─ 16:00: Verify all tickers still liquid (US peak activity)
+  └─ Catch any mid-session runners before market close
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 3: US ONLY TRADING (16:30-21:00 UTC, 4.5 hours)
+═══════════════════════════════════════════════════════════════════════════════
+
+16:15 UTC - INITIAL UNIVERSE (15 min before LSE close):
   ├─ Drop all LSE tickers (market closed)
   ├─ Verify 18 US equities still tradeable
   ├─ Check for any trading halts
-  ├─ DECISION: Final Phase 3 universe (18 US only)
+  ├─ DECISION: Initial Phase 3 universe (18 US only)
   └─ Provide to main engine by 16:30 UTC
 
-PHASE 4 PREP (20:45 UTC - 15 min before 21:00 close):
+16:45 UTC - HOUR 1 REFRESH #1:
+  ├─ Scan for US afternoon runners (post-lunch momentum)
+  ├─ Check for any earnings surprises or catalyst moves
+  └─ UPDATE universe if new runners found
+
+17:00-17:45 UTC - HOUR 1 REFRESH #2 + #3:
+  ├─ Catch any 4pm-5pm momentum plays
+  ├─ Verify all tickers still liquid for final push
+  └─ Lock Phase 3 universe by 17:45
+
+17:30-20:30 UTC - HOURLY REFRESHES (every hour):
+  ├─ 17:30: Afternoon momentum check
+  ├─ 18:30: Verify spreads stable
+  ├─ 19:30: Late-session runner detection
+  ├─ 20:30: Final hour before close
+  └─ Remove any halted/illiquid tickers immediately
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 4: US CLOSE + ASIA WARMUP (21:00-22:00 UTC, 1 hour)
+═══════════════════════════════════════════════════════════════════════════════
+
+20:45 UTC - INITIAL UNIVERSE:
   ├─ Monitor final US trading hour
   ├─ Begin Asia pre-market scanning
-  ├─ Check for any US corporate actions
-  ├─ DECISION: Transition universe
-  └─ Provide to main engine by 21:00 UTC
+  ├─ Check for any US after-hours movers
+  └─ Prepare transition to Asia-only
 
-PHASE 5 PREP (21:45 UTC - 15 min before 22:00 open):
+21:30 UTC - SINGLE REFRESH:
+  ├─ Verify Asia tickers ready to trade
+  └─ Prepare for Phase 5 handoff
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 5: ASIA TRADING (22:00-08:00 UTC, 10 hours)
+═══════════════════════════════════════════════════════════════════════════════
+
+21:45 UTC - INITIAL UNIVERSE (15 min before open):
   ├─ Scan Asia exchanges for tradeable assets
   │  ├─ Verify TSM liquidity
   │  ├─ Verify ASML ADR liquidity
   │  ├─ Check for any trading halts
   │  └─ Detect new Asia-listed instruments
-  ├─ DECISION: Final Phase 5 universe (TSM, ASML, indices)
+  ├─ DECISION: Initial Phase 5 universe (TSM, ASML, indices)
   └─ Provide to main engine by 22:00 UTC
 
-24/7 MONITORING (Between Sessions):
-  └─ Continuous scanning for:
-     ├─ Delistings (remove from universe)
-     ├─ New high-liquidity assets (add to watch)
-     ├─ Corporate actions (adjust sizing)
-     ├─ Halts/suspensions (alert system)
-     ├─ ISA eligibility changes (critical)
-     └─ Spread monitoring (liquidity tracking)
+22:15 UTC - HOUR 1 REFRESH #1:
+  ├─ Check for new Asia momentum runners
+  ├─ Verify TSM/ASML spreads
+  └─ UPDATE if new opportunities found
 
-Result: Fresh, optimized ticker list every session, never stale
+22:30 UTC - HOUR 1 REFRESH #2:
+  ├─ Asia markets warming up
+  ├─ Detect any gap-up moves or breakouts
+  └─ Lock in Phase 5 universe
+
+22:45 UTC - FINAL HOUR 1 REFRESH:
+  ├─ Asia trading confirmed live
+  └─ Switch to hourly checks
+
+23:00-07:00 UTC - HOURLY REFRESHES (every hour):
+  ├─ 23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00, 07:00 UTC
+  ├─ Catch new runners every hour (Asia markets moving 24h)
+  └─ Verify no halts/delisted tickers
+
+═══════════════════════════════════════════════════════════════════════════════
+
+SUMMARY: UNIVERSE REFRESH SCHEDULE
+  • -15 min before session: Full initial scan
+  • First hour: Every 15 minutes (catch early runners)
+  • Rest of session: Every 60 minutes (catch mid-session momentum)
+  • Between sessions: Continuous monitoring
+
+Result: Fresh, optimized ticker list every 15 min in hour 1, hourly thereafter. Never miss a runner.
 ```
 
 ---
