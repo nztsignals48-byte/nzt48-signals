@@ -78,6 +78,8 @@ class TickerProfile:
     liquidity_score: float  # 0-1 (bid-ask spread, volume)
     isa_eligible: bool  # ISA compliance
     holding_style: str  # "swing" (hours), "scalp" (same-day), "momentum" (minutes)
+    entry_pattern: str = ""  # Entry type detected (type_a, type_b, type_c, or empty)
+    position_size_pct: float = 0.0  # Calculated position size as % of account equity
 
     def __post_init__(self):
         """Auto-classify volatility tier based on daily range."""
@@ -128,6 +130,8 @@ class UniverseSnapshot:
                     "daily_range_pct": profile.daily_range_pct,
                     "holding_style": profile.holding_style,
                     "liquidity_score": profile.liquidity_score,
+                    "entry_pattern": profile.entry_pattern,
+                    "position_size_pct": profile.position_size_pct,
                 }
                 for ticker, profile in self.ticker_profiles.items()
             },

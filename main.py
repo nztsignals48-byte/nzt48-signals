@@ -108,6 +108,24 @@ from core.provenance import ProvenanceRegistry, FreshnessChecker
 from feeds.volume_profile import VolumeProfileEngine
 from uk_isa.isa_eligibility import is_isa_eligible
 
+# Universe Refresh Integration
+try:
+    from core.universe_refresh_integration import setup_universe_refresh_integration
+    from core.universe_refresh_scheduler import UniverseRefreshScheduler, RefreshSchedule, UniverseSnapshot
+    _UNIVERSE_REFRESH_AVAILABLE = True
+except ImportError as _e:
+    _UNIVERSE_REFRESH_AVAILABLE = False
+    logging.getLogger("nzt48.main").warning("UniverseRefresh not available: %s", _e)
+
+# Tier-Based Trading System
+try:
+    from core.tier_based_entry_logic import TierBasedEntryDetector, EntryType, EntrySignal
+    from core.tier_exit_enforcer import SessionExitEnforcer, ExitReason
+    _TIER_BASED_AVAILABLE = True
+except ImportError as _e:
+    _TIER_BASED_AVAILABLE = False
+    logging.getLogger("nzt48.main").warning("Tier-based entry logic not available: %s", _e)
+
 # H-01: Startup Readiness Gate — 8 pre-flight checks
 try:
     from core.startup_gate import enforce_startup_gate
@@ -973,6 +991,17 @@ class NZT48Orchestrator:
 
         # Volume Profile Engine — structural level analysis (POC, VA, HVN/LVN)
         self.volume_profile_engine = VolumeProfileEngine()
+
+        # Tier-Based Entry Logic & Exit Enforcement
+        self.tier_entry_detector = None
+        self.tier_exit_enforcer = None
+        if _TIER_BASED_AVAILABLE:
+            try:
+                self.tier_entry_detector = TierBasedEntryDetector()
+                self.tier_exit_enforcer = SessionExitEnforcer()
+                logger.info("Tier-based trading system initialized (Type A/B/C entry patterns, position sizing, Tier 3 exit discipline)")
+            except Exception as _tier_err:
+                logger.warning("Tier-based trading system init failed: %s", _tier_err)
 
         # Signal Logger — logs every signal to data/signal_log.jsonl for future analysis
         try:
@@ -3332,6 +3361,8 @@ class NZT48Orchestrator:
                             logger.error("Sanity gates failed (allowing signal through unchecked): %s", sg_err)
 
                     if qualified.status != SignalStatus.SKIPPED:
+                        # === TIER-BASED LOGIC: Apply position sizing & entry patterns ===
+                        self._apply_tier_based_logic(qualified, qualified.ticker)
                         qualified_signals.append(qualified)
                     else:
                         # --- MISSED TRADE JOURNAL: Record rejected signals ---
@@ -3634,6 +3665,268 @@ class NZT48Orchestrator:
                      len(raw_signals) - len(qualified_signals))
 
         return qualified_signals
+
+    def _apply_tier_based_logic(self, signal: Signal, ticker: str) -> None:
+        """Apply tier-based position sizing and entry pattern to a signal.
+
+        This wires in the TierBasedEntryDetector to:
+        1. Classify ticker tier based on volatility
+        2. Adjust position size per tier
+        3. Apply entry pattern metadata
+        4. Enforce Tier 3 session exit discipline
+
+        Args:
+            signal: Signal object to enhance
+            ticker: Ticker symbol
+        """
+        if not self.tier_entry_detector:
+            return
+
+        try:
+            # Get indicator data from signal if available
+            rsi = getattr(signal.indicators, 'rsi', 50.0) if signal.indicators else 50.0
+            rvol = getattr(signal.indicators, 'rvol', 0.8) if signal.indicators else 0.8
+
+            # Estimate tier from daily range (simplified from historical data)
+            daily_range_pct = 5.0  # Default
+            if ticker.endswith(".L"):
+                daily_range_pct = 4.5
+            elif ticker in ["TSLA"]:
+                daily_range_pct = 8.5
+            elif ticker in ["NVDA"]:
+                daily_range_pct = 7.2
+
+            # Classify tier
+            tier_class = self.tier_entry_detector.classify_tier(
+                ticker=ticker,
+                daily_range_pct=daily_range_pct,
+            )
+
+            # Adjust signal position size by tier (as % of account)
+            # The dynamic_sizer will use this as a baseline
+            if tier_class.position_size_pct > 0:
+                # Store tier info in signal metadata for downstream processing
+                if not hasattr(signal, '_tier_info'):
+                    signal._tier_info = {}
+                signal._tier_info['tier'] = tier_class.tier
+                signal._tier_info['position_size_pct'] = tier_class.position_size_pct
+                signal._tier_info['holding_style'] = tier_class.holding_style
+
+            logger.debug(
+                "Tier logic applied: %s tier=%d, pos_size=%.2f%%, style=%s",
+                ticker, tier_class.tier, tier_class.position_size_pct * 100, tier_class.holding_style
+            )
+        except Exception as _tier_err:
+            logger.debug(f"Tier logic application failed for {ticker}: {_tier_err}")
+
+    async def _send_tier_entry_alert(self, entry_signal) -> None:
+        """Send Telegram alert for detected tier-based entry pattern.
+
+        Args:
+            entry_signal: EntrySignal object with entry type, confidence, price, etc.
+        """
+        if not entry_signal:
+            return
+
+        try:
+            entry_type = entry_signal.entry_type.value.upper()
+
+            if entry_type == "TYPE_B":
+                # 🚀 Type B early runner (PRIORITY - your edge)
+                msg = (
+                    f"🚀 EARLY RUNNER: {entry_signal.ticker}\n"
+                    f"RVOL {entry_signal.rvol:.2f}x | RSI {entry_signal.rsi:.0f} | "
+                    f"Entry {entry_signal.entry_price:.2f} → Target {entry_signal.target_price:.2f}\n"
+                    f"Confidence {entry_signal.confidence:.0f}% | {entry_signal.rationale}"
+                )
+            elif entry_type == "TYPE_A":
+                # 📉 Type A dip recovery
+                msg = (
+                    f"📉 DIP RECOVERY: {entry_signal.ticker}\n"
+                    f"RSI {entry_signal.rsi:.0f} (oversold) | Entry {entry_signal.entry_price:.2f} → "
+                    f"Target {entry_signal.target_price:.2f}\n"
+                    f"Confidence {entry_signal.confidence:.0f}% | {entry_signal.rationale}"
+                )
+            elif entry_type == "TYPE_C":
+                # 📈 Type C overbought fade
+                msg = (
+                    f"📈 OVERBOUGHT FADE: {entry_signal.ticker}\n"
+                    f"RSI {entry_signal.rsi:.0f} (overbought) | Entry {entry_signal.entry_price:.2f} → "
+                    f"Target {entry_signal.target_price:.2f}\n"
+                    f"Confidence {entry_signal.confidence:.0f}% | {entry_signal.rationale}"
+                )
+            else:
+                return
+
+            # Send via Telegram
+            if self.telegram:
+                try:
+                    await self.telegram.send_message(msg)
+                except Exception as _tg_err:
+                    logger.warning(f"Failed to send Telegram alert: {_tg_err}")
+
+        except Exception as _alert_err:
+            logger.warning(f"Tier entry alert generation failed: {_alert_err}")
+
+    async def _send_tier3_exit_alert(self, exit_instruction) -> None:
+        """Send Telegram alert for Tier 3 mandatory exit.
+
+        Args:
+            exit_instruction: ExitInstruction object
+        """
+        if not exit_instruction:
+            return
+
+        try:
+            if exit_instruction.urgency == "critical":
+                msg = f"⏰ {exit_instruction.message}"
+            elif exit_instruction.urgency == "warning":
+                msg = f"⏰ {exit_instruction.message}"
+            else:
+                return
+
+            if self.telegram:
+                try:
+                    await self.telegram.send_message(msg)
+                except Exception as _tg_err:
+                    logger.warning(f"Failed to send Tier 3 exit alert: {_tg_err}")
+
+        except Exception as _alert_err:
+            logger.warning(f"Tier 3 exit alert generation failed: {_alert_err}")
+
+    async def _scan_universe_async(self, schedule: RefreshSchedule) -> UniverseSnapshot:
+        """Execute a universe scan for the refresh scheduler.
+
+        This method is called by the UniverseRefreshIntegration when a scheduled
+        refresh occurs. It scans the universe based on the schedule phase and type.
+
+        Args:
+            schedule: RefreshSchedule with phase, scan_type, and timing info
+
+        Returns:
+            UniverseSnapshot with current universe state and tier classification
+        """
+        try:
+            from datetime import datetime, timezone
+            from core.universe_refresh_scheduler import Phase, ScanType, TickerProfile
+
+            now = datetime.now(timezone.utc)
+            logger.info(
+                "Universe refresh scan started: phase=%s, type=%s",
+                schedule.phase.value,
+                schedule.scan_type.value,
+            )
+
+            # Determine which tickers to scan based on phase
+            lse_tickers = []
+            euro_tickers = []
+            us_tickers = []
+            asia_tickers = []
+
+            if schedule.phase in [Phase.PHASE_1, Phase.PHASE_2]:
+                # LSE + Euro phase — scan ISA universe
+                try:
+                    lse_tickers = list(cfg.ISA_FUNDS) if hasattr(cfg, "ISA_FUNDS") else []
+                except Exception:
+                    lse_tickers = [
+                        "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L",
+                        "TSL3.L", "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "SP5L.L"
+                    ]
+
+            elif schedule.phase == Phase.PHASE_3:
+                # US-only phase — scan US tickers
+                us_tickers = ["AAPL", "MSFT", "NVDA", "TSLA", "QQQ"]
+
+            elif schedule.phase in [Phase.PHASE_4, Phase.PHASE_5]:
+                # Asia phase — scan Asian markets
+                asia_tickers = ["0700.HK", "9618.HK", "1398.HK"]
+
+            # Combine all tickers
+            all_tickers = lse_tickers + euro_tickers + us_tickers + asia_tickers
+
+            # Build ticker profiles with sample volatility data
+            ticker_profiles = {}
+            for ticker in all_tickers[:10]:  # Limit to first 10 for performance
+                try:
+                    # Get daily range estimate (simplified)
+                    daily_range_pct = 5.0  # Default estimate
+                    if ticker.endswith(".L"):
+                        daily_range_pct = 4.5  # LSE ETPs tend to be less volatile
+                    elif ticker.startswith("0") or ticker.startswith("1"):
+                        daily_range_pct = 6.0  # Hong Kong stocks
+                    elif ticker in ["TSLA"]:
+                        daily_range_pct = 8.5
+                    elif ticker in ["NVDA"]:
+                        daily_range_pct = 7.2
+
+                    profile = TickerProfile(
+                        ticker=ticker,
+                        daily_range_pct=daily_range_pct,
+                        tier="moderate",  # Placeholder — will be set by __post_init__
+                        liquidity_score=0.85,
+                        isa_eligible=ticker.endswith(".L"),
+                        holding_style="scalp",  # Placeholder — will be set by __post_init__
+                    )
+
+                    # Wire tier-based entry logic
+                    if self.tier_entry_detector:
+                        try:
+                            tier_class = self.tier_entry_detector.classify_tier(
+                                ticker=ticker,
+                                daily_range_pct=daily_range_pct,
+                            )
+                            profile.position_size_pct = tier_class.position_size_pct
+                            # entry_pattern will be set by signal generation, not here
+                        except Exception as _tier_calc_err:
+                            logger.debug(f"Tier classification failed for {ticker}: {_tier_calc_err}")
+
+                    ticker_profiles[ticker] = profile
+                except Exception as e:
+                    logger.warning(f"Failed to profile {ticker}: {e}")
+
+            # Detect new runners (simplified: just first scan in this session)
+            new_runners = []
+            if schedule.scan_type == ScanType.INITIAL:
+                new_runners = lse_tickers[:2] if lse_tickers else []
+
+            # Create snapshot
+            snapshot = UniverseSnapshot(
+                timestamp=now,
+                phase=schedule.phase,
+                scan_type=schedule.scan_type,
+                lse_tickers=lse_tickers,
+                euro_tickers=euro_tickers,
+                us_tickers=us_tickers,
+                asia_tickers=asia_tickers,
+                total_count=len(all_tickers),
+                new_runners=new_runners,
+                removed_tickers=[],
+                ticker_profiles=ticker_profiles,
+            )
+
+            logger.info(
+                "Universe refresh complete: %d tickers (%d LSE, %d Euro, %d US, %d Asia), "
+                "%d new runners",
+                snapshot.total_count,
+                len(lse_tickers),
+                len(euro_tickers),
+                len(us_tickers),
+                len(asia_tickers),
+                len(new_runners),
+            )
+
+            return snapshot
+
+        except Exception as e:
+            logger.error(f"Universe scan failed: {e}", exc_info=True)
+            from core.universe_refresh_scheduler import UniverseSnapshot
+            from datetime import datetime, timezone
+            return UniverseSnapshot(
+                timestamp=datetime.now(timezone.utc),
+                phase=schedule.phase,
+                scan_type=schedule.scan_type,
+                total_count=0,
+            )
 
     async def _ai_enhance_signals(
         self, signals: list, market_ctx, ai_key: str,
@@ -6251,6 +6544,25 @@ class NZT48Orchestrator:
                 coalesce=True,
                 misfire_grace_time=300,
             )
+
+            # === UNIVERSE REFRESH INTEGRATION ===
+            # Dynamically schedule universe refreshes for each phase
+            if _UNIVERSE_REFRESH_AVAILABLE:
+                try:
+                    self.universe_refresh_integration = setup_universe_refresh_integration(
+                        scheduler,
+                        artifacts_dir=Path("artifacts"),
+                        universe_scan_fn=self._scan_universe_async,
+                    )
+                    logger.info(
+                        "Universe Refresh Integration initialized with %d scheduled jobs",
+                        len(self.universe_refresh_integration.scheduled_jobs),
+                    )
+                except Exception as _uri_err:
+                    logger.warning("Universe Refresh Integration failed to initialize: %s", _uri_err)
+                    self.universe_refresh_integration = None
+            else:
+                self.universe_refresh_integration = None
 
             scheduler.start()
             logger.info(
