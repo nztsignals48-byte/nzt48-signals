@@ -1,0 +1,34 @@
+{
+  "date": "2026-02-26",
+  "tier": "CORE",
+  "count": 12,
+  "tickers": [
+    "QQQ3.L",
+    "3LUS.L",
+    "3SEM.L",
+    "GPT3.L",
+    "NVD3.L",
+    "TSL3.L",
+    "TSM3.L",
+    "MU2.L",
+    "QQQS.L",
+    "3USS.L",
+    "QQQ5.L",
+    "SP5L.L"
+  ],
+  "tradable": true,
+  "factor_themes": {
+    "QQQ3.L": "nasdaq_beta",
+    "3LUS.L": "sp500_beta",
+    "3SEM.L": "semiconductors",
+    "GPT3.L": "ai_tech",
+    "NVD3.L": "semiconductors",
+    "TSL3.L": "tesla_plays",
+    "TSM3.L": "tsmc_plays",
+    "MU2.L": "micron_plays",
+    "QQQS.L": "nasdaq_beta",
+    "3USS.L": "sp500_beta",
+    "QQQ5.L": "nasdaq_beta",
+    "SP5L.L": "sp500_beta"
+  }
+}

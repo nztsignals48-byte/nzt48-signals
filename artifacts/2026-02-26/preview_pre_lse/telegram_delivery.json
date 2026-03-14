@@ -1,0 +1,18 @@
+{
+  "session": "PRE_LSE",
+  "is_preview": true,
+  "generated_at": "2026-02-26T06:33:33.812884+00:00",
+  "pdfs_generated": 1,
+  "pdf_paths": [
+    "/Users/rr/nzt48-signals/reports/2026-02-26/NZT48_MOMENTUM_PREVIEW_PRE_LSE.pdf"
+  ],
+  "telegram_results": [],
+  "system_state": "OK",
+  "data_reliability": 0.498,
+  "pipeline_summary": {
+    "core_plays": 1,
+    "peer_plays": 0,
+    "full_scan_cards": 29,
+    "drought": false
+  }
+}

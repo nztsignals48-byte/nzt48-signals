@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-02-26T06:34:02.545425+00:00",
+  "session": "preview_eod_institutional",
+  "regime": "NEUTRAL",
+  "mode": "WIN_RATE",
+  "strict_count": 0,
+  "fallback_count": 1,
+  "total_plays": 1,
+  "drought": null,
+  "funnel": {
+    "tracked": 10,
+    "data_valid": 10,
+    "passed_all_gates": 1,
+    "signals_strict": 0,
+    "signals_fallback": 1,
+    "total_signals": 1
+  },
+  "plays": [
+    {
+      "ticker": "NVD3.L",
+      "direction": "LONG",
+      "track": "INTRADAY_SWING",
+      "mode": "WIN_RATE",
+      "stars": 1,
+      "stars_str": "[*____]",
+      "composite": 59.9,
+      "label": "WATCH-SIGNAL (RR-relaxed)",
+      "momentum_score": 0.8343359178612283,
+      "volatility_score": 0.8,
+      "regime_score": 0.55,
+      "liquidity_score": 0.47333333333333333,
+      "rr_score": 0.15700000000000003,
+      "quality_score": 0.192,
+      "entry": 61.96,
+      "stop": 61.5262,
+      "target1": 62.7036,
+      "target2": 63.0444,
+      "rr_ratio": 1.314,
+      "stop_distance_pct": 0.7,
+      "target1_distance_pct": 1.2,
+      "setup_type": "breakout",
+      "entry_zone_lo": 61.898,
+      "entry_zone_hi": 62.022,
+      "be_level": 62.2203,
+      "partial_at": 62.3938,
+      "time_stop_min": 90,
+      "time_stop_full": 180,
+      "factor_group": "ai_gpt",
+      "atr_pct": 2.0,
+      "rvol": 1.42,
+      "rvol_reliable": true,
+      "data_reliability": 1.0,
+      "decay_risk": "LOW",
+      "spread_risk": "LOW",
+      "fallback_step": 2,
+      "why_fallback": "R:R below strict minimum (relaxed to 1.2)",
+      "regime": "NEUTRAL",
+      "regime_confidence": 0.65,
+      "reasons": [
+        "Momentum aligned (RSI=67, MACD positive)",
+        "ATR=2.0% \u2014 routinely moves 2%+"
+      ],
+      "exclusion_reason": "",
+      "session": "preview_eod_institutional",
+      "generated_at": "2026-02-26T06:34:02.543918+00:00",
+      "category": "WATCH",
+      "strategy_tag": "STAT_ARB_MEAN_REVERT",
+      "why_strategy_now": [
+        "Range-bound regime: mean reversion statistically preferred",
+        "VWAP/BB mean reversion setup active",
+        "RSI extremes create fading opportunity"
+      ],
+      "time_of_day_window": "AFTER_HOURS",
+      "overlay_tags": [
+        "LEVERAGE_DECAY_WARNING",
+        "TSM_TREND_OVERLAY_NA"
+      ],
+      "overlay_warnings": [
+        "Chop/HV regime: 3x ETPs accumulate daily volatility decay."
+      ],
+      "base_score": 0.0,
+      "strategy_weighted_score": 69.2,
+      "sizing_hint": "M",
+      "sizing_reason": "",
+      "bars_available": 45,
+      "indicator_window_used": 14,
+      "reliability_penalty": 0.0,
+      "short_window": false,
+      "risk_officer_decision": "APPROVE",
+      "risk_officer_reasons": [],
+      "risk_adjustment_factor": 0.0,
+      "execution_plan": {
+        "order_type": "MARKETABLE_LIMIT",
+        "max_slippage_bps": 10.0,
+        "spread_proxy_bps": 18.0,
+        "spread_gate_result": "PASS",
+        "cancel_conditions": [
+          "price moves >2.0% against entry before fill",
+          "session closes before fill"
+        ],
+        "time_in_trade_window": "AFTER_HOURS"
+      },
+      "allocation_weight": 0.5932,
+      "final_rank_score": 41.05
+    }
+  ]
+}

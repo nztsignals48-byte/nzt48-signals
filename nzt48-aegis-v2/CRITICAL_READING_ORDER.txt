@@ -1,0 +1,105 @@
+================================================================================
+CRITICAL READING ORDER: UNDERSTAND AEGIS V2 ACTUAL PLAN
+================================================================================
+
+⚠️  IMPORTANT: There are TWO versions of AEGIS V2 documentation.
+
+Version 1 (APPROVED ✅):
+  → AEGIS_CODEX.md
+  → 15-week timeline
+  → Option D+ (£0 data cost)
+  → Execute immediately
+
+Version 2 (THEORETICAL EXPANSION ❌):
+  → LAYMANS_GUIDE_*.md (created today)
+  → 21-week timeline
+  → Multi-exchange (£900+/month data)
+  → Archive for later reference
+
+================================================================================
+EXECUTION PATH (DO THIS FIRST):
+================================================================================
+
+1. READ THIS FIRST:
+   /Users/rr/nzt48-signals/nzt48-aegis-v2/AMENDMENT_7_DAY_SESSION_REVIEW.md
+   (5 minutes - explains the divergence)
+
+2. THEN READ THE APPROVED PLAN:
+   /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/AEGIS_CODEX.md
+   (2-3 hours - canonical source for execution)
+
+3. FOR WEEK 1 REFACTORING:
+   - Part 2: Bootstrap Protocol (2 days)
+   - Part 3: Week 1 Refactoring (5 RM mandates)
+
+4. FOR PHASES 11-13:
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/PHASE_11_DIRECT_EQUITY_SPEC.md
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/PHASE_12_EUROPEAN_EQUITY_SPEC.md
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/PHASE_13_ASIA_PACIFIC_SPEC.md
+
+5. FOR ARCHITECTURE REFERENCE:
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/00_CANONICAL_RULES.md
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/01_DATA_CONTRACTS.md
+   - /Users/rr/nzt48-signals/nzt48-aegis-v2/docs/02_STATE_MACHINE.md
+
+================================================================================
+DO NOT READ THESE (YET):
+================================================================================
+
+❌ LAYMANS_GUIDE_WHAT_AEGIS_DOES.md
+❌ LAYMANS_GUIDE_BUSINESS.md
+❌ LAYMANS_GUIDE_COMPLIANCE.md
+❌ READING_GUIDE.md
+❌ AEGIS_V2_COMPLETE_IMPLEMENTATION_GUIDE.md
+
+These describe a different architecture. Archive them.
+
+================================================================================
+KEY FACTS:
+================================================================================
+
+APPROVED PLAN (CODEX):
+  ✅ 15 weeks (March 11 → Late June 2026)
+  ✅ Option D+ (IBKR primary, £0/month data)
+  ✅ LSE + 12 leveraged ETPs only
+  ✅ 4 Fourteenth-Order fixes mandatory
+  ✅ 588 tests currently passing
+  ✅ Week 1: 2 days bootstrap + 3 days refactoring
+
+THIS SESSION (THEORETICAL):
+  ❌ 21 weeks (March 13 → July 25)
+  ❌ Multi-exchange (£900+/month)
+  ❌ 33 modules + DQN
+  ❌ 880+ tests (theoretical)
+  ❌ Archive for post-launch reference
+
+================================================================================
+IMMEDIATE NEXT STEP:
+================================================================================
+
+1. Open AMENDMENT_7_DAY_SESSION_REVIEW.md (5 minutes)
+2. Open AEGIS_CODEX.md Part 2 & 3 (30 minutes)
+3. Prepare Week 1 bootstrap (2 days) + refactoring (3 days)
+4. Begin execution Monday March 13
+
+================================================================================
+DO NOT EXECUTE BLINDLY:
+================================================================================
+
+If you execute the 21-week multi-exchange plan:
+  ❌ You will spend £900+/month on unnecessary data
+  ❌ You will miss the approved architecture
+  ❌ You will add complexity (33 modules vs targeted)
+  ❌ You will extend timeline by 6 weeks
+
+Execute AEGIS_CODEX.md instead:
+  ✅ £0 data cost (IBKR primary)
+  ✅ 15-week timeline
+  ✅ Proven Option D+ architecture
+  ✅ Simpler, faster, cheaper
+
+================================================================================
+Generated: March 13, 2026 05:35 UTC
+Status: CRITICAL READING ORDER ESTABLISHED
+Next: Read AMENDMENT_7_DAY_SESSION_REVIEW.md
+================================================================================

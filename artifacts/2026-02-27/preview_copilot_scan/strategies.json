@@ -1,0 +1,409 @@
+{
+  "generated_at": "2026-02-27T06:59:38.954837+00:00",
+  "session": "preview_copilot_scan",
+  "regime_tag": "RANGE_BOUND",
+  "regime_confidence": 0.5,
+  "time_of_day": "AFTER_HOURS",
+  "sizing_mode": "NORMAL",
+  "kill_switch": false,
+  "score_boost": 0.156,
+  "active_count": 6,
+  "active_tags": [
+    "STAT_ARB_MEAN_REVERT",
+    "FACTOR_ROTATION",
+    "MACRO_EVENT_FILTER",
+    "TSM_TREND_OVERLAY",
+    "VIX_TERM_CARRY_OVERLAY",
+    "DISPERSION_CORRELATION_OVERLAY"
+  ],
+  "overlay_tags": [
+    "LEVERAGE_DECAY_WARNING",
+    "TSM_TREND_OVERLAY_NA"
+  ],
+  "overlay_warnings": [
+    "Chop/HV regime: 3x ETPs accumulate daily volatility decay."
+  ],
+  "strategies": [
+    {
+      "tag": "TREND_MOMENTUM_CTA",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "min_adx": 20,
+        "tod_exclude": [
+          "CHAOS_OPEN",
+          "CLOSE_MECHANICS"
+        ]
+      },
+      "required_data": [
+        "ATR",
+        "RSI",
+        "MACD",
+        "EMA_9_20_50",
+        "ADX"
+      ],
+      "data_available": true,
+      "inactive_reason": "regime=RANGE_BOUND or tod=AFTER_HOURS not suitable",
+      "category": "CORE"
+    },
+    {
+      "tag": "MOMENTUM_BREAKOUT",
+      "weight": 0.8,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "min_rvol": 1.2,
+        "tod_required": [
+          "MORNING_MOMENTUM"
+        ]
+      },
+      "required_data": [
+        "RSI",
+        "RVOL",
+        "BB_WIDTH_RANK",
+        "MACD"
+      ],
+      "data_available": true,
+      "inactive_reason": "RVOL 1.0 < 1.2 or tod=AFTER_HOURS",
+      "category": "CORE"
+    },
+    {
+      "tag": "STAT_ARB_MEAN_REVERT",
+      "weight": 0.7,
+      "active": true,
+      "why_active": [
+        "Range-bound regime: mean reversion statistically preferred",
+        "VWAP/BB mean reversion setup active",
+        "RSI extremes create fading opportunity"
+      ],
+      "constraints": {
+        "min_rvol": 0.7,
+        "tod_preferred": [
+          "LUNCH_CHOP",
+          "TREND_EXTENSION"
+        ]
+      },
+      "required_data": [
+        "RSI",
+        "BB_WIDTH_RANK",
+        "MACD"
+      ],
+      "data_available": true,
+      "inactive_reason": "",
+      "category": "CORE"
+    },
+    {
+      "tag": "FACTOR_ROTATION",
+      "weight": 0.6,
+      "active": true,
+      "why_active": [
+        "Sector rotation radar active: monitoring leadership shifts",
+        "Factor group exposure caps applied (nasdaq_beta / semis / commodities)"
+      ],
+      "constraints": {
+        "max_factor_signals": 3
+      },
+      "required_data": [
+        "FACTOR_GROUP",
+        "SECTOR_RADAR"
+      ],
+      "data_available": true,
+      "inactive_reason": "",
+      "category": "CORE"
+    },
+    {
+      "tag": "VOL_SQUEEZE_BREAKOUT",
+      "weight": 0.75,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "max_bb_rank": 0.4
+      },
+      "required_data": [
+        "BB_WIDTH_RANK",
+        "VIX"
+      ],
+      "data_available": true,
+      "inactive_reason": "not in HIGH_VOLATILITY regime",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "VOL_BREAKOUT",
+      "weight": 0.72,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "max_bb_rank": 0.25
+      },
+      "required_data": [
+        "BB_WIDTH_RANK",
+        "ATR"
+      ],
+      "data_available": true,
+      "inactive_reason": "BB rank 0.50 >= 0.25",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "OPENING_RANGE_BREAKOUT",
+      "weight": 0.9,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "tod_required": [
+          "MORNING_MOMENTUM"
+        ],
+        "min_rvol": 1.5
+      },
+      "required_data": [
+        "OPENING_RANGE",
+        "RVOL",
+        "MACD"
+      ],
+      "data_available": true,
+      "inactive_reason": "tod=AFTER_HOURS not morning momentum window",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "VWAP_TREND_PULLBACK",
+      "weight": 0.75,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "tod_required": [
+          "TREND_EXTENSION",
+          "AFTERNOON_PUSH"
+        ]
+      },
+      "required_data": [
+        "EMA_9_20_50",
+        "ATR"
+      ],
+      "data_available": true,
+      "inactive_reason": "not trending or wrong time window",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "VWAP_MEAN_REVERT",
+      "weight": 0.55,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "tod_required": [
+          "LUNCH_CHOP"
+        ],
+        "min_rvol": 1.7
+      },
+      "required_data": [
+        "RSI",
+        "BB_WIDTH_RANK"
+      ],
+      "data_available": true,
+      "inactive_reason": "not lunch + range-bound",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "GAP_GO_FADE",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "tod_required": [
+          "CHAOS_OPEN"
+        ],
+        "note": "observe only window"
+      },
+      "required_data": [
+        "OPEN",
+        "PREV_CLOSE"
+      ],
+      "data_available": true,
+      "inactive_reason": "CHAOS_OPEN window = observe only (spec rule)",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "BETA_NEUTRAL_SPREAD",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "requires": "correlated_pairs_feed"
+      },
+      "required_data": [
+        "PAIR_RATIO",
+        "CORRELATION_MATRIX"
+      ],
+      "data_available": false,
+      "inactive_reason": "pairs_data not available for LSE leveraged ETPs",
+      "category": "INTRADAY"
+    },
+    {
+      "tag": "MACRO_EVENT_FILTER",
+      "weight": 0.0,
+      "active": true,
+      "why_active": [
+        "VIX=18.0: within normal range",
+        "Macro filter on at all times per spec immutable rules"
+      ],
+      "constraints": {
+        "vix_kill_threshold": 35.0
+      },
+      "required_data": [
+        "VIX"
+      ],
+      "data_available": true,
+      "inactive_reason": "",
+      "category": "OVERLAY"
+    },
+    {
+      "tag": "TSM_TREND_OVERLAY",
+      "weight": 0.0,
+      "active": true,
+      "why_active": [
+        "12-month momentum bias from TSM3.L as proxy",
+        "Informs long/short directional bias overlay"
+      ],
+      "constraints": {
+        "proxy": "TSM3.L",
+        "period": "252d"
+      },
+      "required_data": [
+        "TSM3.L_12M_RETURN"
+      ],
+      "data_available": false,
+      "inactive_reason": "12m momentum data not available (yfinance hourly limit)",
+      "category": "OVERLAY"
+    },
+    {
+      "tag": "VIX_TERM_CARRY_OVERLAY",
+      "weight": 0.0,
+      "active": true,
+      "why_active": [
+        "VIX level 18.0: normal",
+        "Risk overlay: vol-of-vol proxy via VIX day-change"
+      ],
+      "constraints": {
+        "vix_elevated_threshold": 20.0
+      },
+      "required_data": [
+        "VIX",
+        "VIX_CHANGE_1D"
+      ],
+      "data_available": true,
+      "inactive_reason": "",
+      "category": "OVERLAY"
+    },
+    {
+      "tag": "DISPERSION_CORRELATION_OVERLAY",
+      "weight": 0.0,
+      "active": true,
+      "why_active": [
+        "Correlation rising -> tighten factor caps",
+        "Factor exposure dashboard active"
+      ],
+      "constraints": {
+        "high_corr_threshold": 0.85,
+        "cap_reduction": "3->2"
+      },
+      "required_data": [
+        "CORRELATION_MATRIX"
+      ],
+      "data_available": false,
+      "inactive_reason": "correlation_matrix not available (using factor group caps instead)",
+      "category": "OVERLAY"
+    },
+    {
+      "tag": "EARNINGS_CONFIRMATION_DRIFT",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "requires": "earnings_calendar + surprise_feed"
+      },
+      "required_data": [
+        "EARNINGS_DATE",
+        "ANALYST_SURPRISE"
+      ],
+      "data_available": false,
+      "inactive_reason": "earnings_feed not connected",
+      "category": "EVENT"
+    },
+    {
+      "tag": "IPO_LOCKUP_PRESSURE",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "requires": "lockup_calendar"
+      },
+      "required_data": [
+        "LOCKUP_EXPIRY_DATE"
+      ],
+      "data_available": false,
+      "inactive_reason": "lockup_calendar not connected",
+      "category": "EVENT"
+    },
+    {
+      "tag": "MERGER_ARB_EVENT",
+      "weight": 0.0,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "requires": "deal_feed + spread_data"
+      },
+      "required_data": [
+        "DEAL_ANNOUNCEMENT",
+        "MERGER_SPREAD"
+      ],
+      "data_available": false,
+      "inactive_reason": "deal_feed not connected",
+      "category": "EVENT"
+    },
+    {
+      "tag": "REBALANCE_FLOW",
+      "weight": 0.95,
+      "active": false,
+      "why_active": [],
+      "constraints": {
+        "fire_time_uk": "19:00",
+        "underlying_move_min": 1.5
+      },
+      "required_data": [
+        "UNDERLYING_DAILY_RETURN",
+        "ETP_TRACKING_ERROR"
+      ],
+      "data_available": true,
+      "inactive_reason": "not in rebalance window (fires at 19:00 UK, S12 only)",
+      "category": "CORE"
+    }
+  ],
+  "allocation_weights": {
+    "STAT_ARB_MEAN_REVERT": 0.5932,
+    "FACTOR_ROTATION": 0.4068,
+    "MACRO_EVENT_FILTER": 0.0,
+    "VIX_TERM_CARRY_OVERLAY": 0.0
+  },
+  "strategy_availability": [
+    {
+      "name": "PEAD_CATALYST",
+      "status": "INACTIVE",
+      "reason": "Earnings calendar feed not connected",
+      "required_config_key": "feeds.earnings_calendar_url",
+      "recommended_provider": "alpha_vantage / openbb / tiingo"
+    },
+    {
+      "name": "LOCKUP_EXPIRY",
+      "status": "INACTIVE",
+      "reason": "Lockup calendar feed not connected",
+      "required_config_key": "feeds.lockup_calendar_url",
+      "recommended_provider": "manual_csv / stockanalysis.com"
+    },
+    {
+      "name": "MERGER_ARB",
+      "status": "INACTIVE",
+      "reason": "Deal feed not connected",
+      "required_config_key": "feeds.deal_feed_url",
+      "recommended_provider": "dealreporter / manual_csv"
+    }
+  ]
+}

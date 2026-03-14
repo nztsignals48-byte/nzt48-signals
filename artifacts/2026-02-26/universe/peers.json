@@ -1,0 +1,24 @@
+{
+  "date": "2026-02-26",
+  "tier": "PEER",
+  "count": 6,
+  "peer_size_target": 6,
+  "peer_expansion_ratio": 0.5,
+  "tickers": [
+    "3LDE.L",
+    "3LEU.L",
+    "AMD3.L",
+    "ARM3.L",
+    "NVDS.L",
+    "TSLS.L"
+  ],
+  "tradable": false,
+  "factor_themes": {
+    "3LDE.L": "europe_index",
+    "3LEU.L": "europe_index",
+    "AMD3.L": "semiconductors",
+    "ARM3.L": "semiconductors",
+    "NVDS.L": "unclassified",
+    "TSLS.L": "tesla_plays"
+  }
+}

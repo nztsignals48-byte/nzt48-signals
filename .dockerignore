@@ -1,0 +1,48 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Git
+.git/
+.gitignore
+
+# Data (persisted in Docker volume, not baked into image)
+data/
+artifacts/
+
+# Dashboard frontend (has its own Dockerfile — exclude from engine build)
+# Keep dashboard/*.py (api.py needed by engine container)
+dashboard/frontend/
+dashboard/node_modules/
+node_modules/
+
+# Documentation & reports (not needed in container)
+*.pdf
+*.md
+nzt pdfs/
+annexes/
+reports/
+docs/
+DEPLOYMENT_RUNBOOK.md
+
+# IDE & tools
+.claude/
+.vscode/
+.idea/
+
+# Environment files (mounted at runtime, not baked in)
+.env
+.env.local
+.env.production
+credentials/
+
+# Build artifacts
+*.tar.gz
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db

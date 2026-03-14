@@ -1,0 +1,5 @@
+# AEGIS V2 — Python dependencies
+# PyO3 extension is built via maturin at image build time
+maturin>=1.5
+tomli>=2.0
+numpy>=1.26

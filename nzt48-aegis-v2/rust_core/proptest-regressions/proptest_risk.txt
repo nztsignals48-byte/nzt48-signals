@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1427d459d1f96da0bd2737decf7fc0c1bffd4b812ce0393d2fa7276993ffcfac # shrinks to ticker_id = 0, direction = Long, confidence = 144.82100671691472, kelly = -0.2518839457092118, regime = Normal, equity = 680025.9837701721, ctx = EvalContext { time_secs: 0, last_tick_age_secs: 0, bid: 903.1053101905538, ask: 903.1053101905538, broker_connected: true, wal_available: true, now_ns: 1000000 }, num_positions = 0

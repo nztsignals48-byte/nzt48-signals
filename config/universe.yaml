@@ -1,0 +1,114 @@
+# NZT-48 Universe Configuration — CORE-FIRST + 50% Peer Expansion
+# Priority: 70% CORE, 20% PEERS, 10% FULL_SCAN
+
+universe:
+  # CORE: Our primary tradable instruments (UK ISA leveraged ETPs)
+  # These are the ONLY instruments eligible for TRADE signals
+  core_list:
+    - QQQ3.L    # Nasdaq 100 3x Long
+    - 3LUS.L    # S&P 500 3x Long
+    - 3SEM.L    # Semiconductors 3x Long
+    - GPT3.L    # AI/GPT 3x Long
+    - NVD3.L    # NVIDIA 3x Long
+    - TSL3.L    # Tesla 3x Long
+    - TSM3.L    # TSMC 3x Long
+    - MU2.L     # Micron 2x Long
+    - QQQS.L    # Nasdaq 100 3x Short
+    - 3USS.L    # S&P 500 3x Short
+    - QQQ5.L    # Nasdaq 100 5x Long
+    - SP5L.L    # S&P 500 5x Long
+
+  # Peer expansion settings
+  peer_expansion_ratio: 0.50       # +50% additional similar instruments
+  # peer_size_target = ceil(0.50 * 12) = 6
+
+  # Peer candidates pool (hand-curated similar instruments available on LSE)
+  # Dead/delisted tickers removed: AVGO3.L, PLTR3.L, AMZL.L, MSFL.L,
+  # COIN3.L, MSTRL.L, BAC3.L, GS3.L, MFAS.L (verified 2026-02-26)
+  peer_candidates:
+    - AMD3.L    # AMD 3x Long (semi peer to 3SEM, NVD3)
+    - ARM3.L    # ARM 3x Long (semi peer)
+    - NVDS.L    # NVIDIA 3x Short (inverse peer to NVD3)
+    - TSLS.L    # Tesla 3x Short (inverse peer to TSL3)
+    - 3LDE.L    # DAX 3x Long (index peer)
+    - 3LEU.L    # Euro Stoxx 50 3x Long (index peer)
+    - 3GOL.L    # Gold 3x Long (commodity hedge)
+    - 3SIL.L    # Silver 3x Long (commodity hedge)
+    - 3OIL.L    # Oil 3x Long (commodity)
+    - LLY3.L    # Eli Lilly 3x Long (pharma)
+
+  # Full scan — broader market context (intel only, never trade)
+  full_scan_list:
+    # US benchmark ETFs
+    - QQQ       # Nasdaq 100 (unleveraged)
+    - SPY       # S&P 500
+    - SMH       # VanEck Semiconductor
+    - SOXX      # iShares Semiconductor
+    - IWM       # Russell 2000
+    - DIA       # Dow Jones
+    - XLK       # Tech Select Sector
+    - XLF       # Financials
+    - XLE       # Energy
+    - XLV       # Healthcare
+    # Volatility
+    - ^VIX      # CBOE VIX
+    # Bonds / FX / Commodities
+    - TLT       # 20+ Year Treasury
+    - GLD       # Gold ETF
+    - USO       # Oil ETF
+    - DX-Y.NYB  # US Dollar Index
+    - BTC-USD   # Bitcoin
+    # Key single names (underlyings for our leveraged ETPs)
+    - NVDA
+    - TSLA
+    - TSM
+    - MU
+    - AMD
+    - AVGO
+    - ARM
+    - AMZN
+    - MSFT
+    - META
+    - PLTR
+    - GOOG
+    - AAPL
+
+  full_scan_max_size: 500          # hard cap
+
+  # Peer selection method priority
+  peer_selection:
+    methods:
+      - correlation_similarity     # rolling correlation of returns
+      - factor_theme_similarity    # sector/theme matching
+      - momentum_vol_similarity    # ATR%, BB width, ADX profile matching
+    correlation_lookback_days: 60
+    min_similarity_score: 0.40     # minimum to qualify as peer
+
+  # Compute budget allocation (must sum to 100)
+  compute_budget:
+    core_pct: 70
+    peer_pct: 20
+    full_scan_pct: 10
+
+  # Scan cadences
+  scan_cadence:
+    core_interval_seconds: 60      # every 60s (full feature set)
+    peer_interval_seconds: 180     # every 3 min (mid feature set)
+    full_scan_interval_seconds: 600  # every 10 min (lite feature set)
+
+  # Trading permissions
+  allow_trade_from_peers: false    # PEERS are WATCH/INTEL only
+  allow_trade_from_full_scan: false
+
+  # Factor/theme mapping
+  factor_themes:
+    nasdaq_beta: [QQQ3.L, QQQS.L, QQQ5.L]
+    sp500_beta: [3LUS.L, 3USS.L, SP5L.L]
+    semiconductors: [3SEM.L, NVD3.L, AMD3.L, ARM3.L]
+    ai_tech: [GPT3.L]
+    tesla_plays: [TSL3.L, TSLS.L]
+    tsmc_plays: [TSM3.L]
+    micron_plays: [MU2.L]
+    commodities: [3GOL.L, 3SIL.L, 3OIL.L]
+    europe_index: [3LDE.L, 3LEU.L]
+    pharma: [LLY3.L]

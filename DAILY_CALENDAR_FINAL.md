@@ -50,12 +50,12 @@ UTC TIME     PHASE                  MARKETS OPEN            WHAT'S HAPPENING
                          │  ├─ Kelly accelerator feedback
                          │  └─ Registry scraper (detect new LSE ETPs)
                          ├─ Universe Scanner: Scanning LSE for new delisted/added ETPs
-                         ├─ Every 60 sec: Scans all 12 LSE ETPs
+                         ├─ Every 60 sec: Scans all LSE ETPs (12+ tradeable)
                          ├─ Telegram: "🎯 LSE OPENS: UK ISA + Euro Trading Live"
                          └─ Expected: Signals possible on UK/Euro momentum
 
 08:00-14:30  📈 PHASE 1: LSE + EUROPEAN MARKETS ONLY (6.5 hours)
-             UK ISA +    ├─ Dual universe: 12 LSE ETPs + European exposure
+             UK ISA +    ├─ Dual universe: ALL ISA-eligible LSE ETPs (12+) + European exposure
              Europe      ├─ Continuous signal generation every 60 sec
              only        ├─ Ouroboros: Real-time alpha analysis on both
              │           ├─ Universe Scanner: Monitoring LSE + Euro exchanges
@@ -79,12 +79,12 @@ UTC TIME     PHASE                  MARKETS OPEN            WHAT'S HAPPENING
              │           └─ Telegram: "US Pre-Market signals warming up"
 
 14:30        🎯 PHASE 2 BEGINS: LSE + AMERICAN STOCKS (2 hours overlap)
-             LSE +       ├─ UK ISA (12 ETPs) + US (18 equities) BOTH LIVE
+             LSE +       ├─ UK ISA (12+ ETPs) + US (18 equities) BOTH LIVE
              US          ├─ **PEAK DUAL-MARKET ACTIVITY** (14:30-16:30 UTC)
              (2 hours)   ├─ Continuous signal generation every 60 sec
              │           ├─ Signals can execute on EITHER/BOTH markets
-             │           ├─ Ouroboros: Simultaneous analysis on 30 symbols
-             │           │  ├─ Alpha sieve per-symbol (12 LSE + 18 US)
+             │           ├─ Ouroboros: Simultaneous analysis on 30+ symbols
+             │           │  ├─ Alpha sieve per-symbol (12+ LSE + 18 US)
              │           │  ├─ Regime shift detection (US momentum vs UK)
              │           │  ├─ Exit calibration (LSE spreads vs US spreads)
              │           │  ├─ Kelly accelerator (30-symbol portfolio sizing)
@@ -190,9 +190,9 @@ Every single minute, everywhere, this happens:
 ```
 0-5 sec:    INGEST (Universe Scanner feeds data)
             └─ Fetch OHLCV from active markets:
-               • 08:00-14:30 UTC: 12 LSE ETPs
-               • 14:30-16:30 UTC: 12 LSE ETPs + 18 US equities (30 total)
-               • 16:30-22:00 UTC: (Maintenance, limited)
+               • 08:00-14:30 UTC: 12+ LSE ETPs + 3-8 European stocks
+               • 14:30-16:30 UTC: 12+ LSE ETPs + 18 US equities (30+ total)
+               • 16:30-22:00 UTC: 18 US equities (LSE closed)
                • 22:00-08:00 UTC: TSM, ASML, Asia indices
 
 5-10 sec:   PERCEIVE (Universe Scanner analyzing all)
@@ -475,16 +475,16 @@ Result: Fresh, optimized ticker list every 15 min in hour 1, hourly thereafter. 
 ## 📊 DAILY EXECUTION SUMMARY
 
 ### Phase 1: LSE + European Markets (08:00-14:30 UTC, 6.5 hours)
-- **Markets Open:** 80% LSE (12 leveraged ETPs) + 20% European stocks
-- **Universe:** ~15-20 total symbols (12 LSE + 3-8 Euro)
+- **Markets Open:** 80% LSE (12+ leveraged ETPs) + 20% European stocks (3-8)
+- **Universe:** 15-30+ total symbols (dynamic, all ISA-eligible ETPs + Euro liquidity)
 - **Trading:** Continuous every 60 sec
 - **Ouroboros:** Real-time alpha analysis on all symbols
-- **Universe Scanner:** Monitoring LSE + Euro exchanges
+- **Universe Scanner:** Initial @ 07:45, refreshes every 15 min in hour 1, then hourly
 - **Expected Trades:** 1-2
 - **Expected P&L:** £50-150
 
 ### Phase 2: LSE + US Peak Overlap (14:30-16:30 UTC, 2 hours) ← PEAK ACTIVITY
-- **Markets Open:** 12 LSE ETPs + 18 US equities (30 total)
+- **Markets Open:** 12+ LSE ETPs + 18 US equities (30+ total, fully dynamic)
 - **Trading:** Continuous every 60 sec (maximum universe)
 - **Ouroboros:** Analyzing 30 symbols simultaneously
 - **Universe Scanner:** Real-time scanning all 30 tickers
@@ -522,16 +522,17 @@ Result: Fresh, optimized ticker list every 15 min in hour 1, hourly thereafter. 
 ```
 Trading Hours:       22.5 hours/day (continuous across all phases)
 Active Markets:      6 (UK ISA, Europe, US, Asia)
-Symbols Scanned:     35-40+ (12 LSE + 3-8 Euro + 18 US + Asia)
-  Phase 1: 80% LSE (12) + 20% Euro (3-8)
-  Phase 2: LSE + US
-  Phase 3: US only
-  Phase 4: Asia
+Symbols Scanned:     35-50+ (dynamic, all ISA-eligible ETPs + liquidity-filtered)
+  Phase 1: 80% LSE (12+) + 20% Euro (3-8+) = 20-30+ symbols
+  Phase 2: LSE (12+) + US (18) = 30+ symbols
+  Phase 3: US only (18 equities)
+  Phase 4: US close + Asia warmup
+  Phase 5: Asia (TSM, ASML, indices)
 
-Market Scans:        1,440 per day (60-sec cycles)
+Market Scans:        1,440 per day (60-sec cycles across active universe)
 Health Checks:       144 per day (10-min cycles)
 Ouroboros Analysis:  ~288 per day (3-5 min cycles)
-Universe Scans:      ~144+ per day (continuous)
+Universe Refreshes:  ~40-50 per day (pre-session + 3 in hour 1 + hourly thereafter)
 
 Expected Trades:     3-9 per day
   Phase 1 (LSE+Euro):      1-2 trades
@@ -654,18 +655,16 @@ EVERY NIGHT (23:00 UTC):
 
 ---
 
-## 🎯 KEY DIFFERENCES FROM LSE-ONLY
+## 🎯 KEY DIFFERENCES FROM PREVIOUS VERSIONS
 
 ```
-BEFORE (LSE-Only, 8.5 hours/day):
-  • 1,440 scans × 12 ETPs only
-  • 1-4 trades per day max
-  • £35-50/day P&L
-  • 8.5 hours trading
-  • No Ouroboros feedback
-  • Static universe
+STATIC UNIVERSE (Previous):
+  • Fixed 12 LSE ETPs
+  • Manual ticker selection
+  • No dynamic runner detection
+  • Missed intraday opportunities
 
-NOW (AEGIS Global, 22 hours/day with Ouroboros):
+NOW (AEGIS V2 Dynamic Universe, 22 hours/day with Ouroboros):
   • 1,440 scans × 30+ symbols (6 markets)
   • 2-8 trades per day (4-5x more)
   • £200-550/day P&L (4-10x more)

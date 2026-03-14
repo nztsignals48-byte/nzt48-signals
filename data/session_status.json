@@ -1,0 +1,74 @@
+{
+  "preview_pre_lse": {
+    "run_id": "4D5460E4",
+    "timestamp": "2026-02-26T06:33:06.357765+00:00",
+    "artifacts_written": true,
+    "pdf_written": false,
+    "error_msg": "",
+    "status": "FAIL",
+    "artifact_paths": [],
+    "pdf_path": "",
+    "signals_strict_count": 0,
+    "signals_fallback_count": 1,
+    "drought_flag": false,
+    "top_blockers": [
+      "RR_RATIO: R:R=0.77 < 1.2 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.17 < 0.55 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.13 < 0.55 (1x)"
+    ],
+    "generated_at_uk": "2026-02-26T06:33:00.209042+00:00"
+  },
+  "preview_pre_nyse": {
+    "run_id": "CC7F7315",
+    "timestamp": "2026-02-26T06:33:39.476100+00:00",
+    "artifacts_written": true,
+    "pdf_written": false,
+    "error_msg": "",
+    "status": "FAIL",
+    "artifact_paths": [],
+    "pdf_path": "",
+    "signals_strict_count": 0,
+    "signals_fallback_count": 1,
+    "drought_flag": false,
+    "top_blockers": [
+      "RR_RATIO: R:R=0.77 < 1.2 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.17 < 0.55 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.13 < 0.55 (1x)"
+    ],
+    "generated_at_uk": "2026-02-26T06:33:33.813177+00:00"
+  },
+  "preview_eod_institutional": {
+    "run_id": "3DF1EAA6",
+    "timestamp": "2026-02-26T06:34:04.188621+00:00",
+    "artifacts_written": true,
+    "pdf_written": false,
+    "error_msg": "",
+    "status": "FAIL",
+    "artifact_paths": [],
+    "pdf_path": "",
+    "signals_strict_count": 0,
+    "signals_fallback_count": 1,
+    "drought_flag": false,
+    "top_blockers": [
+      "RR_RATIO: R:R=0.77 < 1.2 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.17 < 0.55 (1x)",
+      "VOLUME_LIQUIDITY: RVOL=0.13 < 0.55 (1x)"
+    ],
+    "generated_at_uk": "2026-02-26T06:33:59.215788+00:00"
+  },
+  "preview_copilot_scan": {
+    "run_id": "631B9589",
+    "timestamp": "2026-02-27T06:59:40.612750+00:00",
+    "artifacts_written": true,
+    "pdf_written": false,
+    "error_msg": "",
+    "status": "FAIL",
+    "artifact_paths": [],
+    "pdf_path": "",
+    "signals_strict_count": 2,
+    "signals_fallback_count": 1,
+    "drought_flag": false,
+    "top_blockers": [],
+    "generated_at_uk": "2026-02-27T06:59:35.044205+00:00"
+  }
+}

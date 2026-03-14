@@ -1,0 +1,1091 @@
+# V8.0 — Trimmed. SSOT for tickers: uk_isa/isa_universe.py
+# NZT-48 Trading System — Master Configuration
+# All thresholds, parameters, and overrides from the Master Spec (42 pages)
+
+system:
+  name: "NZT-48"
+  version: "8.0"  # V8.0 Apex Predator Engine
+  mode: "PAPER"  # PAPER or LIVE — never go live without Go/No-Go criteria met
+  timezone: "Europe/London"  # AB-02: UK ISA primary — LSE hours, not US
+  uk_timezone: "Europe/London"
+  log_level: "INFO"
+  db_path: "data/nzt48.db"
+  kill_switch_file: "data/KILL_SWITCH"
+  starting_equity: 10000  # £10,000 ISA paper trading balance
+
+# === PART II: WHAT THE SYSTEM SEES ===
+
+bot_b_universe:
+  # 18 US Equities — AI/Semiconductor chain (v5 expanded)
+  tickers:
+    - NVDA
+    - TSLA
+    - MU
+    - SNDK
+    - AMD
+    - AVGO
+    - MRVL
+    - ARM
+    - TSM
+    - ASML
+    - SMCI
+    - VRT
+    - CRDO
+    - ANET
+    - QCOM
+    - LRCX
+    - KLAC
+    - "ON"
+
+  # Per-ticker parameter overrides (Section 4)
+  overrides:
+    NVDA:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Standard king. Best ORB stock. Patient with runners."
+    TSLA:
+      rvol_min: 1.3
+      stop_mult: 1.5
+      notes: "Widest ranges. Pre-market direction often continues."
+    MU:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Clean breakouts. Responds to HBM/memory narrative."
+    SNDK:
+      rvol_min: 1.8
+      stop_mult: 1.5
+      notes: "Post-spinoff. Higher beta. Storage narrative."
+    AMD:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Overreacts to everything. Mean reversion after 3%+ moves."
+    AVGO:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Steady mover. Custom ASIC narrative. Lower beta."
+    MRVL:
+      rvol_min: 1.8
+      stop_mult: 1.5
+      notes: "Higher beta. Custom silicon narrative. Reduce size 15% vs NVDA."
+      size_reduction: 0.15
+    ARM:
+      rvol_min: 1.8
+      stop_mult: 1.5
+      notes: "Lower US liquidity. Wider spread (0.20%). Reduce size 20%."
+      size_reduction: 0.20
+    TSM:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "ADR — NOT ISA-eligible. Bot B only. Asia/geopolitical chop."
+      isa_eligible: false
+    ASML:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "High price ($700+). Min 4 shares. EU news can front-run. ADR — verify ISA."
+    SMCI:
+      rvol_min: 2.0
+      stop_mult: 2.0
+      notes: "EXTREME VOL. Confirmation bar > 0.3%. Reduce to 60% size."
+      size_reduction: 0.40
+    VRT:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Trades with utility/infra flow, not pure semi flow."
+    CRDO:
+      rvol_min: 2.0
+      stop_mult: 1.5
+      notes: "High momentum. Small float. Reduce size 20%."
+      size_reduction: 0.20
+    ANET:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Networking/AI infrastructure. Lower beta. Steady trends."
+    QCOM:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Mobile/AI chip play. Responds to Apple/Samsung news."
+    LRCX:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Semi equipment. Cyclical. Trades with capex cycle."
+    KLAC:
+      rvol_min: 1.5
+      stop_mult: 1.5
+      notes: "Semi equipment. Similar to LRCX. Check correlation."
+    ON:
+      rvol_min: 1.8
+      stop_mult: 1.5
+      notes: "Auto/industrial semi. EV narrative. Higher beta."
+
+  # Context instruments (NOT traded)
+  context_tickers:
+    - QQQ    # Broad tech direction
+    - SMH    # Semiconductor sector pulse
+    - SPY    # Broad market
+    - SOXX   # Secondary semi confirmation
+    - VIX    # Fear gauge
+    - TLT    # Bond market
+    - DXY    # Dollar strength (via UUP)
+    - GLD    # Risk appetite
+
+bot_a_universe:
+  # REMOVED: long_3x — SSOT: uk_isa/isa_universe.py
+  # REMOVED: inverse_3x — SSOT: uk_isa/isa_universe.py
+  # REMOVED: leveraged_4x_5x — SSOT: uk_isa/isa_universe.py
+  # REMOVED: ucits_defensive — SSOT: uk_isa/isa_universe.py
+
+  # ISA mapping: Bot B signal → Bot A equivalent
+  # SSOT: uk_isa/isa_universe.py — orphan SHORT tickers removed (SC3S, GPTS, 3SNV, 3STS, TSMS, SQQQ, SPYS)
+  # Shorting in ISA = going LONG the inverse fund (ISA rules: no short-selling)
+  isa_mapping:
+    NVDA_LONG:  "NVD3.L"    # GraniteShares NVIDIA 3x long
+    TSLA_LONG:  "TSL3.L"    # GraniteShares Tesla 3x long
+    QQQ_LONG:   "QQQ3.L"    # WisdomTree Nasdaq 100 3x long
+    QQQ_SHORT:  "QQQS.L"    # WisdomTree Nasdaq 100 -3x
+    QQQ_LONG_5X:  "QQQ5.L"  # Leverage Shares Nasdaq 5x long
+    SPX_LONG:   "3LUS.L"    # WisdomTree S&P 500 3x long
+    SPX_SHORT:  "3USS.L"    # WisdomTree S&P 500 -3x
+    SPX_LONG_5X:  "SP5L.L"  # WisdomTree S&P 500 5x long
+    SEMIS_LONG:  "3SEM.L"   # WisdomTree Semiconductor 3x long
+    AI_LONG:    "GPT3.L"    # Leverage Shares AI 3x long
+    TSMC_LONG:  "TSM3.L"    # Leverage Shares TSMC 3x long
+    MU_LONG:    "MU2.L"     # Leverage Shares Micron 2x long
+    # Leverage cascade: confidence → leverage level
+    # High conviction (80+): 5x
+    QQQ_LONG_5X: "QQQ5.L"
+    QQQ_SHORT_5X: "QQS5.L"
+    SP500_LONG_5X: "SP5L.L"
+    SP500_SHORT_5X: "SP5S.L"
+    # Medium conviction (65-79): 3x (default)
+    # Low conviction (55-64): 1x defensive
+    QQQ_LONG_1X: "CNX1.L"
+    SP500_LONG_1X: "IUSA.L"
+    SEMIS_LONG_1X: "SMGB.L"
+    QQQ_LONG_1X_ALT: "EQQQ.L"
+    # Single stock ETPs
+    MSFT_LONG: "3MSF.L"
+    AMZN_LONG: "3AMZ.L"
+    # REMOVED (4-05): GOOGL_LONG was mapped to 3GOL.L (Gold 3x) — NOT Alphabet
+    # GOOGL_LONG: "3GOL.L"
+    # NEW: Additional single-stock leverage mappings
+    MU_LONG: "MU2.L"         # Micron 2x
+    TSM_LONG: "TSM3.L"       # TSMC 3x
+    AMD_LONG: "AMD3.L"       # AMD 3x
+    AMD_SHORT: "AMDS.L"      # AMD -3x
+    AVGO_LONG: "AVG3.L"      # Broadcom 3x
+    ARM_LONG: "ARM3.L"       # ARM 3x
+    # ISA fallback mappings — no single-stock ETP, use sector index proxy
+    QCOM_LONG: "3SEM.L"      # Semiconductor index proxy
+    LRCX_LONG: "3SEM.L"      # Semiconductor index proxy
+    KLAC_LONG: "3SEM.L"      # Semiconductor index proxy
+    ASML_LONG: "3SEM.L"      # Semiconductor index proxy
+    ON_LONG: "3SEM.L"        # Semiconductor index proxy
+    MRVL_LONG: "3SEM.L"      # Semiconductor index proxy
+    CRDO_LONG: "3SEM.L"      # Semiconductor index proxy
+    SNDK_LONG: "MU2.L"       # Memory peer proxy (Micron 2x)
+    VRT_LONG: "QQQ3.L"       # Broad tech proxy
+    ANET_LONG: "QQQ3.L"      # Broad tech proxy
+    # EXPANSION v2 mappings (verified 2026-02-27)
+    SP500_LONG_3X_ALT: "SPXL.L"    # S&P 500 3x Leverage Shares (highest vol in expansion)
+    SEMIS_LONG_2X: "SEMI.L"         # Semiconductors 2x Leverage Shares
+    SEMIS_LONG_3X_ALT: "SOXL.L"    # Semiconductors 3x Leverage Shares
+    NVDA_LONG_ALT: "3LNV.L"         # Nvidia 3x long WisdomTree
+    TSLA_LONG_ALT: "3LTS.L"         # Tesla 3x long WisdomTree
+    OIL_LONG_3X: "3OIL.L"           # Crude Oil 3x
+    OIL_LONG_3X_ALT: "3HCL.L"      # Crude Oil 3x (Brent, alt provider)
+    SILVER_LONG_3X: "3SIL.L"        # Silver 3x
+    SILVER_LONG_1X: "PHAG.L"        # Silver physical 1x (hedge/defensive)
+    GOLD_LONG_3X: "3GOL.L"          # Gold 3x
+    GOLD_LONG_1X: "PHAU.L"          # Gold physical 1x (hedge/defensive)
+    MAG7_LONG_2X: "MAGS.L"          # Magnificent 7 2x Leverage Shares
+    AAPL_SHORT: "AAPS.L"             # Apple 3x short GraniteShares
+    TECH_SHORT_1X: "XLKS.L"         # US Tech sector short 1x (low liquidity — intel only)
+    FIN_SHORT_1X: "XLFS.L"          # US Financials short 1x (low liquidity — intel only)
+    ENERGY_SHORT_1X: "XLES.L"       # US Energy short 1x (low liquidity — intel only)
+    # Short-side leverage for mega-caps (Leverage Shares inverse ETPs)
+    MSFT_SHORT: "3SMS.L"     # Microsoft -3x (VERIFY)
+    GOOGL_SHORT: "3GOS.L"    # Alphabet -3x (VERIFY)
+    AVGO_SHORT: "AVGS.L"     # Broadcom -3x (VERIFY)
+
+  sector_rotation:
+    - "XLE"    # Energy
+    - "XLU"    # Utilities/AI power
+    - "XLI"    # Industrials/data centres
+    - "XLF"    # Financials/rates
+    - "GDX"    # Gold miners/fear
+    - "KWEB"   # China tech/rotation risk
+    - "XLK"    # Technology Select
+    - "XLC"    # Communication Services (META, GOOGL)
+    - "SOXX"   # iShares Semiconductor ETF
+    - "IGV"    # iShares Software ETF
+    - "HACK"   # Cybersecurity ETF
+    - "BOTZ"   # Robotics & AI ETF
+    - "TAN"    # Solar/Clean Energy
+    - "URA"    # Uranium/Nuclear Power
+
+# === PART III: FIVE-LAYER PERCEPTION ENGINE ===
+
+indicators:
+  # Section 6 — 22 Core Indicators
+  vwap:
+    bands: [1, 2]  # Standard deviations
+    timeframe: "1min"
+  ema:
+    fast: 9
+    medium: 20
+    slow: 50
+    weekly: 50  # 10-week EMA on weekly = 50-period on daily
+    timeframes:
+      fast_medium: "1min"
+      slow: "5min"
+      weekly: "1W"
+  rsi:
+    period: 14
+    timeframe: "1min"
+    overbought: 70
+    oversold: 30
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+    timeframe: "5min"
+  atr:
+    period: 14
+    timeframe: "5min"
+  bollinger:
+    period: 20
+    std_dev: 2
+    timeframe: "5min"
+  adx:
+    period: 14
+    timeframe: "5min"
+    trending_threshold: 25
+    no_trend_threshold: 15
+  stochastic_rsi:
+    period: 14
+    timeframe: "5min"
+  keltner:
+    period: 20
+    atr_mult: 1.5
+    timeframe: "5min"
+  obv:
+    timeframe: "5min"
+  mfi:
+    period: 14
+    timeframe: "5min"
+  volume:
+    spike_threshold: 2.0  # > 2x avg = strong
+    dollar_min_bot_b: 500_000_000  # $500M/day Bot B
+    rvol_timeadjust: true
+  opening_range:
+    periods: [5, 15]  # minutes
+    timeframe: "5min"
+  microstructure:
+    bid_ask_spread_max: 0.15  # percent, skip if >
+    timeframe: "1min"
+
+patterns:
+  # Section 6 — 12 Pattern Detection
+  coiled_spring:
+    or_width_pct: 0.50  # OR < 50% of 20-day avg
+    confidence_bonus: 15
+  volume_climax:
+    rvol_threshold: 3.0
+  failed_breakout:
+    bars_inside: 3
+    volume_condition: "fading"
+    reverse_confidence_floor: 70
+  trend_acceleration:
+    consecutive_bars: 3
+    confidence_bonus: 10
+    trail_multiplier: 1.5
+  momentum_exhaustion:
+    macd_peaked_bars: 5
+    trail_multiplier: 0.5
+  vwap_magnet:
+    extension_std: 2
+  gap_and_go:
+    gap_pct: 1.5
+    hold_bars: 5
+    rvol_min: 2.0
+  gap_and_fade:
+    gap_pct: 1.5
+  earnings_momentum:
+    hold_hours: 2
+    rvol_min: 2.0
+  dead_cat_bounce:
+    ema_condition: "EMA9 < EMA20 < EMA50"
+  absorption:
+    description: "Large vol, small range, then continuation"
+    confidence_bonus: 10
+  abcd_pattern:
+    fibonacci: true
+
+# === Section 7: Regime Classification — 8 States ===
+
+regime:
+  states:
+    TRENDING_UP_STRONG:
+      conditions: "QQQ+SPY > VWAP, EMA(9) > EMA(20), slope > +0.02%/bar"
+      long: "Full"
+      short: "Counter"
+      etp_3x: "80+"
+      size: 1.0
+    TRENDING_UP_MOD:
+      conditions: "1 of 2 > VWAP, slope +0.005 to +0.02"
+      long: "Full"
+      short: "Counter"
+      etp_3x: "75+"
+      size: 0.8
+    TRENDING_DOWN_STRONG:
+      conditions: "QQQ+SPY < VWAP, EMA(9) < EMA(20), slope < -0.02%/bar"
+      long: "Counter"
+      short: "Full"
+      etp_3x: "80+ inv"
+      size: 1.0
+    TRENDING_DOWN_MOD:
+      conditions: "1 of 2 < VWAP, slope -0.005 to -0.02"
+      long: "Counter"
+      short: "Full"
+      etp_3x: "75+ inv"
+      size: 0.8
+    RANGE_BOUND:
+      conditions: "+/-0.3% around VWAP, EMAs flat, VIX 15-22"
+      long: "ORB 1R"
+      short: "ORB 1R"
+      etp_3x: "CASH"
+      size: 0.6
+    HIGH_VOLATILITY:
+      conditions: "VIX > 25 OR range > 2x normal"
+      long: "Half"
+      short: "Half"
+      etp_3x: "CASH"
+      size: 0.5
+    RISK_OFF:
+      conditions: "VIX > 35 OR SPY falls > -2% intraday"
+      long: "NO"
+      short: "Inv only"
+      etp_3x: "CASH"
+      size: 0.25
+    SHOCK:
+      conditions: "VIX > 45 OR circuit breaker"
+      long: "FLAT ALL"
+      short: "FLAT ALL"
+      etp_3x: "FLAT ALL"
+      size: 0.0
+
+  # Regime transition actions
+  transitions:
+    TRENDING_UP_to_RANGE: "Tighten all long stops to breakeven. No new longs."
+    TRENDING_UP_to_TRENDING_DOWN: "FLATTEN all longs. Switch to short-hunting."
+    TRENDING_DOWN_to_TRENDING_UP: "FLATTEN all shorts. Switch to long-hunting."
+    ANY_to_RISK_OFF: "FLATTEN everything. Cash. Wait."
+    ANY_to_SHOCK: "EMERGENCY FLATTEN. Kill switch."
+    RANGE_to_TRENDING: "Opportunity. Enter trend direction. +10 confidence."
+
+# === Section 8: Market Structure ===
+
+market_structure:
+  gex:
+    source: "squeezemetrics"
+    positive: "dampen moves (mean reversion)"
+    negative: "amplify moves (trending/crashing)"
+    flipping: "regime change imminent"
+  dix:
+    bullish_threshold: 0.45
+    bearish_threshold: 0.40
+
+# === Section 9: Market Internals ===
+
+market_internals:
+  tick:
+    bullish: 800
+    bearish: -800
+  trin:
+    bullish_below: 0.80
+    bearish_above: 1.20
+  add:
+    bullish: "rising"
+    bearish: "falling"
+  vold:
+    bullish: 1_500_000_000
+    bearish: -1_500_000_000
+  composite:
+    strong: [3, 4]      # +5 confidence
+    weak: [0, 1]         # -5 confidence
+
+# === Section 10: Time-of-Day Engine (ET) ===
+
+time_windows:
+  chaos_open:
+    start: "09:30"
+    end: "09:35"
+    strategy: "NO TRADES. Observe only."
+  morning_momentum:
+    start: "09:35"
+    end: "10:30"
+    strategy: "PRIMARY WINDOW. Full aggression. ORB."
+  trend_extension:
+    start: "10:30"
+    end: "11:30"
+    strategy: "VWAP pullback entries. Good for adds."
+  lunch_chop:
+    start: "11:30"
+    end: "14:00"
+    strategy: "RVOL min 1.7. Most NO_TRADE signals."
+  afternoon_push:
+    start: "14:00"
+    end: "15:00"
+    strategy: "Fresh setups. Confirm with regime."
+  power_hour:
+    start: "15:00"
+    end: "15:30"
+    strategy: "Only high confidence. Quick exits."
+  close_mechanics:
+    start: "15:30"
+    end: "16:00"
+    strategy: "FLATTEN. No new entries."
+
+# === PART IV: Strategy Schedule (UK Times) ===
+
+schedule:
+  pre_market:
+    time_uk: "06:00"
+    strategies: ["S1", "S3", "S5", "S6", "S7", "S10"]
+    notes: "Pre-market + context"
+  midday:
+    time_uk: "12:00"
+    strategies: ["S7", "S9", "S11"]
+  us_open:
+    time_uk: "14:30"  # 02:30 PM UK = 09:30 ET
+    strategies: ["S2", "S4", "S8", "S11", "S14"]
+  mid_session:
+    time_uk: "16:00"
+    strategies: ["S2", "S3", "S4", "S9"]
+  rebalance:
+    time_uk: "19:00"
+    strategies: ["S12"]
+    notes: "THE KEY SIGNAL"
+  late_session:
+    time_uk: "20:30"
+    strategies: ["S2", "S3", "S13"]
+  weekly:
+    day: "Sunday"
+    time_uk: "20:00"
+    strategies: ["S1", "S7", "S13"]
+
+# === PART V: Confidence Engine ===
+
+confidence:
+  # Section 36 — Five-Layer Scoring
+  floor: 65  # System-wide minimum — aligned with ThresholdRegistry + ImmutableRules (E-01)
+  orb_vwap_floor: 65
+  bear_bot_floor: 80
+  max_score: 100
+
+  layer1_price_action:
+    max_points: 45
+    components:
+      rvol: {min: 0, max: 12}
+      ema_alignment: {min: 0, max: 8}
+      vwap: {min: -5, max: 8}
+      macd: {min: -5, max: 8}
+      volume_spike: {min: 0, max: 7}
+      atr_pct: {min: 0, max: 3}
+      rsi: {min: -3, max: 3}
+      spread: {min: 0, max: 3}
+      pattern: {min: 0, max: 5}
+      microstructure: {min: -3, max: 3}
+
+  layer2_regime:
+    max_points: 20
+    fully_aligned: 15
+    partial: 8
+    neutral: 3
+    transition_bonus: 5
+    historical_wr_bonus: 5  # WR > 65%
+
+  layer3_sector_flow:
+    max_points: 15
+    strong_rs: 15        # RS > +1.0
+    mild_rs: 10          # RS > +0.5
+    negative_rs_long: -5 # RS < -0.5
+    rs_leader: 5
+
+  layer4_macro:
+    max_points: 10
+    tailwind: 7
+    neutral: 0
+    cautious: -5
+    headwind: -10
+    crisis: -20  # VETO
+
+  layer5_narrative:
+    max_points: 10
+    positive_news: 8
+    sector_positive: 5
+    negative_news: -10
+    crisis_keyword: -50  # VETO
+
+  # Penalties
+  penalties:
+    macd_zero_cross_3bars: -12
+    sector_divergence: -12
+    consecutive_losses_2: -5
+    consecutive_losses_3_plus: -15
+    midday: -8
+    or_too_wide: -8
+    ticker_cold_streak: -10
+    friday_afternoon: -5
+
+# === Section 37: 7-Stage Qualification Pipeline ===
+
+qualification:
+  stage1_dedup:
+    window_hours: 4
+    match_fields: ["ticker", "direction"]
+  stage2_no_trade:
+    vix_threshold: 35
+    adx_threshold: 15
+    first_5min: true
+    last_10min: true
+    spread_max: 1.5
+    # Also checks max positions per bot
+  stage3_calendar:
+    fomc_block_5x: true
+    earnings_block_ticker: true
+    cpi_nfp_high_risk: true  # half size
+  stage4_gex_overlay:
+    positive_gex: "reduce breakout confidence"
+    negative_gex: "boost momentum confidence"
+  stage5_confidence:
+    scorer: "5-layer"
+    kill_below: 60
+  stage6_risk_sizer:
+    risk_per_trade: 0.0075  # 0.75% IMMUTABLE
+    position_cap: 0.05      # 5% of equity
+    total_exposure_cap: 0.20  # 20% per bot
+    etp_3x_max_single: 0.15
+    etp_3x_max_total: 0.30
+    etp_5x_max_single: 0.05
+    etp_5x_max_total: 0.15
+  stage7_isa_mapper:
+    enabled: true
+
+# === PART VI: Profit Extraction & Risk Management ===
+
+profit_ladder:
+  # Section 40 — 7 Rungs (Stocks / Bot B)
+  stocks:
+    - {rung: 0, move: "Entry", action: "Full position. Stop at calculated level.", new_stop: "Original", remaining: 1.0}
+    - {rung: 1, move: "+0.3R", action: "Reduce risk.", new_stop: "Entry - 0.15xATR", remaining: 1.0}
+    - {rung: 2, move: "+0.5R", action: "BREAKEVEN. Trade is now SAFE.", new_stop: "Breakeven", remaining: 1.0}
+    - {rung: 3, move: "+1.0R", action: "FIRST CASH. Sell 40%.", new_stop: "+0.3R", remaining: 0.6}
+    - {rung: 4, move: "+1.5R", action: "Evaluate: RVOL > 1.2 + regime = hold.", new_stop: "+0.7R", remaining: 0.4}
+    - {rung: 5, move: "+2.0R", action: "SECOND CASH. Sell to 30%.", new_stop: "+1.0R", remaining: 0.3}
+    - {rung: 6, move: "+2.5R+", action: "RUNNER. Trail 1.5x ATR.", new_stop: "Trail 1.5xATR", remaining: 0.3}
+    - {rung: 7, move: "+4.0R+", action: "GIFT. Tighten trail.", new_stop: "Trail 0.5xATR", remaining: 0.3}
+
+  # Section 41 — Bot A Ladder (3x ETPs — FASTER)
+  etp_3x:
+    stop_from_entry: -0.03  # -3% = 1R risk
+    breakeven: 0.01         # +1% underlying
+    first_partial: 0.025    # +2.5%: sell 50%, stop to +0.5% (0.83R)
+    close_remaining: 0.05   # +5%: sell remaining, CLOSED (1.67R)
+    strong_trend_exception:
+      conditions: "conf > 85 AND TRENDING"
+      action: "Hold 50% with 2% trailing stop from highest point"
+
+# === Section 42: Session & Weekly Protection ===
+
+session_protection:
+  daily:
+    - {pnl: [0.5, 1.0], action: "Raise min confidence to 70"}
+    - {pnl: [1.0, 1.5], action: "Min conf 80. One more trade max."}
+    - {pnl: [1.5, 2.0], action: "STOP. Lock it in."}
+    - {pnl_above: 2.0, action: "DEFINITELY stop. Walk away."}
+    - {loss: [-1.0, -2.0], action: "Min conf 80. Half size."}
+    - {loss: [-2.0, -2.5], action: "ONE more trade if conf >= 90."}
+    - {loss_below: -3.0, action: "HALT. Non-negotiable. Done."}
+  weekly:
+    plus_3_by_wed: "half size"
+    plus_5_any_day: "stop for week"
+    minus_3_by_wed: "half size"
+    minus_6: "auto-halt, manual resume"
+
+# === Section 43: 17 Immutable Risk Rules (CONSTITUTIONAL) ===
+
+immutable_rules:
+  risk_per_trade: 0.0075              # 0.75% of equity
+  max_drawdown: 0.08                  # 8% max drawdown — HALT if breached (CONSTITUTIONAL)
+  max_daily_loss: 0.03                # 3%
+  max_weekly_loss: 0.06               # 6%
+  max_concurrent_positions: 4         # F-13: reconciled from 3→4 (plan says 4, headroom for 4×0.75% = 3% heat)
+  max_same_sub_industry: 2            # No 3 GPU stocks at once
+  max_trades_per_day: 4               # Per bot (hard cap)
+  max_trades_per_week: 10             # Per bot
+  min_confidence: 65                  # Canonical confidence floor — see ThresholdRegistry (E-01)
+  consecutive_losses_3_cooldown: 15   # Minutes + conf 75
+  # A-13: consecutive_losses_5_halt removed — circuit_breakers.py is the
+  # sole authority for consecutive loss halts (threshold = 5).
+  etp_3x_max_allocation: 0.30        # 30% of equity
+  etp_3x_max_single: 0.15            # 15%
+  etp_5x_max_allocation: 0.15        # 15%
+  etp_5x_max_single: 0.05            # 5%
+  etp_5x_max_hold_days: 3            # Volatility decay
+  etp_3x_max_hold_days: 5            # Decay limit
+  regime_flip_exit: true              # Wrong regime with leverage = EXIT immediately
+
+# === Section 44: Emotional Firewall — 12 Blocked Patterns ===
+
+emotional_firewall:
+  revenge_trading:
+    detection: "Signal within 5 min of stop-out, conf < 75"
+    response: "BLOCK. 15-min cooldown."
+  overtrading:
+    detection: "4th trade when last 3 were wins"
+    response: "BLOCK unless conf >= 85."
+  size_inflation:
+    detection: "Size > 100% standard calc"
+    response: "CAP at 100%."
+  holding_losers:
+    detection: "At -1R for > 5 min"
+    response: "FORCE EXIT."
+  moving_stops:
+    detection: "Any attempt to increase stop distance"
+    response: "BLOCK. One direction only."
+  fomo:
+    detection: "NO_TRADE moved well, re-eval"
+    response: "BLOCK 10 min. Then -10 penalty."
+  averaging_down:
+    detection: "Add to losing position"
+    response: "BLOCK unconditionally."
+  refusing_profits:
+    detection: "+2R, no partial/trail set"
+    response: "AUTO partial 50%."
+  friday_anxiety:
+    detection: "Large position 15:30 ET Friday"
+    response: "FLATTEN 3x. Reduce 50%."
+  one_more_trade:
+    detection: "Daily loss -2.5%, new signal"
+    response: "BLOCK unless conf >= 90."
+  hope:
+    detection: "Negative, past time stop"
+    response: "EXIT. Hope is not a strategy."
+  anchoring:
+    detection: "Re-enter < 15 min at worse price"
+    response: "-15 confidence penalty."
+
+# === PART VII: Learning & Adaptation ===
+
+learning:
+  guardrailed_self_improvement:
+    review_window: 40       # Last N trades
+    max_changes_per_week: 3
+    min_trades_before_adjust: 20
+    improvement_threshold: 0.05  # 5%
+    failures_to_lock: 3     # 3 failures = lock 4 weeks
+    risk_rules_touchable: false  # NEVER
+
+  adjustable_parameters:
+    confidence_weights: {default: "Varied", min: -0.50, max: 0.50, step: 0.01}
+    rvol_minimums: {default: "Per-ticker", min: 1.0, max: 3.0, step: 0.1}
+    or_time_window: {default: 5, min: 3, max: 15, step: 1}
+    partial_profit_pcts: {default: "40/30/30", min: "25/20/20", max: "60/40/40", step: 5}
+    trail_width: {default: "1.0x ATR", min: "0.5x", max: "2.0x", step: 0.1}
+    breakeven_trigger: {default: "+0.5R", min: "+0.3R", max: "+1.0R", step: 0.1}
+
+  decay_detector:
+    strategy_wr_disable: 0.35    # Win rate < 35% = disable
+    ticker_wr_disable: 0.30      # Ticker WR < 30% = disable
+    drawdown_halt: 0.12           # > 12% = halt
+    consecutive_losses_halt: 6    # 6 in a row = halt session
+
+# === F-14: Stale Data Tick-Change Counter ===
+# Detects frozen data feeds (price unchanged for extended periods during market hours)
+stale_data_monitor:
+  stale_threshold_sec: 300       # 5 min unchanged price = stale (during LSE hours)
+  halt_fraction: 0.50            # >50% of universe stale = halt all trading
+  min_tickers_for_halt: 4        # need 4+ tracked tickers before halt check is meaningful
+
+# === PART VIII: Data Feeds ===
+
+data_feeds:
+  yfinance:
+    enabled: true
+    description: "Primary — OHLCV, all tickers, no API key"
+  alpha_vantage:
+    enabled: true
+    description: "Backup feed, intraday data"
+    max_calls_per_day: 25
+    api_key_env: "ALPHA_VANTAGE_KEY"
+  squeezemetrics:
+    enabled: true
+    description: "GEX and DIX readings (web scraper)"
+    url: "https://squeezemetrics.com/monitor/dix"
+  cboe:
+    enabled: true
+    description: "VIX and VIX3M data"
+  finviz:
+    enabled: true
+    description: "Hot stock screener (vol spikes, gaps, momentum)"
+  finnhub:
+    enabled: true
+    description: "Earnings calendar + company financials + analyst consensus"
+    max_calls_per_min: 60
+    api_key_env: "FINNHUB_API_KEY"
+  forex_factory:
+    enabled: true
+    description: "FOMC, CPI, NFP dates (scraper)"
+  newsapi:
+    enabled: true
+    description: "Catalyst detection, news headlines"
+    api_key_env: "NEWSAPI_API_KEY"
+  twelvedata:
+    enabled: true
+    description: "Real-time quotes, intraday bars, fundamentals"
+    max_calls_per_min: 8   # free tier: 800/day ~= 8/min safe
+    max_calls_per_day: 750  # conservative buffer below 800 hard limit
+    api_key_env: "TWELVEDATA_API_KEY"
+  fmp:
+    enabled: true
+    description: "Company profiles, bulk quotes, financial statements"
+    max_calls_per_day: 250  # free tier
+    api_key_env: "FMP_KEY"
+
+# === Telegram ===
+
+telegram:
+  bot_token_env: "TELEGRAM_BOT_TOKEN"
+  chat_id_env: "TELEGRAM_CHAT_ID"
+  signal_format: |
+    {emoji} {direction} {ticker} | {strategy} | Conf: {confidence}/100
+    Entry: ${entry} | Stop: ${stop} ({stop_pct}) | Risk: ${risk} ({risk_pct})
+    T1: ${target1} ({t1_pct}) | T2: ${target2} ({t2_pct}) | Trail: ${trail}
+    Regime: {regime} | GEX: {gex} | RVOL: {rvol}
+    ISA Map: {isa_ticker} ({isa_leverage} {isa_underlying}) | Bot: {bot}
+    Overseer: {overseer_status} | Portfolio heat: {heat}
+
+# === Google Sheets ===
+
+sheets:
+  enabled: true
+  credentials_env: "GOOGLE_SHEETS_CREDS"
+  spreadsheet_name: "NZT-48 Trade Log"
+  auto_calc_after: 50  # trades triggers MAE/MFE recalibration
+
+# === Drawdown Recovery Protocol (Section 60) ===
+
+drawdown_recovery:
+  yellow:
+    range: [-0.05, -0.03]
+    status: "CAUTION"
+    risk_per_trade: 0.005
+    min_confidence: 70
+    max_trades_per_day: 2
+    no_3x_etps: true
+  orange:
+    range: [-0.08, -0.05]
+    status: "DEFENSIVE"
+    risk_per_trade: 0.003
+    min_confidence: 80
+    max_trades_per_day: 1
+    strategies: ["S1", "S2"]
+  red:
+    range: [-0.10, -0.08]
+    status: "RECOVERY MODE"
+    action: "HALT live trading. Return to paper 5 days minimum."
+  critical:
+    range: [-0.12, -0.10]
+    status: "FULL STOP"
+    action: "HALT all. 2-week break. Complete strategy audit. Walk-forward re-validation."
+  emergency:
+    below: -0.12
+    status: "RESET"
+    action: "STOP. Full system redesign. Re-paper 30 days. Restart with 0.25% risk."
+
+# === Cross-Correlation Matrix (Section 57) ===
+
+correlation:
+  matrix:
+    NVDA_AMD: 0.82
+    NVDA_SNDK: 0.55
+    NVDA_VRT: 0.41
+    TSLA_ASML: 0.28
+    SMCI_SNDK: 0.62
+    QCOM_AVGO: 0.71
+    LRCX_KLAC: 0.88
+    CRDO_MRVL: 0.65
+    ANET_AVGO: 0.58
+    ON_TSM: 0.52
+  max_correlated_positions: 2
+  correlation_threshold: 0.70
+  portfolio_heat_max: 0.035  # 3.5% of equity (F-12: was 3.0%, raised for spread headroom with 4 positions)
+  sector_concentration_max: 0.60
+  beta_exposure_max: 2.5
+  direction_concentration_warn: 0.80
+  drawdown_correlation_exit: 0.05  # If QQQ -3% loss > 5% equity
+
+# REMOVED: pdt — US-only PDT rule, not relevant to UK ISA
+
+# === Multi-Bot Architecture (Phase 2) ===
+
+bots:
+  bull_bot:
+    active_regime: "TRENDING_UP"
+    strategies: ["S1", "S2", "S5", "S10", "S11", "S13", "S14"]
+    max_risk_per_trade: 0.0075
+    min_confidence: 65  # Canonical confidence floor — see ThresholdRegistry (E-01)
+    max_positions: 5
+    personality: "Aggressive. Rides trends. Wider stops. Trails aggressively."
+    profit_target_1r: [2.0, 3.0]
+    stop_width: "1.5x ATR"
+    partial_profit: [30, 30, 40]  # 40/30/30 reversed
+    trail_trigger: "+1.0R"
+    max_hold_days: 5
+    overnight: true
+    daily_loss_limit: -0.02
+    capital_allocation: 0.50
+
+  range_bot:
+    active_regime: "RANGE_BOUND"
+    strategies: ["S3", "S4", "S8", "S9", "S12"]
+    max_risk_per_trade: 0.005
+    min_confidence: 70
+    max_positions: 3
+    personality: "Patient. Fades extremes. Quick partials."
+    profit_target_1r: [1.2, 1.5]
+    stop_width: "1.0x ATR"
+    partial_profit: [50, 30, 20]
+    trail_trigger: "+0.5R"
+    max_hold_days: 0  # Intraday only
+    overnight: false
+    daily_loss_limit: -0.01
+    capital_allocation: 0.30
+
+  bear_bot:
+    active_regime: ["RISK_OFF", "TRENDING_DOWN"]
+    strategies: ["S6", "S7", "S1"]  # S1 trend short bias, S7 defensive sectors
+    max_risk_per_trade: 0.003
+    min_confidence: 80
+    max_positions: 2
+    personality: "Defensive. Capital preservation. Highest-conviction only."
+    profit_target_1r: [1.0, 1.5]
+    stop_width: "0.8x ATR"
+    partial_profit: [60, 40, 0]
+    trail_trigger: "+0.3R"
+    max_hold_days: 2
+    overnight: false  # Rare (hedges only)
+    daily_loss_limit: -0.0075
+    capital_allocation: 0.20
+
+  earnings_bot:
+    activation_windows:
+      - {start: "Jan 15", end: "Feb 28"}
+      - {start: "Apr 15", end: "May 31"}
+      - {start: "Jul 15", end: "Aug 31"}
+      - {start: "Oct 15", end: "Nov 30"}
+    core_strategy: "S5"
+    risk_per_trade: 0.005
+    stop_logic: "2.0x ATR"
+    max_positions: 3
+    entry_timing_minutes: [15, 45]  # After market open on earnings day
+    blacklist_mcap_below: 5_000_000_000
+
+# === Overseer (Section 67) ===
+
+overseer:
+  check_interval_seconds: 30
+  functions:
+    aggregate_exposure:
+      max_net_exposure: 1.50  # 150% of equity
+      action: "Block new entries on largest-exposure bot until < 120%"
+    cross_bot_correlation:
+      threshold: 0.80
+      action: "If 3+ correlated positions across bots: force-close smallest"
+    sector_stacking:
+      max_sector_pct: 0.50
+      action: "Block new same-sector entries until reduced to 40%"
+    drawdown_cascade:
+      trigger: "2+ bots in YELLOW drawdown AND combined > -5%"
+      action: "ALL bots to ORANGE parameters"
+    direction_concentration:
+      max_same_direction: 0.85
+      action: "Force smallest bot to flatten or take opposing hedge"
+    daily_loss_aggregation:
+      max_combined_loss: -0.015  # -1.5% total equity
+      action: "HALT all bots for remainder of session"
+    capital_allocation_drift:
+      max_drift: 0.15  # 15% over target
+      action: "Rebalance at next weekly review"
+    regime_disagreement:
+      action: "HALT both until consensus. Use longest timeframe as tiebreaker."
+
+# === Kelly Criterion (Section 56) ===
+
+kelly:
+  method: "half_kelly"
+  rolling_window: 60  # trades
+  recalc_interval: 20  # trades
+  cap: 0.0075  # Never exceeds immutable risk rule
+  max_position_pct: 0.05  # 5% of equity
+
+# REMOVED: options_flow — no active code loads this
+
+# ============================================================
+# V8.0 — Apex Predator Engine
+# ============================================================
+v2_engine:
+  enabled: true
+  primary_mode: "UK_ISA"
+  global_modules_dormant: true
+  mean_reversion_dormant: true
+
+  # LSE Registry
+  lse_registry:
+    daily_refresh_hour: 7          # 07:00 London time
+    daily_refresh_minute: 30
+    min_liquidity_tier: "LOW"      # Include LOW+ for watchlist
+    auto_discover: true
+
+  # Multi-Timeframe Analytics
+  multiframe:
+    compute_hour: 7
+    compute_minute: 45
+    timeframes: ["1M", "3M", "6M", "1Y"]
+    risk_free_rate: 0.045
+
+  # Volatility Regime
+  vol_regime:
+    compute_hour: 8
+    compute_minute: 0
+    expansion_alert_threshold: 1.5   # ATR acceleration to flag
+    compression_pct_threshold: 25    # Vol percentile below = compression
+
+  # Predictive Scoring
+  predictive:
+    compute_hour: 8
+    compute_minute: 15
+    min_confidence_to_signal: 55
+    strong_signal_threshold: 75
+    decay_penalty_enabled: true
+
+  # Sector Rotation
+  sector_rotation:
+    compute_hour: 8
+    compute_minute: 30
+    rotation_alert_on_shift: true
+
+  # Correlation Engine
+  correlation:
+    scan_hour: 8
+    scan_minute: 45
+    move_threshold: 0.025            # 2.5% minimum significant move
+    min_samples_for_insight: 5
+
+  # Triple PDF Reports (V2.0 — 3 daily reports)
+  pdf_reports:
+    archive_days: 90
+    output_dir: "data/reports"
+    # PDF 1: Momentum & Opportunity (pre-LSE brief)
+    pdf1_name: "momentum_opportunity"
+    pdf1_hour: 7              # 07:00 UK — 1h before LSE open (08:00)
+    pdf1_minute: 0
+    # PDF 2: Risk & Structural (pre-NYSE brief)
+    pdf2_name: "risk_structural"
+    pdf2_hour: 13             # 13:30 UK — 1h before NYSE open (14:30 UK / 09:30 ET)
+    pdf2_minute: 30
+    # PDF 3: EOD Daily Review (end of day)
+    pdf3_name: "daily_review"
+    pdf3_hour: 22             # 22:00 UK — 1h after NYSE close (21:00 UK / 16:00 ET)
+    pdf3_minute: 0
+    # MEGA PDF: Full analysis (30 min after PDF 3)
+    mega_hour: 22             # 22:30 UK
+    mega_minute: 30
+    # 2% daily target: £10K × (1.02)^252 = £1,485,757.36 (14,757% annualised)
+    compounding_target_pct: 2.0
+    starting_equity: 10000
+
+  # REMOVED: isa_tickers_v2 (core_long, core_inverse, extended, core_expansion_v2, core_expansion_v3) — SSOT: uk_isa/isa_universe.py
+
+# === FEATURE FLAGS (W12: Ops Governance) ===
+# All new changes are behind feature flags for instant rollback.
+# Set to true to enable; false to disable (revert to pre-change behavior).
+# Picked up on next 60s tick — no restart needed.
+
+feature_flags:
+  # W1: Premarket sanity — validates morning data before allowing trades
+  sanity_gate_v2: true
+
+  # W2: Return math
+  leverage_once_assertion: false
+
+  # W3: Provenance — tracks signal origin through qualification pipeline
+  provenance_tracking: true
+
+  # W4: Telegram tape
+  telegram_tape_v2: false
+  persistent_dedupe: true  # Prevents duplicate signal delivery
+
+  # W5: Regime/drought — unified regime classification + drought escalation
+  regime_unification: true
+  drought_escalation: true  # Relaxes gates during signal drought
+
+  # W6: PDF QA
+  pdf_qa_gate: false
+
+  # W7: War Room
+  war_room_v2: true
+
+  # W8: Data vendor
+  datahub_routing: false
+
+  # W10: Universe governance
+  universe_governance: false
+
+  # W11: Learning loop — hardened feedback from trade outcomes to strategies
+  learning_loop_hardened: true
+
+  # W13: Always-Wired — system health + integrity
+  always_wired_v1: false
+
+  # V3.2: New module groups
+  v3_signals: true        # Enables all V3 signal module logic paths
+  learning_engine: true   # Enables nightly ML cycle and advanced self-learning
+  realtime_feed: true     # Enables realtime price fallback chain
+  startup_readiness_gate: true   # Pre-flight checks before trading
+  continuous_integrity: true     # Runtime data integrity validation
+  self_healing_ops: false
+  artifact_single_source: false
+  docker_parity_check: false
+
+  # ── V9.5 Omega Architecture ─────────────────────────────────
+  v95_uvloop: true                        # uvloop event loop (fallback to asyncio if unavailable)
+  v95_gc_discipline: true                 # Disable GC during market hours
+  v95_latency_gate_ms: 4000              # Fail-closed if engine.run() > Nms (0 = disabled) — t3.small baseline ~3s
+  v95_telemetry_buffer: true              # Rich feature snapshots per trade
+  v95_hot_reload: true                    # Redis PUBSUB weight swap
+  v95_stoikov_ev_gate: true               # Stoikov micro-price EV gate
+  v95_stoikov_spread_etp_bps: 80          # LSE 3x/5x ETP spread threshold
+  v95_stoikov_spread_us_a_bps: 30         # US A-TEAM spread threshold
+  v95_stoikov_spread_us_b_bps: 50         # US B-TEAM spread threshold
+  v95_cusum_alpha_reaper: true            # CUSUM edge decay detection
+  v95_cusum_h_threshold: 3.0             # CUSUM decision threshold (Page 1954)
+  v95_cusum_quarantine_days: 30           # Days a degraded strategy is quarantined
+  v95_autonomous_ml_daemon: true          # Daily 18:00 UTC ML retrain + GPD recal
+
+  # Wave 2 — Advanced Volatility & CVaR Risk Scaling
+  v95_vol_target_enabled: true             # Moreira & Muir (2017) vol targeting
+  v95_vol_target_annualized: 0.15          # 15% annualized target vol for ETPs
+  v95_cvar_scaling_enabled: true           # Rockafellar & Uryasev (2000) CVaR scaling
+  v95_momentum_crash_guard_enabled: true   # Barroso & Santa-Clara (2015) crash guard
+
+  # Wave 2 — Gaussian HMM Regime Model
+  v95_hmm_regime_enabled: true             # Nystrup et al. (2017) 2-state HMM
+  v95_hmm_confirmation_lag_days: 3         # Days new state must persist before change
+
+  # Wave 2 — SHAP Feature Stability Filter
+  v95_shap_stability_filter_enabled: true  # Gu, Kelly & Xiu (2020) feature filtering
+
+  # Wave 2 — ERC Capital Allocation
+  v95_erc_allocation_enabled: true          # Maillard et al. (2010) Equal Risk Contribution

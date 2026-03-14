@@ -1,0 +1,62 @@
+{
+  "session": "preview_copilot_scan",
+  "generated_at": "2026-02-27T06:59:38.959212+00:00",
+  "decisions": [
+    {
+      "ticker": "3OIL.L",
+      "direction": "LONG",
+      "decision": "APPROVE",
+      "reasons": [],
+      "original_sizing": "M",
+      "final_sizing": "M",
+      "risk_score": 0.0,
+      "rules_checked": [
+        "VOL_SHOCK:pass",
+        "LIQUIDITY:pass",
+        "DRAWDOWN:pass",
+        "EVENT_WINDOW:pass",
+        "DATA_RELIABILITY:pass",
+        "CORRELATION:pass"
+      ]
+    },
+    {
+      "ticker": "GPT3.L",
+      "direction": "LONG",
+      "decision": "APPROVE",
+      "reasons": [],
+      "original_sizing": "M",
+      "final_sizing": "M",
+      "risk_score": 0.0,
+      "rules_checked": [
+        "VOL_SHOCK:pass",
+        "LIQUIDITY:pass",
+        "DRAWDOWN:pass",
+        "EVENT_WINDOW:pass",
+        "DATA_RELIABILITY:pass",
+        "CORRELATION:pass"
+      ]
+    },
+    {
+      "ticker": "QQQS.L",
+      "direction": "LONG",
+      "decision": "VETO",
+      "reasons": [
+        "RVOL=0.22x < 0.4 \u2014 insufficient liquidity to exit cleanly"
+      ],
+      "original_sizing": "M",
+      "final_sizing": "S",
+      "risk_score": 0.9,
+      "rules_checked": [
+        "VOL_SHOCK:pass",
+        "LIQUIDITY:VETO",
+        "DRAWDOWN:pass",
+        "EVENT_WINDOW:pass",
+        "DATA_RELIABILITY:pass",
+        "CORRELATION:pass"
+      ]
+    }
+  ],
+  "veto_count": 1,
+  "downsize_count": 0,
+  "approve_count": 2
+}

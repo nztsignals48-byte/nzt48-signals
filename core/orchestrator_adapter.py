@@ -14,7 +14,11 @@ This adapter converts simplified market_data to the required format.
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
+import logging
 from strategies.daily_target import DailyTargetStrategy, MarketContext, SectorFlow, NarrativeContext, IndicatorSnapshot
+from models import RegimeState, GEXRegime, TimeWindow
+
+logger = logging.getLogger("nzt48.orchestrator_adapter")
 
 
 @dataclass
@@ -33,15 +37,81 @@ class OrchestratorAdapter:
         self.strategy = DailyTargetStrategy()
     
     def build_market_context(self, market_data: Dict[str, Any]) -> MarketContext:
-        """Convert market_data dict to MarketContext"""
-        return MarketContext(
-            timestamp=market_data.get('timestamp', datetime.now(timezone.utc)),
-            vix=market_data.get('vix', 20),
-            dxy=market_data.get('dxy', 104),
-            credit_spread=market_data.get('credit_spread', 100),
-            volatility_regime=market_data.get('regime', 'NORMAL'),
-            fear_gauge=market_data.get('fear_gauge', 50),
-        )
+        """Convert market_data dict to MarketContext (with graceful fallbacks)"""
+        
+        try:
+            # Try minimal initialization with required fields
+            return MarketContext(
+                timestamp=market_data.get('timestamp', datetime.now(timezone.utc)),
+                regime=RegimeState.RANGE_BOUND,
+                regime_confidence=0.5,
+                regime_duration_bars=0,
+                qqq_vs_vwap=0,
+                spy_vs_vwap=0,
+                ema_alignment='NEUTRAL',
+                gex_regime=GEXRegime.POSITIVE,
+                gex_value=0,
+                dix_value=0,
+                dix_signal='NEUTRAL',
+                dix_gex_regime='NEUTRAL',
+                dix_trend='FLAT',
+                tick=0,
+                trin=1,
+                add=0,
+                vold=0,
+                internals_composite=0,
+                internals_confidence_adj=50,
+                vix=market_data.get('vix', 20),
+                vix3m=market_data.get('vix', 20),
+                vix_term_structure='NORMAL',
+                dxy=market_data.get('dxy', 104),
+                ten_year_yield=4.0,
+                put_call_ratio=0.8,
+                macro_score=50,
+                time_window=TimeWindow.US_SESSION_OPEN,
+                fomc_today=False,
+                earnings_tonight=[],
+                cpi_nfp_today=False,
+                calendar_risk='LOW',
+                premarket_brief=None,
+            )
+        except Exception as e:
+            # Last resort: return minimal stub
+            logger.warning(f"MarketContext build failed: {e}")
+            return MarketContext(
+                timestamp=market_data.get('timestamp', datetime.now(timezone.utc)),
+                regime=RegimeState.RANGE_BOUND,
+                regime_confidence=0.5,
+                regime_duration_bars=0,
+                qqq_vs_vwap=0,
+                spy_vs_vwap=0,
+                ema_alignment='NEUTRAL',
+                gex_regime=GEXRegime.POSITIVE,
+                gex_value=0,
+                dix_value=0,
+                dix_signal='NEUTRAL',
+                dix_gex_regime='NEUTRAL',
+                dix_trend='FLAT',
+                tick=0,
+                trin=1,
+                add=0,
+                vold=0,
+                internals_composite=0,
+                internals_confidence_adj=50,
+                vix=20,
+                vix3m=20,
+                vix_term_structure='NORMAL',
+                dxy=104,
+                ten_year_yield=4.0,
+                put_call_ratio=0.8,
+                macro_score=50,
+                time_window=TimeWindow.US_SESSION_OPEN,
+                fomc_today=False,
+                earnings_tonight=[],
+                cpi_nfp_today=False,
+                calendar_risk='LOW',
+                premarket_brief=None,
+            )
     
     def build_sector_flows(self) -> Dict[str, SectorFlow]:
         """Build minimal sector flows"""

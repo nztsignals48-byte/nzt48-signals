@@ -1,0 +1,719 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nzt48.internal/schemas/signal_record.schema.json",
+  "title": "NZT-48 Canonical Signal Record",
+  "description": "JSON Schema for every signal emitted by the NZT-48 trading system. Version 1.0.0 -- Phase 2 Institutional Audit.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "git_hash",
+    "config_hash",
+    "universe_hash",
+    "signal_id",
+    "time_logged_utc",
+    "time_logged_uk",
+    "date_str",
+    "session",
+    "time_of_day_window",
+    "instrument_traded",
+    "direction",
+    "tier",
+    "objective_tag",
+    "decision",
+    "decision_reasons",
+    "strategy_tag",
+    "track",
+    "regime_tag",
+    "regime_confidence",
+    "entry",
+    "stop",
+    "target1",
+    "target2",
+    "rr_net",
+    "spread_bps",
+    "slippage_bps",
+    "data_health_status",
+    "data_reliability_score",
+    "bars_available",
+    "quality_passed",
+    "failed_gates",
+    "fallback_step",
+    "gate_mode",
+    "rvol",
+    "atr_pct",
+    "composite",
+    "ohlcv_as_of",
+    "risk_officer_decision",
+    "sizing_hint",
+    "liquidity_bucket",
+    "outcome"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "UUID v4 first 8 chars uppercase. Unique per pipeline invocation.",
+      "pattern": "^[A-F0-9]{8}$"
+    },
+    "git_hash": {
+      "type": "string",
+      "description": "First 12 characters of HEAD commit SHA at engine start.",
+      "minLength": 7,
+      "maxLength": 40
+    },
+    "config_hash": {
+      "type": "string",
+      "description": "SHA-256 of config/settings.yaml content. Format: sha256:<hex>.",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "universe_hash": {
+      "type": "string",
+      "description": "SHA-256 of sorted ticker list used for this run. Format: sha256:<hex>.",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "engine_version": {
+      "type": "string",
+      "description": "Semantic version of the signal engine.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "signal_id": {
+      "type": "string",
+      "description": "Deterministic signal identifier. Format: NZT-XXXXXX (6 hex chars).",
+      "pattern": "^NZT-[A-F0-9]{6}$"
+    },
+    "time_logged_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when signal was persisted (ISO 8601 with timezone)."
+    },
+    "time_logged_uk": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Europe/London timestamp (handles BST/GMT)."
+    },
+    "date_str": {
+      "type": "string",
+      "description": "Trading date in YYYY-MM-DD format.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "session": {
+      "type": "string",
+      "description": "Scheduled session that produced this signal.",
+      "enum": [
+        "PRE_LSE",
+        "LSE",
+        "PRE_NYSE",
+        "NYSE",
+        "EOD",
+        "preview_pre_lse",
+        "preview_lse",
+        "preview_pre_nyse",
+        "preview_nyse",
+        "preview_eod",
+        "preview_eod_institutional",
+        "INTRADAY",
+        "preview_intraday"
+      ]
+    },
+    "time_of_day_window": {
+      "type": "string",
+      "description": "Master Spec Section 10 time-of-day window.",
+      "enum": [
+        "CHAOS_OPEN",
+        "MORNING_MOMENTUM",
+        "TREND_EXTENSION",
+        "LUNCH_CHOP",
+        "AFTERNOON_PUSH",
+        "POWER_HOUR",
+        "CLOSE_MECHANICS",
+        "AFTER_HOURS",
+        "UNKNOWN"
+      ]
+    },
+    "instrument_traded": {
+      "type": "string",
+      "description": "Actual ISA ETP ticker to buy. Must be a .L ticker for ISA signals.",
+      "pattern": "^[A-Z0-9]+\\.L$"
+    },
+    "direction": {
+      "type": "string",
+      "description": "Trade direction. Always LONG for ISA (buy-only). A bearish view = LONG on an inverse ETP.",
+      "enum": ["LONG", "SHORT"]
+    },
+    "underlying_proxy": {
+      "type": ["string", "null"],
+      "description": "Underlying index or stock the ETP tracks (e.g., 'Nasdaq 100', 'NVIDIA')."
+    },
+    "leverage_multiple": {
+      "type": ["string", "null"],
+      "description": "Leverage factor of the ETP (e.g., '3x', '-3x', '5x', '2x')."
+    },
+    "factor_group": {
+      "type": ["string", "null"],
+      "description": "Factor cluster from ISA_FACTOR_GROUPS (e.g., 'nasdaq_beta_long', 'semiconductors')."
+    },
+    "is_inverse_etp": {
+      "type": "boolean",
+      "description": "True if ticker is in INVERSE_ETPS set (QQQS.L, 3USS.L, NVDS.L, TSLS.L).",
+      "default": false
+    },
+    "tier": {
+      "type": "string",
+      "description": "Universe tier from TieredPipelineResult.",
+      "enum": ["CORE", "PEER", "FULL_SCAN"]
+    },
+    "objective_tag": {
+      "type": "string",
+      "description": "CORE tickers target MAX_INTRADAY_GAINS (uncapped). Non-core use 2PCT_CAP. FULL_SCAN is INTEL_ONLY.",
+      "enum": ["MAX_INTRADAY_GAINS", "2PCT_CAP", "INTEL_ONLY"]
+    },
+    "decision": {
+      "type": "string",
+      "description": "Final disposition: TRADE (actionable), WATCH (monitoring), INTEL (informational), ABSTAIN (explicit no-trade).",
+      "enum": ["TRADE", "WATCH", "INTEL", "ABSTAIN"]
+    },
+    "decision_reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Human-readable bullets explaining the decision."
+    },
+    "category": {
+      "type": ["string", "null"],
+      "description": "PDF sectioning category.",
+      "enum": ["TRADE", "WATCH", "EXCLUDED", null]
+    },
+    "label": {
+      "type": ["string", "null"],
+      "description": "Granular label from scoring (STRICT, WATCH-SIGNAL (xxx), PEER, FULL_SCAN)."
+    },
+    "strategy_tag": {
+      "type": "string",
+      "description": "Active strategy tag from StrategyRouter (e.g., TREND_MOMENTUM_CTA, OPENING_RANGE_BREAKOUT)."
+    },
+    "strategy_weighted_score": {
+      "type": ["number", "null"],
+      "description": "Composite score after strategy boost.",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "allocation_weight": {
+      "type": ["number", "null"],
+      "description": "Capital allocation weight for this strategy (0.0-1.0).",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "why_strategy_now": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Up to 3 bullets explaining why this strategy is active now."
+    },
+    "overlay_tags": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Active overlay tags."
+    },
+    "overlay_warnings": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Warning messages from overlays."
+    },
+    "track": {
+      "type": "string",
+      "description": "Trade timeframe.",
+      "enum": ["SCALP", "INTRADAY_SWING", "OVERNIGHT_SWING"]
+    },
+    "setup_type": {
+      "type": ["string", "null"],
+      "description": "Inferred setup classification determining stop/target ATR fractions.",
+      "enum": ["continuation", "breakout", "mean_revert", "default", null]
+    },
+    "mode": {
+      "type": ["string", "null"],
+      "description": "Operating mode of the engine.",
+      "enum": ["WIN_RATE", "R_MULTIPLE", null]
+    },
+    "regime_tag": {
+      "type": "string",
+      "description": "8-state regime from Master Spec Section 7.",
+      "enum": [
+        "TRENDING_UP_STRONG",
+        "TRENDING_UP_MOD",
+        "TRENDING_DOWN_STRONG",
+        "TRENDING_DOWN_MOD",
+        "RANGE_BOUND",
+        "HIGH_VOLATILITY",
+        "RISK_OFF",
+        "SHOCK",
+        "NEUTRAL",
+        "RISK_ON",
+        "BULLISH",
+        "BEARISH"
+      ]
+    },
+    "regime_confidence": {
+      "type": "number",
+      "description": "Confidence in regime classification (0.0-1.0).",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "entry": {
+      "type": "number",
+      "description": "Entry price (GBP for .L tickers).",
+      "minimum": 0
+    },
+    "entry_zone_lo": {
+      "type": ["number", "null"],
+      "description": "Entry zone lower bound (entry * 0.999).",
+      "minimum": 0
+    },
+    "entry_zone_hi": {
+      "type": ["number", "null"],
+      "description": "Entry zone upper bound (entry * 1.001).",
+      "minimum": 0
+    },
+    "stop": {
+      "type": "number",
+      "description": "Stop-loss price.",
+      "minimum": 0
+    },
+    "target1": {
+      "type": "number",
+      "description": "Primary target (T1).",
+      "minimum": 0
+    },
+    "target2": {
+      "type": "number",
+      "description": "Runner/secondary target (T2).",
+      "minimum": 0
+    },
+    "time_stop_min": {
+      "type": ["integer", "null"],
+      "description": "Minutes: exit if not +0.3R by this time (half of full time stop).",
+      "minimum": 0
+    },
+    "time_stop_full": {
+      "type": ["integer", "null"],
+      "description": "Full time stop in minutes (180 for swing, 12 for scalp).",
+      "minimum": 0
+    },
+    "be_level": {
+      "type": ["number", "null"],
+      "description": "Break-even level (+0.6R from entry).",
+      "minimum": 0
+    },
+    "partial_at": {
+      "type": ["number", "null"],
+      "description": "Price to take partial profit (+1R).",
+      "minimum": 0
+    },
+    "rr_gross": {
+      "type": ["number", "null"],
+      "description": "Gross reward:risk ratio (before cost deduction).",
+      "minimum": 0
+    },
+    "rr_net": {
+      "type": "number",
+      "description": "Net reward:risk ratio (after spread + slippage deduction).",
+      "minimum": 0
+    },
+    "stop_distance_pct": {
+      "type": ["number", "null"],
+      "description": "Stop distance as percentage of entry price.",
+      "minimum": 0
+    },
+    "target1_distance_pct": {
+      "type": ["number", "null"],
+      "description": "T1 distance as percentage of entry price.",
+      "minimum": 0
+    },
+    "spread_bps": {
+      "type": "number",
+      "description": "Estimated bid-ask spread in basis points.",
+      "minimum": 0
+    },
+    "slippage_bps": {
+      "type": "number",
+      "description": "Estimated slippage per side in basis points.",
+      "minimum": 0
+    },
+    "round_trip_cost_bps": {
+      "type": ["number", "null"],
+      "description": "Total round-trip cost in basis points.",
+      "minimum": 0
+    },
+    "fx_fee_bps": {
+      "type": ["number", "null"],
+      "description": "T212 FX conversion fee in basis points (15 bps for USD-denominated ETPs).",
+      "minimum": 0
+    },
+    "data_health_status": {
+      "type": "string",
+      "description": "Result of DataHealthGate check.",
+      "enum": ["PASS", "WARN", "FAIL"]
+    },
+    "data_reliability_score": {
+      "type": "number",
+      "description": "Data reliability score (0.0-1.0). Penalty applied for short windows.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "bars_available": {
+      "type": "integer",
+      "description": "Number of OHLCV bars used for indicator computation.",
+      "minimum": 0
+    },
+    "indicator_window_used": {
+      "type": ["integer", "null"],
+      "description": "Adaptive window size: min(n_bars, 14).",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "short_window": {
+      "type": ["boolean", "null"],
+      "description": "True if 7 <= bars < 14 (SHORT_WINDOW mode)."
+    },
+    "quality_passed": {
+      "type": "boolean",
+      "description": "Whether all hard gates (DATA_HEALTH, PRICE_SCALE, MIN_BARS) passed."
+    },
+    "price_scale_check": {
+      "type": ["string", "null"],
+      "description": "Pence-vs-pounds detection result.",
+      "enum": ["PASS", "FAIL", null]
+    },
+    "rvol": {
+      "type": "number",
+      "description": "Relative Volume (last bar vs trailing average).",
+      "minimum": 0
+    },
+    "atr_pct": {
+      "type": "number",
+      "description": "ATR as percentage of price.",
+      "minimum": 0
+    },
+    "rsi": {
+      "type": ["number", "null"],
+      "description": "RSI-14 (or adaptive window RSI).",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "adx": {
+      "type": ["number", "null"],
+      "description": "ADX-14.",
+      "minimum": 0
+    },
+    "macd_hist": {
+      "type": ["number", "null"],
+      "description": "MACD histogram value."
+    },
+    "ema_aligned": {
+      "type": ["boolean", "null"],
+      "description": "Whether EMAs (9/20/50) are aligned with direction."
+    },
+    "bb_width_rank": {
+      "type": ["number", "null"],
+      "description": "Bollinger Band width percentile rank (0-1).",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "momentum_score": {
+      "type": ["number", "null"],
+      "description": "0-1 composite momentum from RSI + MACD + EMA alignment.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "volatility_score": {
+      "type": ["number", "null"],
+      "description": "0-1 composite volatility opportunity from ATR + BB expansion.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "regime_fit_score": {
+      "type": ["number", "null"],
+      "description": "0-1 regime compatibility score.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "liquidity_score": {
+      "type": ["number", "null"],
+      "description": "0-1 liquidity score from RVOL.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rr_score": {
+      "type": ["number", "null"],
+      "description": "0-1 risk-reward score.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "quality_score": {
+      "type": ["number", "null"],
+      "description": "0-1 quality/ADX score.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "composite": {
+      "type": "number",
+      "description": "0-100 PlayScore composite.",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "stars": {
+      "type": ["integer", "null"],
+      "description": "1-5 star rating.",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "ohlcv_as_of": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of the most recent OHLCV bar used."
+    },
+    "field_used": {
+      "type": ["string", "null"],
+      "description": "Which price field was primary (default: Close).",
+      "default": "Close"
+    },
+    "yfinance_period": {
+      "type": ["string", "null"],
+      "description": "Period parameter passed to yfinance (e.g., '5d')."
+    },
+    "yfinance_interval": {
+      "type": ["string", "null"],
+      "description": "Interval parameter passed to yfinance (e.g., '1h')."
+    },
+    "failed_gates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of gate names that failed (empty if all passed). Format: 'GATE_NAME: reason'."
+    },
+    "fallback_step": {
+      "type": "integer",
+      "description": "0 = strict mode. 1-4 = which fallback relaxation was applied.",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "gate_mode": {
+      "type": "string",
+      "description": "STRICT or FALLBACK_STEP{N}.",
+      "enum": [
+        "STRICT",
+        "FALLBACK_STEP1",
+        "FALLBACK_STEP2",
+        "FALLBACK_STEP3",
+        "FALLBACK_STEP4"
+      ]
+    },
+    "gates_summary": {
+      "type": ["object", "null"],
+      "description": "Full gate funnel result mapping gate names to outcomes.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["PASS", "FAIL", "RELAXED"]
+      }
+    },
+    "risk_officer_decision": {
+      "type": "string",
+      "description": "Post-router governance decision.",
+      "enum": ["APPROVE", "DOWNSIZE", "VETO"]
+    },
+    "risk_officer_reasons": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Reasons from all risk officer rules that fired."
+    },
+    "risk_adjustment_factor": {
+      "type": ["number", "null"],
+      "description": "0.0-1.0 aggregate risk severity (0 = safe, 1 = full veto risk).",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rules_checked": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Names and outcomes of each risk officer rule."
+    },
+    "sizing_hint": {
+      "type": "string",
+      "description": "Position sizing tier.",
+      "enum": ["XS", "S", "M", "L"]
+    },
+    "sizing_reason": {
+      "type": ["string", "null"],
+      "description": "Why this sizing was chosen."
+    },
+    "execution_plan": {
+      "type": ["object", "null"],
+      "description": "Full execution plan for order management.",
+      "properties": {
+        "order_type": {
+          "type": "string",
+          "enum": ["LIMIT", "MARKETABLE_LIMIT"]
+        },
+        "max_slippage_bps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "spread_proxy_bps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "spread_gate_result": {
+          "type": "string",
+          "enum": ["PASS", "WATCH", "VETO"]
+        },
+        "cancel_conditions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "time_in_trade_window": {
+          "type": "string"
+        }
+      }
+    },
+    "upgrade_condition": {
+      "type": ["string", "null"],
+      "description": "For WATCH signals: condition that would promote to TRADE."
+    },
+    "closest_miss_gate": {
+      "type": ["string", "null"],
+      "description": "Which gate blocked this signal from being STRICT."
+    },
+    "closest_miss_delta": {
+      "type": ["number", "null"],
+      "description": "How far the observed value was from the threshold.",
+      "minimum": 0
+    },
+    "liquidity_bucket": {
+      "type": "string",
+      "description": "Liquidity classification based on RVOL.",
+      "enum": ["HIGH", "NORMAL", "LOW", "THIN", "UNKNOWN"]
+    },
+    "spread_risk": {
+      "type": ["string", "null"],
+      "description": "Spread/liquidity risk assessment.",
+      "enum": ["LOW", "HIGH", null]
+    },
+    "decay_risk": {
+      "type": ["string", "null"],
+      "description": "Leveraged ETP daily volatility decay risk.",
+      "enum": ["LOW", "HIGH", null]
+    },
+    "outcome": {
+      "type": "string",
+      "description": "Signal resolution status.",
+      "enum": [
+        "PENDING",
+        "HIT_TARGET",
+        "HIT_STOP",
+        "TIME_STOP",
+        "AMBIGUOUS",
+        "SCRATCH",
+        "EXPIRED",
+        "RESOLVED"
+      ]
+    },
+    "exit_price": {
+      "type": ["number", "null"],
+      "description": "Price at resolution.",
+      "minimum": 0
+    },
+    "pnl_r_gross": {
+      "type": ["number", "null"],
+      "description": "Gross P&L in R-multiples."
+    },
+    "pnl_r_net": {
+      "type": ["number", "null"],
+      "description": "Net P&L after costs."
+    },
+    "mfe_pct": {
+      "type": ["number", "null"],
+      "description": "Maximum Favourable Excursion as percentage."
+    },
+    "mae_pct": {
+      "type": ["number", "null"],
+      "description": "Maximum Adverse Excursion as percentage."
+    },
+    "duration_minutes": {
+      "type": ["integer", "null"],
+      "description": "How long the trade lasted in minutes.",
+      "minimum": 0
+    },
+    "closed_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "When the outcome was resolved."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision": { "const": "TRADE" } }
+      },
+      "then": {
+        "properties": {
+          "entry": { "exclusiveMinimum": 0 },
+          "stop": { "exclusiveMinimum": 0 },
+          "target1": { "exclusiveMinimum": 0 },
+          "rr_net": { "minimum": 1.2 },
+          "data_reliability_score": { "minimum": 0.50 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "tier": { "const": "CORE" } }
+      },
+      "then": {
+        "properties": {
+          "objective_tag": { "const": "MAX_INTRADAY_GAINS" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "tier": { "const": "FULL_SCAN" } }
+      },
+      "then": {
+        "properties": {
+          "objective_tag": { "const": "INTEL_ONLY" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "risk_officer_decision": { "const": "VETO" } }
+      },
+      "then": {
+        "not": {
+          "properties": { "decision": { "const": "TRADE" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": { "const": "LONG" },
+          "decision": { "const": "TRADE" }
+        }
+      },
+      "then": {
+        "description": "For LONG TRADE signals, stop must be below entry and target1 above entry. Enforced via custom validation (JSON Schema cannot express cross-field less-than)."
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision": { "const": "WATCH" } }
+      },
+      "then": {
+        "required": ["upgrade_condition"],
+        "properties": {
+          "upgrade_condition": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

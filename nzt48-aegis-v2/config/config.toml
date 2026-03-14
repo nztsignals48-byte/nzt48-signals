@@ -1,0 +1,127 @@
+# AEGIS V2 — Static Configuration
+# This file contains ALL configurable parameters.
+# Code MUST reference these constants, not literal values (H109).
+
+[signal]
+confidence_floor = 65
+outlier_win_cap_pct = 3.0
+gap_detection_pct = 2.0
+erroneous_tick_deviation_pct = 5.0
+velocity_check_window_secs = 1
+velocity_check_max_intents = 5
+
+[position]
+max_simultaneous_positions = 3    # Crucible override: 1
+# Portfolio heat = sum((entry_price - stop_price) * qty / total_equity)
+portfolio_heat_limit_pct = 6.0
+sector_heat_cap_pct = 33.0
+cash_buffer_pct = 10.0
+isa_annual_limit_gbp = 20000      # Tracked in WAL, enforced by RiskArbiter
+isa_tax_year_start = "04-06"      # 6 April UK tax year start
+
+[kelly]
+fraction_cap = 0.5
+clamp_max = 0.20
+volatility_drag_3x = 9
+volatility_drag_5x = 25
+
+[timing]
+# ALL LSE times are in LONDON LOCAL TIME (Europe/London timezone).
+# During GMT (Nov-Mar): these are UTC. During BST (Mar-Oct): UTC = local - 1h.
+# Use chrono-tz crate, NEVER hardcode UTC offsets.
+stale_data_threshold_secs = 120
+entry_cutoff_london = "15:45"     # London local time
+lse_open_london = "08:00"         # London local time
+lse_close_london = "16:30"        # London local time
+auction_open_start = "07:50"      # London local time
+auction_open_end = "08:00"        # London local time
+auction_close_start = "16:30"     # London local time
+auction_close_end = "16:35"       # London local time
+eod_flatten_time = "16:25"        # London local time
+eod_flatten_phase1 = "15:55"      # T-35: passive limit at mid+1tick
+eod_flatten_phase2 = "16:15"      # T-15: limit at mid
+eod_flatten_phase3 = "16:25"      # T-5: MTL emergency
+gap_cooldown_mins = 15
+synthetic_halt_limp_secs = 30     # Per-ticker Limp Mode threshold
+synthetic_halt_full_secs = 120    # Per-ticker full HALT threshold
+
+[volatility]
+# Yang-Zhang (2000) estimator — mandatory for Moreira-Muir scaling
+# The ONLY estimator that handles overnight gaps in leveraged ETPs
+yz_rolling_window = 10            # 10-bar rolling for real-time
+yz_nightly_window = 20            # 20-bar for nightly recalibration
+vol_target_annual_pct = 15.0      # Portfolio vol target
+vol_high_threshold = 1.5          # > 1.5x historical -> reduce 30%
+vol_extreme_threshold = 2.0       # > 2.0x historical -> reduce 60%
+
+[risk]
+daily_drawdown_pct = 2.0
+spread_veto_pct = 0.5
+slippage_assumption_pct = 1.0
+consecutive_loss_halt = 3
+reject_to_halt_count = 3
+reject_to_halt_window_secs = 60
+
+[execution]
+marketable_limit_buffer_pct = 0.1
+tick_size_under_1 = 0.001
+tick_size_over_1 = 0.01
+
+[channel]
+capacity = 50000
+reduce_threshold = 40000
+halt_threshold = 50000
+tick_drop_alert_per_sec = 100
+
+[backpressure]
+warning_ms = 500
+reduce_ms = 2000
+
+[reconciliation]
+interval_secs = 300
+orphan_ack_timeout_secs = 5
+
+[ibkr]
+client_id_executioner = 101
+client_id_ouroboros = 200
+reconnect_backoff_secs = [1, 2, 4, 8, 16, 32, 60]
+rate_limit_msgs_per_sec = 50
+reqmktdata_pacing_ms = 10
+historical_data_max_per_10min = 60
+max_simultaneous_lines = 100        # Free IBKR default, no Quote Boosters
+
+[rotation]
+# Dynamic subscription rotation — 100 free lines across 1,000 tickers
+tier1_permanent_lines = 50           # Top 50 Vanguard, always subscribed
+tier2_rotating_lines = 50            # Shared between Vanguard warm + Apex
+tier2_rotation_secs = 60             # Rotate every 60 seconds
+tier2_vanguard_batches = 5           # 250 Vanguard warm in 5 batches
+tier3_apex_batches = 14              # 700 Apex in 14 batches
+tier1_promotion_confidence = 80      # Promote warm->hot if signal > 80
+full_vanguard_scan_mins = 5          # Complete Vanguard warm scan
+full_apex_scan_mins = 15             # Complete Apex scan
+open_position_always_tier1 = true    # Tickers with positions = permanent
+
+[wal]
+schema_version = 1
+
+[inverse_pairs]
+# If long is open, its inverse is blocked (H32). Vice versa.
+# Format: [[long_ticker, short_ticker]]
+pairs = [
+    ["QQQ3.L", "QQQS.L"],
+    ["3LUS.L", "3USS.L"],
+]
+
+[sectors]
+# Sector classification for heat cap (H30)
+Technology = ["QQQ3.L", "QQQS.L", "QQQ5.L", "GPT3.L"]
+Semiconductors = ["3SEM.L", "NVD3.L", "TSM3.L", "MU2.L"]
+US_Broad = ["3LUS.L", "3USS.L", "SP5L.L"]
+Single_Stock = ["TSL3.L"]
+
+[crucible]
+# Crucible phase overrides (Days 1-30)
+max_positions_override = 1           # Override max_simultaneous_positions
+paper_mode = true
+starting_equity_gbp = 10000

@@ -1,0 +1,100 @@
+# ==============================================================================
+# NZT-48 Live Trading Engine — Production Dockerfile
+# Multi-stage build: Python runtime + Perfect Entry Timing modules
+# Target: EC2 c7i-flex.large (x86_64, 4GB RAM, 2 vCPU)
+# ==============================================================================
+
+# Stage 1: Python dependencies with system libs
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# System dependencies for numpy, scipy, pandas compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gfortran \
+    libopenblas-dev \
+    liblapack-dev \
+    libatlas-base-dev \
+    pkg-config \
+    libgomp1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and pre-build wheels
+COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+# Stage 2: Runtime image (lean production container)
+FROM python:3.11-slim
+
+LABEL maintainer="NZT-48 Trading System"
+LABEL description="NZT-48 Live Trading Engine with Perfect Entry Timing"
+LABEL version="1.0-live"
+
+WORKDIR /app
+
+# Runtime dependencies only (libgomp for lightgbm, curl for health checks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libopenblas0 \
+    curl \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy pre-built Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy top-level orchestrator modules
+COPY models.py .
+COPY exceptions.py .
+
+# Copy core modules (6 perfect entry + orchestrator)
+COPY core/entry_timing_model.py ./core/
+COPY core/chandelier_exit.py ./core/
+COPY core/clock.py ./core/
+COPY core/db_writer.py ./core/
+COPY core/cross_asset_macro.py ./core/
+COPY core/state_manager.py ./core/
+COPY core/__init__.py ./core/
+
+# Copy ISA-specific modules (tiered scanner + optimizer)
+COPY uk_isa/ ./uk_isa/
+
+# Copy qualification (risk sizing, circuit breakers, position limits)
+COPY qualification/ ./qualification/
+
+# Copy execution (order routing, exit handling)
+COPY execution/ ./execution/
+
+# Copy delivery (Telegram alerts, database logging)
+COPY delivery/ ./delivery/
+
+# Copy config
+COPY config/ ./config/
+
+# Copy live trading script
+COPY scripts/run_live_trading.py ./scripts/
+
+# Create data directories for SQLite, positions, and logs
+RUN mkdir -p /app/data/trades && \
+    mkdir -p /app/data/positions && \
+    mkdir -p /app/logs && \
+    chmod -R 755 /app/data /app/logs
+
+# Health check: curl metrics endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/metrics || exit 1
+
+# Expose API port (metrics + control)
+EXPOSE 8000
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TZ=Europe/London
+
+# Entrypoint: run live trading orchestrator
+ENTRYPOINT ["python3", "scripts/run_live_trading.py"]

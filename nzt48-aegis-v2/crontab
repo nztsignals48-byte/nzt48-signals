@@ -1,0 +1,3 @@
+# Ouroboros nightly analytics — runs after LSE close (16:30 GMT = ~12:30 ET)
+# 18:00 ET every weekday (Mon-Fri) — gives 1.5h buffer after LSE close
+0 18 * * 1-5 cd /app && python3 -m ouroboros.cli --config-dir /app/config --wal-path /app/events/current.ndjson --day-count $(( ($(date +%s) - 1741478400) / 86400 )) 2>&1 | tee -a /app/events/ouroboros.log

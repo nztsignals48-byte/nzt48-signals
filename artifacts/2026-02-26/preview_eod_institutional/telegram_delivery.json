@@ -1,0 +1,20 @@
+{
+  "session": "EOD_INSTITUTIONAL",
+  "is_preview": true,
+  "generated_at": "2026-02-26T06:34:34.746010+00:00",
+  "pdfs_generated": 3,
+  "pdf_paths": [
+    "/Users/rr/nzt48-signals/reports/2026-02-26/NZT48_MOMENTUM_PREVIEW_EOD_INSTITUTIONAL.pdf",
+    "/Users/rr/nzt48-signals/reports/2026-02-26/NZT48_RISK_PREVIEW_EOD_INSTITUTIONAL.pdf",
+    "/Users/rr/nzt48-signals/reports/2026-02-26/NZT48_REVIEW_PREVIEW_EOD_INSTITUTIONAL.pdf"
+  ],
+  "telegram_results": [],
+  "system_state": "OK",
+  "data_reliability": 0.498,
+  "pipeline_summary": {
+    "core_plays": 1,
+    "peer_plays": 0,
+    "full_scan_cards": 29,
+    "drought": false
+  }
+}

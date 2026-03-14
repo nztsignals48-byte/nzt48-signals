@@ -1,0 +1,19 @@
+{
+  "state": "OK",
+  "reasons": [
+    "ALL_CHECKS_PASSED"
+  ],
+  "tick_count": 1,
+  "last_tick_age_seconds": 0.0,
+  "data_freshness_seconds": 0.0,
+  "memory_mb": 157.3,
+  "daily_loss_pct": 0.0,
+  "consecutive_losses": 0,
+  "open_positions": 0,
+  "kill_switch_active": false,
+  "mode": "PAPER",
+  "git_hash": "unknown",
+  "config_hash": "1ad699fbe9bb",
+  "uptime_seconds": 0.0,
+  "generated_at": "2026-02-26T06:34:09.655874+00:00"
+}

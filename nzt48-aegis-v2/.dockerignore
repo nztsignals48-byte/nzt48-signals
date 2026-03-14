@@ -1,0 +1,31 @@
+# Build artifacts
+target/
+.venv/
+__pycache__/
+*.pyc
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Documentation
+docs/
+*.md
+*.pdf
+
+# Test artifacts
+dead_letter/
+events/
+
+# Secrets (mounted at runtime)
+.env*
+credentials/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "saved_at": "2026-02-28T05:04:52.044489+00:00",
+  "total_trades": 103,
+  "regime_matrix": {
+    "NEUTRAL|TREND_MOMENTUM_CTA|LONG": {
+      "wins": 0,
+      "losses": 3,
+      "total": 3,
+      "sum_r": -3.0547,
+      "sum_r_gross": -3.0,
+      "sum_holding_mins": 322,
+      "avg_r": -1.0182333333333333,
+      "win_rate": 0.0,
+      "avg_holding_mins": 107.33333333333333
+    },
+    "RISK_ON|TREND_MOMENTUM_CTA|LONG": {
+      "wins": 3,
+      "losses": 5,
+      "total": 8,
+      "sum_r": -0.34209999999999985,
+      "sum_r_gross": -0.18259999999999987,
+      "sum_holding_mins": 1101,
+      "avg_r": -0.04276249999999998,
+      "win_rate": 0.375,
+      "avg_holding_mins": 137.625
+    },
+    "RISK_OFF|MEAN_REVERSION|LONG": {
+      "wins": 2,
+      "losses": 0,
+      "total": 2,
+      "sum_r": 1.9756,
+      "sum_r_gross": 2.0,
+      "sum_holding_mins": 338,
+      "avg_r": 0.9878,
+      "win_rate": 1.0,
+      "avg_holding_mins": 169.0
+    },
+    "RISK_OFF|MOMENTUM_BREAKOUT|LONG": {
+      "wins": 3,
+      "losses": 0,
+      "total": 3,
+      "sum_r": 2.9453,
+      "sum_r_gross": 3.0,
+      "sum_holding_mins": 420,
+      "avg_r": 0.9817666666666667,
+      "win_rate": 1.0,
+      "avg_holding_mins": 140.0
+    },
+    "RISK_OFF|SECTOR_ROTATION|LONG": {
+      "wins": 0,
+      "losses": 2,
+      "total": 2,
+      "sum_r": -1.0933000000000002,
+      "sum_r_gross": -1.0711,
+      "sum_holding_mins": 290,
+      "avg_r": -0.5466500000000001,
+      "win_rate": 0.0,
+      "avg_holding_mins": 145.0
+    },
+    "NEUTRAL|MOMENTUM_BREAKOUT|LONG": {
+      "wins": 2,
+      "losses": 3,
+      "total": 5,
+      "sum_r": -1.0663000000000005,
+      "sum_r_gross": -1.0,
+      "sum_holding_mins": 605,
+      "avg_r": -0.2132600000000001,
+      "win_rate": 0.4,
+      "avg_holding_mins": 121.0
+    },
+    "RISK_ON|SECTOR_ROTATION|LONG": {
+      "wins": 1,
+      "losses": 2,
+      "total": 3,
+      "sum_r": 0.8319000000000001,
+      "sum_r_gross": 0.8854,
+      "sum_holding_mins": 389,
+      "avg_r": 0.27730000000000005,
+      "win_rate": 0.3333333333333333,
+      "avg_holding_mins": 129.66666666666666
+    },
+    "NEUTRAL|MEAN_REVERSION|LONG": {
+      "wins": 0,
+      "losses": 1,
+      "total": 1,
+      "sum_r": -1.0226,
+      "sum_r_gross": -1.0,
+      "sum_holding_mins": 105,
+      "avg_r": -1.0226,
+      "win_rate": 0.0,
+      "avg_holding_mins": 105.0
+    },
+    "RISK_OFF|BREAKOUT|LONG": {
+      "wins": 3,
+      "losses": 2,
+      "total": 5,
+      "sum_r": 0.9145999999999999,
+      "sum_r_gross": 1.0,
+      "sum_holding_mins": 701,
+      "avg_r": 0.18291999999999997,
+      "win_rate": 0.6,
+      "avg_holding_mins": 140.2
+    },
+    "RISK_ON|BREAKOUT|LONG": {
+      "wins": 1,
+      "losses": 0,
+      "total": 1,
+      "sum_r": 0.9864,
+      "sum_r_gross": 1.0,
+      "sum_holding_mins": 63,
+      "avg_r": 0.9864,
+      "win_rate": 1.0,
+      "avg_holding_mins": 63.0
+    },
+    "RISK_ON|MOMENTUM_BREAKOUT|LONG": {
+      "wins": 1,
+      "losses": 0,
+      "total": 1,
+      "sum_r": 0.9805,
+      "sum_r_gross": 1.0,
+      "sum_holding_mins": 131,
+      "avg_r": 0.9805,
+      "win_rate": 1.0,
+      "avg_holding_mins": 131.0
+    },
+    "NEUTRAL|BREAKOUT|LONG": {
+      "wins": 0,
+      "losses": 1,
+      "total": 1,
+      "sum_r": -1.0173,
+      "sum_r_gross": -1.0,
+      "sum_holding_mins": 90,
+      "avg_r": -1.0173,
+      "win_rate": 0.0,
+      "avg_holding_mins": 90.0
+    },
+    "TRENDING_DOWN_STRONG|S15|LONG": {
+      "wins": 0,
+      "losses": 4,
+      "total": 4,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "TRENDING_DOWN_STRONG|S16|SHORT": {
+      "wins": 0,
+      "losses": 7,
+      "total": 7,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "RANGE_BOUND|S15|LONG": {
+      "wins": 0,
+      "losses": 15,
+      "total": 15,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "RANGE_BOUND|S16|SHORT": {
+      "wins": 0,
+      "losses": 6,
+      "total": 6,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "TRENDING_UP_STRONG|S15|LONG": {
+      "wins": 0,
+      "losses": 20,
+      "total": 20,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "TRENDING_UP_MOD|S15|LONG": {
+      "wins": 0,
+      "losses": 8,
+      "total": 8,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "NEUTRAL|S15|LONG": {
+      "wins": 0,
+      "losses": 5,
+      "total": 5,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "NEUTRAL|S16|SHORT": {
+      "wins": 0,
+      "losses": 1,
+      "total": 1,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "TRENDING_UP_MOD|S16|SHORT": {
+      "wins": 0,
+      "losses": 1,
+      "total": 1,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    },
+    "TRENDING_UP_STRONG|S16|SHORT": {
+      "wins": 0,
+      "losses": 1,
+      "total": 1,
+      "sum_r": 0.0,
+      "sum_r_gross": 0.0,
+      "sum_holding_mins": 0,
+      "avg_r": 0.0,
+      "win_rate": 0.0,
+      "avg_holding_mins": 0.0
+    }
+  },
+  "calibration": {
+    "calibration_score": 0.0,
+    "buckets": [],
+    "suggestion": "Insufficient data for calibration.",
+    "total_samples": 0
+  },
+  "stop_calibration": {
+    "ticker": "ALL",
+    "current_stop_pct": 1.0,
+    "suggested_stop_pct": 0.3,
+    "current_target_pct": 2.0,
+    "suggested_target_pct": 0.5,
+    "mae_median": 0.0,
+    "mae_p75": -0.3,
+    "mfe_median": 0.0,
+    "mfe_p25": 0.5,
+    "sample_size": 103,
+    "significant": true
+  },
+  "ticker_fitness": {
+    "QQQ3.L": {
+      "ticker": "QQQ3.L",
+      "fitness_score": 51.33,
+      "grade": "C",
+      "trades": 38,
+      "win_rate": 0.4211,
+      "avg_r": 0.0273,
+      "factors": {
+        "win_rate": 70.18,
+        "avg_r": 26.37,
+        "spread_consistency": 100.0,
+        "volume_reliability": 0.0,
+        "regime_responsiveness": 100.0,
+        "profit_ladder_effectiveness": 0.0
+      },
+      "recommendation": "HOLD"
+    },
+    "3LUS.L": {
+      "ticker": "3LUS.L",
+      "fitness_score": 20.0,
+      "grade": "F",
+      "trades": 12,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "factors": {
+        "win_rate": 0.0,
+        "avg_r": 25.0,
+        "spread_consistency": 50.0,
+        "volume_reliability": 50.0,
+        "regime_responsiveness": 0.0,
+        "profit_ladder_effectiveness": 0.0
+      },
+      "recommendation": "INSUFFICIENT_DATA"
+    },
+    "3USS.L": {
+      "ticker": "3USS.L",
+      "fitness_score": 20.0,
+      "grade": "F",
+      "trades": 10,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "factors": {
+        "win_rate": 0.0,
+        "avg_r": 25.0,
+        "spread_consistency": 50.0,
+        "volume_reliability": 50.0,
+        "regime_responsiveness": 0.0,
+        "profit_ladder_effectiveness": 0.0
+      },
+      "recommendation": "INSUFFICIENT_DATA"
+    },
+    "3LDE.L": {
+      "ticker": "3LDE.L",
+      "fitness_score": 20.0,
+      "grade": "F",
+      "trades": 11,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "factors": {
+        "win_rate": 0.0,
+        "avg_r": 25.0,
+        "spread_consistency": 50.0,
+        "volume_reliability": 50.0,
+        "regime_responsiveness": 0.0,
+        "profit_ladder_effectiveness": 0.0
+      },
+      "recommendation": "INSUFFICIENT_DATA"
+    }
+  }
+}

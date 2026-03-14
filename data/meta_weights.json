@@ -1,0 +1,65 @@
+{
+  "weights": {
+    "TREND_MOMENTUM_CTA": 0.2,
+    "BREAKOUT": 0.15,
+    "MEAN_REVERSION": 0.1,
+    "SECTOR_ROTATION": 0.1,
+    "EARNINGS_PLAY": 0.1,
+    "VOL_CRUSH": 0.1,
+    "PAIRS_TRADE": 0.1,
+    "MACRO_REGIME": 0.1,
+    "REGIME_TREND": 0.05
+  },
+  "allowed_tracks": {
+    "TREND_MOMENTUM_CTA": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "BREAKOUT": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "MEAN_REVERSION": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "SECTOR_ROTATION": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "EARNINGS_PLAY": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "VOL_CRUSH": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "PAIRS_TRADE": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "MACRO_REGIME": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ],
+    "REGIME_TREND": [
+      "SCALP",
+      "INTRADAY_SWING",
+      "OVERNIGHT_SWING"
+    ]
+  },
+  "sizing_overrides": {},
+  "regime_tag": "NEUTRAL",
+  "generated_at": "2026-02-28T05:15:15.443369+00:00",
+  "evidence_summary": "Ledger buckets: 26, defensive=False",
+  "guardrail_notes": []
+}

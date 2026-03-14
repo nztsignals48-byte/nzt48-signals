@@ -1,0 +1,18 @@
+{
+  "drought_flag": false,
+  "closest_misses": [],
+  "recommended_knobs": [],
+  "blockers_summary": [
+    "RR_RATIO: R:R=0.77 < 1.2:1",
+    "VOLUME_LIQUIDITY: RVOL=0.17 < 0.55:1",
+    "VOLUME_LIQUIDITY: RVOL=0.13 < 0.55:1",
+    "RR_RATIO: R:R=0.76 < 1.2:1",
+    "RR_RATIO: R:R=0.80 < 1.2:1",
+    "RR_RATIO: R:R=0.97 < 1.2:1",
+    "RR_RATIO: R:R=1.09 < 1.2:1",
+    "RR_RATIO: R:R=1.18 < 1.2:1",
+    "RR_RATIO: R:R=1.08 < 1.2:1"
+  ],
+  "tickers_checked": 10,
+  "generated_at": "2026-02-26T06:34:02.544626+00:00"
+}

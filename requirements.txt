@@ -1,0 +1,69 @@
+# NZT-48 Trading System — Requirements
+# Pinned to versions known to work with Python 3.12 binary wheels
+
+# Data & Finance
+yfinance>=1.2.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# Scientific computing (binary wheels only — no source compilation)
+numpy>=2.0.0
+pandas>=2.1.0
+pandas-ta>=0.3.14b1
+scipy>=1.12.0
+scikit-learn>=1.4.0
+statsmodels>=0.14.0
+arch>=7.0.0
+lightgbm>=4.0.0
+shap>=0.44.0
+
+# ML & Optimization
+xgboost>=2.0.0
+numba>=0.60.0
+riskfolio-lib>=6.0.0
+cvxpy>=1.4.0
+hmmlearn>=0.3.0
+pykalman>=0.11.0
+
+# API & Web
+fastapi>=0.100.0
+uvicorn>=0.20.0
+httpx>=0.24.0
+python-telegram-bot>=20.0
+gspread>=6.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-generativeai>=0.3.0
+
+# Utilities
+APScheduler>=3.10.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+schedule>=1.2.0
+fpdf2>=2.7.0
+plotly>=5.0.0
+xlsxwriter>=3.0.0
+tqdm>=4.60.0
+Jinja2>=3.1.0
+python-dateutil>=2.9.0
+pytz>=2024.0
+dateparser>=1.2.0
+peewee>=3.16.0
+pydantic>=2.0.0
+vectorbt>=0.28.0
+matplotlib>=3.8.0
+
+# IBKR Gateway — Interactive Brokers API client
+ib_insync>=0.9.86
+nest_asyncio>=1.5.0
+
+# Redis (Mandate 9 — Chandelier state persistence)
+redis>=5.0.0
+
+# V9.5 — async event loop optimization (optional, graceful fallback)
+uvloop>=0.19.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.20.0

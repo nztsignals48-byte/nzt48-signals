@@ -44,11 +44,17 @@ UTC TIME     EVENT                                        COMPONENT             
              └─ IB Gateway connection verified         ib-gateway             Docker
 
 08:00        🎯 LSE OPENS (London)
-             ├─ UK ISA universe activated
+             ├─ UK ISA universe activated (12 ETPs)
              ├─ 12 leveraged ETPs now streaming       feeds/ib_client.py      ib-gateway
              ├─ Every 60 sec: Signals may generate    signal_engine          nzt48
              ├─ Every 10 min: Health checks            monitor.yml            GitHub Actions
-             └─ Telegram: "Market Open, Ready"        TelegramNotifier       nzt48
+             └─ Telegram: "UK ISA Market Open"        TelegramNotifier       nzt48
+
+09:30        🎯 NYSE/NASDAQ OPENS (US Market)
+             ├─ US 18-equity universe activated
+             ├─ All US tickers now streaming          feeds/ib_client.py      ib-gateway
+             ├─ US trades may execute alongside UK    signal_engine          nzt48
+             └─ Telegram: "US Market Open"            TelegramNotifier       nzt48
 
 08:30        📈 Trading activity possible
              ├─ First signal might trigger             qualification/qualifier nzt48

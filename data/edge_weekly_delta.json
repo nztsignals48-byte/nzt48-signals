@@ -1,0 +1,184 @@
+{
+  "TREND_MOMENTUM_CTA|NEUTRAL|SCALP|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|RISK_ON|INTRADAY_SWING|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 2,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|RISK_ON|SCALP|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 3,
+    "prior_n": 0
+  },
+  "MEAN_REVERSION|RISK_OFF|SCALP|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 2,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|RISK_OFF|INTRADAY_SWING|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "SECTOR_ROTATION|RISK_OFF|SCALP|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 2,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|NEUTRAL|INTRADAY_SWING|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 2,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|RISK_ON|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "SECTOR_ROTATION|RISK_ON|SCALP|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "SECTOR_ROTATION|RISK_ON|INTRADAY_SWING|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MEAN_REVERSION|NEUTRAL|INTRADAY_SWING|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "BREAKOUT|RISK_OFF|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "SECTOR_ROTATION|RISK_ON|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|NEUTRAL|SCALP|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|RISK_OFF|INTRADAY_SWING|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|RISK_ON|INTRADAY_SWING|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 2,
+    "prior_n": 0
+  },
+  "BREAKOUT|RISK_ON|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "BREAKOUT|RISK_OFF|SCALP|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 3,
+    "prior_n": 0
+  },
+  "TREND_MOMENTUM_CTA|NEUTRAL|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|RISK_ON|SCALP|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|RISK_OFF|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|NEUTRAL|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|NEUTRAL|SCALP|MORNING_MOMENTUM|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "MOMENTUM_BREAKOUT|NEUTRAL|INTRADAY_SWING|POWER_HOUR|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "BREAKOUT|NEUTRAL|INTRADAY_SWING|AFTERNOON_PUSH|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  },
+  "BREAKOUT|RISK_OFF|INTRADAY_SWING|TREND_EXTENSION|NORMAL": {
+    "win_rate_delta": 0.0,
+    "expectancy_delta": 0.0,
+    "trend": "NEW",
+    "current_n": 1,
+    "prior_n": 0
+  }
+}

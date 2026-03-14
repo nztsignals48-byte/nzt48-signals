@@ -1,0 +1,96 @@
+{
+  "generated_at": "2026-02-26T06:33:08.933444+00:00",
+  "date": "2026-02-26",
+  "session": "PRE_LSE",
+  "peer_count": 6,
+  "peers": [
+    {
+      "ticker": "TSLS.L",
+      "similarity_score": 0.7332,
+      "similarity_method": "correlation",
+      "core_parent": "TSL3.L",
+      "factor_group": "ev_tech",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "High correlation (0.97) with CORE parent TSL3.L",
+        "Partial factor/theme overlap (score 0.33)",
+        "Very similar momentum/vol profile (score 0.75)",
+        "Factor group: ev_tech"
+      ]
+    },
+    {
+      "ticker": "AMD3.L",
+      "similarity_score": 0.6077,
+      "similarity_method": "correlation",
+      "core_parent": "GPT3.L",
+      "factor_group": "semiconductors",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "High correlation (0.74) with CORE parent GPT3.L",
+        "Partial factor/theme overlap (score 0.33)",
+        "Similar ATR%/RSI/ADX profile (score 0.68)",
+        "Factor group: semiconductors"
+      ]
+    },
+    {
+      "ticker": "ARM3.L",
+      "similarity_score": 0.5599,
+      "similarity_method": "momentum",
+      "core_parent": "GPT3.L",
+      "factor_group": "ai_gpt",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "Moderate correlation (0.63) with CORE parent GPT3.L",
+        "Partial factor/theme overlap (score 0.33)",
+        "Very similar momentum/vol profile (score 0.72)",
+        "Factor group: ai_gpt"
+      ]
+    },
+    {
+      "ticker": "3LDE.L",
+      "similarity_score": 0.5407,
+      "similarity_method": "momentum",
+      "core_parent": "3LUS.L",
+      "factor_group": "eu_broad",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "High correlation (0.76) with CORE parent 3LUS.L",
+        "Very similar momentum/vol profile (score 0.81)",
+        "Factor group: eu_broad"
+      ]
+    },
+    {
+      "ticker": "3LEU.L",
+      "similarity_score": 0.5256,
+      "similarity_method": "momentum",
+      "core_parent": "3USS.L",
+      "factor_group": "eu_broad",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "High correlation (0.73) with CORE parent 3USS.L",
+        "Very similar momentum/vol profile (score 0.80)",
+        "Factor group: eu_broad"
+      ]
+    },
+    {
+      "ticker": "NVDS.L",
+      "similarity_score": 0.4782,
+      "similarity_method": "momentum",
+      "core_parent": "3SEM.L",
+      "factor_group": "single_stock_short",
+      "tier": "PEER",
+      "tradable": true,
+      "reasons": [
+        "Moderate correlation (0.57) with CORE parent 3SEM.L",
+        "Partial factor/theme overlap (score 0.17)",
+        "Very similar momentum/vol profile (score 0.72)",
+        "Factor group: single_stock_short"
+      ]
+    }
+  ]
+}

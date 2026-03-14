@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-card: #12121a;
+  --border: #1e1e2e;
+  --accent: #00ff88;
+  --danger: #ff4444;
+  --warning: #ffaa00;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: #e0e0e0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+/* Glow effects */
+.glow-green { box-shadow: 0 0 20px rgba(0, 255, 136, 0.1); }
+.glow-red { box-shadow: 0 0 20px rgba(255, 68, 68, 0.1); }
+.glow-yellow { box-shadow: 0 0 20px rgba(255, 170, 0, 0.1); }
+
+/* Pulse animation for live indicators */
+@keyframes pulse-green {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.pulse-live { animation: pulse-green 2s ease-in-out infinite; }
+
+/* Marquee animation for signal feed ticker tape */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-marquee { animation: marquee 30s linear infinite; }
+.animate-marquee:hover { animation-play-state: paused; }

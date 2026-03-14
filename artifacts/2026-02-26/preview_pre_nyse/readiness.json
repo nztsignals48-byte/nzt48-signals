@@ -1,0 +1,11 @@
+{
+  "system_state": "OK",
+  "data_reliability_score": 0.498,
+  "quality_passed": true,
+  "violations_count": 0,
+  "mode": "PAPER",
+  "git_hash": "unknown",
+  "config_hash": "1ad699fbe9bb",
+  "paper_launch_ready": false,
+  "generated_at": "2026-02-26T06:33:44.436146+00:00"
+}

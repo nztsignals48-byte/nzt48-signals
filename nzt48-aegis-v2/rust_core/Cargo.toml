@@ -1,0 +1,30 @@
+[package]
+name = "rust_core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rust_core"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "aegis"
+path = "src/main.rs"
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+ibapi = { version = "2.10", features = ["sync"] }
+uuid = { version = "1", features = ["v7"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crc32fast = "1"
+crossbeam-channel = "0.5"
+toml = "0.8"
+ctrlc = "3"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"

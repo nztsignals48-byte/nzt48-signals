@@ -1,0 +1,33 @@
+[0;36m╔════════════════════════════════════════════════════════════╗[0m
+[0;36m║[0m [1mAEGIS V2 INTERACTIVE EXECUTION[0m
+[0;36m║[0m Complete system: Bootstrap → Refactoring → Build → Test
+[0;36m╚════════════════════════════════════════════════════════════╝[0m
+
+Requirements:
+  ✓ POLYGON_API_KEY set
+  ✓ AEGIS_ROOT directory exists
+  ✓ 500+ hours for all phases
+
+Approval gates will be requested before each phase.
+You can continue (c), skip (s), or quit (q) at any point.
+
+[0;36mStarting Phase 0 Bootstrap...[0m
+
+[0;34m╔════════════════════════════════════════════════════════════╗[0m
+[0;34m║[0m [1mPHASE 0: Bootstrap - Option D Data Caches[0m
+[0;34m║[0m ETA: ~90 minutes
+[0;34m╚════════════════════════════════════════════════════════════╝[0m
+
+Tasks:
+  1. Dividend calendar (150 API calls, 15-sec rate limit) — ~37.5 min
+  2. Splits calendar (150 API calls, 15-sec rate limit) — ~37.5 min
+  3. IBKR LSE contract discovery (real-time, zero latency) — ~2 min
+  4. Validation of cached data
+
+
+[0;36mReady to proceed to: [1mPHASE 0 Bootstrap[0m
+[0;32m[AUTO-APPROVED] Continuing to PHASE 0 Bootstrap (non-interactive mode)[0m
+
+[0;36mExecuting Phase 0 Bootstrap...[0m
+
+14:20:24 [Task 1] Fetching Dividend Calendar...

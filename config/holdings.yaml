@@ -1,0 +1,535 @@
+# NZT-48 ETP/ETF Holdings Decomposition
+# Maps every tracked fund to its underlying constituents.
+# Used by the pre-market intelligence engine to see what's moving inside each fund.
+# Updated quarterly or when rebalances occur.
+# Last updated: 2026-02-24
+
+holdings:
+
+  # ============================================================
+  # INDEX ETPs — Nasdaq 100
+  # ============================================================
+  QQQ3.L:
+    index: "Nasdaq 100"
+    leverage: 3
+    direction: LONG
+    inverse: QQQS.L
+    type: index
+    provider: WisdomTree
+    top_holdings:
+      - {ticker: AAPL, weight: 0.09, name: Apple}
+      - {ticker: MSFT, weight: 0.08, name: Microsoft}
+      - {ticker: NVDA, weight: 0.08, name: NVIDIA}
+      - {ticker: AMZN, weight: 0.06, name: Amazon}
+      - {ticker: META, weight: 0.05, name: Meta}
+      - {ticker: GOOGL, weight: 0.04, name: "Alphabet Class A"}
+      - {ticker: GOOG, weight: 0.04, name: "Alphabet Class C"}
+      - {ticker: AVGO, weight: 0.04, name: Broadcom}
+      - {ticker: TSLA, weight: 0.03, name: Tesla}
+      - {ticker: COST, weight: 0.03, name: Costco}
+      - {ticker: NFLX, weight: 0.03, name: Netflix}
+      - {ticker: AMD, weight: 0.02, name: AMD}
+      - {ticker: ADBE, weight: 0.02, name: Adobe}
+      - {ticker: PEP, weight: 0.02, name: PepsiCo}
+      - {ticker: LIN, weight: 0.02, name: Linde}
+    sector_weights:
+      Technology: 0.58
+      Communication_Services: 0.15
+      Consumer_Discretionary: 0.12
+      Healthcare: 0.06
+      Consumer_Staples: 0.04
+      Industrials: 0.03
+      Other: 0.02
+
+  QQQS.L:
+    index: "Nasdaq 100"
+    leverage: -3
+    direction: SHORT
+    inverse: QQQ3.L
+    type: index
+    provider: WisdomTree
+    alias_of: QQQ3.L
+
+  QQQ5.L:
+    index: "Nasdaq 100"
+    leverage: 5
+    direction: LONG
+    inverse: QQS5.L
+    type: index
+    provider: GraniteShares
+    alias_of: QQQ3.L
+
+  QQS5.L:
+    index: "Nasdaq 100"
+    leverage: -5
+    direction: SHORT
+    inverse: QQQ5.L
+    type: index
+    provider: GraniteShares
+    alias_of: QQQ3.L
+
+  # UCITS equivalents (Nasdaq 100)
+  CNX1.L:
+    index: "Nasdaq 100"
+    leverage: 1
+    direction: LONG
+    type: index
+    provider: iShares
+    alias_of: QQQ3.L
+
+  EQQQ.L:
+    index: "Nasdaq 100"
+    leverage: 1
+    direction: LONG
+    type: index
+    provider: Invesco
+    alias_of: QQQ3.L
+
+  # ============================================================
+  # INDEX ETPs — S&P 500
+  # ============================================================
+  3LUS.L:
+    index: "S&P 500"
+    leverage: 3
+    direction: LONG
+    inverse: 3USS.L
+    type: index
+    provider: WisdomTree
+    top_holdings:
+      - {ticker: AAPL, weight: 0.07, name: Apple}
+      - {ticker: MSFT, weight: 0.07, name: Microsoft}
+      - {ticker: NVDA, weight: 0.06, name: NVIDIA}
+      - {ticker: AMZN, weight: 0.04, name: Amazon}
+      - {ticker: META, weight: 0.03, name: Meta}
+      - {ticker: GOOGL, weight: 0.02, name: "Alphabet Class A"}
+      - {ticker: BRK.B, weight: 0.02, name: "Berkshire Hathaway"}
+      - {ticker: AVGO, weight: 0.02, name: Broadcom}
+      - {ticker: JPM, weight: 0.02, name: JPMorgan}
+      - {ticker: LLY, weight: 0.02, name: "Eli Lilly"}
+      - {ticker: TSLA, weight: 0.02, name: Tesla}
+      - {ticker: V, weight: 0.01, name: Visa}
+      - {ticker: UNH, weight: 0.01, name: UnitedHealth}
+      - {ticker: MA, weight: 0.01, name: Mastercard}
+      - {ticker: COST, weight: 0.01, name: Costco}
+    sector_weights:
+      Technology: 0.32
+      Healthcare: 0.12
+      Financials: 0.13
+      Consumer_Discretionary: 0.10
+      Communication_Services: 0.09
+      Industrials: 0.09
+      Consumer_Staples: 0.06
+      Energy: 0.04
+      Utilities: 0.03
+      Other: 0.02
+
+  3USS.L:
+    index: "S&P 500"
+    leverage: -3
+    direction: SHORT
+    inverse: 3LUS.L
+    type: index
+    provider: WisdomTree
+    alias_of: 3LUS.L
+
+  SP5L.L:
+    index: "S&P 500"
+    leverage: 5
+    direction: LONG
+    inverse: SP5S.L
+    type: index
+    provider: GraniteShares
+    alias_of: 3LUS.L
+
+  SP5S.L:
+    index: "S&P 500"
+    leverage: -5
+    direction: SHORT
+    inverse: SP5L.L
+    type: index
+    provider: GraniteShares
+    alias_of: 3LUS.L
+
+  # UCITS equivalent (S&P 500)
+  IUSA.L:
+    index: "S&P 500"
+    leverage: 1
+    direction: LONG
+    type: index
+    provider: iShares
+    alias_of: 3LUS.L
+
+  # ============================================================
+  # INDEX ETPs — PHLX Semiconductor
+  # ============================================================
+  3SEM.L:
+    index: "PHLX Semiconductor"
+    leverage: 3
+    direction: LONG
+    inverse: SC3S.L
+    type: index
+    provider: WisdomTree
+    top_holdings:
+      - {ticker: NVDA, weight: 0.12, name: NVIDIA}
+      - {ticker: AVGO, weight: 0.10, name: Broadcom}
+      - {ticker: AMD, weight: 0.06, name: AMD}
+      - {ticker: QCOM, weight: 0.06, name: Qualcomm}
+      - {ticker: TXN, weight: 0.06, name: "Texas Instruments"}
+      - {ticker: INTC, weight: 0.04, name: Intel}
+      - {ticker: MU, weight: 0.04, name: Micron}
+      - {ticker: LRCX, weight: 0.04, name: "Lam Research"}
+      - {ticker: KLAC, weight: 0.03, name: KLA}
+      - {ticker: MRVL, weight: 0.04, name: Marvell}
+      - {ticker: ON, weight: 0.03, name: "ON Semiconductor"}
+      - {ticker: ASML, weight: 0.03, name: ASML}
+      - {ticker: ADI, weight: 0.03, name: "Analog Devices"}
+      - {ticker: AMAT, weight: 0.03, name: "Applied Materials"}
+      - {ticker: ARM, weight: 0.02, name: ARM}
+    sector_weights:
+      Semiconductor_Design: 0.45
+      Semiconductor_Equipment: 0.20
+      Semiconductor_Manufacturing: 0.15
+      Memory: 0.10
+      Other: 0.10
+
+  SC3S.L:
+    index: "PHLX Semiconductor"
+    leverage: -3
+    direction: SHORT
+    inverse: 3SEM.L
+    type: index
+    provider: WisdomTree
+    alias_of: 3SEM.L
+
+  SOXL.L:
+    index: "NYSE Semiconductor"
+    leverage: 3
+    direction: LONG
+    type: index
+    provider: Direxion
+    # Tracks ICE Semiconductor Index — similar but not identical to PHLX SOX
+    # Shares most top holdings with 3SEM.L
+    alias_of: 3SEM.L
+
+  # UCITS equivalent (Semiconductors)
+  SMGB.L:
+    index: "MVIS US Listed Semiconductor 25"
+    leverage: 1
+    direction: LONG
+    type: index
+    provider: VanEck
+    alias_of: 3SEM.L
+
+  # ============================================================
+  # INDEX ETPs — Magnificent 7
+  # ============================================================
+  3MG7.L:
+    index: "Magnificent 7"
+    leverage: 3
+    direction: LONG
+    inverse: MG3S.L
+    type: index
+    provider: WisdomTree
+    # Equal-weighted basket of Mag 7 (rebalanced quarterly)
+    top_holdings:
+      - {ticker: AAPL, weight: 0.143, name: Apple}
+      - {ticker: MSFT, weight: 0.143, name: Microsoft}
+      - {ticker: NVDA, weight: 0.143, name: NVIDIA}
+      - {ticker: AMZN, weight: 0.143, name: Amazon}
+      - {ticker: META, weight: 0.143, name: Meta}
+      - {ticker: GOOGL, weight: 0.143, name: Alphabet}
+      - {ticker: TSLA, weight: 0.143, name: Tesla}
+    sector_weights:
+      Technology: 0.57
+      Communication_Services: 0.29
+      Consumer_Discretionary: 0.14
+
+  MG3S.L:
+    index: "Magnificent 7"
+    leverage: -3
+    direction: SHORT
+    inverse: 3MG7.L
+    type: index
+    provider: WisdomTree
+    alias_of: 3MG7.L
+
+  # ============================================================
+  # INDEX ETPs — AI Thematic
+  # ============================================================
+  GPT3.L:
+    index: "Solactive US AI"
+    leverage: 3
+    direction: LONG
+    inverse: GPTS.L
+    type: index
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: NVDA, weight: 0.10, name: NVIDIA}
+      - {ticker: MSFT, weight: 0.10, name: Microsoft}
+      - {ticker: GOOGL, weight: 0.08, name: Alphabet}
+      - {ticker: META, weight: 0.07, name: Meta}
+      - {ticker: AMD, weight: 0.06, name: AMD}
+      - {ticker: AVGO, weight: 0.05, name: Broadcom}
+      - {ticker: PLTR, weight: 0.04, name: Palantir}
+      - {ticker: CRM, weight: 0.04, name: Salesforce}
+      - {ticker: SNOW, weight: 0.03, name: Snowflake}
+      - {ticker: MRVL, weight: 0.03, name: Marvell}
+      - {ticker: NOW, weight: 0.03, name: ServiceNow}
+      - {ticker: PANW, weight: 0.03, name: "Palo Alto Networks"}
+      - {ticker: CRWD, weight: 0.02, name: CrowdStrike}
+      - {ticker: ORCL, weight: 0.02, name: Oracle}
+      - {ticker: ADBE, weight: 0.02, name: Adobe}
+    sector_weights:
+      Technology: 0.70
+      Communication_Services: 0.15
+      Industrials: 0.05
+      Other: 0.10
+
+  GPTS.L:
+    index: "Solactive US AI"
+    leverage: -3
+    direction: SHORT
+    inverse: GPT3.L
+    type: index
+    provider: Leverage Shares
+    alias_of: GPT3.L
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — NVIDIA
+  # ============================================================
+  NVD3.L:
+    index: "NVIDIA"
+    leverage: 3
+    direction: LONG
+    inverse: NVDS.L
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: NVDA, weight: 1.0, name: NVIDIA}
+
+  NVDS.L:
+    index: "NVIDIA"
+    leverage: -3
+    direction: SHORT
+    inverse: NVD3.L
+    type: single_stock
+    provider: Leverage Shares
+    alias_of: NVD3.L
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Tesla
+  # ============================================================
+  TSL3.L:
+    index: "Tesla"
+    leverage: 3
+    direction: LONG
+    inverse: TSLS.L
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: TSLA, weight: 1.0, name: Tesla}
+
+  TSLS.L:
+    index: "Tesla"
+    leverage: -3
+    direction: SHORT
+    inverse: TSL3.L
+    type: single_stock
+    provider: Leverage Shares
+    alias_of: TSL3.L
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Microsoft
+  # ============================================================
+  3MSF.L:
+    index: "Microsoft"
+    leverage: 3
+    direction: LONG
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: MSFT, weight: 1.0, name: Microsoft}
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Apple
+  # ============================================================
+  3AAL.L:
+    index: "Apple"
+    leverage: 3
+    direction: LONG
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: AAPL, weight: 1.0, name: Apple}
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Amazon
+  # ============================================================
+  3AMZ.L:
+    index: "Amazon"
+    leverage: 3
+    direction: LONG
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: AMZN, weight: 1.0, name: Amazon}
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Alphabet
+  # ============================================================
+  3GOL.L:
+    index: "Alphabet"
+    leverage: 3
+    direction: LONG
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: GOOGL, weight: 1.0, name: Alphabet}
+
+  # ============================================================
+  # SINGLE-STOCK ETPs — Meta
+  # ============================================================
+  3MTA.L:
+    index: "Meta"
+    leverage: 3
+    direction: LONG
+    type: single_stock
+    provider: Leverage Shares
+    top_holdings:
+      - {ticker: META, weight: 1.0, name: Meta}
+
+  # ============================================================
+  # SECTOR ROTATION ETFs (US-listed, for context/rotation signals)
+  # ============================================================
+  XLE:
+    index: "Energy Select Sector"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: "State Street SPDR"
+    top_holdings:
+      - {ticker: XOM, weight: 0.23, name: "Exxon Mobil"}
+      - {ticker: CVX, weight: 0.16, name: Chevron}
+      - {ticker: COP, weight: 0.05, name: ConocoPhillips}
+      - {ticker: EOG, weight: 0.04, name: "EOG Resources"}
+      - {ticker: SLB, weight: 0.04, name: Schlumberger}
+      - {ticker: MPC, weight: 0.04, name: "Marathon Petroleum"}
+      - {ticker: PSX, weight: 0.03, name: "Phillips 66"}
+      - {ticker: PXD, weight: 0.03, name: "Pioneer Natural Resources"}
+      - {ticker: VLO, weight: 0.03, name: Valero}
+      - {ticker: WMB, weight: 0.03, name: "Williams Companies"}
+    sector_weights:
+      Energy: 1.0
+
+  XLU:
+    index: "Utilities Select Sector"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: "State Street SPDR"
+    top_holdings:
+      - {ticker: NEE, weight: 0.14, name: "NextEra Energy"}
+      - {ticker: SO, weight: 0.08, name: "Southern Company"}
+      - {ticker: DUK, weight: 0.07, name: "Duke Energy"}
+      - {ticker: CEG, weight: 0.06, name: "Constellation Energy"}
+      - {ticker: VST, weight: 0.05, name: Vistra}
+      - {ticker: SRE, weight: 0.04, name: Sempra}
+      - {ticker: AEP, weight: 0.04, name: "American Electric Power"}
+      - {ticker: D, weight: 0.04, name: Dominion}
+      - {ticker: PCG, weight: 0.03, name: "PG&E"}
+      - {ticker: EXC, weight: 0.03, name: Exelon}
+    sector_weights:
+      Utilities: 1.0
+
+  XLI:
+    index: "Industrials Select Sector"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: "State Street SPDR"
+    top_holdings:
+      - {ticker: GE, weight: 0.05, name: "GE Aerospace"}
+      - {ticker: CAT, weight: 0.05, name: Caterpillar}
+      - {ticker: RTX, weight: 0.04, name: RTX}
+      - {ticker: UNP, weight: 0.04, name: "Union Pacific"}
+      - {ticker: HON, weight: 0.04, name: Honeywell}
+      - {ticker: DE, weight: 0.03, name: "Deere & Company"}
+      - {ticker: BA, weight: 0.03, name: Boeing}
+      - {ticker: LMT, weight: 0.03, name: "Lockheed Martin"}
+      - {ticker: ETN, weight: 0.03, name: Eaton}
+      - {ticker: WM, weight: 0.02, name: "Waste Management"}
+    sector_weights:
+      Industrials: 1.0
+
+  XLF:
+    index: "Financials Select Sector"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: "State Street SPDR"
+    top_holdings:
+      - {ticker: BRK.B, weight: 0.14, name: "Berkshire Hathaway"}
+      - {ticker: JPM, weight: 0.11, name: JPMorgan}
+      - {ticker: V, weight: 0.08, name: Visa}
+      - {ticker: MA, weight: 0.06, name: Mastercard}
+      - {ticker: BAC, weight: 0.04, name: "Bank of America"}
+      - {ticker: WFC, weight: 0.03, name: "Wells Fargo"}
+      - {ticker: GS, weight: 0.03, name: "Goldman Sachs"}
+      - {ticker: MS, weight: 0.03, name: "Morgan Stanley"}
+      - {ticker: SPGI, weight: 0.03, name: "S&P Global"}
+      - {ticker: AXP, weight: 0.02, name: "American Express"}
+    sector_weights:
+      Financials: 1.0
+
+  GDX:
+    index: "NYSE Arca Gold Miners"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: VanEck
+    top_holdings:
+      - {ticker: NEM, weight: 0.13, name: Newmont}
+      - {ticker: GOLD, weight: 0.10, name: "Barrick Gold"}
+      - {ticker: AEM, weight: 0.08, name: "Agnico Eagle"}
+      - {ticker: WPM, weight: 0.06, name: "Wheaton Precious Metals"}
+      - {ticker: FNV, weight: 0.05, name: Franco-Nevada}
+      - {ticker: GFI, weight: 0.04, name: "Gold Fields"}
+      - {ticker: KGC, weight: 0.04, name: Kinross}
+      - {ticker: RGLD, weight: 0.03, name: "Royal Gold"}
+      - {ticker: AU, weight: 0.03, name: AngloGold}
+      - {ticker: AGI, weight: 0.03, name: "Alamos Gold"}
+    sector_weights:
+      Gold_Miners: 1.0
+
+  KWEB:
+    index: "CSI Overseas China Internet"
+    leverage: 1
+    direction: LONG
+    type: sector
+    provider: KraneShares
+    top_holdings:
+      - {ticker: BABA, weight: 0.10, name: Alibaba}
+      - {ticker: PDD, weight: 0.09, name: "PDD Holdings"}
+      - {ticker: TCOM, weight: 0.07, name: "Trip.com"}
+      - {ticker: JD, weight: 0.07, name: "JD.com"}
+      - {ticker: BIDU, weight: 0.05, name: Baidu}
+      - {ticker: NTES, weight: 0.05, name: NetEase}
+      - {ticker: BILI, weight: 0.04, name: Bilibili}
+      - {ticker: ZTO, weight: 0.03, name: "ZTO Express"}
+      - {ticker: MNSO, weight: 0.03, name: MINISO}
+      - {ticker: KC, weight: 0.03, name: Kingsoft}
+    sector_weights:
+      China_Internet: 1.0
+
+# ============================================================
+# LOOKUP HELPERS
+# ============================================================
+# The pre-market engine uses these to quickly resolve:
+#   1. ETP ticker -> underlying tickers (for scanning pre-market movers)
+#   2. US ticker -> which ETPs it appears in (for impact propagation)
+#   3. Inverse pairs (for hedging logic)
+#
+# alias_of: points inverse/leveraged variants to the canonical
+# entry so the engine only needs to maintain one set of holdings.
+# The direction field tells the engine whether price impact is
+# same-direction (LONG) or inverted (SHORT).

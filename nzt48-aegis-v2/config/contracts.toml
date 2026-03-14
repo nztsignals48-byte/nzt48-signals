@@ -1,0 +1,934 @@
+# AEGIS V2 — IBKR Contract Definitions (H48)
+# ConIDs resolved via reqContractDetails on first boot.
+# con_id = 0 means "not yet resolved" — engine resolves on startup.
+# Updated by nightly pipeline after successful resolution.
+
+[[contracts]]
+symbol = "QQQ3.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "QQQS.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Technology"
+inverse_of = "QQQ3.L"
+
+[[contracts]]
+symbol = "3LUS.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "US_Broad"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3USS.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "US_Broad"
+inverse_of = "3LUS.L"
+
+[[contracts]]
+symbol = "QQQ5.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 5
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SP5L.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 5
+sector = "US_Broad"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3SEM.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NVD3.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TSL3.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Single_Stock"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GPT3.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TSM3.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MU2.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 2
+sector = "Semiconductors"
+inverse_of = ""
+
+# ─── MODE A: ASIAN MARKETS (TSE) ───
+# Tokyo Stock Exchange - 20 most liquid stocks
+[[contracts]]
+symbol = "7203"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6902"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8035"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6758"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6861"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8306"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6954"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Equipment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9432"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8591"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9984"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8766"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3382"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6869"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Equipment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6903"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Automobiles"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9201"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Transport"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8802"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "5401"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Steel"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1925"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1928"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6501"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Equipment"
+inverse_of = ""
+
+# ─── MODE A: HKEX (Hong Kong) ───
+# Hong Kong Exchange - 20 most liquid stocks
+[[contracts]]
+symbol = "0001"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0175"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Telecom"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0691"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0700"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0883"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1211"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1299"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1398"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1088"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6862"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9618"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6823"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0288"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0857"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1177"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0142"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0689"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0939"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0006"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0388"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+# ─── MODE A: ASX (Australian) ───
+# Australian Securities Exchange - 20 most liquid stocks
+[[contracts]]
+symbol = "BHP"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CBA"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSL"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FMG"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NAB"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WBC"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MQG"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RIO"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ANZ"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GPT"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WES"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TCL"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APA"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IAG"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "QAN"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Transport"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SYD"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VAS"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ORA"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AGL"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AFL"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+# ─── MODE B: XETRA (Frankfurt) ───
+# XETRA Frankfurt Exchange - 14 most liquid stocks
+[[contracts]]
+symbol = "SAP"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SIE"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IFX"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DAI"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VOW3"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BMW"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MBG"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADS"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MUV2"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HEI"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RWE"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EOAN"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DTE"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BEI"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+# ─── MODE B: EURONEXT (Paris/Amsterdam) ───
+# Euronext - 6 stocks
+[[contracts]]
+symbol = "OR"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Luxury"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NOKIA"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Telecom"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TOTAL"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SANOFI"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LVMH"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Luxury"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ASML"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Technology"
+inverse_of = ""

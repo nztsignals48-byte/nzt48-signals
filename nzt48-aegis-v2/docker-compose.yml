@@ -1,0 +1,125 @@
+# AEGIS V2 — Docker Compose (Self-Contained)
+# Includes IB Gateway, Redis, and Rust engine — no V1 dependency.
+# IB Gateway: gnzsnz/ib-gateway (paper mode, port 4004)
+# Client ID: 101
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f aegis-v2
+
+services:
+  aegis-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    container_name: aegis-v2
+    restart: unless-stopped
+    depends_on:
+      aegis-redis:
+        condition: service_healthy
+      ib-gateway:
+        condition: service_healthy
+    environment:
+      - IBKR_HOST=ib-gateway
+      - IBKR_PORT=4004
+      - REDIS_URL=redis://:nzt48redis@aegis-redis:6379/0
+      - IS_LIVE=false
+    command: >
+      aegis
+        --config-dir /app/config
+        --wal-dir /app/events
+        --ibkr-host ib-gateway
+        --ibkr-port 4004
+    volumes:
+      - ./config:/app/config:ro
+      - aegis-events:/app/events
+    # SC-01a: Graceful shutdown grace period (flatten positions + wait fills)
+    stop_grace_period: 60s
+    # SC-16: Shared memory for IPC
+    shm_size: '2gb'
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - aegis-net
+
+  # IB Gateway — headless IBKR API via IBC (auto-reconnect, auto-restart)
+  # Image: gnzsnz/ib-gateway (IB Gateway + IBC, Xvfb for headless)
+  # Weekly maintenance: user must approve 2FA on phone every Monday morning
+  # Port 4004 = paper trading API (gnzsnz image convention)
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: aegis-ib-gateway
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - READ_ONLY_API=false
+      - TWOFA_TIMEOUT_ACTION=restart
+      - TWS_ACCEPT_INCOMING=accept
+    expose:
+      - "4002"
+      - "4004"
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4004' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - aegis-net
+
+  aegis-redis:
+    image: redis:7-alpine
+    container_name: aegis-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --requirepass nzt48redis
+        --maxmemory 256mb
+        --maxmemory-policy noeviction
+        --appendonly yes
+        --appendfsync everysec
+    volumes:
+      - aegis-redis-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "nzt48redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - aegis-net
+
+volumes:
+  aegis-events:
+  aegis-redis-data:
+
+networks:
+  aegis-net:
+    driver: bridge

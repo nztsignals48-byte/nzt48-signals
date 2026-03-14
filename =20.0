@@ -1,0 +1,24 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting python-telegram-bot
+  Downloading python_telegram_bot-22.5-py3-none-any.whl.metadata (17 kB)
+Collecting httpx<0.29,>=0.27 (from python-telegram-bot)
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting anyio (from httpx<0.29,>=0.27->python-telegram-bot)
+  Using cached anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+Requirement already satisfied: certifi in /Users/rr/Library/Python/3.9/lib/python/site-packages (from httpx<0.29,>=0.27->python-telegram-bot) (2026.1.4)
+Collecting httpcore==1.* (from httpx<0.29,>=0.27->python-telegram-bot)
+  Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: idna in /Users/rr/Library/Python/3.9/lib/python/site-packages (from httpx<0.29,>=0.27->python-telegram-bot) (3.11)
+Requirement already satisfied: h11>=0.16 in /Users/rr/Library/Python/3.9/lib/python/site-packages (from httpcore==1.*->httpx<0.29,>=0.27->python-telegram-bot) (0.16.0)
+Requirement already satisfied: exceptiongroup>=1.0.2 in /Users/rr/Library/Python/3.9/lib/python/site-packages (from anyio->httpx<0.29,>=0.27->python-telegram-bot) (1.3.1)
+Requirement already satisfied: typing_extensions>=4.5 in /Users/rr/Library/Python/3.9/lib/python/site-packages (from anyio->httpx<0.29,>=0.27->python-telegram-bot) (4.15.0)
+Downloading python_telegram_bot-22.5-py3-none-any.whl (730 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 731.0/731.0 kB 404.8 kB/s  0:00:01
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+Using cached anyio-4.12.1-py3-none-any.whl (113 kB)
+Installing collected packages: httpcore, anyio, httpx, python-telegram-bot
+  WARNING: The script httpx is installed in '/Users/rr/Library/Python/3.9/bin' which is not on PATH.
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+
+Successfully installed anyio-4.12.1 httpcore-1.0.9 httpx-0.28.1 python-telegram-bot-22.5

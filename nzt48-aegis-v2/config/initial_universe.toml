@@ -1,0 +1,313 @@
+# AEGIS V2 — Initial Universe (Day 1)
+# ~1,000 LSE-listed leveraged ETPs
+# This file is loaded on first boot when no universe_classification.toml exists.
+# Nightly pipeline (Phase 9) generates universe_classification.toml thereafter.
+# Tickers are classified by the Dynamic Rotation Manager at boot.
+#
+# SOURCES:
+# - LSE leveraged ETP listings (GraniteShares, Leverage Shares, WisdomTree, etc.)
+# - Filtered for: LSE-listed, GBP-denominated, leveraged (2x-5x), IBKR-tradeable
+#
+# FORMAT:
+# Each ticker entry includes: symbol, leverage_factor, underlying, sector
+# The nightly pipeline will validate tradability via reqContractDetails (H48).
+
+# ============================================================================
+# CORE 12 — Known ISA-eligible leveraged ETPs (manually verified)
+# ============================================================================
+
+[[tickers]]
+symbol = "QQQ3.L"
+leverage = 3
+underlying = "Nasdaq 100"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "QQQS.L"
+leverage = 3
+underlying = "Nasdaq 100"
+sector = "Technology"
+inverse_of = "QQQ3.L"
+
+[[tickers]]
+symbol = "3LUS.L"
+leverage = 3
+underlying = "S&P 500"
+sector = "US_Broad"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3USS.L"
+leverage = 3
+underlying = "S&P 500"
+sector = "US_Broad"
+inverse_of = "3LUS.L"
+
+[[tickers]]
+symbol = "QQQ5.L"
+leverage = 5
+underlying = "Nasdaq 100"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "SP5L.L"
+leverage = 5
+underlying = "S&P 500"
+sector = "US_Broad"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SEM.L"
+leverage = 3
+underlying = "Philadelphia Semiconductor"
+sector = "Semiconductors"
+inverse_of = ""
+
+[[tickers]]
+symbol = "NVD3.L"
+leverage = 3
+underlying = "NVIDIA"
+sector = "Semiconductors"
+inverse_of = ""
+
+[[tickers]]
+symbol = "TSL3.L"
+leverage = 3
+underlying = "Tesla"
+sector = "Single_Stock"
+inverse_of = ""
+
+[[tickers]]
+symbol = "GPT3.L"
+leverage = 3
+underlying = "AI Basket"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "TSM3.L"
+leverage = 3
+underlying = "TSMC"
+sector = "Semiconductors"
+inverse_of = ""
+
+[[tickers]]
+symbol = "MU2.L"
+leverage = 2
+underlying = "Micron"
+sector = "Semiconductors"
+inverse_of = ""
+
+# ============================================================================
+# EXTENDED UNIVERSE — Additional LSE leveraged ETPs
+# ============================================================================
+# The full ~1,000 ticker list is populated by the Phase 8 bootstrap process
+# which runs reqContractDetails against IBKR for all LSE leveraged ETPs.
+# This initial file contains the core 12 + known high-liquidity ETPs.
+# The nightly pipeline expands this list as new products are discovered.
+
+# --- GraniteShares Single Stock ---
+
+[[tickers]]
+symbol = "3LAP.L"
+leverage = 3
+underlying = "Apple"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SAP.L"
+leverage = 3
+underlying = "Apple"
+sector = "Technology"
+inverse_of = "3LAP.L"
+
+[[tickers]]
+symbol = "3LMS.L"
+leverage = 3
+underlying = "Microsoft"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SMS.L"
+leverage = 3
+underlying = "Microsoft"
+sector = "Technology"
+inverse_of = "3LMS.L"
+
+[[tickers]]
+symbol = "3LAM.L"
+leverage = 3
+underlying = "Amazon"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SAM.L"
+leverage = 3
+underlying = "Amazon"
+sector = "Technology"
+inverse_of = "3LAM.L"
+
+[[tickers]]
+symbol = "3LMT.L"
+leverage = 3
+underlying = "Meta"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SMT.L"
+leverage = 3
+underlying = "Meta"
+sector = "Technology"
+inverse_of = "3LMT.L"
+
+[[tickers]]
+symbol = "3LGO.L"
+leverage = 3
+underlying = "Alphabet"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SGO.L"
+leverage = 3
+underlying = "Alphabet"
+sector = "Technology"
+inverse_of = "3LGO.L"
+
+[[tickers]]
+symbol = "3LNF.L"
+leverage = 3
+underlying = "Netflix"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3LBA.L"
+leverage = 3
+underlying = "Alibaba"
+sector = "Technology"
+inverse_of = ""
+
+[[tickers]]
+symbol = "AMD3.L"
+leverage = 3
+underlying = "AMD"
+sector = "Semiconductors"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3LCO.L"
+leverage = 3
+underlying = "Coinbase"
+sector = "Crypto_Adjacent"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SCO.L"
+leverage = 3
+underlying = "Coinbase"
+sector = "Crypto_Adjacent"
+inverse_of = "3LCO.L"
+
+# --- Broad Market ETPs ---
+
+[[tickers]]
+symbol = "3LUK.L"
+leverage = 3
+underlying = "FTSE 100"
+sector = "UK_Broad"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SUK.L"
+leverage = 3
+underlying = "FTSE 100"
+sector = "UK_Broad"
+inverse_of = "3LUK.L"
+
+[[tickers]]
+symbol = "3LEU.L"
+leverage = 3
+underlying = "Euro Stoxx 50"
+sector = "EU_Broad"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SEU.L"
+leverage = 3
+underlying = "Euro Stoxx 50"
+sector = "EU_Broad"
+inverse_of = "3LEU.L"
+
+[[tickers]]
+symbol = "3LDE.L"
+leverage = 3
+underlying = "DAX"
+sector = "EU_Broad"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SDE.L"
+leverage = 3
+underlying = "DAX"
+sector = "EU_Broad"
+inverse_of = "3LDE.L"
+
+# --- Commodity-Linked ---
+
+[[tickers]]
+symbol = "3LOI.L"
+leverage = 3
+underlying = "Brent Crude"
+sector = "Commodities"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SOI.L"
+leverage = 3
+underlying = "Brent Crude"
+sector = "Commodities"
+inverse_of = "3LOI.L"
+
+[[tickers]]
+symbol = "3LGD.L"
+leverage = 3
+underlying = "Gold"
+sector = "Commodities"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SGD.L"
+leverage = 3
+underlying = "Gold"
+sector = "Commodities"
+inverse_of = "3LGD.L"
+
+[[tickers]]
+symbol = "3LSV.L"
+leverage = 3
+underlying = "Silver"
+sector = "Commodities"
+inverse_of = ""
+
+[[tickers]]
+symbol = "3SSV.L"
+leverage = 3
+underlying = "Silver"
+sector = "Commodities"
+inverse_of = "3LSV.L"
+
+# ============================================================================
+# NOTE: The remaining ~960 tickers are discovered automatically by the
+# Phase 8 bootstrap process using IBKR reqContractDetails with filters:
+#   exchange = "LSE"
+#   sec_type = "STK"
+#   leveraged ETP naming conventions (2x, 3x, 5x, Long, Short, etc.)
+# The nightly pipeline in Phase 9 maintains and updates this list.
+# ============================================================================

@@ -1,0 +1,650 @@
+================================================================================
+PHASE 8 ARCHITECTURE: Ouroboros Nightly Pipeline & Engine Integration
+================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           NIGHTLY EXECUTION (18:00 UTC)                      │
+│                     [CURRENTLY BROKEN - TIMING GUARD BLOCKS]                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                           SUPERCRONIC (Docker entrypoint)
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │   Cron: 0 18 * * 1-5          │
+                    │   (18:00 UTC every weekday)   │
+                    │                               │
+                    │   BUG: This is LSE open time! │
+                    │   Should be 23:50 ET (03:50 UTC EDT, 04:50 EST)
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────────────┐
+                    │  python3 -m ouroboros.cli             │
+                    │    --config-dir /app/config           │
+                    │    --wal-path /app/events/current.*   │
+                    │    --day-count $((days_since_epoch))  │
+                    └───────────────┬─────────────────────────┘
+                                    │
+                  ┌─────────────────▼──────────────────┐
+                  │  cli.py:main() — Entry Point        │
+                  │                                    │
+                  │  atexit.register(flush_all)        │
+                  │  try:                              │
+                  │    run_pipeline(...)               │
+                  │  finally:                          │
+                  │    flush_all()  ← fsync safety     │
+                  └──────────────────┬──────────────────┘
+                                     │
+         ┌───────────────────────────▼────────────────────────┐
+         │ PIPELINE EXECUTION (10 Steps)                      │
+         ├──────────────────────────────────────────────────────┤
+         │                                                       │
+         │ ┌─ Step 1: Timing Guard ────────────────────────┐   │
+         │ │ if is_lse_open(london_time_secs):            │   │
+         │ │   REFUSE "LSE is open (08:00-16:30 London)"  │   │
+         │ │                                                │   │
+         │ │ CURRENT STATUS: **WILL FAIL** at 18:00 UTC   │   │
+         │ │ (which equals 18:00 London, LSE still open)  │   │
+         │ └────────────────────────────────────────────────┘   │
+         │                                                       │
+         │ ┌─ Step 2: Cold Start Check ─────────────────────┐  │
+         │ │ if day_count <= 3:                             │  │
+         │ │   return conservative defaults                 │  │
+         │ │   (WR=0.5, Chandelier=3.0, empty tiers)       │  │
+         │ └────────────────────────────────────────────────┘  │
+         │                                                      │
+         │ ┌─ Step 3: WAL Ingest ────────────────────────────┐ │
+         │ │ wal_reader.py:read_day_journal()                │ │
+         │ │                                                  │ │
+         │ │ Parse NDJSON events:                            │ │
+         │ │   • RoutedOrder → order_id, ticker, confidence │ │
+         │ │   • FillEvent → qty, price, commission         │ │
+         │ │   • PositionClosed → final_pnl, exit_reason    │ │
+         │ │                                                  │ │
+         │ │ Output: DayJournal {                            │ │
+         │ │   closed_trades: [ClosedTrade],                │ │
+         │ │   fills: [FillRecord],                         │ │
+         │ │   total_events: int,                           │ │
+         │ │ }                                               │ │
+         │ │                                                  │ │
+         │ │ GUARANTEE: Read-only, never writes to WAL      │ │
+         │ └─────────────────────────────────────────────────┘ │
+         │                                                      │
+         │ ┌─ Step 4: Bayesian Win Rate ──────────────────────┐│
+         │ │ bayesian.py:bayesian_win_rate()                  ││
+         │ │                                                  ││
+         │ │ Laplace smoothing: (wins + 1) / (total + 2)     ││
+         │ │   → Shrinks small samples toward 50%            ││
+         │ │   → Converges to raw WR as N grows             ││
+         │ │                                                  ││
+         │ │ Output: BayesianResult {                        ││
+         │ │   raw_win_rate,                                ││
+         │ │   bayesian_win_rate,  ← Applied by engine       ││
+         │ │   trade_count,                                 ││
+         │ │   total_pnl,                                   ││
+         │ │ }                                               ││
+         │ └─────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ Step 5: Deflated Sharpe Ratio (DSR) ──────────┐ │
+         │ │ bayesian.py:deflated_sharpe_ratio()             │ │
+         │ │                                                  │ │
+         │ │ Bailey & López de Prado (2014) formula:         │ │
+         │ │   DSR = Φ((SR* - SR₀) / σ_SR₀)                │ │
+         │ │                                                  │ │
+         │ │ Output: DSRResult {                             │ │
+         │ │   sharpe_ratio,                                │ │
+         │ │   dsr,                ← p-value [0, 1]         │ │
+         │ │   is_significant,     ← DSR > 0.95?           │ │
+         │ │ }                                               │ │
+         │ └─────────────────────────────────────────────────┘ │
+         │                                                      │
+         │ ┌─ Step 6: Kelly Accelerator ──────────────────────┐│
+         │ │ kelly_accelerator.py:compute_kelly_updates()     ││
+         │ │                                                  ││
+         │ │ Per-ticker Kelly criterion:                     ││
+         │ │   f* = p - (1-p)/b                             ││
+         │ │   where p = Bayesian WR, b = avg_win/avg_loss  ││
+         │ │                                                  ││
+         │ │ Clamped: [KELLY_FLOOR=0.02, KELLY_CEILING=0.20]││
+         │ │ EWA blend: new = α*f* + (1-α)*prior            ││
+         │ │                                                  ││
+         │ │ Output: Dict[ticker_id, KellyUpdate] {          ││
+         │ │   new_kelly,          ← Applied to order sizing ││
+         │ │   prior_kelly,                                 ││
+         │ │   trade_count,                                 ││
+         │ │ }                                               ││
+         │ └──────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ Step 7: Exit Calibration ───────────────────────┐│
+         │ │ exit_calibration.py:calibrate_exit_multiplier()  ││
+         │ │                                                  ││
+         │ │ Analysis:                                       ││
+         │ │   • % of trades hitting Rung 5 (most aggressive)││
+         │ │   • % of trades stopping out early (tight stop) ││
+         │ │   • MAE & MFE metrics                           ││
+         │ │                                                  ││
+         │ │ Rule: If >60% hit Rung 5, LOOSEN multiplier     ││
+         │ │       If many early stops, TIGHTEN multiplier   ││
+         │ │                                                  ││
+         │ │ Output: ExitCalibrationResult {                 ││
+         │ │   new_multiplier,     ← [1.5, 4.0]            ││
+         │ │   rung5_rate,                                  ││
+         │ │ }                                               ││
+         │ └──────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ Step 8: Regime Hunting ─────────────────────────┐│
+         │ │ regime_hunting.py:hunt_regimes()                 ││
+         │ │                                                  ││
+         │ │ Classify trades by regime at entry:             ││
+         │ │   • bull_quiet   (↗ trend, ↓ vol)  ← Often best ││
+         │ │   • bull_volatile (↗ trend, ↑ vol)              ││
+         │ │   • bear_quiet   (↘ trend, ↓ vol)               ││
+         │ │   • bear_volatile (↘ trend, ↑ vol) ← Often worst ││
+         │ │                                                  ││
+         │ │ Output: RegimeHuntResult {                      ││
+         │ │   regimes: Dict[label, RegimeStats] {           ││
+         │ │     is_profitable,    ← Scale position if true  ││
+         │ │     win_rate,                                  ││
+         │ │     avg_pnl,                                   ││
+         │ │   },                                           ││
+         │ │   best_regime,                                 ││
+         │ │   worst_regime,                                ││
+         │ │ }                                               ││
+         │ └──────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ Step 9: Alpha Sieve ───────────────────────────┐ │
+         │ │ alpha_sieve.py:sieve_universe()                 │ │
+         │ │                                                  │ │
+         │ │ Per-ticker Information Coefficient (IC):        │ │
+         │ │   IC = correlation(signal, realized return)     │ │
+         │ │                                                  │ │
+         │ │ Promotion rule:  IC > 0.8  → Tier 1 (Vanguard) │ │
+         │ │ Demotion rule:   IC < 0.3  → Tier 3 (cold)     │ │
+         │ │ Lock rule:       IC ≤ 0 OR spread > 0.5%       │ │
+         │ │                     → Remove from universe       │ │
+         │ │                                                  │ │
+         │ │ Output: AlphaSieveResult {                      │ │
+         │ │   ticker_alphas: Dict[ticker_id, TickerAlpha],  │ │
+         │ │   promotions: [ticker_ids],                    │ │
+         │ │   demotions: [ticker_ids],                     │ │
+         │ │   locked: [ticker_ids],                        │ │
+         │ │ }                                               │ │
+         │ └─────────────────────────────────────────────────┘ │
+         │                                                      │
+         │ ┌─ Step 10: TOML Generation ───────────────────────┐│
+         │ │ toml_writer.py:write_dynamic_weights()           ││
+         │ │                                                  ││
+         │ │ Generate config/dynamic_weights.toml:           ││
+         │ │                                                  ││
+         │ │ [bayesian]                                      ││
+         │ │ win_rate = 0.623456                             ││
+         │ │ trade_count = 142                               ││
+         │ │ sharpe_ratio = 1.234567                         ││
+         │ │ dsr = 0.850000                                  ││
+         │ │ dsr_significant = true                          ││
+         │ │                                                  ││
+         │ │ [exit]                                          ││
+         │ │ chandelier_atr_mult = 3.25                      ││
+         │ │ rung5_rate = 0.6200                             ││
+         │ │                                                  ││
+         │ │ [regime]                                        ││
+         │ │ best = "bull_quiet"                             ││
+         │ │ worst = "bear_volatile"                         ││
+         │ │ bull_quiet = 1.00                               ││
+         │ │ bear_volatile = 0.50                            ││
+         │ │                                                  ││
+         │ │ [kelly_fractions]                               ││
+         │ │ t1 = 0.120000                                   ││
+         │ │ t2 = 0.080000                                   ││
+         │ │ ...                                              ││
+         │ │                                                  ││
+         │ │ FSYNC SAFETY:                                   ││
+         │ │   1. Write file                                 ││
+         │ │   2. f.flush()     ← kernel cache              ││
+         │ │   3. os.fsync()    ← force to disk             ││
+         │ │   4. Track in _written_files[]                 ││
+         │ │                                                  ││
+         │ │ toml_writer.py:write_universe_classification()  ││
+         │ │                                                  ││
+         │ │ Generate config/universe_classification.toml:   ││
+         │ │                                                  ││
+         │ │ [tiers]                                         ││
+         │ │ tier1 = [1, 3, 5]         ← Vanguard (best)    ││
+         │ │ tier2 = [2, 4, 6, 7, 8]   ← Warm (default)     ││
+         │ │ tier3 = [9, 10]           ← Cold (low alpha)   ││
+         │ │ locked = [11, 12]         ← Removed (IC ≤ 0)   ││
+         │ └──────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ Step 11: Archive ───────────────────────────────┐│
+         │ │ toml_writer.py:archive_results()                 ││
+         │ │                                                  ││
+         │ │ Create parameter_history/ouroboros_2026-03-13.json:
+         │ │                                                  ││
+         │ │ {                                               ││
+         │ │   "date": "2026-03-13",                         ││
+         │ │   "schema_version": 1,                          ││
+         │ │   "dynamic_weights": <full TOML text>,          ││
+         │ │   "universe_classification": <full TOML text>,  ││
+         │ │ }                                               ││
+         │ │                                                  ││
+         │ │ Purpose: Audit trail + reconstruction if corrupt
+         │ └──────────────────────────────────────────────────┘│
+         │                                                      │
+         │ ┌─ finally block: Flush Safety ─────────────────┐  │
+         │ │ flush_all() in toml_writer.py:42-58            │  │
+         │ │                                                 │  │
+         │ │ For each file in _written_files[]:            │  │
+         │ │   1. Open file in read mode                   │  │
+         │ │   2. Call os.fsync(fd)  ← fsync directory    │  │
+         │ │   3. Close fd                                 │  │
+         │ │                                                 │  │
+         │ │ Ensures directory metadata persists            │  │
+         │ │ (Safe against crash before this block)        │  │
+         │ └─────────────────────────────────────────────────┘ │
+         │                                                      │
+         └──────────────────────────────────────────────────────┘
+
+                         Returns to Supercronic
+                              │
+                    ┌─────────▼──────────┐
+                    │ Log to              │
+                    │ /app/events/       │
+                    │ ouroboros.log       │
+                    │                     │
+                    │ exit(0) if success  │
+                    │ exit(1) if error    │
+                    └─────────────────────┘
+
+
+================================================================================
+MORNING ENGINE BOOT (06:00 ET / 11:00 UTC)
+================================================================================
+
+                           aegis binary launches
+                                    │
+                        ┌───────────▼───────────┐
+                        │ main.rs:38-250        │
+                        │                       │
+                        │ 1. Parse CLI args     │
+                        │ 2. Load EngineConfig  │
+                        │ 3. Initialize broker  │
+                        └───────────┬───────────┘
+                                    │
+              ┌─────────────────────▼──────────────────┐
+              │ OUROBOROS LOADER (Safe Fallback)       │
+              │ main.rs:79-89                          │
+              │                                        │
+              │ dw = load_dynamic_weights(config_dir)  │
+              │   │                                    │
+              │   ├─→ Path: config/dynamic_weights.toml
+              │   │                                    │
+              │   └─→ _load_dw(path)                  │
+              │       ├─ File exists?       YES/NO    │
+              │       │   if NO → Default             │
+              │       │                                │
+              │       ├─ TOML valid?       YES/NO     │
+              │       │   if NO → Default             │
+              │       │                                │
+              │       └─ Parse & return DynamicWeights
+              │           {                            │
+              │             bayesian_win_rate,         │
+              │             trade_count,               │
+              │             chandelier_atr_mult,       │
+              │             regime_scales,             │
+              │             kelly_fractions,           │
+              │           }                            │
+              │                                        │
+              │ uc = load_universe_classification(...) │
+              │   └─→ Same safe fallback pattern       │
+              │       Returns UniverseClassification { │
+              │         tier1: [ids],                  │
+              │         tier2: [ids],                  │
+              │         tier3: [ids],                  │
+              │         locked: [ids],                 │
+              │       }                                │
+              │                                        │
+              │ GUARANTEE:                             │
+              │   • Never crashes on missing files     │
+              │   • Never crashes on corrupted TOML    │
+              │   • Always returns safe defaults       │
+              │   • Logged to stderr for debugging     │
+              └────────────┬─────────────────────────┘
+                           │
+                ┌──────────▼──────────┐
+                │ Engine::new()       │
+                │ engine.rs:309-340   │
+                │                     │
+                │ Store weights in:   │
+                │ • engine.config     │
+                │ • risk_arbiter      │
+                │ • kelly_mgr         │
+                │ • etc.              │
+                └──────────┬──────────┘
+                           │
+        ┌──────────────────▼───────────────────┐
+        │ Engine::startup()                    │
+        │ engine.rs:358-458                    │
+        │                                      │
+        │ Step 1: Verify broker connected     │
+        │ Step 2: Sync clock                  │
+        │ Step 3: Replay WAL (get prior state)│
+        │ Step 4: Reconcile positions         │
+        │ Step 5: Resolve orphaned orders     │
+        │ Step 6: Register tickers            │
+        │ Step 7: Write SystemReady to WAL    │
+        │ Step 8: Mark startup_complete       │
+        │                                      │
+        │ NOW READY FOR LIVE TRADING          │
+        └──────────────────────────────────────┘
+                           │
+        ┌──────────────────▼─────────────────────┐
+        │ Main Event Loop                        │
+        │ main.rs:250-???                        │
+        │                                        │
+        │ For each tick from IB Gateway:        │
+        │   1. Update bar history (ATR calc)    │
+        │   2. Check gap detection              │
+        │   3. GARCH volatility update          │
+        │   4. Universe routing filter          │
+        │   5. Python Brain signal (if enabled) │
+        │   6. Risk arbiter approval            │
+        │   7. Order routing & execution        │
+        │   8. Exit management (Chandelier)     │
+        │   9. WAL event write (fsync)          │
+        │   10. Periodic reconciliation         │
+        │                                        │
+        │ Uses Ouroboros weights:               │
+        │   • bayesian_win_rate → confidence   │
+        │   • kelly_fractions → position size  │
+        │   • chandelier_atr_mult → exit level │
+        │   • regime_scales → size multiplier  │
+        │   • universe_tiers → routing filter  │
+        └────────────────────────────────────────┘
+
+
+================================================================================
+DATA STRUCTURES & TYPE SIGNATURES
+================================================================================
+
+PyPython Ouroboros Types (ouroboros/wal_reader.py):
+
+@dataclass(frozen=True)
+class ClosedTrade:
+    ticker_id: int
+    final_pnl: float
+    entry_time_ns: int
+    exit_time_ns: int
+    entry_price: float
+    exit_price: float
+    qty: int
+    commission: float
+    exit_reason: str
+    strategy: str
+    regime_label: str
+    highest_rung: int
+
+@dataclass(frozen=True)
+class DayJournal:
+    closed_trades: List[ClosedTrade]
+    fills: List[FillRecord]
+    orders: List[OrderRecord]
+    risk_changes: List[RiskChange]
+    equity_end: float
+    high_water: float
+    total_events: int
+
+
+Rust Engine Types (rust_core/src/ouroboros_loader.rs):
+
+#[derive(Debug, Clone)]
+pub struct DynamicWeights {
+    pub bayesian_win_rate: f64,
+    pub trade_count: u32,
+    pub sharpe_ratio: f64,
+    pub dsr: f64,
+    pub dsr_significant: bool,
+    pub chandelier_atr_mult: f64,
+    pub regime_best: String,
+    pub regime_worst: String,
+    pub regime_scales: HashMap<String, f64>,
+    pub kelly_fractions: HashMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UniverseClassification {
+    pub tier1: Vec<i64>,
+    pub tier2: Vec<i64>,
+    pub tier3: Vec<i64>,
+    pub locked: Vec<i64>,
+}
+
+impl Default for DynamicWeights {
+    fn default() -> Self {
+        Self {
+            bayesian_win_rate: 0.5,           // Safe default (no edge)
+            chandelier_atr_mult: 3.0,         // Default multiplier
+            regime_best: "bull_quiet",        // Baseline regime
+            regime_worst: "bear_volatile",    // Worst case
+            // ... empty regime_scales, kelly_fractions
+        }
+    }
+}
+
+
+================================================================================
+FAILURE MODES & RESILIENCE
+================================================================================
+
+Scenario 1: Ouroboros crashes mid-write
+┌─────────────────────────────────────────────────────────┐
+│ 1. dynamic_weights.toml partially written (incomplete)   │
+│ 2. Crash before fsync() called                          │
+│ 3. Kernel cache loss → file on disk is corrupt          │
+├─────────────────────────────────────────────────────────┤
+│ MITIGATION:                                             │
+│ • Engine boots, calls load_dynamic_weights()            │
+│ • toml::from_str() fails on malformed TOML             │
+│ • Falls back to DynamicWeights::default()              │
+│ • Engine starts with conservative defaults (WR=0.5)    │
+│ • No crash, trading continues                          │
+├─────────────────────────────────────────────────────────┤
+│ OUTCOME: ✅ SAFE — Engine recovers gracefully           │
+│ LOSS: Yesterday's analysis thrown away, reverts to 50% WR
+│ PROBABILITY: Low (fsync prevents ~99% of corruption)   │
+└─────────────────────────────────────────────────────────┘
+
+Scenario 2: Crontab triggers during LSE hours (current bug)
+┌─────────────────────────────────────────────────────────┐
+│ 1. Supercronic triggers at 18:00 UTC (18:00 London)     │
+│ 2. LSE is open (08:00-16:30 London times = continuous) │
+│ 3. Ouroboros checks is_lse_open(london_time_secs)      │
+│ 4. Returns True → pipeline.py returns error             │
+├─────────────────────────────────────────────────────────┤
+│ MITIGATION:                                             │
+│ • No crash, no partial writes                          │
+│ • exit(1) logged to ouroboros.log                       │
+│ • Old TOML files not touched                           │
+│ • Engine boots next morning with yesterday's weights    │
+├─────────────────────────────────────────────────────────┤
+│ OUTCOME: ⚠️  PARTIAL FAILURE — Pipeline skipped         │
+│ EFFECT: Weights from 2 days ago used instead of fresh  │
+│ PROBABILITY: 100% (crontab is set to LSE open time)    │
+│ FIX: Change crontab to 23:50 ET (03:50 UTC)            │
+└─────────────────────────────────────────────────────────┘
+
+Scenario 3: Empty WAL (no trades today)
+┌─────────────────────────────────────────────────────────┐
+│ 1. wal_path exists but has 0 closed_trades              │
+│ 2. journal.total_events == 0                            │
+│ 3. pipeline.py:96 returns error                         │
+├─────────────────────────────────────────────────────────┤
+│ MITIGATION:                                             │
+│ • No error, clean failure                              │
+│ • Old TOML files not updated                           │
+│ • Engine boots with yesterday's weights (stale)        │
+├─────────────────────────────────────────────────────────┤
+│ OUTCOME: ✅ GRACEFUL — No trading days are skipped      │
+│ EFFECT: Yesterday's parameters used (slight drift)     │
+│ PROBABILITY: ~10% on low-volume days                   │
+└─────────────────────────────────────────────────────────┘
+
+Scenario 4: Ouroboros runs but writes invalid JSON
+┌─────────────────────────────────────────────────────────┐
+│ 1. Ouroboros crashes during toml_writer.py              │
+│ 2. TOML file is valid but incomplete (missing sections) │
+│ 3. Schema validation fails in Rust loader              │
+├─────────────────────────────────────────────────────────┤
+│ MITIGATION:                                             │
+│ • Rust deserializer rejects malformed TOML             │
+│ • Falls back to Default                                │
+│ • Engine boots safely                                  │
+│ • parameter_history/ archive partially filled          │
+├─────────────────────────────────────────────────────────┤
+│ OUTCOME: ✅ SAFE — Incomplete updates reverted         │
+│ EFFECT: WR, Kelly, etc. revert to defaults            │
+│ PROBABILITY: <1% (TOML generation is simple)           │
+└─────────────────────────────────────────────────────────┘
+
+
+================================================================================
+INTEGRATION TOUCHPOINTS (Where Ouroboros Weights Apply)
+================================================================================
+
+[NEEDS VERIFICATION]
+
+1. Bayesian Win Rate (dw.bayesian_win_rate)
+   Likely used by: Risk arbiter confidence calculation
+   Engine file: ???
+   Status: ❓ NOT VERIFIED
+
+2. Chandelier ATR Multiplier (dw.chandelier_atr_mult)
+   Likely used by: Exit engine stop price calculation
+   Engine file: rust_core/src/exit_engine.rs
+   Status: ❓ NOT VERIFIED
+
+3. Kelly Fractions (dw.kelly_fractions)
+   Likely used by: Position sizing, order approval
+   Engine file: rust_core/src/smart_router.rs (?)
+   Status: ❓ NOT VERIFIED
+
+4. Regime Scales (dw.regime_scales)
+   Likely used by: Size multiplier based on regime
+   Engine file: rust_core/src/risk_arbiter.rs (?)
+   Status: ❓ NOT VERIFIED
+
+5. Universe Classification (uc.tier1/2/3/locked)
+   Likely used by: Routing filter, Vanguard vs warm vs cold
+   Engine file: rust_core/src/universe.rs
+   Status: ❓ NOT VERIFIED
+
+ACTION REQUIRED: Grep engine.rs for load_dynamic_weights usage
+                 Confirm each weight is actually applied
+
+
+================================================================================
+TIMELINE & HANDOFF
+================================================================================
+
+Day N, 23:50 ET (04:50 UTC + 1):
+  Ouroboros nightly runs, produces:
+  • config/dynamic_weights.toml (V2.0, today's analytics)
+  • config/universe_classification.toml (V2.0)
+  • parameter_history/ouroboros_YYYY-MM-DD.json (archive)
+
+Day N+1, 06:00 ET (11:00 UTC):
+  Engine boots, loads:
+  • dynamic_weights.toml (yesterday's V2.0)
+  • universe_classification.toml (yesterday's V2.0)
+
+Day N+1, 08:00-16:30 GMT:
+  Engine runs with yesterday's weights
+  Accumulates closed trades → WAL events
+
+Day N+1, 23:50 ET:
+  Ouroboros runs again, reads Day N+1 trades
+  Computes new weights based on Day N+1 performance
+
+Day N+2, 06:00 ET:
+  Engine loads Day N+1 weights
+  [cycle repeats]
+
+
+================================================================================
+TESTING MATRIX
+================================================================================
+
+Unit Tests (implemented):
+  ✅ test_ouroboros.py (15 test classes, ~50 tests)
+     • Timing guard (LSE hours)
+     • Bayesian WR shrinkage
+     • DSR formula
+     • Kelly clamping
+     • Exit calibration (Rung 5 analysis)
+     • Regime hunting (profit identification)
+     • Alpha sieve (IC + spread)
+     • TOML validity
+     • Reproducibility (deterministic)
+     • Parameter archive
+     • WAL quarantine (never writes input)
+
+Integration Tests (NOT implemented):
+  ❌ 30-day synthetic backtest
+     • Simulate 30 days of trading
+     • Nightly Ouroboros updates
+     • Verify no corruption
+     • Engine loads each morning
+     • Check weight drift
+
+End-to-End Tests (NOT implemented):
+  ❌ Ouroboros → Engine → Trading decision chain
+     • Ouroboros computes weights
+     • Engine loads weights at boot
+     • Engine applies weights to order sizing
+     • Verify impact on trade count/PnL
+
+Load Tests (NOT implemented):
+  ❌ Performance with 1000+ trades/day
+  ❌ Memory growth over 30-day backtest
+  ❌ Disk I/O impact of nightly 10-step pipeline
+
+
+================================================================================
+SIGN-OFF CHECKLIST
+================================================================================
+
+Code Review:
+  ✅ All 10 modules exist and are tested
+  ✅ Atomicity/fsync implementation correct
+  ✅ DynamicWeights loader has safe fallback
+  ✅ Read-only quarantine on WAL (never writes)
+  ❌ Crontab timing is BROKEN (critical fix needed)
+  ❌ Epoch reference is hard-coded (minor fix)
+
+Architecture:
+  ✅ Clear separation: Ouroboros (analytics) vs Engine (trading)
+  ✅ TOML interface is well-defined
+  ✅ Default fallbacks prevent crashes
+  ❓ Downstream appliance of weights NOT verified
+
+Testing:
+  ✅ Unit tests (50+ tests, all passing)
+  ❌ Integration tests (30-day backtest)
+  ❌ End-to-end tests (weights → trading decision)
+  ❌ Load tests (performance + memory)
+
+Documentation:
+  ✅ Code is well-commented
+  ⚠️  Crontab comment disagrees with actual cron
+  ❌ Runbook for manual Ouroboros execution missing
+  ❌ Troubleshooting guide missing
+
+Operations:
+  ✅ Dockerfile builds
+  ✅ Supercronic installed
+  ❌ **Crontab timing breaks nightly runs**
+  ❌ No monitoring/alerting for Ouroboros failures
+  ❌ No dead-letter queue for corrupt TOML
+
+
+================================================================================

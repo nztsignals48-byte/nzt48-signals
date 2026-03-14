@@ -1,0 +1,343 @@
+{
+  "proposal_date": "2026-02-27",
+  "proposal_version": "7.0",
+  "audit_phase": 7,
+  "status": "DRAFT_PENDING_APPROVAL",
+  "requires_approval": true,
+
+  "core_current": [
+    {
+      "ticker": "QQQ3.L",
+      "name": "WisdomTree NASDAQ 100 3x Daily ETP",
+      "underlying": "QQQ/NDX",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "Technology",
+      "provider": "WisdomTree",
+      "spread_bps": 8,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "3LUS.L",
+      "name": "WisdomTree S&P 500 3x Daily ETP",
+      "underlying": "SPY/SPX",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "Broad Market",
+      "provider": "WisdomTree",
+      "spread_bps": 8,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "3SEM.L",
+      "name": "WisdomTree Semiconductors 3x Daily ETP",
+      "underlying": "SOX/SMH",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "Semiconductors",
+      "provider": "WisdomTree",
+      "spread_bps": 12,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "GPT3.L",
+      "name": "WisdomTree US AI 3x Daily ETP",
+      "underlying": "Solactive US AI",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "AI & Technology",
+      "provider": "WisdomTree/Leverage Shares",
+      "spread_bps": 12,
+      "health": "MONITOR",
+      "concern_level": "MEDIUM",
+      "concern_note": "New AI theme index; monitor composition quarterly"
+    },
+    {
+      "ticker": "NVD3.L",
+      "name": "GraniteShares NVIDIA 3x Long Daily ETP",
+      "underlying": "NVDA",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "Semiconductors",
+      "provider": "GraniteShares",
+      "spread_bps": 12,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "TSL3.L",
+      "name": "GraniteShares Tesla 3x Long Daily ETP",
+      "underlying": "TSLA",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "EV/Tech",
+      "provider": "GraniteShares",
+      "spread_bps": 15,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "TSM3.L",
+      "name": "GraniteShares TSMC 3x Long Daily ETP",
+      "underlying": "TSM",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "sector": "Semiconductors",
+      "provider": "GraniteShares",
+      "spread_bps": 10,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "MU2.L",
+      "name": "GraniteShares Micron 2x Long Daily ETP",
+      "underlying": "MU",
+      "leverage": 2.0,
+      "direction": "LONG",
+      "sector": "Semiconductors",
+      "provider": "GraniteShares",
+      "spread_bps": 10,
+      "health": "MONITOR",
+      "concern_level": "MEDIUM",
+      "concern_note": "Only 2x leverage in CORE; needs 1.0% underlying move for 2% target vs 0.67% for 3x"
+    },
+    {
+      "ticker": "QQQS.L",
+      "name": "WisdomTree NASDAQ 100 3x Daily Short ETP",
+      "underlying": "QQQ/NDX",
+      "leverage": -3.0,
+      "direction": "SHORT",
+      "sector": "Technology",
+      "provider": "WisdomTree",
+      "spread_bps": 10,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "3USS.L",
+      "name": "WisdomTree S&P 500 3x Daily Short ETP",
+      "underlying": "SPY/SPX",
+      "leverage": -3.0,
+      "direction": "SHORT",
+      "sector": "Broad Market",
+      "provider": "WisdomTree",
+      "spread_bps": 10,
+      "health": "HEALTHY",
+      "concern_level": "LOW"
+    },
+    {
+      "ticker": "QQQ5.L",
+      "name": "WisdomTree NASDAQ 100 5x Daily ETP",
+      "underlying": "QQQ/NDX",
+      "leverage": 5.0,
+      "direction": "LONG",
+      "sector": "Technology",
+      "provider": "WisdomTree",
+      "spread_bps": 10,
+      "health": "MONITOR",
+      "concern_level": "MEDIUM",
+      "concern_note": "5x leverage; significant volatility decay; max hold 3 days; max 5% single position"
+    },
+    {
+      "ticker": "SP5L.L",
+      "name": "WisdomTree S&P 500 5x Daily ETP",
+      "underlying": "SPY/SPX",
+      "leverage": 5.0,
+      "direction": "LONG",
+      "sector": "Broad Market",
+      "provider": "WisdomTree",
+      "spread_bps": 8,
+      "health": "MONITOR",
+      "concern_level": "MEDIUM",
+      "concern_note": "5x leverage; same decay and position limit concerns as QQQ5.L"
+    }
+  ],
+
+  "core_proposed_additions": [],
+  "core_proposed_removals": [],
+
+  "core_review_notes": {
+    "summary": "No CORE changes recommended at this time. All 12 tickers functioning and appropriate.",
+    "monitor_items": [
+      "GPT3.L: Verify Solactive US AI index composition quarterly",
+      "MU2.L: Evaluate if 3x Micron ETP becomes available on LSE",
+      "QQQ5.L/SP5L.L: Ensure 5x position limits (5% single, 15% total) are enforced"
+    ],
+    "future_candidates": [
+      {
+        "ticker": "AMD3.L",
+        "rationale": "2nd largest AI chip company; currently PEER; revisit if AMD decouples from semiconductor sector index",
+        "recommendation": "DEFER"
+      },
+      {
+        "ticker": "3SSM.L",
+        "rationale": "Semiconductors 3x Short; direct inverse of 3SEM.L; would complete long/short sector pair",
+        "recommendation": "CONSIDER_NEXT_QUARTER"
+      },
+      {
+        "ticker": "SP5S.L",
+        "rationale": "S&P 500 5x Short; inverse of SP5L.L; too aggressive for standard use",
+        "recommendation": "DO_NOT_ADD"
+      }
+    ]
+  },
+
+  "peer_proposed": [
+    {
+      "ticker": "AMD3.L",
+      "name": "GraniteShares AMD 3x Long Daily ETP",
+      "underlying": "AMD",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "factor_theme": "semiconductors",
+      "rationale": "Direct semiconductor peer to 3SEM.L and NVD3.L; 2nd largest GPU/AI chip company",
+      "risk": "Lower liquidity than NVD3.L; AMD earnings can cause extreme single-day moves at 3x",
+      "expected_benefit": "Granular AMD signal; catches AMD-specific catalysts"
+    },
+    {
+      "ticker": "ARM3.L",
+      "name": "GraniteShares ARM 3x Long Daily ETP",
+      "underlying": "ARM Holdings",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "factor_theme": "semiconductors",
+      "rationale": "ARM architecture underpins mobile + AI edge chips; unique exposure not in any CORE ticker",
+      "risk": "UK-listed dual; lower US-hours liquidity; spread may widen LSE-only hours",
+      "expected_benefit": "Diversifies semi exposure; different IP licensing risk profile"
+    },
+    {
+      "ticker": "NVDS.L",
+      "name": "GraniteShares NVIDIA -3x Short Daily ETP",
+      "underlying": "NVDA",
+      "leverage": -3.0,
+      "direction": "SHORT",
+      "factor_theme": "inverse_single_stock",
+      "rationale": "Direct inverse of NVD3.L; essential for NVIDIA-specific downside hedging",
+      "risk": "Accelerated decay in trending-up markets; can lose 90%+ in strong bull runs",
+      "expected_benefit": "NVIDIA-specific short signals; complements broad shorts"
+    },
+    {
+      "ticker": "TSLS.L",
+      "name": "GraniteShares Tesla -3x Short Daily ETP",
+      "underlying": "TSLA",
+      "leverage": -3.0,
+      "direction": "SHORT",
+      "factor_theme": "inverse_single_stock",
+      "rationale": "Direct inverse of TSL3.L; Tesla is highest-volatility CORE underlying",
+      "risk": "Same inverse decay; Tesla extreme volatility makes -3x particularly aggressive",
+      "expected_benefit": "Tesla-specific short signals; both-direction event trading"
+    },
+    {
+      "ticker": "3LDE.L",
+      "name": "WisdomTree DAX 3x Daily ETP",
+      "underlying": "DAX Index",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "factor_theme": "europe_index",
+      "rationale": "European index diversification; different sector mix from Nasdaq/S&P",
+      "risk": "European macro risk; time zone disconnect with US afternoon session",
+      "expected_benefit": "Non-US directional signal; US holiday coverage; EU-specific catalysts"
+    },
+    {
+      "ticker": "3LEU.L",
+      "name": "WisdomTree Euro Stoxx 50 3x Daily ETP",
+      "underlying": "Euro Stoxx 50",
+      "leverage": 3.0,
+      "direction": "LONG",
+      "factor_theme": "europe_index",
+      "rationale": "Broader European exposure; includes ASML (semi linkage), LVMH, TotalEnergies",
+      "risk": "European macro risk; slightly lower liquidity than DAX 3x",
+      "expected_benefit": "Pan-European breadth; rotation signal when capital flows EU vs US"
+    }
+  ],
+
+  "peer_candidate_pool_additions_recommended": [
+    {
+      "ticker": "3SSM.L",
+      "name": "WisdomTree Semiconductors 3x Daily Short ETP",
+      "underlying": "SOX/SMH",
+      "leverage": -3.0,
+      "direction": "SHORT",
+      "rationale": "Direct inverse of CORE 3SEM.L; adds sector-level short precision to candidate pool"
+    }
+  ],
+
+  "full_scan_scope": "29 instruments: US benchmark ETFs (QQQ, SPY, SMH, SOXX, IWM, DIA, XLK, XLF, XLE, XLV), volatility (^VIX), bonds/FX/commodities (TLT, GLD, USO, DX-Y.NYB, BTC-USD), key underlying single names (NVDA, TSLA, TSM, MU, AMD, AVGO, ARM, AMZN, MSFT, META, PLTR, GOOG, AAPL). Intel-only, never tradable, max 500 tickers, 10% compute budget, 600s scan cadence.",
+  "full_scan_proposed_changes": "NONE",
+
+  "objective_split": {
+    "core": {
+      "objective": "MAX_INTRADAY_GAINS",
+      "signal_types": ["TRADE", "WATCH", "INTEL"],
+      "tradable": true,
+      "s15_daily_target": true,
+      "compounding_target_pct": 2.0,
+      "compute_budget_pct": 70,
+      "scan_cadence_seconds": 60
+    },
+    "peer": {
+      "objective": "2PCT_REPORTING_FRAMING",
+      "signal_types": ["WATCH-INTEL", "INTEL"],
+      "tradable": false,
+      "s15_daily_target": false,
+      "compute_budget_pct": 20,
+      "scan_cadence_seconds": 180,
+      "constraints": [
+        "Cannot generate TRADE signals",
+        "Cannot substitute for CORE output quotas",
+        "2% framing is informational context only"
+      ]
+    },
+    "full_scan": {
+      "objective": "CONTEXT_INTEL_ONLY",
+      "signal_types": ["INTEL"],
+      "tradable": false,
+      "s15_daily_target": false,
+      "compute_budget_pct": 10,
+      "scan_cadence_seconds": 600,
+      "constraints": [
+        "Cannot generate TRADE or WATCH signals",
+        "Cannot override CORE or PEER",
+        "Cannot substitute for CORE output quotas",
+        "Purpose: regime detection, sector rotation, macro context"
+      ]
+    }
+  },
+
+  "governance": {
+    "approval_workflow": ["PROPOSAL", "REVIEW", "TEST_5_DAYS", "APPROVE", "DEPLOY"],
+    "quarterly_review_months": ["January", "April", "July", "October"],
+    "config_sources_to_update": [
+      "config/universe.yaml",
+      "config/settings.yaml (v2_engine.isa_tickers_v2)",
+      "uk_isa/isa_universe.py",
+      "uk_isa/universe_manager.py (defaults verification)"
+    ],
+    "core_inclusion_criteria": {
+      "isa_eligible": true,
+      "lse_listing": true,
+      "leverage_range": "2x to 5x absolute",
+      "avg_daily_volume_min": 50000,
+      "spread_max_bps": 20,
+      "tracking_error_max_annual_pct": 1.5,
+      "min_trading_days": 90,
+      "yfinance_data_available": true
+    },
+    "peer_selection_criteria": {
+      "expansion_ratio": 0.50,
+      "target_count": 6,
+      "min_similarity_score": 0.40,
+      "max_per_factor_group": 2,
+      "scoring_weights": {
+        "correlation": 0.50,
+        "factor_theme": 0.30,
+        "momentum_vol": 0.20
+      }
+    }
+  },
+
+  "rationale": "Phase 7 institutional audit establishing formal governance framework for the NZT-48 three-tier universe (CORE/PEER/FULL_SCAN). No changes to CORE recommended. Peer universe of 6 tickers confirmed (AMD3.L, ARM3.L, NVDS.L, TSLS.L, 3LDE.L, 3LEU.L). Recommends adding 3SSM.L to peer candidate pool. Defines formal approval workflow, quarterly review cadence, and objective split enforcement for MAX_INTRADAY_GAINS (CORE) vs 2% reporting framing (non-CORE)."
+}

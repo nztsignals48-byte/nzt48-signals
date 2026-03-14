@@ -1,0 +1,2078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NZT-48 WAR ROOM</title>
+<style>
+:root {
+  --bg-primary: #0a0e17;
+  --bg-card: #111827;
+  --bg-card-hover: #1a2332;
+  --bg-input: #1e293b;
+  --bg-expand: #0d1420;
+  --border: #1e293b;
+  --border-active: #3b82f6;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #3b82f6;
+  --green: #22c55e;
+  --green-bg: rgba(34,197,94,0.12);
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.12);
+  --amber: #f59e0b;
+  --amber-bg: rgba(245,158,11,0.12);
+  --cyan: #06b6d4;
+  --purple: #a855f7;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background: var(--bg-primary); color: var(--text); font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; font-size:13px; }
+a { color: var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+
+/* Header */
+.header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 20px; border-bottom:1px solid var(--border);
+  background: linear-gradient(180deg, #0d1321 0%, var(--bg-primary) 100%);
+}
+.header h1 { font-size:16px; font-weight:700; letter-spacing:2px; }
+.header h1 span { color: var(--accent); }
+.header-badges { display:flex; gap:8px; align-items:center; }
+.badge { padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; }
+.badge-green { background: var(--green-bg); color: var(--green); border:1px solid rgba(34,197,94,0.3); }
+.badge-red { background: var(--red-bg); color: var(--red); border:1px solid rgba(239,68,68,0.3); }
+.badge-amber { background: var(--amber-bg); color: var(--amber); border:1px solid rgba(245,158,11,0.3); }
+.badge-blue { background: rgba(59,130,246,0.12); color: var(--accent); border:1px solid rgba(59,130,246,0.3); }
+.badge-purple { background: rgba(168,85,247,0.12); color: var(--purple); border:1px solid rgba(168,85,247,0.3); }
+
+/* Navigation tabs */
+.nav {
+  display:flex; gap:0; border-bottom:1px solid var(--border);
+  background: var(--bg-card); overflow-x:auto;
+}
+.nav button {
+  padding:10px 18px; border:none; background:transparent; color: var(--text-dim);
+  cursor:pointer; font-family:inherit; font-size:12px; font-weight:600;
+  border-bottom:2px solid transparent; white-space:nowrap;
+  transition: all 0.15s;
+}
+.nav button:hover { color: var(--text); background: var(--bg-card-hover); }
+.nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Tab content */
+.tab { display:none; padding:16px 20px; }
+.tab.active { display:block; }
+
+/* Cards */
+.card {
+  background: var(--bg-card); border:1px solid var(--border);
+  border-radius: var(--radius); padding:14px; margin-bottom:12px;
+  box-shadow: var(--shadow);
+}
+.card-header {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border);
+}
+.card-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color: var(--text-dim); }
+
+/* Grid */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+@media (max-width:900px) { .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr; } }
+
+/* Stats */
+.stat { text-align:center; padding:8px; }
+.stat-value { font-size:24px; font-weight:700; }
+.stat-label { font-size:10px; color: var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }
+
+/* Table */
+.tbl { width:100%; border-collapse:collapse; font-size:12px; }
+.tbl th { text-align:left; padding:8px 10px; color: var(--text-muted); font-weight:600; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:0.5px; }
+.tbl td { padding:7px 10px; border-bottom:1px solid rgba(30,41,59,0.5); }
+.tbl tr:hover { background: var(--bg-card-hover); }
+.tbl .ticker { font-weight:700; color: var(--cyan); }
+.tbl .long { color: var(--green); }
+.tbl .short { color: var(--red); }
+
+/* ========================================================
+   EXPANDABLE SYSTEM — institutional drill-down panels
+   ======================================================== */
+.expandable {
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+}
+.expandable:hover { border-color: var(--accent); }
+.expandable::after {
+  content: '\u25BC';
+  position: absolute; top:14px; right:14px;
+  font-size:10px; color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.expandable.expanded::after { transform: rotate(180deg); }
+.expandable.expanded { border-color: var(--accent); background: var(--bg-card-hover); }
+
+.expand-panel {
+  display: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out;
+}
+.expandable.expanded .expand-panel { display: block; }
+
+@keyframes slideDown {
+  from { opacity:0; transform: translateY(-6px); }
+  to { opacity:1; transform: translateY(0); }
+}
+
+/* Expand sub-sections */
+.expand-section {
+  background: var(--bg-expand);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.expand-section-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--accent); margin-bottom: 6px;
+}
+.expand-kv {
+  display: grid; grid-template-columns: 140px 1fr; gap: 2px 12px;
+  font-size: 11px;
+}
+.expand-kv dt { color: var(--text-muted); }
+.expand-kv dd { color: var(--text); font-weight: 500; }
+
+/* Mini bar chart for expand panels */
+.mini-bar {
+  height: 6px; border-radius: 3px; background: var(--bg-input);
+  overflow: hidden; margin-top: 2px;
+}
+.mini-bar-fill { height:100%; border-radius: 3px; transition: width 0.3s; }
+.mini-bar-fill.green { background: var(--green); }
+.mini-bar-fill.red { background: var(--red); }
+.mini-bar-fill.amber { background: var(--amber); }
+.mini-bar-fill.blue { background: var(--accent); }
+.mini-bar-fill.purple { background: var(--purple); }
+
+/* Inline action buttons */
+.action-btn {
+  padding: 4px 12px; border-radius: 5px;
+  border: 1px solid var(--accent); background: transparent;
+  color: var(--accent); cursor: pointer; font-family: inherit;
+  font-size: 10px; font-weight: 600; transition: all 0.15s;
+}
+.action-btn:hover { background: rgba(59,130,246,0.15); }
+.action-btn.danger { border-color: var(--red); color: var(--red); }
+.action-btn.danger:hover { background: var(--red-bg); }
+.action-btn.success { border-color: var(--green); color: var(--green); }
+.action-btn.success:hover { background: var(--green-bg); }
+
+/* Signal card (play row) — now expandable */
+.play-card {
+  background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius);
+  padding:12px 14px; margin-bottom:8px;
+  transition: border-color 0.15s;
+  cursor: pointer; position: relative;
+}
+.play-card:hover { border-color: var(--accent); }
+.play-card::after {
+  content: '\u25BC'; position: absolute; top:14px; right:14px;
+  font-size:9px; color: var(--text-muted); transition: transform 0.2s;
+}
+.play-card.expanded::after { transform: rotate(180deg); }
+.play-card .play-top { display:flex; align-items:center; gap:14px; }
+.play-rank { font-size:18px; font-weight:700; color: var(--text-muted); min-width:28px; text-align:center; }
+.play-info { flex:1; }
+.play-ticker { font-size:14px; font-weight:700; color: var(--cyan); }
+.play-meta { font-size:11px; color: var(--text-dim); margin-top:2px; }
+.play-levels { display:flex; gap:12px; font-size:11px; flex-wrap:wrap; }
+.play-levels span { padding:2px 6px; border-radius:4px; }
+.play-entry { background: rgba(59,130,246,0.15); color: var(--accent); }
+.play-stop { background: var(--red-bg); color: var(--red); }
+.play-target { background: var(--green-bg); color: var(--green); }
+.play-stars { font-size:14px; min-width:90px; text-align:right; letter-spacing:1px; }
+.play-label { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:600; }
+.label-trade { background: var(--green-bg); color: var(--green); border:1px solid rgba(34,197,94,0.3); }
+.label-watch { background: var(--amber-bg); color: var(--amber); border:1px solid rgba(245,158,11,0.3); }
+.label-intel { background: rgba(168,85,247,0.12); color: var(--purple); border:1px solid rgba(168,85,247,0.3); }
+
+.play-expand {
+  display: none; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out;
+}
+.play-card.expanded .play-expand { display: block; }
+
+/* Intel card — expandable */
+.intel-card {
+  background: var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--purple);
+  border-radius: var(--radius); padding:12px 14px; margin-bottom:8px;
+  cursor:pointer; position:relative; transition: border-color 0.15s;
+}
+.intel-card:hover { border-color: var(--accent); }
+.intel-card::after {
+  content: '\u25BC'; position: absolute; top:14px; right:14px;
+  font-size:9px; color: var(--text-muted); transition: transform 0.2s;
+}
+.intel-card.expanded::after { transform: rotate(180deg); }
+.intel-expand {
+  display: none; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out;
+}
+.intel-card.expanded .intel-expand { display: block; }
+
+/* Drought banner */
+.drought-banner {
+  background: linear-gradient(135deg, rgba(239,68,68,0.15), rgba(245,158,11,0.1));
+  border: 1px solid rgba(239,68,68,0.3); border-radius: var(--radius);
+  padding:14px 18px; margin-bottom:14px; cursor:pointer; position:relative;
+}
+.drought-banner::after {
+  content: '\u25BC'; position: absolute; top:14px; right:14px;
+  font-size:9px; color: var(--red); transition: transform 0.2s;
+}
+.drought-banner.expanded::after { transform: rotate(180deg); }
+.drought-title { color: var(--red); font-weight:700; font-size:13px; margin-bottom:6px; }
+.drought-expand {
+  display: none; margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid rgba(239,68,68,0.2);
+  animation: slideDown 0.2s ease-out;
+}
+.drought-banner.expanded .drought-expand { display: block; }
+
+/* File item — expandable */
+.file-item {
+  display:flex; align-items:center; gap:10px; padding:8px 12px;
+  border-bottom:1px solid rgba(30,41,59,0.5); font-size:12px;
+  cursor:pointer; transition: background 0.15s; position:relative;
+}
+.file-item:hover { background: var(--bg-card-hover); }
+.file-item::after {
+  content: '\u25BC'; font-size:8px; color: var(--text-muted); transition: transform 0.2s;
+}
+.file-item.expanded::after { transform: rotate(180deg); }
+.file-icon { font-size:16px; min-width:20px; text-align:center; }
+.file-name { flex:1; font-weight:500; }
+.file-size { color: var(--text-muted); min-width:60px; text-align:right; }
+.file-time { color: var(--text-muted); min-width:80px; text-align:right; font-size:11px; }
+.file-expand {
+  display: none; padding: 10px 12px 10px 40px;
+  background: var(--bg-expand); border-bottom: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out; max-height: 300px; overflow-y: auto;
+}
+.file-expand.show { display: block; }
+.file-expand pre {
+  font-size: 11px; color: var(--text-dim); white-space: pre-wrap;
+  word-break: break-all; line-height: 1.5;
+}
+
+/* Scheduler row — expandable */
+.sched-row {
+  display:flex; align-items:center; gap:12px; padding:8px 12px;
+  border-bottom:1px solid rgba(30,41,59,0.5);
+  cursor:pointer; transition: background 0.15s;
+}
+.sched-row:hover { background: var(--bg-card-hover); }
+.sched-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.sched-dot.pass { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.sched-dot.fail { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.sched-dot.pending { background: var(--text-muted); }
+.sched-name { flex:1; font-weight:500; }
+.sched-time { color: var(--text-muted); font-size:11px; min-width:100px; }
+.sched-expand {
+  display: none; padding: 8px 12px 8px 32px;
+  background: var(--bg-expand); border-bottom: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out;
+}
+.sched-expand.show { display: block; }
+
+/* Gate funnel visualization */
+.funnel { display:flex; flex-direction:column; gap:4px; }
+.funnel-bar { display:flex; align-items:center; gap:8px; cursor:pointer; padding:2px 0; border-radius:4px; }
+.funnel-bar:hover { background: var(--bg-card-hover); }
+.funnel-label { min-width:110px; font-size:11px; color: var(--text-dim); text-align:right; }
+.funnel-track { flex:1; height:22px; background: var(--bg-input); border-radius:4px; overflow:hidden; position:relative; }
+.funnel-fill { height:100%; border-radius:4px; transition: width 0.5s; display:flex; align-items:center; justify-content:flex-end; padding-right:6px; font-size:10px; font-weight:700; }
+.funnel-fill.fill-blue { background: linear-gradient(90deg, var(--accent), #60a5fa); color: #fff; }
+.funnel-fill.fill-green { background: linear-gradient(90deg, #16a34a, var(--green)); color: #fff; }
+.funnel-fill.fill-amber { background: linear-gradient(90deg, #d97706, var(--amber)); color: #fff; }
+.funnel-detail {
+  display:none; padding: 8px 12px; margin: 2px 0 6px 118px;
+  background: var(--bg-expand); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; animation: slideDown 0.2s ease-out;
+}
+.funnel-detail.show { display: block; }
+
+/* Spinner */
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color: var(--accent); border-radius:50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Pulse */
+.pulse { animation: pulse-glow 2s ease-in-out infinite; }
+@keyframes pulse-glow { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+
+/* Toast */
+.toast { position:fixed; bottom:20px; right:20px; padding:10px 18px; border-radius:var(--radius); font-size:12px; z-index:1000; opacity:0; transition: opacity 0.3s; max-width:400px; }
+.toast.show { opacity:1; }
+.toast-info { background: var(--accent); color: #fff; }
+.toast-error { background: var(--red); color: #fff; }
+.toast-success { background: var(--green); color: #fff; }
+
+/* Telegram button */
+.tg-btn {
+  display:inline-flex; align-items:center; gap:6px;
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid #229ED9; background: rgba(34,158,217,0.12);
+  color: #229ED9; cursor:pointer; font-family:inherit;
+  font-weight:600; font-size:11px; transition: all 0.15s;
+}
+.tg-btn:hover { background: rgba(34,158,217,0.25); }
+
+/* JSON viewer */
+.json-viewer {
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px; max-height: 250px;
+  overflow-y: auto; font-size: 11px; line-height: 1.5;
+}
+.json-key { color: var(--cyan); }
+.json-str { color: var(--green); }
+.json-num { color: var(--amber); }
+.json-bool { color: var(--purple); }
+.json-null { color: var(--text-muted); }
+
+/* Tier badges */
+.tier-badge {
+  padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 700;
+  letter-spacing: 0.5px; text-transform: uppercase;
+}
+.tier-core { background: rgba(6,182,212,0.15); color: var(--cyan); border: 1px solid rgba(6,182,212,0.3); }
+.tier-peer { background: rgba(168,85,247,0.15); color: var(--purple); border: 1px solid rgba(168,85,247,0.3); }
+.tier-scan { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+
+/* Peer card */
+.peer-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--purple);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px;
+  cursor: pointer; position: relative; transition: border-color 0.15s;
+}
+.peer-card:hover { border-color: var(--accent); }
+.peer-card::after {
+  content: '\u25BC'; position: absolute; top: 14px; right: 14px;
+  font-size: 9px; color: var(--text-muted); transition: transform 0.2s;
+}
+.peer-card.expanded::after { transform: rotate(180deg); }
+.peer-expand {
+  display: none; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--border); animation: slideDown 0.2s ease-out;
+}
+.peer-card.expanded .peer-expand { display: block; }
+
+/* Universe badge group */
+.universe-badges { display: flex; gap: 6px; align-items: center; }
+.universe-badge {
+  padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.ub-core { background: rgba(6,182,212,0.12); color: var(--cyan); border: 1px solid rgba(6,182,212,0.25); }
+.ub-peer { background: rgba(168,85,247,0.12); color: var(--purple); border: 1px solid rgba(168,85,247,0.25); }
+.ub-scan { background: rgba(245,158,11,0.12); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
+
+/* Sub-section header */
+.section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card-hover) 100%);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.section-header h3 { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+.section-header .subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>NZT</span>-48 WAR ROOM</h1>
+  <div class="header-badges">
+    <span id="healthBadge" class="badge badge-blue">LOADING</span>
+    <span id="regimeBadge" class="badge badge-blue">-</span>
+    <span id="modeBadge" class="badge badge-green">PAPER</span>
+    <div class="universe-badges">
+      <span id="ubCore" class="universe-badge ub-core">C:12</span>
+      <span id="ubPeer" class="universe-badge ub-peer">P:--</span>
+      <span id="ubScan" class="universe-badge ub-scan">S:--</span>
+    </div>
+    <span id="tickBadge" class="badge badge-blue">tick: 0</span>
+    <button class="tg-btn" onclick="sendPDFsToTelegram()" title="Send all 3 PDFs to Telegram">TG PDFs</button>
+  </div>
+</div>
+
+<div class="nav" id="nav">
+  <button class="active" data-tab="plays">CORE PLAYS</button>
+  <button data-tab="peers">PEERS (+50%)</button>
+  <button data-tab="intel">MARKET INTEL</button>
+  <button data-tab="risk">RISK COCKPIT</button>
+  <button data-tab="explain">EXPLAINABILITY</button>
+  <button data-tab="files">FILES & PDFs</button>
+  <button data-tab="scheduler">SCHEDULER</button>
+  <button data-tab="ai">AI ENGINE</button>
+  <button data-tab="copilot">COPILOT</button>
+</div>
+
+<!-- TAB 1: TOP PLAYS + DROUGHT -->
+<div class="tab active" id="tab-plays">
+  <div class="grid-4" id="statsRow">
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="strict">
+      <div class="stat"><div class="stat-value" id="statStrict">-</div><div class="stat-label">STRICT</div></div>
+      <div class="expand-panel" id="detail-strict"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="fallback">
+      <div class="stat"><div class="stat-value" id="statFallback">-</div><div class="stat-label">WATCH</div></div>
+      <div class="expand-panel" id="detail-fallback"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="total">
+      <div class="stat"><div class="stat-value" id="statTotal">-</div><div class="stat-label">TOTAL</div></div>
+      <div class="expand-panel" id="detail-total"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="session">
+      <div class="stat"><div class="stat-value" id="statSession">-</div><div class="stat-label">SESSION</div></div>
+      <div class="expand-panel" id="detail-session"></div>
+    </div>
+  </div>
+  <div id="droughtBanner"></div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Decision Stack</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="playsUpdated" class="badge badge-blue">-</span>
+        <button class="action-btn" onclick="loadPlays()">REFRESH</button>
+      </div>
+    </div>
+    <div id="playsList"></div>
+  </div>
+</div>
+
+<!-- TAB 2: PEERS (+50%) -->
+<div class="tab" id="tab-peers">
+  <div class="section-header">
+    <div>
+      <h3 style="display:flex;align-items:center;gap:10px;">
+        <span class="tier-badge tier-peer">PEER</span> Peer Universe (+50% Expansion)
+        <span id="peerCountBadge" class="badge badge-purple">--</span>
+      </h3>
+      <div class="subtitle">Similar instruments to CORE. WATCH/INTEL only &mdash; not trade-eligible.</div>
+    </div>
+    <button class="action-btn" onclick="loadPeers()">REFRESH</button>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Peer Plays</span>
+      <span id="peerPlaysCount" class="badge badge-purple">0 plays</span>
+    </div>
+    <div id="peerPlaysList"></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Peer Registry</span>
+      <span id="peerRegistryCount" class="badge badge-purple">0 peers</span>
+    </div>
+    <div id="peerRegistryList"></div>
+  </div>
+</div>
+
+<!-- TAB 3: MARKET INTEL -->
+<div class="tab" id="tab-intel">
+  <div class="card" style="margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:12px;padding:4px 0;">
+      <span class="universe-badge ub-core" id="intelUbCore">CORE: 12</span>
+      <span class="universe-badge ub-peer" id="intelUbPeer">PEERS: --</span>
+      <span class="universe-badge ub-scan" id="intelUbScan">FULL_SCAN: --</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Full Scan Highlights</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="fullScanCount" class="badge badge-amber">0 items</span>
+        <button class="action-btn" onclick="loadFullScan()">REFRESH</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">Extended universe tickers from full daily scan. Informational only &mdash; not in CORE or PEER tier.</p>
+    <div id="fullScanList"></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Extended Universe Intel Feed</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="intelCount" class="badge badge-purple">0 items</span>
+        <button class="action-btn" onclick="loadIntel()">REFRESH</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">Context instruments (NOT tradable in ISA). Click any card to drill down into full technicals.</p>
+    <div id="intelList"></div>
+  </div>
+</div>
+
+<!-- TAB 4: RISK COCKPIT -->
+<div class="tab" id="tab-risk">
+  <div class="grid-2">
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="health">
+      <div class="card-header"><span class="card-title">Data Health</span><span id="dhBadge" class="badge badge-blue">-</span></div>
+      <div class="grid-3" id="dhStats">
+        <div class="stat"><div class="stat-value" id="dhPass">-</div><div class="stat-label">PASS</div></div>
+        <div class="stat"><div class="stat-value" id="dhWarn">-</div><div class="stat-label">WARN</div></div>
+        <div class="stat"><div class="stat-value" id="dhFail">-</div><div class="stat-label">FAIL</div></div>
+      </div>
+      <div id="dhWarnings" style="margin-top:8px;font-size:11px;color:var(--text-dim)"></div>
+      <div class="expand-panel" id="detail-health"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="riskofficer">
+      <div class="card-header"><span class="card-title">Risk Officer</span></div>
+      <div class="grid-3" id="roStats">
+        <div class="stat"><div class="stat-value" id="roApprove">-</div><div class="stat-label">APPROVE</div></div>
+        <div class="stat"><div class="stat-value" id="roDownsize">-</div><div class="stat-label">DOWNSIZE</div></div>
+        <div class="stat"><div class="stat-value" id="roVeto">-</div><div class="stat-label">VETO</div></div>
+      </div>
+      <div class="expand-panel" id="detail-riskofficer"></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="allocation">
+      <div class="card-header"><span class="card-title">Capital Allocation</span></div>
+      <div id="allocationSummary" style="font-size:12px;color:var(--text-dim);">Click to load...</div>
+      <div class="expand-panel" id="detail-allocation"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="calibration">
+      <div class="card-header"><span class="card-title">Calibration</span></div>
+      <div id="calibrationSummary" style="font-size:12px;color:var(--text-dim);">Click to load...</div>
+      <div class="expand-panel" id="detail-calibration"></div>
+    </div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="halt">
+    <div class="card-header"><span class="card-title">Halt Control</span></div>
+    <div style="display:flex;align-items:center;gap:14px;">
+      <span id="haltStatus" style="font-weight:700;">ACTIVE</span>
+      <button id="haltBtn" onclick="event.stopPropagation();toggleHalt()" class="action-btn danger">HALT</button>
+    </div>
+    <div class="expand-panel" id="detail-halt"></div>
+  </div>
+</div>
+
+<!-- TAB 5: EXPLAINABILITY -->
+<div class="tab" id="tab-explain">
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="strategies">
+    <div class="card-header"><span class="card-title">Strategy Router</span><span id="stratCount" class="badge badge-blue">-</span></div>
+    <div id="strategySummary" style="font-size:12px;color:var(--text-dim);">Click to expand active/inactive strategies...</div>
+    <div class="expand-panel" id="detail-strategies"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Gate Funnel</span><span class="badge badge-blue" style="font-size:10px;">Click any gate for breakdown</span></div>
+    <div id="funnelViz" class="funnel"></div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="drought">
+    <div class="card-header"><span class="card-title">Drought Cockpit</span><span id="droughtFlag" class="badge badge-blue">-</span></div>
+    <div id="droughtSummary" style="font-size:12px;color:var(--text-dim);"></div>
+    <div class="expand-panel" id="detail-drought"></div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="blockers">
+    <div class="card-header"><span class="card-title">Top Blockers</span></div>
+    <div id="blockersList"></div>
+    <div class="expand-panel" id="detail-blockers"></div>
+  </div>
+</div>
+
+<!-- TAB 6: FILES & PDFs -->
+<div class="tab" id="tab-files">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Generated Files</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="fileCount" class="badge badge-blue">-</span>
+        <button class="tg-btn" onclick="sendPDFsToTelegram()">SEND PDFs TO TELEGRAM</button>
+        <button class="action-btn" onclick="loadFiles()">REFRESH</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">Click any file to preview contents. JSON files render inline; PDFs open in new tab.</p>
+    <div id="filesList"></div>
+  </div>
+</div>
+
+<!-- TAB 7: SCHEDULER -->
+<div class="tab" id="tab-scheduler">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Scheduled Jobs</span>
+      <button class="action-btn" onclick="loadScheduler()">REFRESH</button>
+    </div>
+    <div id="schedulerList"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Session Status</span></div>
+    <div id="sessionStatusList"></div>
+  </div>
+</div>
+
+<!-- TAB 8: AI ENGINE -->
+<div class="tab" id="tab-ai">
+  <div class="grid-2">
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="signallog">
+      <div class="card-header"><span class="card-title">Signal Log</span></div>
+      <div class="grid-3" id="sigLogStats">
+        <div class="stat"><div class="stat-value" id="slTotal">-</div><div class="stat-label">TOTAL</div></div>
+        <div class="stat"><div class="stat-value" id="slPending">-</div><div class="stat-label">PENDING</div></div>
+        <div class="stat"><div class="stat-value" id="slResolved">-</div><div class="stat-label">RESOLVED</div></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;">
+        <button onclick="event.stopPropagation();resolveOutcomes()" class="action-btn">RESOLVE NOW</button>
+        <button onclick="event.stopPropagation();rebuildEdgeLedger()" class="action-btn">REBUILD LEDGER</button>
+      </div>
+      <div class="expand-panel" id="detail-signallog"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="edgemap">
+      <div class="card-header"><span class="card-title">Edge Map</span></div>
+      <div id="edgeMapSummary" style="font-size:12px;color:var(--text-dim);">Click to load full edge map...</div>
+      <div class="expand-panel" id="detail-edgemap"></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="drift">
+      <div class="card-header"><span class="card-title">Drift Detection</span><span id="driftBadge" class="badge badge-blue">-</span></div>
+      <div id="driftSummary" style="font-size:12px;color:var(--text-dim);">Click to check drift status...</div>
+      <div class="expand-panel" id="detail-drift"></div>
+    </div>
+    <div class="card expandable" onclick="toggleExpand(this)" data-detail="metaweights">
+      <div class="card-header"><span class="card-title">Meta-Learner Weights</span></div>
+      <div id="metaSummary" style="font-size:12px;color:var(--text-dim);">Click to load strategy weights...</div>
+      <div class="expand-panel" id="detail-metaweights"></div>
+    </div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="expectancy">
+    <div class="card-header"><span class="card-title">AI Expectancy</span></div>
+    <div id="aiExpectancy"><span style="color:var(--text-muted)">Click to load expectancy model...</span></div>
+    <div class="expand-panel" id="detail-expectancy"></div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="execquality">
+    <div class="card-header"><span class="card-title">Execution Quality</span></div>
+    <div id="execSummary" style="font-size:12px;color:var(--text-dim);">Click to load execution quality records...</div>
+    <div class="expand-panel" id="detail-execquality"></div>
+  </div>
+  <div class="card expandable" onclick="toggleExpand(this)" data-detail="outcomes">
+    <div class="card-header"><span class="card-title">Recent Outcomes</span></div>
+    <div id="outcomesSummary" style="font-size:12px;color:var(--text-dim);">Click to load recent resolved outcomes...</div>
+    <div class="expand-panel" id="detail-outcomes"></div>
+  </div>
+</div>
+
+<!-- TAB 9: COPILOT -->
+<div class="tab" id="tab-copilot">
+  <div class="card" style="height:calc(100vh - 200px);display:flex;flex-direction:column;">
+    <div class="card-header">
+      <span class="card-title">OPERATOR COPILOT</span>
+      <span class="badge badge-blue" id="copilotConfBadge" style="display:none;">—</span>
+    </div>
+    <!-- Quick actions -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+      <button class="action-btn" onclick="sendCopilotQuery('Run a full CORE scan and summarise top trades','CORE')">Scan now (CORE)</button>
+      <button class="action-btn" onclick="sendCopilotQuery('Run OPPORTUNITY scan — best 2% candidates','OPPORTUNITY')">Scan now (OPPORTUNITY)</button>
+      <button class="action-btn" onclick="sendCopilotQuery('Explain the top-ranked signal in detail','ALL')">Explain selected signal</button>
+      <button class="action-btn" onclick="sendCopilotQuery('System health summary — scan SLA, engine, errors','ALL')">System health summary</button>
+      <button class="action-btn" onclick="sendCopilotQuery('Show closest misses — signals that almost qualified','ALL')">Closest misses</button>
+      <button class="action-btn" onclick="sendCopilotQuery('What changed since the last scan?','ALL')">What changed?</button>
+    </div>
+    <!-- Chat area -->
+    <div id="copilotChat" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;background:var(--bg-card);display:flex;flex-direction:column;gap:8px;">
+      <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Ask the copilot anything about your trading system. Read-only — cannot place orders.</div>
+    </div>
+    <!-- Input -->
+    <div style="display:flex;gap:8px;">
+      <input id="copilotInput" type="text" placeholder="Ask the copilot..." style="flex:1;background:var(--bg-main);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;" onkeydown="if(event.key==='Enter')sendCopilotFromInput()">
+      <button class="action-btn" onclick="sendCopilotFromInput()" style="padding:8px 16px;">SEND</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CORE: Tab switching, keyboard, API, utilities
+// ============================================================
+document.querySelectorAll('.nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    loadTabData(btn.dataset.tab);
+  });
+});
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const tabs = ['plays','peers','intel','risk','explain','files','scheduler','ai','copilot'];
+  const n = parseInt(e.key);
+  if (n >= 1 && n <= 8) document.querySelectorAll('.nav button')[n-1].click();
+  if (e.key === 'r') refresh();
+  if (e.key === 'Escape') {
+    // Collapse all expanded panels
+    document.querySelectorAll('.expanded').forEach(el => el.classList.remove('expanded'));
+    document.querySelectorAll('.funnel-detail.show,.file-expand.show,.sched-expand.show').forEach(el => el.classList.remove('show'));
+  }
+});
+
+async function api(path) {
+  try { const r = await fetch(path); return await r.json(); }
+  catch(e) { console.error(path, e); return null; }
+}
+
+function fmtTime(iso) {
+  if (!iso) return '-';
+  try { return new Date(iso).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  catch { return iso.slice(11,19); }
+}
+
+function fmtDate(iso) {
+  if (!iso) return '-';
+  try { return new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+  catch { return iso; }
+}
+
+function toast(msg, type='info') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type} show`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function pct(v, max) { return Math.max(3, Math.min(100, (v / Math.max(max,1)) * 100)); }
+
+function jsonHighlight(obj, indent=0) {
+  if (obj === null) return '<span class="json-null">null</span>';
+  if (typeof obj === 'boolean') return `<span class="json-bool">${obj}</span>`;
+  if (typeof obj === 'number') return `<span class="json-num">${obj}</span>`;
+  if (typeof obj === 'string') return `<span class="json-str">"${escHtml(obj.length > 120 ? obj.slice(0,120)+'...' : obj)}"</span>`;
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return '[]';
+    const pad = '  '.repeat(indent+1);
+    return '[\n' + obj.slice(0,20).map(v => pad + jsonHighlight(v, indent+1)).join(',\n') + (obj.length > 20 ? ',\n' + pad + `... (${obj.length - 20} more)` : '') + '\n' + '  '.repeat(indent) + ']';
+  }
+  if (typeof obj === 'object') {
+    const keys = Object.keys(obj);
+    if (keys.length === 0) return '{}';
+    const pad = '  '.repeat(indent+1);
+    return '{\n' + keys.slice(0,30).map(k => pad + `<span class="json-key">"${escHtml(k)}"</span>: ${jsonHighlight(obj[k], indent+1)}`).join(',\n') + (keys.length > 30 ? ',\n' + pad + `... (${keys.length - 30} more keys)` : '') + '\n' + '  '.repeat(indent) + '}';
+  }
+  return String(obj);
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ============================================================
+// EXPANDABLE SYSTEM
+// ============================================================
+function toggleExpand(el) {
+  const wasExpanded = el.classList.contains('expanded');
+  el.classList.toggle('expanded');
+  if (!wasExpanded) {
+    const detail = el.dataset.detail;
+    if (detail) loadDetail(detail);
+  }
+}
+
+// Cache for loaded data to avoid re-fetching on collapse/expand
+const _detailCache = {};
+
+async function loadDetail(key) {
+  const panel = document.getElementById('detail-' + key);
+  if (!panel) return;
+
+  // Show loading
+  if (!_detailCache[key]) {
+    panel.innerHTML = '<div style="padding:8px;"><span class="spinner"></span> Loading institutional analysis...</div>';
+  }
+
+  switch(key) {
+    case 'strict': await loadDetailStrict(panel); break;
+    case 'fallback': await loadDetailFallback(panel); break;
+    case 'total': await loadDetailTotal(panel); break;
+    case 'session': await loadDetailSession(panel); break;
+    case 'health': await loadDetailHealth(panel); break;
+    case 'riskofficer': await loadDetailRiskOfficer(panel); break;
+    case 'allocation': await loadDetailAllocation(panel); break;
+    case 'calibration': await loadDetailCalibration(panel); break;
+    case 'halt': await loadDetailHalt(panel); break;
+    case 'strategies': await loadDetailStrategies(panel); break;
+    case 'drought': await loadDetailDrought(panel); break;
+    case 'blockers': await loadDetailBlockers(panel); break;
+    case 'signallog': await loadDetailSignalLog(panel); break;
+    case 'edgemap': await loadDetailEdgeMap(panel); break;
+    case 'drift': await loadDetailDrift(panel); break;
+    case 'metaweights': await loadDetailMetaWeights(panel); break;
+    case 'expectancy': await loadDetailExpectancy(panel); break;
+    case 'execquality': await loadDetailExecQuality(panel); break;
+    case 'outcomes': await loadDetailOutcomes(panel); break;
+  }
+}
+
+// ============================================================
+// DETAIL LOADERS — institutional-grade drill-downs
+// ============================================================
+
+async function loadDetailStrict(panel) {
+  const d = await api('/api/plays');
+  if (!d) { panel.innerHTML = '<div style="color:var(--text-muted)">No data</div>'; return; }
+  const strict = d.plays.filter(p => p.label === 'STRICT');
+  let html = `<div class="expand-section"><div class="expand-section-title">Strict Signal Breakdown</div>`;
+  html += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${strict.length} signals passed all gates at strict thresholds (RVOL >= 0.8, ATR >= 1.0%, R:R >= 1.5)</div>`;
+  if (strict.length > 0) {
+    html += `<table class="tbl"><tr><th>Ticker</th><th>Dir</th><th>R:R</th><th>ATR%</th><th>RVOL</th><th>Composite</th><th>Setup</th><th>Factor</th></tr>`;
+    strict.forEach(p => {
+      html += `<tr><td class="ticker">${p.ticker}</td><td class="${p.direction==='LONG'?'long':'short'}">${p.direction}</td><td>${(p.rr||0).toFixed(2)}</td><td>${(p.atr_pct||0).toFixed(2)}%</td><td>${p.rvol !== null ? p.rvol.toFixed(2) : 'N/A'}</td><td style="font-weight:700;color:var(--accent)">${(p.score||0).toFixed(0)}</td><td>${p.setup_type}</td><td>${p.factor_group}</td></tr>`;
+    });
+    html += `</table>`;
+  } else {
+    html += `<div style="color:var(--amber);padding:6px;">No strict signals. All current signals are WATCH/fallback.</div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailFallback(panel) {
+  const d = await api('/api/plays');
+  if (!d) { panel.innerHTML = '<div style="color:var(--text-muted)">No data</div>'; return; }
+  const watch = d.plays.filter(p => p.label !== 'STRICT');
+  let html = `<div class="expand-section"><div class="expand-section-title">Watch/Fallback Signal Analysis</div>`;
+  html += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${watch.length} signals from relaxed gates. These are WATCH-only (do not trade without confirmation).</div>`;
+  if (watch.length > 0) {
+    html += `<table class="tbl"><tr><th>Ticker</th><th>Dir</th><th>R:R</th><th>ATR%</th><th>RVOL</th><th>Score</th><th>Why Fallback</th></tr>`;
+    watch.forEach(p => {
+      const reasons = (p.reasons||[]).join('; ') || 'Relaxed thresholds';
+      html += `<tr><td class="ticker">${p.ticker}</td><td class="${p.direction==='LONG'?'long':'short'}">${p.direction}</td><td>${(p.rr||0).toFixed(2)}</td><td>${(p.atr_pct||0).toFixed(2)}%</td><td>${p.rvol !== null ? p.rvol.toFixed(2) : 'N/A'}</td><td>${(p.score||0).toFixed(0)}</td><td style="font-size:10px;max-width:200px;overflow:hidden;">${escHtml(reasons)}</td></tr>`;
+    });
+    html += `</table>`;
+  } else {
+    html += `<div style="color:var(--green);padding:6px;">All signals are strict quality. No fallbacks needed.</div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailTotal(panel) {
+  const [d, f] = await Promise.all([api('/api/plays'), api('/api/funnel')]);
+  let html = `<div class="expand-section"><div class="expand-section-title">Signal Pipeline Summary</div>`;
+  if (f) {
+    html += `<dl class="expand-kv">
+      <dt>Universe Tracked</dt><dd>${f.tracked}</dd>
+      <dt>Data Valid</dt><dd>${f.data_valid}</dd>
+      <dt>Passed All Gates</dt><dd>${f.passed_all_gates}</dd>
+      <dt>Strict Signals</dt><dd>${f.signals_strict}</dd>
+      <dt>Fallback Signals</dt><dd>${f.signals_fallback}</dd>
+      <dt>Total Output</dt><dd style="font-weight:700;color:var(--accent)">${f.total}</dd>
+    </dl>`;
+    const convRate = f.tracked > 0 ? ((f.total / f.tracked) * 100).toFixed(1) : '0.0';
+    html += `<div style="margin-top:8px;font-size:11px;">Conversion rate: <strong style="color:var(--accent)">${convRate}%</strong> of universe produced signals</div>`;
+  }
+  if (d && d.plays.length > 0) {
+    const groups = {};
+    d.plays.forEach(p => { groups[p.factor_group] = (groups[p.factor_group]||0)+1; });
+    html += `<div style="margin-top:8px;"><div class="expand-section-title">Factor Group Distribution</div>`;
+    Object.entries(groups).sort((a,b)=>b[1]-a[1]).forEach(([g,c]) => {
+      html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;"><span style="min-width:120px;font-size:11px;color:var(--text-dim)">${g}</span><div class="mini-bar" style="flex:1"><div class="mini-bar-fill blue" style="width:${pct(c,d.plays.length)}%"></div></div><span style="font-size:11px;font-weight:700">${c}</span></div>`;
+    });
+    html += `</div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailSession(panel) {
+  const [d, ss] = await Promise.all([api('/api/state'), api('/api/session_status')]);
+  let html = `<div class="expand-section"><div class="expand-section-title">Session Intelligence</div>`;
+  if (d) {
+    html += `<dl class="expand-kv">
+      <dt>Current Session</dt><dd>${d.market?.session_name || '-'}</dd>
+      <dt>Regime</dt><dd>${d.market?.regime || '-'}</dd>
+      <dt>Regime Confidence</dt><dd>${(d.market?.regime_confidence || 0).toFixed(2)}</dd>
+      <dt>Tick Count</dt><dd>${d.tick_count || 0}</dd>
+      <dt>Halt Active</dt><dd style="color:${d.halt_new_signals?'var(--red)':'var(--green)'}">${d.halt_new_signals?'YES':'NO'}</dd>
+    </dl>`;
+  }
+  if (ss && ss.jobs) {
+    html += `<div style="margin-top:8px;"><div class="expand-section-title">All Session Runs</div>`;
+    html += `<table class="tbl"><tr><th>Session</th><th>Status</th><th>Artifacts</th><th>PDF</th><th>Time</th><th>Error</th></tr>`;
+    ss.jobs.forEach(j => {
+      html += `<tr><td>${j.session}</td><td><span class="badge ${j.status==='PASS'?'badge-green':j.status==='FAIL'?'badge-red':'badge-amber'}">${j.status}</span></td><td>${j.artifacts_written?'YES':'NO'}</td><td>${j.pdf_written?'YES':'NO'}</td><td>${fmtTime(j.timestamp)}</td><td style="color:var(--red);font-size:10px;">${escHtml((j.error_msg||'').slice(0,60))}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailHealth(panel) {
+  const h = await api('/api/health');
+  if (!h) { panel.innerHTML = '<div style="color:var(--text-muted)">No data</div>'; return; }
+  let html = `<div class="expand-section"><div class="expand-section-title">Data Health Deep Dive</div>`;
+  html += `<dl class="expand-kv">
+    <dt>Overall Badge</dt><dd><span class="badge ${h.badge==='GREEN'?'badge-green':h.badge==='RED'?'badge-red':'badge-amber'}">${h.badge}</span></dd>
+    <dt>Tickers Passing</dt><dd style="color:var(--green)">${h.pass}</dd>
+    <dt>Tickers Warning</dt><dd style="color:var(--amber)">${h.warn}</dd>
+    <dt>Tickers Failing</dt><dd style="color:var(--red)">${h.fail}</dd>
+    <dt>Total Checked</dt><dd>${h.pass + h.warn + h.fail}</dd>
+  </dl>`;
+  if (h.failed_tickers && h.failed_tickers.length > 0) {
+    html += `<div style="margin-top:8px;"><div class="expand-section-title" style="color:var(--red)">Failed Tickers</div>`;
+    h.failed_tickers.forEach(t => { html += `<span class="badge badge-red" style="margin:2px 4px 2px 0;">${typeof t === 'string' ? t : t.ticker || JSON.stringify(t)}</span>`; });
+    html += `</div>`;
+  }
+  if (h.warnings && h.warnings.length > 0) {
+    html += `<div style="margin-top:8px;"><div class="expand-section-title" style="color:var(--amber)">Warnings</div>`;
+    h.warnings.forEach(w => { html += `<div style="padding:3px 0;font-size:11px;color:var(--text-dim);">- ${escHtml(w)}</div>`; });
+    html += `</div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailRiskOfficer(panel) {
+  const ro = await api('/api/risk_officer');
+  if (!ro) { panel.innerHTML = '<div style="color:var(--text-muted)">No data</div>'; return; }
+  let html = `<div class="expand-section"><div class="expand-section-title">Risk Officer Full Report</div>`;
+  html += `<div class="json-viewer"><pre>${jsonHighlight(ro)}</pre></div>`;
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailAllocation(panel) {
+  const a = await api('/api/allocation');
+  if (!a) { panel.innerHTML = '<div style="color:var(--text-muted)">No allocation data</div>'; return; }
+  document.getElementById('allocationSummary').textContent = 'Loaded - expand to see details';
+  let html = `<div class="expand-section"><div class="expand-section-title">Capital Allocation Weights</div>`;
+  html += `<div class="json-viewer"><pre>${jsonHighlight(a)}</pre></div>`;
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailCalibration(panel) {
+  const c = await api('/api/calibration');
+  if (!c) { panel.innerHTML = '<div style="color:var(--text-muted)">No calibration data</div>'; return; }
+  document.getElementById('calibrationSummary').textContent = c.note || 'Loaded';
+  let html = `<div class="expand-section"><div class="expand-section-title">R:R Breakeven Table</div>`;
+  if (c.rr_breakeven_table) {
+    html += `<table class="tbl"><tr><th>Risk:Reward</th><th>Win Rate Required</th><th>Visual</th></tr>`;
+    c.rr_breakeven_table.forEach(r => {
+      html += `<tr><td style="font-weight:700">${r.rr.toFixed(1)}</td><td>${r.win_rate_required_pct.toFixed(1)}%</td><td><div class="mini-bar" style="width:120px"><div class="mini-bar-fill amber" style="width:${r.win_rate_required_pct}%"></div></div></td></tr>`;
+    });
+    html += `</table>`;
+  }
+  if (c.suggestions && c.suggestions.length > 0) {
+    html += `<div style="margin-top:10px;"><div class="expand-section-title">AI Calibration Suggestions</div>`;
+    c.suggestions.forEach(s => {
+      html += `<div style="padding:6px 10px;background:var(--bg-input);border-radius:6px;margin-bottom:4px;font-size:11px;">${jsonHighlight(s)}</div>`;
+    });
+    html += `</div>`;
+  }
+  if (c.attribution_summary && Object.keys(c.attribution_summary).length > 0) {
+    html += `<div style="margin-top:10px;"><div class="expand-section-title">Attribution Summary</div>`;
+    html += `<div class="json-viewer"><pre>${jsonHighlight(c.attribution_summary)}</pre></div></div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailHalt(panel) {
+  const [h, s] = await Promise.all([api('/api/halt'), api('/api/state')]);
+  let html = `<div class="expand-section"><div class="expand-section-title">Halt Control System</div>`;
+  html += `<dl class="expand-kv">
+    <dt>Current State</dt><dd style="color:${h?.halt_new_signals?'var(--red)':'var(--green)'}; font-weight:700">${h?.halt_new_signals?'HALTED':'ACTIVE'}</dd>
+    <dt>Tick Count</dt><dd>${s?.tick_count || 0}</dd>
+    <dt>Mode</dt><dd>PAPER</dd>
+  </dl>`;
+  html += `<div style="margin-top:8px;font-size:11px;color:var(--text-dim);">
+    Halt prevents new signal generation. Existing signals remain active.
+    Use HALT during high-impact events (FOMC, NFP, earnings) or system issues.
+  </div>`;
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailStrategies(panel) {
+  const s = await api('/api/strategies');
+  if (!s) { panel.innerHTML = '<div style="color:var(--text-muted)">No strategy data</div>'; return; }
+  document.getElementById('stratCount').textContent = `${(s.active||[]).length} active / ${(s.inactive||[]).length} inactive`;
+  let html = '';
+
+  html += `<div class="expand-section"><div class="expand-section-title">Regime & Context</div>`;
+  html += `<dl class="expand-kv">
+    <dt>Regime Tag</dt><dd><span class="badge ${s.regime_tag?.includes('BULL')?'badge-green':s.regime_tag?.includes('BEAR')?'badge-red':'badge-blue'}">${s.regime_tag}</span></dd>
+    <dt>Confidence</dt><dd>${(s.regime_confidence||0).toFixed(2)}</dd>
+    <dt>Time of Day</dt><dd>${s.time_of_day || '-'}</dd>
+    <dt>Sizing Mode</dt><dd>${s.sizing_mode || '-'}</dd>
+    <dt>Kill Switch</dt><dd style="color:${s.kill_switch?'var(--red)':'var(--green)'};">${s.kill_switch?'ACTIVE':'OFF'}</dd>
+    <dt>Score Boost</dt><dd>${s.score_boost || 0}</dd>
+    <dt>Max Factor Cap</dt><dd>${s.max_factor_cap || '-'}</dd>
+  </dl></div>`;
+
+  if (s.active && s.active.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--green)">Active Strategies</div>`;
+    html += `<table class="tbl"><tr><th>Tag</th><th>Weight</th><th>Category</th><th>Why Active</th></tr>`;
+    s.active.forEach(st => {
+      html += `<tr><td style="font-weight:700">${st.tag}</td><td><div style="display:flex;align-items:center;gap:6px"><div class="mini-bar" style="width:60px"><div class="mini-bar-fill green" style="width:${Math.min(100,st.weight*100)}%"></div></div>${st.weight.toFixed(2)}</div></td><td>${st.category}</td><td style="font-size:10px;color:var(--text-dim)">${escHtml(st.why_active||'')}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  if (s.inactive && s.inactive.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--text-muted)">Inactive Strategies</div>`;
+    html += `<table class="tbl"><tr><th>Tag</th><th>Category</th><th>Reason</th></tr>`;
+    s.inactive.forEach(st => {
+      html += `<tr style="opacity:0.6"><td>${st.tag}</td><td>${st.category}</td><td style="font-size:10px">${escHtml(st.inactive_reason||'')}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  if (s.overlay_tags && s.overlay_tags.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--amber)">Overlay Tags</div>`;
+    s.overlay_tags.forEach(t => { html += `<span class="badge badge-amber" style="margin:2px 4px 2px 0;">${t}</span>`; });
+    html += `</div>`;
+  }
+  if (s.overlay_warnings && s.overlay_warnings.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--amber)">Overlay Warnings</div>`;
+    s.overlay_warnings.forEach(w => { html += `<div style="padding:3px 0;font-size:11px;color:var(--amber);">- ${escHtml(w)}</div>`; });
+    html += `</div>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+async function loadDetailDrought(panel) {
+  const dr = await api('/api/drought');
+  if (!dr) { panel.innerHTML = '<div style="color:var(--text-muted)">No drought data</div>'; return; }
+  const dflag = document.getElementById('droughtFlag');
+  dflag.textContent = dr.drought_flag ? 'DROUGHT' : 'OK';
+  dflag.className = 'badge ' + (dr.drought_flag ? 'badge-red' : 'badge-green');
+  document.getElementById('droughtSummary').textContent = dr.drought_flag ? 'SIGNAL DROUGHT ACTIVE - expand for analysis' : 'No drought - all clear';
+
+  let html = '';
+  if (dr.closest_misses && dr.closest_misses.length) {
+    html += `<div class="expand-section"><div class="expand-section-title">Closest Misses Analysis</div>`;
+    html += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">These tickers nearly qualified. Small threshold changes would admit them.</div>`;
+    html += `<table class="tbl"><tr><th>Ticker</th><th>Failed Gate</th><th>Observed</th><th>Required</th><th>Delta</th><th>Admits At</th></tr>`;
+    dr.closest_misses.forEach(m => {
+      const deltaPct = m.required > 0 ? ((m.delta / m.required) * 100).toFixed(1) : '-';
+      html += `<tr><td class="ticker">${m.ticker}</td><td>${m.failed_gate}</td><td>${m.observed.toFixed(3)}</td><td>${m.required.toFixed(3)}</td><td style="color:var(--amber)">${m.delta.toFixed(4)} (${deltaPct}%)</td><td>${m.fallback_step_admits >= 0 ? '<span class="badge badge-green">Step '+m.fallback_step_admits+'</span>' : '<span class="badge badge-red">Never</span>'}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  if (dr.recommended_knobs && dr.recommended_knobs.length) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--amber)">Recommended Parameter Adjustments</div>`;
+    dr.recommended_knobs.forEach(k => {
+      html += `<div style="padding:8px 12px;background:var(--bg-input);border-radius:6px;margin-bottom:6px;">
+        <div style="font-weight:700;font-size:12px;">${escHtml(k.param_name)}</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+          <span style="color:var(--text-muted);font-size:11px;">Current: <strong style="color:var(--red)">${k.current}</strong></span>
+          <span style="color:var(--text-muted);font-size:11px;">-></span>
+          <span style="color:var(--text-muted);font-size:11px;">Suggested: <strong style="color:var(--green)">${k.suggested}</strong></span>
+        </div>
+        <div style="font-size:10px;color:var(--amber);margin-top:3px;">Tradeoff: ${escHtml(k.tradeoff)}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (!html) html = '<div style="color:var(--green);padding:8px;">No drought. Pipeline is producing signals normally.</div>';
+  panel.innerHTML = html;
+}
+
+async function loadDetailBlockers(panel) {
+  const f = await api('/api/funnel');
+  if (!f || !f.blockers || f.blockers.length === 0) {
+    panel.innerHTML = '<div style="color:var(--green);padding:8px;">No blockers - all gates passing.</div>';
+    return;
+  }
+  let html = `<div class="expand-section"><div class="expand-section-title">Blocker Frequency Analysis</div>`;
+  const freq = {};
+  f.blockers.forEach(b => {
+    const gate = b.split(':')[0] || b;
+    freq[gate] = (freq[gate]||0) + 1;
+  });
+  const sorted = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+  const maxFreq = sorted[0]?.[1] || 1;
+  sorted.forEach(([gate,count]) => {
+    html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+      <span style="min-width:140px;font-size:11px;color:var(--text-dim)">${gate}</span>
+      <div class="mini-bar" style="flex:1"><div class="mini-bar-fill red" style="width:${pct(count,maxFreq)}%"></div></div>
+      <span style="font-size:11px;font-weight:700;color:var(--red)">${count}</span>
+    </div>`;
+  });
+  html += `</div>`;
+
+  if (f.closest_misses && f.closest_misses.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title">Closest Misses from Funnel</div>`;
+    html += `<div class="json-viewer"><pre>${jsonHighlight(f.closest_misses)}</pre></div></div>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+async function loadDetailSignalLog(panel) {
+  const [sl, outcomes] = await Promise.all([api('/api/ai/signal_log_stats'), api('/api/outcomes/recent')]);
+  let html = '';
+
+  if (sl) {
+    const winRate = sl.resolved > 0 ? 'Computing...' : 'N/A (no resolved)';
+    html += `<div class="expand-section"><div class="expand-section-title">Signal Log Analysis</div>`;
+    html += `<dl class="expand-kv">
+      <dt>Total Logged</dt><dd>${sl.total}</dd>
+      <dt>Pending</dt><dd style="color:var(--amber)">${sl.pending}</dd>
+      <dt>Resolved</dt><dd style="color:var(--green)">${sl.resolved}</dd>
+      <dt>Resolution Rate</dt><dd>${sl.total > 0 ? ((sl.resolved/sl.total)*100).toFixed(1) + '%' : 'N/A'}</dd>
+    </dl></div>`;
+  }
+
+  if (outcomes && outcomes.outcomes && outcomes.outcomes.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title">Recent Outcomes (last ${outcomes.outcomes.length})</div>`;
+    html += `<table class="tbl"><tr><th>Signal ID</th><th>Ticker</th><th>Dir</th><th>Outcome</th><th>P&L</th><th>Duration</th></tr>`;
+    outcomes.outcomes.slice(0,15).forEach(o => {
+      const pnl = o.pnl_pct || o.net_pnl_pct || 0;
+      html += `<tr><td style="font-size:10px">${(o.signal_id||'').slice(0,12)}</td><td class="ticker">${o.ticker||'-'}</td><td class="${(o.direction||'LONG')==='LONG'?'long':'short'}">${o.direction||'-'}</td><td><span class="badge ${o.outcome==='WIN'?'badge-green':o.outcome==='LOSS'?'badge-red':'badge-amber'}">${o.outcome||'-'}</span></td><td style="color:${pnl>=0?'var(--green)':'var(--red)'}">${pnl.toFixed(2)}%</td><td>${o.duration_min ? o.duration_min+'m' : '-'}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  html += `<div style="margin-top:8px;display:flex;gap:8px;">
+    <button onclick="event.stopPropagation();resolveOutcomes()" class="action-btn success">RESOLVE OUTCOMES</button>
+    <button onclick="event.stopPropagation();rebuildEdgeLedger()" class="action-btn">REBUILD EDGE LEDGER</button>
+  </div>`;
+
+  panel.innerHTML = html;
+}
+
+async function loadDetailEdgeMap(panel) {
+  const d = await api('/api/ai/edge_map');
+  if (!d || !d.buckets) { panel.innerHTML = '<div style="color:var(--text-muted)">No edge map data</div>'; return; }
+  document.getElementById('edgeMapSummary').innerHTML = `Regime: <strong>${d.regime}</strong> | ${d.actionable} actionable / ${d.total_buckets} total buckets`;
+
+  let html = `<div class="expand-section"><div class="expand-section-title">Full Edge Map (Top 20 Buckets)</div>`;
+  if (d.buckets.length > 0) {
+    html += `<table class="tbl"><tr><th>Strategy</th><th>Regime</th><th>Track</th><th>Trades</th><th>Win Rate</th><th>CI</th><th>Avg R:R</th><th>Expectancy</th><th>Status</th></tr>`;
+    d.buckets.slice(0,20).forEach(b => {
+      html += `<tr${b.current_regime?' style="background:rgba(59,130,246,0.08)"':''}><td style="font-weight:700">${b.strategy_tag}</td><td>${b.regime_tag}</td><td>${b.track}</td><td>${b.trades_count}</td><td>${(b.win_rate*100).toFixed(1)}%</td><td style="font-size:10px">[${(b.win_rate_low*100).toFixed(0)}-${(b.win_rate_high*100).toFixed(0)}%]</td><td>${b.avg_rr_net.toFixed(2)}</td><td style="color:${b.expectancy_net>0?'var(--green)':'var(--red)'}; font-weight:700">${b.expectancy_net.toFixed(3)}</td><td><span class="badge ${b.status==='ACTIONABLE'?'badge-green':'badge-amber'}">${b.status}</span></td></tr>`;
+    });
+    html += `</table>`;
+  } else {
+    html += '<div style="color:var(--text-muted)">No edge buckets yet.</div>';
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailDrift(panel) {
+  const d = await api('/api/ai/drift');
+  if (!d) { panel.innerHTML = '<div style="color:var(--text-muted)">No drift data</div>'; return; }
+  const db = document.getElementById('driftBadge');
+  db.textContent = d.has_drift ? 'DRIFT' : 'STABLE';
+  db.className = 'badge ' + (d.has_drift ? 'badge-red' : 'badge-green');
+  document.getElementById('driftSummary').textContent = d.defensive_mode ? 'DEFENSIVE MODE ACTIVE' : 'No drift detected';
+
+  let html = `<div class="expand-section"><div class="expand-section-title">Drift Analysis</div>`;
+  html += `<dl class="expand-kv">
+    <dt>Defensive Mode</dt><dd style="color:${d.defensive_mode?'var(--red)':'var(--green)'}; font-weight:700">${d.defensive_mode?'ACTIVE':'OFF'}</dd>
+    <dt>Drift Detected</dt><dd>${d.has_drift?'YES':'NO'}</dd>
+  </dl>`;
+
+  if (d.latest_report) {
+    html += `<div style="margin-top:8px;"><div class="expand-section-title">Latest Report</div>`;
+    html += `<div class="json-viewer"><pre>${jsonHighlight(d.latest_report)}</pre></div></div>`;
+  }
+
+  html += `</div>`;
+  html += `<div style="margin-top:8px;"><button onclick="event.stopPropagation();runDrift()" class="action-btn">RUN DRIFT DETECTION</button></div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailMetaWeights(panel) {
+  const w = await api('/api/ai/meta_weights');
+  if (!w) { panel.innerHTML = '<div style="color:var(--text-muted)">No meta-weight data</div>'; return; }
+  document.getElementById('metaSummary').textContent = 'Loaded - expand to see weights';
+
+  let html = `<div class="expand-section"><div class="expand-section-title">Strategy Weights</div>`;
+  if (w.weights && Object.keys(w.weights).length > 0) {
+    const sorted = Object.entries(w.weights).sort((a,b) => b[1] - a[1]);
+    const maxW = sorted[0]?.[1] || 1;
+    sorted.forEach(([strat, weight]) => {
+      html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">
+        <span style="min-width:120px;font-size:11px;color:var(--text-dim)">${strat}</span>
+        <div class="mini-bar" style="flex:1"><div class="mini-bar-fill purple" style="width:${pct(weight,maxW)}%"></div></div>
+        <span style="font-size:11px;font-weight:700">${weight.toFixed(3)}</span>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text-muted)">No weights computed yet.</div>';
+  }
+  html += `</div>`;
+
+  if (w.guardrail_notes && w.guardrail_notes.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title" style="color:var(--amber)">Guardrail Notes</div>`;
+    w.guardrail_notes.forEach(n => { html += `<div style="padding:3px 0;font-size:11px;color:var(--amber);">- ${escHtml(n)}</div>`; });
+    html += `</div>`;
+  }
+
+  html += `<div style="margin-top:8px;"><button onclick="event.stopPropagation();updateMetaWeights()" class="action-btn">UPDATE WEIGHTS</button></div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailExpectancy(panel) {
+  const exp = await api('/api/ai/expectancy');
+  if (!exp) { panel.innerHTML = '<div style="color:var(--text-muted)">No expectancy data</div>'; return; }
+
+  if (exp.trades && exp.trades.length > 0) {
+    document.getElementById('aiExpectancy').innerHTML = `<span style="color:var(--green)">${exp.count} trades analyzed</span> | Regime: ${exp.regime}`;
+    let html = `<div class="expand-section"><div class="expand-section-title">Full Expectancy Model Output</div>`;
+    html += `<table class="tbl"><tr><th>Ticker</th><th>Dir</th><th>Stars</th><th>E[Net R]</th><th>P(Target)</th><th>Duration</th><th>Uncertainty</th><th>Decision</th><th>Fill Risk</th><th>Exec</th><th>Why</th></tr>`;
+    exp.trades.forEach(t => {
+      html += `<tr>
+        <td class="ticker">${t.ticker}</td>
+        <td class="${t.direction==='LONG'?'long':'short'}">${t.direction}</td>
+        <td>${t.stars}</td>
+        <td style="color:${t.expected_net_r>0?'var(--green)':'var(--red)'}; font-weight:700">${t.expected_net_r.toFixed(3)}</td>
+        <td>${(t.p_target*100).toFixed(1)}%</td>
+        <td>${t.expected_duration}m</td>
+        <td>${t.uncertainty.toFixed(2)}</td>
+        <td><span class="badge ${t.decision==='TRADE'?'badge-green':t.decision==='PASS'?'badge-amber':'badge-red'}">${t.decision}</span></td>
+        <td>${t.fill_risk_score.toFixed(2)}</td>
+        <td style="font-size:10px">${escHtml(t.exec_recommendation||'')}</td>
+        <td style="font-size:10px;max-width:150px;overflow:hidden">${escHtml(t.why||'')}</td>
+      </tr>`;
+    });
+    html += `</table></div>`;
+    panel.innerHTML = html;
+  } else {
+    document.getElementById('aiExpectancy').innerHTML = '<span style="color:var(--text-muted)">No trades to analyze yet.</span>';
+    panel.innerHTML = `<div style="color:var(--text-muted);padding:8px;">${exp.error ? 'Error: ' + escHtml(exp.error) : 'Engine needs to produce plays first.'}</div>`;
+  }
+}
+
+async function loadDetailExecQuality(panel) {
+  const eq = await api('/api/ai/execution_quality');
+  if (!eq) { panel.innerHTML = '<div style="color:var(--text-muted)">No execution quality data</div>'; return; }
+  document.getElementById('execSummary').textContent = `${eq.count} records`;
+
+  let html = `<div class="expand-section"><div class="expand-section-title">Execution Quality Records (Latest ${eq.count})</div>`;
+  if (eq.records && eq.records.length > 0) {
+    html += `<div class="json-viewer" style="max-height:350px;"><pre>${jsonHighlight(eq.records)}</pre></div>`;
+  } else {
+    html += '<div style="color:var(--text-muted)">No execution records yet.</div>';
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+async function loadDetailOutcomes(panel) {
+  const o = await api('/api/outcomes/recent');
+  if (!o) { panel.innerHTML = '<div style="color:var(--text-muted)">No outcomes data</div>'; return; }
+  document.getElementById('outcomesSummary').textContent = `${o.count} recent outcomes`;
+
+  let html = `<div class="expand-section"><div class="expand-section-title">Recent Resolved Outcomes</div>`;
+  if (o.outcomes && o.outcomes.length > 0) {
+    html += `<table class="tbl"><tr><th>Signal</th><th>Ticker</th><th>Dir</th><th>Outcome</th><th>P&L%</th><th>Entry</th><th>Exit</th><th>Duration</th></tr>`;
+    o.outcomes.forEach(oc => {
+      const pnl = oc.pnl_pct || oc.net_pnl_pct || 0;
+      html += `<tr>
+        <td style="font-size:10px">${(oc.signal_id||'').slice(0,14)}</td>
+        <td class="ticker">${oc.ticker||'-'}</td>
+        <td class="${(oc.direction||'LONG')==='LONG'?'long':'short'}">${oc.direction||'-'}</td>
+        <td><span class="badge ${oc.outcome==='WIN'?'badge-green':oc.outcome==='LOSS'?'badge-red':'badge-amber'}">${oc.outcome||'-'}</span></td>
+        <td style="color:${pnl>=0?'var(--green)':'var(--red)'}; font-weight:700">${pnl.toFixed(2)}%</td>
+        <td>${(oc.entry||0).toFixed(4)}</td>
+        <td>${(oc.exit_price||0).toFixed(4)}</td>
+        <td>${oc.duration_min ? oc.duration_min+'m' : '-'}</td>
+      </tr>`;
+    });
+    html += `</table>`;
+  } else {
+    html += '<div style="color:var(--text-muted)">No resolved outcomes yet.</div>';
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+}
+
+// ============================================================
+// TAB DATA LOADERS (top-level)
+// ============================================================
+
+function loadTabData(tab) {
+  switch(tab) {
+    case 'plays': loadPlays(); break;
+    case 'peers': loadPeers(); break;
+    case 'intel': loadIntel(); loadFullScan(); break;
+    case 'risk': loadRisk(); break;
+    case 'explain': loadExplain(); break;
+    case 'files': loadFiles(); break;
+    case 'scheduler': loadScheduler(); break;
+    case 'ai': loadAI(); break;
+    case 'copilot': loadCopilot(); break;
+  }
+}
+
+// =========== TAB 1: PLAYS ===========
+async function loadPlays() {
+  const d = await api('/api/plays');
+  if (!d) return;
+  const strictCount = d.plays.filter(p => p.label === 'STRICT').length;
+  const watchCount = d.plays.filter(p => p.label !== 'STRICT').length;
+  document.getElementById('statStrict').textContent = strictCount;
+  document.getElementById('statFallback').textContent = watchCount;
+  document.getElementById('statTotal').textContent = d.plays.length;
+  document.getElementById('statSession').textContent = d.session || '-';
+  document.getElementById('playsUpdated').textContent = d.plays.length + ' plays';
+
+  // Drought banner — expandable
+  const db = document.getElementById('droughtBanner');
+  if (d.drought) {
+    const lines = d.drought.split('\n').filter(l => l.trim());
+    db.innerHTML = `<div class="drought-banner" onclick="this.classList.toggle('expanded')">
+      <div class="drought-title">SIGNAL DROUGHT</div>
+      <div style="font-size:12px;color:var(--text-dim)">${escHtml(lines[0] || '')}</div>
+      <div class="drought-expand">
+        ${lines.slice(1).map(l => `<div style="padding:2px 0;font-size:11px;color:var(--text-dim);">${escHtml(l)}</div>`).join('')}
+        <div style="margin-top:8px;">
+          <button class="action-btn" onclick="event.stopPropagation();document.querySelectorAll('.nav button')[4].click();">VIEW DROUGHT COCKPIT</button>
+        </div>
+      </div>
+    </div>`;
+  } else {
+    db.innerHTML = '';
+  }
+
+  // Play cards — each expandable with full drill-down
+  const pl = document.getElementById('playsList');
+  if (d.plays.length === 0) {
+    pl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No plays available. Waiting for engine run...</div>';
+    return;
+  }
+  pl.innerHTML = d.plays.map((p,i) => `
+    <div class="play-card" onclick="this.classList.toggle('expanded');if(this.classList.contains('expanded'))loadPlayDrilldown('${p.ticker}',this);">
+      <div class="play-top">
+        <div class="play-rank">${i+1}</div>
+        <div class="play-info">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="play-ticker">${p.ticker}</span>
+            <span class="tier-badge tier-core">CORE</span>
+            <span class="${p.direction==='LONG'?'long':'short'}" style="font-weight:700;font-size:12px;">${p.direction}</span>
+            <span class="play-label ${p.label==='STRICT'?'label-trade':'label-watch'}">${p.label==='STRICT'?'TRADE':'WATCH'}</span>
+            <span class="badge badge-blue" style="font-size:9px;">${p.strategy_tag || ''}</span>
+          </div>
+          <div class="play-meta">
+            ${p.setup_type} | R:R ${(p.rr||0).toFixed(2)} | ATR ${(p.atr_pct||0).toFixed(2)}% | RVOL ${p.rvol !== null ? p.rvol.toFixed(2) : 'N/A'} | ${p.factor_group} | Track: ${p.track || 'INTRADAY_SWING'} | Size: ${p.sizing_hint || 'M'}
+          </div>
+          <div class="play-levels" style="margin-top:4px;">
+            <span class="play-entry">Entry ${p.entry.toFixed(4)}</span>
+            <span class="play-stop">Stop ${p.stop.toFixed(4)}</span>
+            <span class="play-target">T1 ${p.target1.toFixed(4)}</span>
+            <span class="play-target">T2 ${p.target2.toFixed(4)}</span>
+          </div>
+        </div>
+        <div class="play-stars">${p.stars}</div>
+        <div style="font-size:18px;font-weight:700;color:var(--accent);min-width:40px;text-align:right;">${(p.score||0).toFixed(0)}</div>
+      </div>
+      <div class="play-expand" id="play-expand-${p.ticker}">
+        <div style="padding:8px;"><span class="spinner"></span> Loading ${p.ticker} drilldown...</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadPlayDrilldown(ticker, el) {
+  const panel = el.querySelector('.play-expand');
+  if (panel.dataset.loaded) return; // Don't reload
+  const d = await api('/api/ticker/' + ticker);
+  if (!d) { panel.innerHTML = '<div style="color:var(--text-muted)">Failed to load</div>'; return; }
+
+  let html = '<div class="grid-2">';
+
+  // Play details
+  if (d.play) {
+    html += `<div class="expand-section"><div class="expand-section-title">Signal Detail</div>
+    <dl class="expand-kv">
+      <dt>Composite Score</dt><dd style="font-weight:700;color:var(--accent)">${(d.play.composite||0).toFixed(1)}</dd>
+      <dt>Direction</dt><dd class="${d.play.direction==='LONG'?'long':'short'}">${d.play.direction}</dd>
+      <dt>Entry</dt><dd>${(d.play.entry||0).toFixed(4)}</dd>
+      <dt>Stop</dt><dd style="color:var(--red)">${(d.play.stop||0).toFixed(4)}</dd>
+      <dt>Target 1</dt><dd style="color:var(--green)">${(d.play.target1||0).toFixed(4)}</dd>
+      <dt>Risk:Reward</dt><dd>${(d.play.rr_ratio||0).toFixed(2)}</dd>
+      <dt>ATR %</dt><dd>${(d.play.atr_pct||0).toFixed(2)}%</dd>
+      <dt>RVOL</dt><dd>${d.play.rvol !== null ? d.play.rvol.toFixed(2) : 'N/A'}</dd>
+      <dt>Setup Type</dt><dd>${d.play.setup_type}</dd>
+      <dt>Factor Group</dt><dd>${d.play.factor_group}</dd>
+      <dt>Strategy</dt><dd>${d.play.strategy_tag || '-'}</dd>
+    </dl></div>`;
+  }
+
+  // Reasons / why
+  if (d.play && d.play.reasons && d.play.reasons.length > 0) {
+    html += `<div class="expand-section"><div class="expand-section-title">Why This Signal</div>`;
+    d.play.reasons.forEach(r => { html += `<div style="padding:3px 0;font-size:11px;color:var(--text-dim);">- ${escHtml(r)}</div>`; });
+    html += `</div>`;
+  }
+
+  html += '</div>';
+
+  // Artifact data
+  if (d.artifact_data) {
+    html += `<div class="expand-section"><div class="expand-section-title">Raw Artifact Data</div>`;
+    html += `<div class="json-viewer"><pre>${jsonHighlight(d.artifact_data)}</pre></div>`;
+    html += `</div>`;
+  }
+
+  panel.innerHTML = html;
+  panel.dataset.loaded = '1';
+}
+
+// =========== TAB 2: PEERS ===========
+async function loadPeers() {
+  const [peers, peerPlays] = await Promise.all([api('/api/peers'), api('/api/peer_plays')]);
+
+  // Update peer count badge
+  const peerCount = peers ? (peers.peers || peers.tickers || []).length : 0;
+  document.getElementById('peerCountBadge').textContent = peerCount + ' peers';
+  document.getElementById('ubPeer').textContent = 'P:' + peerCount;
+  document.getElementById('peerRegistryCount').textContent = peerCount + ' peers';
+
+  // Render peer plays
+  const playsCount = peerPlays ? (peerPlays.plays || []).length : 0;
+  document.getElementById('peerPlaysCount').textContent = playsCount + ' plays';
+  const plEl = document.getElementById('peerPlaysList');
+  if (peerPlays && peerPlays.plays && peerPlays.plays.length > 0) {
+    plEl.innerHTML = peerPlays.plays.map((p, i) => `
+      <div class="peer-card" onclick="this.classList.toggle('expanded')">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="play-rank" style="font-size:14px;">${i+1}</div>
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="play-ticker">${p.ticker}</span>
+              <span class="tier-badge tier-peer">PEER</span>
+              ${p.direction ? `<span class="${p.direction==='LONG'?'long':'short'}" style="font-weight:700;font-size:12px;">${p.direction}</span>` : ''}
+              ${p.similarity_score !== undefined ? `<span class="badge badge-purple" style="font-size:9px;">sim: ${(p.similarity_score||0).toFixed(2)}</span>` : ''}
+              ${p.core_parent ? `<span class="badge badge-blue" style="font-size:9px;">parent: ${p.core_parent}</span>` : ''}
+              ${p.factor_group ? `<span class="badge badge-amber" style="font-size:9px;">${p.factor_group}</span>` : ''}
+            </div>
+            <div class="play-meta" style="margin-top:4px;">
+              ${p.setup_type ? p.setup_type + ' | ' : ''}${p.rr ? 'R:R ' + p.rr.toFixed(2) + ' | ' : ''}${p.atr_pct ? 'ATR ' + p.atr_pct.toFixed(2) + '% | ' : ''}${p.score ? 'Score: ' + p.score.toFixed(0) : ''}
+            </div>
+          </div>
+          ${p.score ? `<div style="font-size:16px;font-weight:700;color:var(--purple);min-width:40px;text-align:right;padding-right:24px;">${p.score.toFixed(0)}</div>` : ''}
+        </div>
+        <div class="peer-expand">
+          <div class="grid-2">
+            <div class="expand-section"><div class="expand-section-title">Peer Detail</div>
+              <dl class="expand-kv">
+                <dt>Ticker</dt><dd class="ticker">${p.ticker}</dd>
+                <dt>Core Parent</dt><dd>${p.core_parent || '-'}</dd>
+                <dt>Similarity</dt><dd>${p.similarity_score !== undefined ? p.similarity_score.toFixed(3) : '-'}</dd>
+                <dt>Factor Group</dt><dd>${p.factor_group || '-'}</dd>
+                ${p.direction ? `<dt>Direction</dt><dd class="${p.direction==='LONG'?'long':'short'}">${p.direction}</dd>` : ''}
+                ${p.entry ? `<dt>Entry</dt><dd>${p.entry.toFixed(4)}</dd>` : ''}
+                ${p.stop ? `<dt>Stop</dt><dd style="color:var(--red)">${p.stop.toFixed(4)}</dd>` : ''}
+                ${p.target1 ? `<dt>Target</dt><dd style="color:var(--green)">${p.target1.toFixed(4)}</dd>` : ''}
+              </dl>
+            </div>
+            ${p.reasons && p.reasons.length > 0 ? `<div class="expand-section"><div class="expand-section-title">Signal Reasons</div>${p.reasons.map(r => '<div style="padding:2px 0;font-size:11px;color:var(--text-dim);">- ' + escHtml(r) + '</div>').join('')}</div>` : ''}
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } else {
+    plEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">No peer plays available. Engine needs to run peer analysis first.</div>';
+  }
+
+  // Render peer registry
+  const regEl = document.getElementById('peerRegistryList');
+  const peerList = peers ? (peers.peers || peers.tickers || []) : [];
+  if (peerList.length > 0) {
+    regEl.innerHTML = `<table class="tbl"><tr><th>Ticker</th><th>Tier</th><th>Core Parent</th><th>Similarity</th><th>Factor Group</th><th>Category</th></tr>` +
+      peerList.map(p => `<tr>
+        <td class="ticker">${p.ticker || p}</td>
+        <td><span class="tier-badge tier-peer">PEER</span></td>
+        <td>${p.core_parent || '-'}</td>
+        <td>${p.similarity_score !== undefined ? p.similarity_score.toFixed(3) : '-'}</td>
+        <td>${p.factor_group || '-'}</td>
+        <td>${p.category || '-'}</td>
+      </tr>`).join('') + '</table>';
+  } else {
+    regEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">No peers registered. Peer discovery needs to run.</div>';
+  }
+}
+
+// =========== TAB 3: MARKET INTEL (Full Scan + Intel Feed) ===========
+async function loadFullScan() {
+  const d = await api('/api/full_scan');
+  const el = document.getElementById('fullScanList');
+  if (!d || !d.tickers || d.tickers.length === 0) {
+    document.getElementById('fullScanCount').textContent = '0 items';
+    if (el) el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">No full scan data. Waiting for daily scan...</div>';
+    return;
+  }
+  const count = d.tickers.length;
+  document.getElementById('fullScanCount').textContent = count + ' items';
+  document.getElementById('ubScan').textContent = 'S:' + count;
+  document.getElementById('intelUbScan').textContent = 'FULL_SCAN: ' + count;
+
+  el.innerHTML = d.tickers.map(t => `
+    <div class="intel-card" onclick="this.classList.toggle('expanded')" style="border-left-color:var(--amber);">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="play-ticker">${t.ticker}</span>
+          <span class="tier-badge tier-scan">SCAN</span>
+          ${t.trend ? `<span class="badge ${t.trend==='BULLISH'?'badge-green':t.trend==='BEARISH'?'badge-red':'badge-blue'}">${t.trend}</span>` : ''}
+          ${t.momentum_rank !== undefined ? `<span style="font-size:14px;font-weight:700;color:var(--amber);margin-left:auto;padding-right:24px;">${(t.momentum_rank||0).toFixed(0)}</span>` : ''}
+        </div>
+        ${t.insight ? `<div style="font-size:12px;margin-top:4px;color:var(--text);">${escHtml(t.insight)}</div>` : ''}
+        <div class="play-meta" style="margin-top:4px;">
+          ${t.price ? 'Price ' + t.price.toFixed(2) + ' | ' : ''}${t.move_pct !== undefined ? 'Move ' + t.move_pct.toFixed(2) + '% | ' : ''}${t.rsi ? 'RSI ' + t.rsi.toFixed(1) + ' | ' : ''}${t.atr_pct ? 'ATR ' + t.atr_pct.toFixed(2) + '%' : ''}${t.score ? ' | Score ' + t.score.toFixed(0) : ''}
+        </div>
+      </div>
+      <div class="intel-expand">
+        <div class="expand-section"><div class="expand-section-title">Full Scan Detail</div>
+          <dl class="expand-kv">
+            <dt>Ticker</dt><dd class="ticker">${t.ticker}</dd>
+            ${t.price ? `<dt>Price</dt><dd>${t.price.toFixed(4)}</dd>` : ''}
+            ${t.move_pct !== undefined ? `<dt>Move %</dt><dd style="color:${t.move_pct>=0?'var(--green)':'var(--red)'}">${t.move_pct.toFixed(2)}%</dd>` : ''}
+            ${t.rsi ? `<dt>RSI</dt><dd>${t.rsi.toFixed(1)}</dd>` : ''}
+            ${t.atr_pct ? `<dt>ATR %</dt><dd>${t.atr_pct.toFixed(2)}%</dd>` : ''}
+            ${t.rvol !== undefined ? `<dt>RVOL</dt><dd>${t.rvol !== null ? t.rvol.toFixed(2) : 'N/A'}</dd>` : ''}
+            ${t.adx ? `<dt>ADX</dt><dd>${t.adx.toFixed(1)}</dd>` : ''}
+            ${t.factor_group ? `<dt>Factor Group</dt><dd>${t.factor_group}</dd>` : ''}
+            ${t.category ? `<dt>Category</dt><dd>${t.category}</dd>` : ''}
+          </dl>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// =========== INTEL FEED ===========
+async function loadIntel() {
+  const d = await api('/api/intel');
+  if (!d) return;
+  document.getElementById('intelCount').textContent = d.count + ' items';
+  const el = document.getElementById('intelList');
+  if (!d.cards || d.cards.length === 0) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">No intel cards yet. Engine needs to run first.</div>';
+    return;
+  }
+  el.innerHTML = d.cards.map(c => `
+    <div class="intel-card" onclick="this.classList.toggle('expanded')">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="play-ticker">${c.ticker}</span>
+          <span class="play-label label-intel">${c.label}</span>
+          <span class="badge ${c.trend==='BULLISH'?'badge-green':c.trend==='BEARISH'?'badge-red':'badge-blue'}">${c.trend}</span>
+          <span class="badge ${c.vol_regime==='EXPANSION'?'badge-amber':c.vol_regime==='COMPRESSION'?'badge-blue':'badge-purple'}">${c.vol_regime||'-'}</span>
+          <span style="font-size:16px;font-weight:700;color:var(--purple);margin-left:auto;padding-right:24px;">${(c.momentum_rank||0).toFixed(0)}</span>
+        </div>
+        <div style="font-size:12px;margin-top:4px;color:var(--text);">${escHtml(c.insight || '')}</div>
+        <div class="play-meta" style="margin-top:4px;">
+          Price ${(c.price||0).toFixed(2)} | Move ${(c.move_pct||0).toFixed(2)}% | RSI ${(c.rsi||0).toFixed(1)} | ATR ${(c.atr_pct||0).toFixed(2)}% | RVOL ${c.rvol !== null && c.rvol !== undefined ? c.rvol.toFixed(2) : 'N/A'} | ADX ${(c.adx||0).toFixed(1)}
+        </div>
+      </div>
+      <div class="intel-expand">
+        <div class="grid-2">
+          <div class="expand-section"><div class="expand-section-title">Technical Profile</div>
+            <dl class="expand-kv">
+              <dt>Price</dt><dd>${(c.price||0).toFixed(2)}</dd>
+              <dt>Move %</dt><dd style="color:${(c.move_pct||0)>=0?'var(--green)':'var(--red)'}">${(c.move_pct||0).toFixed(2)}%</dd>
+              <dt>RSI (14)</dt><dd style="color:${(c.rsi||50)>70?'var(--red)':(c.rsi||50)<30?'var(--green)':'var(--text)'}">${(c.rsi||0).toFixed(1)} ${(c.rsi||50)>70?'(OVERBOUGHT)':(c.rsi||50)<30?'(OVERSOLD)':''}</dd>
+              <dt>ATR %</dt><dd>${(c.atr_pct||0).toFixed(2)}%</dd>
+              <dt>ADX</dt><dd>${(c.adx||0).toFixed(1)} ${(c.adx||0)>25?'(TRENDING)':'(RANGING)'}</dd>
+              <dt>RVOL</dt><dd>${c.rvol !== null && c.rvol !== undefined ? c.rvol.toFixed(2) : 'N/A'} ${(c.rvol||0)>=2?'(HIGH)' : (c.rvol||0)>=1.2?'(NORMAL)' : (c.rvol||0)>=0.7?'(LOW)':'(THIN/UNKNOWN)'}</dd>
+            </dl>
+          </div>
+          <div class="expand-section"><div class="expand-section-title">Classification</div>
+            <dl class="expand-kv">
+              <dt>Label</dt><dd><span class="badge badge-purple">${c.label}</span></dd>
+              <dt>Is Core</dt><dd>${c.is_core?'YES':'NO'}</dd>
+              <dt>Trend</dt><dd><span class="badge ${c.trend==='BULLISH'?'badge-green':c.trend==='BEARISH'?'badge-red':'badge-blue'}">${c.trend}</span></dd>
+              <dt>Vol Regime</dt><dd>${c.vol_regime||'-'}</dd>
+              <dt>Momentum Rank</dt><dd style="font-weight:700;color:var(--purple)">${(c.momentum_rank||0).toFixed(0)}</dd>
+              <dt>Category</dt><dd>${c.category||'-'}</dd>
+            </dl>
+            <div style="margin-top:6px;">
+              <div class="mini-bar"><div class="mini-bar-fill purple" style="width:${Math.min(100,c.momentum_rank||0)}%"></div></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Momentum rank (0-100)</div>
+            </div>
+          </div>
+        </div>
+        ${c.ticker && !c.ticker.includes('.') && !c.ticker.startsWith('^') ? `<div style="margin-top:6px;font-size:10px;color:var(--text-muted);">This is an underlying for leveraged ETP. Correlate with .L ticker moves.</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// =========== TAB 4: RISK ===========
+async function loadRisk() {
+  const [h, ro, halt] = await Promise.all([api('/api/health'), api('/api/risk_officer'), api('/api/halt')]);
+  if (h) {
+    document.getElementById('dhPass').textContent = h.pass || 0;
+    document.getElementById('dhWarn').textContent = h.warn || 0;
+    document.getElementById('dhFail').textContent = h.fail || 0;
+    const b = document.getElementById('dhBadge');
+    b.textContent = h.badge;
+    b.className = 'badge ' + (h.badge==='GREEN'?'badge-green':h.badge==='RED'?'badge-red':'badge-amber');
+    document.getElementById('dhWarnings').innerHTML = (h.warnings || []).slice(0,3).map(w => `<div style="font-size:11px;color:var(--text-dim);">- ${escHtml(w)}</div>`).join('');
+  }
+  if (ro) {
+    document.getElementById('roApprove').textContent = ro.approve_count || 0;
+    document.getElementById('roDownsize').textContent = ro.downsize_count || 0;
+    document.getElementById('roVeto').textContent = ro.veto_count || 0;
+  }
+  if (halt) {
+    const el = document.getElementById('haltStatus');
+    const btn = document.getElementById('haltBtn');
+    if (halt.halt_new_signals) {
+      el.textContent = 'HALTED'; el.style.color = 'var(--red)';
+      btn.textContent = 'RESUME'; btn.className = 'action-btn success';
+    } else {
+      el.textContent = 'ACTIVE'; el.style.color = 'var(--green)';
+      btn.textContent = 'HALT'; btn.className = 'action-btn danger';
+    }
+  }
+}
+
+// =========== TAB 5: EXPLAINABILITY ===========
+async function loadExplain() {
+  const [f, dr, s] = await Promise.all([api('/api/funnel'), api('/api/drought'), api('/api/strategies')]);
+
+  // Strategies summary
+  if (s) {
+    document.getElementById('stratCount').textContent = `${(s.active||[]).length} active / ${(s.inactive||[]).length} inactive`;
+    document.getElementById('strategySummary').textContent = `Regime: ${s.regime_tag} | Sizing: ${s.sizing_mode} | ${(s.active||[]).length} active strategies`;
+  }
+
+  // Gate funnel with expandable gates
+  if (f) {
+    const max = Math.max(f.tracked || 1, 1);
+    const gates = [
+      {label:'Tracked', val:f.tracked, cls:'fill-blue', detail:'Total tickers in ISA universe being tracked by engine'},
+      {label:'Data Valid', val:f.data_valid, cls:'fill-blue', detail:'Tickers with sufficient OHLCV data and passing health checks'},
+      {label:'All Gates', val:f.passed_all_gates, cls:'fill-green', detail:'Tickers passing: DATA_HEALTH + PRICE_SCALE + MIN_BARS + TRADABILITY + VOLUME_LIQUIDITY + REGIME_FIT + RR_RATIO + MOMENTUM_ALIGNMENT + FACTOR_CAP'},
+      {label:'Strict Signals', val:f.signals_strict, cls:'fill-green', detail:'Signals at strict thresholds: RVOL >= 0.8, ATR >= 1.0%, R:R >= 1.5'},
+      {label:'Fallback', val:f.signals_fallback, cls:'fill-amber', detail:'Signals from relaxed gates (WATCH only). Produced when strict < MIN_SIGNALS_STRICT (3)'},
+      {label:'Total Signals', val:f.total, cls:'fill-green', detail:'Combined strict + fallback output. Target: MIN_SIGNALS_TOTAL = 5-10'},
+    ];
+    document.getElementById('funnelViz').innerHTML = gates.map((r, idx) => `
+      <div>
+        <div class="funnel-bar" onclick="document.getElementById('funnel-d-${idx}').classList.toggle('show')">
+          <span class="funnel-label">${r.label}</span>
+          <div class="funnel-track"><div class="funnel-fill ${r.cls}" style="width:${Math.max(4, r.val/max*100)}%">${r.val}</div></div>
+          <span style="font-size:9px;color:var(--text-muted);cursor:pointer;">&#9660;</span>
+        </div>
+        <div class="funnel-detail" id="funnel-d-${idx}">
+          <div style="color:var(--text-dim);margin-bottom:4px;">${r.detail}</div>
+          <div style="display:flex;gap:12px;">
+            <span>Count: <strong>${r.val}</strong></span>
+            <span>Rate: <strong>${(r.val/max*100).toFixed(1)}%</strong> of tracked</span>
+            ${idx > 0 ? `<span>Drop from prev: <strong style="color:var(--red)">${gates[idx-1].val - r.val}</strong></span>` : ''}
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('blockersList').innerHTML = (f.blockers || []).map(b => `<div style="padding:3px 0;font-size:12px;color:var(--text-dim);">- ${escHtml(b)}</div>`).join('') || '<div style="color:var(--text-muted);padding:8px;">No blockers</div>';
+  }
+
+  // Drought summary
+  if (dr) {
+    const dflag = document.getElementById('droughtFlag');
+    dflag.textContent = dr.drought_flag ? 'DROUGHT' : 'OK';
+    dflag.className = 'badge ' + (dr.drought_flag ? 'badge-red' : 'badge-green');
+    document.getElementById('droughtSummary').textContent = dr.drought_flag
+      ? `DROUGHT: ${(dr.closest_misses||[]).length} closest misses, ${(dr.recommended_knobs||[]).length} recommended knobs`
+      : 'No drought detected. Pipeline healthy.';
+  }
+}
+
+// =========== TAB 6: FILES ===========
+async function loadFiles() {
+  const d = await api('/api/files');
+  if (!d) return;
+  document.getElementById('fileCount').textContent = d.total_files + ' files';
+  const el = document.getElementById('filesList');
+  if (d.files.length === 0) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">No files generated yet.</div>';
+    return;
+  }
+  el.innerHTML = d.files.map((f, idx) => {
+    const icon = f.type === 'PDF' ? '\u{1F4C4}' : f.type === 'ARTIFACT' ? '\u{1F4E6}' : f.type === 'LOG' ? '\u{1F4DD}' : '\u{2699}';
+    const isJson = f.name.endsWith('.json') || f.name.endsWith('.jsonl');
+    return `
+      <div>
+        <div class="file-item ${isJson ? '' : ''}" onclick="${isJson ? `toggleFilePreview(${idx}, '${f.path}')` : `window.open('${f.path}','_blank')`}">
+          <span class="file-icon">${icon}</span>
+          <span class="file-name">${f.name}</span>
+          <span class="badge ${f.type==='PDF'?'badge-green':f.type==='ARTIFACT'?'badge-blue':'badge-amber'}">${f.type}</span>
+          <span class="file-size">${f.size_kb} KB</span>
+          <span class="file-time">${fmtTime(f.modified)}</span>
+        </div>
+        ${isJson ? `<div class="file-expand" id="file-expand-${idx}"><pre>Click to load preview...</pre></div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function toggleFilePreview(idx, path) {
+  const panel = document.getElementById('file-expand-' + idx);
+  if (!panel) return;
+  const isShown = panel.classList.contains('show');
+  // Collapse all others
+  document.querySelectorAll('.file-expand.show').forEach(p => p.classList.remove('show'));
+  if (isShown) return;
+  panel.classList.add('show');
+  if (panel.dataset.loaded) return;
+  panel.innerHTML = '<pre><span class="spinner"></span> Loading...</pre>';
+  try {
+    const r = await fetch(path);
+    const text = await r.text();
+    try {
+      const json = JSON.parse(text);
+      panel.innerHTML = `<div class="json-viewer"><pre>${jsonHighlight(json)}</pre></div>`;
+    } catch {
+      // JSONL — show last 30 lines
+      const lines = text.trim().split('\n');
+      const shown = lines.slice(-30);
+      panel.innerHTML = `<pre style="font-size:10px;color:var(--text-dim);">${lines.length > 30 ? `... (${lines.length - 30} earlier lines)\n\n` : ''}${shown.map(l => { try { return jsonHighlight(JSON.parse(l)); } catch { return escHtml(l); } }).join('\n')}</pre>`;
+    }
+    panel.dataset.loaded = '1';
+  } catch(e) {
+    panel.innerHTML = `<pre style="color:var(--red)">Failed to load: ${escHtml(e.message)}</pre>`;
+  }
+}
+
+// =========== TAB 7: SCHEDULER ===========
+async function loadScheduler() {
+  const [sched, ss] = await Promise.all([api('/api/scheduler'), api('/api/session_status')]);
+  if (sched) {
+    document.getElementById('schedulerList').innerHTML = sched.jobs.map((j, idx) => `
+      <div>
+        <div class="sched-row" onclick="toggleSchedExpand(${idx})">
+          <div class="sched-dot ${(j.last_status||'pending').toLowerCase()}"></div>
+          <span class="sched-name">${j.name}</span>
+          <span class="sched-time">${j.schedule}</span>
+          <span class="badge ${j.last_status==='PASS'?'badge-green':j.last_status==='FAIL'?'badge-red':'badge-blue'}">${j.last_status||'PENDING'}</span>
+          <span style="font-size:11px;color:var(--text-muted);min-width:80px;">${fmtTime(j.last_run)}</span>
+          <span style="font-size:9px;color:var(--text-muted);">&#9660;</span>
+        </div>
+        <div class="sched-expand" id="sched-expand-${idx}">
+          <div class="expand-section">
+            <dl class="expand-kv">
+              <dt>Job Name</dt><dd>${j.name}</dd>
+              <dt>Schedule</dt><dd>${j.schedule}</dd>
+              <dt>Session Key</dt><dd>${j.session || 'N/A'}</dd>
+              <dt>Last Status</dt><dd><span class="badge ${j.last_status==='PASS'?'badge-green':j.last_status==='FAIL'?'badge-red':'badge-blue'}">${j.last_status||'PENDING'}</span></dd>
+              <dt>Last Run</dt><dd>${fmtDate(j.last_run)}</dd>
+              ${j.error_msg ? `<dt>Error</dt><dd style="color:var(--red)">${escHtml(j.error_msg)}</dd>` : ''}
+              ${j.strict_count !== undefined ? `<dt>Strict Signals</dt><dd>${j.strict_count}</dd>` : ''}
+              ${j.fallback_count !== undefined ? `<dt>Fallback Signals</dt><dd>${j.fallback_count}</dd>` : ''}
+              ${j.drought_flag !== undefined ? `<dt>Drought</dt><dd style="color:${j.drought_flag?'var(--red)':'var(--green)'}">${j.drought_flag?'YES':'NO'}</dd>` : ''}
+            </dl>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+  if (ss && ss.jobs) {
+    document.getElementById('sessionStatusList').innerHTML = ss.jobs.map((j, idx) => `
+      <div>
+        <div class="sched-row" onclick="toggleSessionExpand(${idx})">
+          <div class="sched-dot ${j.status==='PASS'?'pass':j.status==='FAIL'?'fail':'pending'}"></div>
+          <span class="sched-name">${j.session}</span>
+          <span class="badge ${j.status==='PASS'?'badge-green':j.status==='FAIL'?'badge-red':'badge-amber'}">${j.status}</span>
+          <span style="font-size:11px;color:var(--text-muted);">${j.artifacts_written?'artifacts':'no artifacts'} | ${j.pdf_written?'pdf':'no pdf'}</span>
+          <span style="font-size:11px;color:var(--text-muted);min-width:80px;">${fmtTime(j.timestamp)}</span>
+          <span style="font-size:9px;color:var(--text-muted);">&#9660;</span>
+        </div>
+        <div class="sched-expand" id="session-expand-${idx}">
+          <div class="expand-section">
+            <dl class="expand-kv">
+              <dt>Session</dt><dd>${j.session}</dd>
+              <dt>Status</dt><dd><span class="badge ${j.status==='PASS'?'badge-green':j.status==='FAIL'?'badge-red':'badge-amber'}">${j.status}</span></dd>
+              <dt>Artifacts Written</dt><dd>${j.artifacts_written?'YES':'NO'}</dd>
+              <dt>PDF Written</dt><dd>${j.pdf_written?'YES':'NO'}</dd>
+              <dt>Timestamp</dt><dd>${fmtDate(j.timestamp)}</dd>
+              ${j.error_msg ? `<dt>Error</dt><dd style="color:var(--red)">${escHtml(j.error_msg)}</dd>` : ''}
+            </dl>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+function toggleSchedExpand(idx) {
+  const el = document.getElementById('sched-expand-' + idx);
+  if (el) el.classList.toggle('show');
+}
+
+function toggleSessionExpand(idx) {
+  const el = document.getElementById('session-expand-' + idx);
+  if (el) el.classList.toggle('show');
+}
+
+// =========== TAB 8: AI ===========
+async function loadAI() {
+  const sl = await api('/api/ai/signal_log_stats');
+  if (sl) {
+    document.getElementById('slTotal').textContent = sl.total || 0;
+    document.getElementById('slPending').textContent = sl.pending || 0;
+    document.getElementById('slResolved').textContent = sl.resolved || 0;
+  }
+}
+
+// ============================================================
+// ACTIONS
+// ============================================================
+async function toggleHalt() {
+  const r = await fetch('/api/halt', {method:'POST'});
+  const d = await r.json();
+  toast(d.message);
+  loadRisk();
+}
+
+async function resolveOutcomes() {
+  toast('Resolving outcomes...');
+  const r = await fetch('/api/ai/resolve_outcomes', {method:'POST'});
+  const d = await r.json();
+  toast(d.status === 'ok' ? 'Outcomes resolved' : 'Failed: ' + (d.error||''), d.status === 'ok' ? 'success' : 'error');
+  loadAI();
+}
+
+async function rebuildEdgeLedger() {
+  toast('Rebuilding edge ledger...');
+  const r = await fetch('/api/ai/rebuild_edge_ledger', {method:'POST'});
+  const d = await r.json();
+  toast(d.status === 'ok' ? 'Edge ledger rebuilt' : 'Failed', d.status === 'ok' ? 'success' : 'error');
+}
+
+async function updateMetaWeights() {
+  toast('Updating meta-learner weights...');
+  const r = await fetch('/api/ai/update_meta_weights', {method:'POST'});
+  const d = await r.json();
+  toast(d.status === 'ok' ? 'Weights updated' : 'Failed', d.status === 'ok' ? 'success' : 'error');
+}
+
+async function runDrift() {
+  toast('Running drift detection...');
+  const r = await fetch('/api/ai/run_drift_detection', {method:'POST'});
+  const d = await r.json();
+  toast(d.status === 'ok' ? `Drift: ${d.reports_generated} reports, defensive=${d.defensive_mode}` : 'Failed', d.status === 'ok' ? 'success' : 'error');
+}
+
+async function sendPDFsToTelegram() {
+  toast('Sending PDFs to Telegram...');
+  try {
+    const r = await fetch('/api/telegram/send_pdfs', {method:'POST'});
+    const d = await r.json();
+    toast(d.status === 'ok' ? `Sent ${d.files_sent} PDFs to Telegram` : 'Failed: ' + (d.error||''), d.status === 'ok' ? 'success' : 'error');
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// HEADER + REFRESH + WEBSOCKET
+// ============================================================
+async function updateHeader() {
+  const s = await api('/api/state');
+  if (!s) return;
+  document.getElementById('tickBadge').textContent = 'tick: ' + (s.tick_count || 0);
+  const regime = s.market?.regime || '-';
+  const rb = document.getElementById('regimeBadge');
+  rb.textContent = regime;
+  rb.className = 'badge ' + (regime.includes('BULL')||regime.includes('RISK_ON')?'badge-green':regime.includes('BEAR')||regime.includes('RISK_OFF')?'badge-red':'badge-blue');
+
+  const hb = document.getElementById('healthBadge');
+  const badge = s.data_health?.badge || 'UNKNOWN';
+  hb.textContent = badge;
+  hb.className = 'badge ' + (badge==='GREEN'?'badge-green':badge==='RED'?'badge-red':'badge-amber');
+
+  // Update universe size badges
+  updateUniverseBadges();
+}
+
+async function updateUniverseBadges() {
+  const [peers, fullScan] = await Promise.all([api('/api/peers'), api('/api/full_scan')]);
+  if (peers) {
+    const peerCount = (peers.peers || peers.tickers || []).length;
+    document.getElementById('ubPeer').textContent = 'P:' + peerCount;
+    const intelPeer = document.getElementById('intelUbPeer');
+    if (intelPeer) intelPeer.textContent = 'PEERS: ' + peerCount;
+  }
+  if (fullScan && fullScan.tickers) {
+    const scanCount = fullScan.tickers.length;
+    document.getElementById('ubScan').textContent = 'S:' + scanCount;
+    const intelScan = document.getElementById('intelUbScan');
+    if (intelScan) intelScan.textContent = 'FULL_SCAN: ' + scanCount;
+  }
+}
+
+// =========== TAB 9: COPILOT ===========
+let copilotLastJson = null;
+
+function loadCopilot() {
+  // No auto-load needed — chat is interactive
+  document.getElementById('copilotInput').focus();
+}
+
+function sendCopilotFromInput() {
+  const input = document.getElementById('copilotInput');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+  sendCopilotQuery(q, 'ALL');
+}
+
+async function sendCopilotQuery(query, lane) {
+  const chat = document.getElementById('copilotChat');
+  // Add user message
+  const userMsg = document.createElement('div');
+  userMsg.style.cssText = 'align-self:flex-end;background:var(--accent);color:#000;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:70%;font-size:12px;word-break:break-word;';
+  userMsg.textContent = query;
+  chat.appendChild(userMsg);
+
+  // Add loading indicator
+  const loading = document.createElement('div');
+  loading.style.cssText = 'align-self:flex-start;color:var(--text-muted);font-size:11px;padding:8px;';
+  loading.textContent = 'Copilot thinking...';
+  chat.appendChild(loading);
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const r = await fetch('/api/copilot/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, lane, max_results: 10 })
+    });
+    const data = await r.json();
+    copilotLastJson = data;
+    chat.removeChild(loading);
+    renderCopilotResponse(data, chat);
+  } catch (e) {
+    chat.removeChild(loading);
+    renderCopilotResponse({
+      answer: 'Failed to reach copilot: ' + e.message,
+      confidence: 'C', actions: [], evidence: [], warnings: ['fetch_error']
+    }, chat);
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderCopilotResponse(data, chat) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'align-self:flex-start;background:var(--bg-main);border:1px solid var(--border);padding:10px 14px;border-radius:2px 12px 12px 12px;max-width:85%;font-size:12px;';
+
+  // Confidence badge
+  const conf = data.confidence || 'C';
+  const confColor = conf === 'A' ? '#22c55e' : conf === 'B' ? '#eab308' : '#ef4444';
+  const confBadge = document.getElementById('copilotConfBadge');
+  confBadge.style.display = 'inline';
+  confBadge.textContent = 'Confidence: ' + conf;
+  confBadge.style.background = confColor + '33';
+  confBadge.style.color = confColor;
+
+  // Header row: regime + state
+  let header = '';
+  if (data.regime || data.system_state) {
+    header = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">';
+    if (data.regime) header += '<span style="margin-right:8px;">REGIME: ' + data.regime + '</span>';
+    if (data.system_state) header += '<span>STATE: ' + data.system_state + '</span>';
+    header += '</div>';
+  }
+
+  // Answer
+  let html = header;
+  html += '<div style="color:var(--text);white-space:pre-wrap;margin-bottom:8px;">' + escapeHtml(data.answer || data.error || 'No answer') + '</div>';
+
+  // Evidence
+  if (data.evidence && data.evidence.length > 0) {
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">EVIDENCE</div>';
+    data.evidence.forEach(ev => {
+      const evText = typeof ev === 'string' ? ev : (ev.description || ev.source || JSON.stringify(ev));
+      html += '<div style="font-size:11px;color:var(--accent);padding-left:8px;">&#x2022; ' + escapeHtml(evText) + '</div>';
+    });
+    html += '<div style="margin-bottom:6px;"></div>';
+  }
+
+  // Actions
+  if (data.actions && data.actions.length > 0) {
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">SUGGESTED ACTIONS</div>';
+    data.actions.forEach(a => {
+      const aText = a.action || a.description || JSON.stringify(a);
+      html += '<div style="font-size:11px;color:#60a5fa;padding-left:8px;">&#x2022; ' + escapeHtml(aText) + '</div>';
+    });
+    html += '<div style="margin-bottom:6px;"></div>';
+  }
+
+  // Warnings
+  if (data.warnings && data.warnings.length > 0) {
+    data.warnings.forEach(w => {
+      html += '<div style="font-size:11px;color:#eab308;padding-left:8px;">&#x26A0; ' + escapeHtml(w) + '</div>';
+    });
+    html += '<div style="margin-bottom:6px;"></div>';
+  }
+
+  // Copy JSON button
+  html += '<button onclick="copyCopilotJson(event)" style="font-size:10px;background:var(--border);border:none;color:var(--text-muted);padding:3px 8px;border-radius:4px;cursor:pointer;margin-top:4px;">Copy JSON</button>';
+
+  wrap.innerHTML = html;
+  chat.appendChild(wrap);
+}
+
+function copyCopilotJson(e) {
+  e.stopPropagation();
+  if (copilotLastJson) {
+    navigator.clipboard.writeText(JSON.stringify(copilotLastJson, null, 2))
+      .then(() => { e.target.textContent = 'Copied!'; setTimeout(() => { e.target.textContent = 'Copy JSON'; }, 1500); })
+      .catch(() => { e.target.textContent = 'Failed'; });
+  }
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function refresh() {
+  updateHeader();
+  const activeTab = document.querySelector('.nav button.active');
+  if (activeTab) loadTabData(activeTab.dataset.tab);
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (e) => {
+    try {
+      const s = JSON.parse(e.data);
+      document.getElementById('tickBadge').textContent = 'tick: ' + (s.tick_count || 0);
+    } catch {}
+  };
+  ws.onclose = () => setTimeout(connectWS, 5000);
+  ws.onerror = () => ws.close();
+}
+
+// Init
+refresh();
+connectWS();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

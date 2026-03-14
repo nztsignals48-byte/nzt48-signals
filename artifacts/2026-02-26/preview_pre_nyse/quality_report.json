@@ -1,0 +1,11 @@
+{
+  "quality_passed": true,
+  "violations": [],
+  "checks_run": 1,
+  "checks_passed": 1,
+  "rvol_placeholder_errors": 0,
+  "regime_contradictions": 0,
+  "missing_execution_plans": 0,
+  "trade_without_approval": 0,
+  "generated_at": "2026-02-26T06:33:44.436075+00:00"
+}

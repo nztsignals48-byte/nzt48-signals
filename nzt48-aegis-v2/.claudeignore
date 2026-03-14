@@ -1,0 +1,7 @@
+target/
+data/
+node_modules/
+events/
+dead_letter/
+config/parameter_history/
+*.ndjson

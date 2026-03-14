@@ -1,0 +1,32 @@
+{
+  "a_team": [
+    "AAPL",
+    "AMD",
+    "AMZN",
+    "ARM",
+    "AVGO",
+    "META",
+    "MU",
+    "TSM"
+  ],
+  "b_team": [
+    "AMC",
+    "ANET",
+    "COIN",
+    "CRWD",
+    "GME",
+    "GOOGL",
+    "IONQ",
+    "MRVL",
+    "MSFT",
+    "MSTR",
+    "NVDA",
+    "PANW",
+    "PLTR",
+    "SMCI",
+    "TSLA",
+    "WOLF"
+  ],
+  "last_updated": "2026-03-01T13:32:33.985145+00:00",
+  "version": "prefill_v1"
+}
