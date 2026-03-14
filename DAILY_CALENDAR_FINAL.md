@@ -296,38 +296,67 @@ WAL Reader:
 
 ---
 
-## 🔎 UNIVERSE SCANNER: CONTINUOUS ASSET DISCOVERY (24/7)
+## 🔎 UNIVERSE SCANNER: SESSION TICKER SELECTION (15 Minutes Pre-Session)
 
-While main loop and Ouroboros run, Universe Scanner runs **independently**:
+Universe Scanner **decides the session tickers 15 minutes before each session starts**:
 
 ```
-ALWAYS RUNNING (24/7):
+PHASE 1 PREP (07:45 UTC - 15 min before 08:00 open):
+  ├─ Scan LSE for tradeable leveraged ETPs
+  │  ├─ Check ISA eligibility (critical)
+  │  ├─ Verify liquidity (spreads <0.5%)
+  │  ├─ Detect any delistings or halts
+  │  └─ Filter to 12 best LSE ETPs for the day
+  ├─ Scan European exchanges for 20% of universe
+  │  ├─ Check trading halts/suspensions
+  │  ├─ Verify liquidity profiles
+  │  └─ Select 3-8 Euro stocks for the session
+  ├─ DECISION: Final Phase 1 universe (15-20 symbols)
+  └─ Provide to main engine by 08:00 UTC
 
-LSE Monitoring (08:00-16:30 UTC):
-  └─ Scans for new 3x/5x leveraged ETPs
-  └─ Detects delistings (e.g., old MU2.L variants)
-  └─ Monitors for trading halts/suspensions
-  └─ Updates ISA eligibility status
+PHASE 2 PREP (14:15 UTC - 15 min before 14:30 open):
+  ├─ Verify all Phase 1 LSE tickers still tradeable
+  ├─ Scan US market for 18 equities
+  │  ├─ Check pre-market activity
+  │  ├─ Verify liquidity (bid-ask spreads)
+  │  ├─ Detect any halts/corporate actions
+  │  └─ Select 18 best liquid equities
+  ├─ DECISION: Final Phase 2 universe (30 symbols)
+  └─ Provide to main engine by 14:30 UTC
 
-NASDAQ/NYSE Monitoring (09:30-16:00 UTC):
-  └─ Scans for new securities in watch list
-  └─ Detects IPOs, spin-offs, restructures
-  └─ Monitors for corporate actions
-  └─ Updates liquidity profiles
+PHASE 3 PREP (16:15 UTC - 15 min before 16:30 close):
+  ├─ Drop all LSE tickers (market closed)
+  ├─ Verify 18 US equities still tradeable
+  ├─ Check for any trading halts
+  ├─ DECISION: Final Phase 3 universe (18 US only)
+  └─ Provide to main engine by 16:30 UTC
 
-Asia Exchange Monitoring (22:00-08:00 UTC):
-  └─ Scans for new TSM-related instruments
-  └─ Monitors ASML ADR changes
-  └─ Detects new Asia-listed assets
-  └─ Updates universe dynamically
+PHASE 4 PREP (20:45 UTC - 15 min before 21:00 close):
+  ├─ Monitor final US trading hour
+  ├─ Begin Asia pre-market scanning
+  ├─ Check for any US corporate actions
+  ├─ DECISION: Transition universe
+  └─ Provide to main engine by 21:00 UTC
 
-Meta-Monitoring (24/7):
-  └─ Delisted ticker alerts (remove from universe)
-  └─ New asset alerts (add to universe)
-  └─ Liquidity changes (adjust position sizing)
-  └─ Regulatory changes (ISA eligibility)
+PHASE 5 PREP (21:45 UTC - 15 min before 22:00 open):
+  ├─ Scan Asia exchanges for tradeable assets
+  │  ├─ Verify TSM liquidity
+  │  ├─ Verify ASML ADR liquidity
+  │  ├─ Check for any trading halts
+  │  └─ Detect new Asia-listed instruments
+  ├─ DECISION: Final Phase 5 universe (TSM, ASML, indices)
+  └─ Provide to main engine by 22:00 UTC
 
-Result: Universe never stale, always reflects current market reality
+24/7 MONITORING (Between Sessions):
+  └─ Continuous scanning for:
+     ├─ Delistings (remove from universe)
+     ├─ New high-liquidity assets (add to watch)
+     ├─ Corporate actions (adjust sizing)
+     ├─ Halts/suspensions (alert system)
+     ├─ ISA eligibility changes (critical)
+     └─ Spread monitoring (liquidity tracking)
+
+Result: Fresh, optimized ticker list every session, never stale
 ```
 
 ---
