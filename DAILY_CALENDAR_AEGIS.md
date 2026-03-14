@@ -16,6 +16,68 @@ Your system trades **across 6 markets** for **22 hours per day**:
 
 ---
 
+## 🔮 OUROBOROS: CONTINUOUS AI ANALYTICS ENGINE
+
+**Ouroboros** (V2 Rust engine) runs in **parallel with main trading loop**, providing real-time feedback on:
+
+### What Ouroboros Does (Every 3-5 Minutes)
+
+```
+Alpha Sieve:
+  └─ Per-symbol signal quality measurement
+  └─ Filters noise from real alpha
+  └─ Feeds back into signal confidence
+
+Bayesian Regime Hunting:
+  └─ Detects hidden market regimes
+  └─ Finds regime shifts in real-time
+  └─ Adjusts strategy per-regime
+
+Exit Calibration:
+  └─ Optimizes chandelier exit levels
+  └─ Adjusts for market volatility
+  └─ Per-symbol exit tuning
+
+Kelly Accelerator:
+  └─ Real-time position sizing feedback
+  └─ Recommends f* (Kelly fraction)
+  └─ Risk-adjusted sizing per trade
+
+Registry Scraper:
+  └─ Monitors LSE for new leverage ETPs
+  └─ Detects delisted/new assets
+  └─ Updates universe dynamically
+
+WAL Reader:
+  └─ Replays event log (order flow)
+  └─ Finds execution patterns
+  └─ Learns from trade sequence
+```
+
+### How It Fits Into Daily Trading
+
+**During UK ISA (08:00-16:30 UTC):**
+- Ouroboros watches all 12 LSE ETPs
+- Measures alpha per-ETP
+- Optimizes exits in real-time
+- Suggests Kelly sizing
+
+**During US Trading (09:30-16:00 UTC):**
+- Ouroboros analyzes all 18 equities simultaneously
+- Detects regime shifts (momentum → mean-revert)
+- Updates regime classification every 3-5 min
+- Feeds confidence scores back to main engine
+
+**During Asia (22:00 UTC+):**
+- Ouroboros focuses on TSM, ASML
+- Detects Asia-specific patterns
+- Calibrates exits for wider spreads
+- Generates registry scrape (new Asia-listed assets?)
+
+**Result:** Trading engine gets **real-time feedback loop** instead of static parameters
+
+---
+
 ## 📅 24-HOUR DAILY TIMELINE
 
 ```
@@ -120,26 +182,39 @@ UTC TIME     MARKET              WHAT'S HAPPENING
              │  └─ Example: "3 trades, 2W/1L, +£150 P&L"
              └─ **ONLY 4 MARKETS LEFT OPEN NOW**
 
-16:45 UTC    🌍 OVERLAP ENDS
+16:45 UTC    🌍 OVERLAP ENDS + OUROBOROS DAYTIME PHASE BEGINS
              ├─ UK closed
              ├─ US after-hours (low liquidity, ignored)
              ├─ Asia pre-market heating up
+             ├─ **OUROBOROS ANALYTICS START** (see below)
              ├─ System monitoring but limited trading
+             └─ Continuous Ouroboros analysis (every 3-5 min)
 
-17:00 UTC    🌏 ASIA PRE-MARKET
+17:00 UTC    🌏 ASIA PRE-MARKET + OUROBOROS ALPHA ANALYSIS
              ├─ Hong Kong market warming up
              ├─ TSM (Taiwan Semi) pre-trading
              ├─ ASML ADR pre-market moves
+             ├─ **Ouroboros simultaneously:**
+             │  ├─ Alpha sieve: Measuring signal quality on TSM/ASML
+             │  ├─ Regime hunting: Detecting shift to Asia volatility patterns
+             │  ├─ Exit calibration: Adjusting chandelier levels for Asia spreads
+             │  └─ Kelly accelerator: Sizing recommendations for overnight trades
              ├─ Possible early signals on Asia momentum
              └─ Continuous scanning (60 sec cycles)
 
-22:00 UTC    🌏 ASIA OPENS
+22:00 UTC    🌏 ASIA OPENS + OUROBOROS LIVE FEEDBACK
              ├─ Asia full trading begins
              ├─ Tokyo, Hong Kong, Singapore markets live
              ├─ TSM and ASML primary trading venues
+             ├─ **Ouroboros continuously analyzing:**
+             │  ├─ Alpha quality of TSM/ASML signals
+             │  ├─ Bayesian regime classification
+             │  ├─ Trade quality metrics (entry timing, exit calibration)
+             │  ├─ Registry scraping (any new Asia-listed ETPs?)
+             │  └─ WAL event log replay (finding patterns in order flow)
              ├─ Possible 1-2 trades in Asia window
              ├─ Continuous scanning all 4 tickers (TSM, ASML, context indices)
-             └─ Telegram: "🌏 Asia Market Alive"
+             └─ Telegram: "🌏 Asia Market Alive + Ouroboros Analysis"
 
 00:00 UTC    🔄 CYCLE REPEATS
              ├─ Next LSE open: 7.5 hours away (08:00)
