@@ -335,9 +335,10 @@ Result: Universe never stale, always reflects current market reality
 ## 📊 DAILY EXECUTION SUMMARY
 
 ### Phase 1: LSE + European Markets (08:00-14:30 UTC, 6.5 hours)
-- **Markets Open:** 12 LSE leveraged ETPs + European exposure
+- **Markets Open:** 80% LSE (12 leveraged ETPs) + 20% European stocks
+- **Universe:** ~15-20 total symbols (12 LSE + 3-8 Euro)
 - **Trading:** Continuous every 60 sec
-- **Ouroboros:** Real-time alpha analysis on 12 symbols
+- **Ouroboros:** Real-time alpha analysis on all symbols
 - **Universe Scanner:** Monitoring LSE + Euro exchanges
 - **Expected Trades:** 1-2
 - **Expected P&L:** £50-150
@@ -379,9 +380,13 @@ Result: Universe never stale, always reflects current market reality
 ## 💰 DAILY METRICS (After Validation)
 
 ```
-Trading Hours:       22 hours/day (8 hours maintenance)
+Trading Hours:       22.5 hours/day (continuous across all phases)
 Active Markets:      6 (UK ISA, Europe, US, Asia)
-Symbols Scanned:     30+ (12 LSE + 18 US + Asia)
+Symbols Scanned:     35-40+ (12 LSE + 3-8 Euro + 18 US + Asia)
+  Phase 1: 80% LSE (12) + 20% Euro (3-8)
+  Phase 2: LSE + US
+  Phase 3: US only
+  Phase 4: Asia
 
 Market Scans:        1,440 per day (60-sec cycles)
 Health Checks:       144 per day (10-min cycles)
