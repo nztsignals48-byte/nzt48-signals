@@ -70,6 +70,32 @@ class RefreshSchedule:
 
 
 @dataclass
+class TickerProfile:
+    """Ticker profile with volatility classification."""
+    ticker: str
+    daily_range_pct: float  # Average daily range as %
+    tier: str  # "conservative", "moderate", "volatile", "scalp"
+    liquidity_score: float  # 0-1 (bid-ask spread, volume)
+    isa_eligible: bool  # ISA compliance
+    holding_style: str  # "swing" (hours), "scalp" (same-day), "momentum" (minutes)
+
+    def __post_init__(self):
+        """Auto-classify volatility tier based on daily range."""
+        if self.daily_range_pct <= 3.0:
+            self.tier = "conservative"
+            self.holding_style = "swing"
+        elif self.daily_range_pct <= 7.0:
+            self.tier = "moderate"
+            self.holding_style = "scalp"
+        elif self.daily_range_pct <= 15.0:
+            self.tier = "volatile"
+            self.holding_style = "scalp"
+        else:
+            self.tier = "extreme"
+            self.holding_style = "momentum"  # Minute-level entries/exits only
+
+
+@dataclass
 class UniverseSnapshot:
     """Snapshot of universe at a point in time."""
     timestamp: datetime
@@ -82,6 +108,7 @@ class UniverseSnapshot:
     total_count: int = 0
     new_runners: List[str] = field(default_factory=list)  # Detected this scan
     removed_tickers: List[str] = field(default_factory=list)  # Halted/delisted this scan
+    ticker_profiles: Dict[str, TickerProfile] = field(default_factory=dict)  # Per-ticker analysis
 
     def to_dict(self) -> dict:
         return {
@@ -95,6 +122,15 @@ class UniverseSnapshot:
             "total_count": self.total_count,
             "new_runners": self.new_runners,
             "removed_tickers": self.removed_tickers,
+            "ticker_profiles": {
+                ticker: {
+                    "tier": profile.tier,
+                    "daily_range_pct": profile.daily_range_pct,
+                    "holding_style": profile.holding_style,
+                    "liquidity_score": profile.liquidity_score,
+                }
+                for ticker, profile in self.ticker_profiles.items()
+            },
         }
 
 
