@@ -29,7 +29,7 @@ UTC TIME     PHASE                  MARKETS OPEN            WHAT'S HAPPENING
              └─ Expected: 0-1 trades (low Asia volume overnight)
 
 08:00        🎯 LSE OPENS (London Stock Exchange)
-             UK ISA +    ├─ 12 Leveraged ETPs activate:
+             UK ISA +    ├─ ALL ISA-eligible leveraged ETPs activate (not limited to 12):
              Europe      │  ├─ QQQ3.L (Nasdaq 3x long)
                          │  ├─ 3LUS.L (S&P 500 3x long)
                          │  ├─ 3SEM.L (Semiconductors 3x long)
@@ -41,13 +41,14 @@ UTC TIME     PHASE                  MARKETS OPEN            WHAT'S HAPPENING
                          │  ├─ 3USS.L (S&P 500 -3x short)
                          │  ├─ QQQ5.L (Nasdaq 5x long)
                          │  ├─ SP5L.L (S&P 500 5x long)
-                         │  └─ + Leveraged defensive ETPs
+                         │  ├─ + Any new 3x/5x/bear variants passing checks
+                         │  └─ + European stocks (liquidity-filtered, ~20% allocation)
                          ├─ Ouroboros: 24/7 continuous analytics
-                         │  ├─ Alpha sieve on all 12 LSE ETPs
+                         │  ├─ Alpha sieve on ALL LSE tradeable ETPs
                          │  ├─ Regime hunting (UK/Euro regime)
                          │  ├─ Exit calibration per ETP
                          │  ├─ Kelly accelerator feedback
-                         │  └─ Registry scraper (new LSE ETPs?)
+                         │  └─ Registry scraper (detect new LSE ETPs)
                          ├─ Universe Scanner: Scanning LSE for new delisted/added ETPs
                          ├─ Every 60 sec: Scans all 12 LSE ETPs
                          ├─ Telegram: "🎯 LSE OPENS: UK ISA + Euro Trading Live"
@@ -302,16 +303,16 @@ Universe Scanner **decides the session tickers 15 minutes before each session st
 
 ```
 PHASE 1 PREP (07:45 UTC - 15 min before 08:00 open):
-  ├─ Scan LSE for tradeable leveraged ETPs
+  ├─ Scan LSE for ALL tradeable leveraged ETPs (3x, 5x, bear variants)
   │  ├─ Check ISA eligibility (critical)
   │  ├─ Verify liquidity (spreads <0.5%)
   │  ├─ Detect any delistings or halts
-  │  └─ Filter to 12 best LSE ETPs for the day
-  ├─ Scan European exchanges for 20% of universe
+  │  └─ Include ALL passing checks (not limited to 12 — current ~12+, dynamic)
+  ├─ Scan European exchanges for ~20% of universe
   │  ├─ Check trading halts/suspensions
   │  ├─ Verify liquidity profiles
-  │  └─ Select 3-8 Euro stocks for the session
-  ├─ DECISION: Final Phase 1 universe (15-20 symbols)
+  │  └─ Select all liquid Euro stocks meeting criteria
+  ├─ DECISION: Final Phase 1 universe (20-30+ symbols)
   └─ Provide to main engine by 08:00 UTC
 
 PHASE 2 PREP (14:15 UTC - 15 min before 14:30 open):
