@@ -94,28 +94,38 @@ UTC TIME     PHASE                  MARKETS OPEN            WHAT'S HAPPENING
              │           ├─ Telegram: Trade entries/exits on LSE or US
              │           └─ Health checks: Every 10 min
 
-16:00        🏁 NYSE/NASDAQ CLOSES
-             LSE still   ├─ US market ends (after-hours begins, ignored)
-             open only   ├─ UK ISA continues (30 more minutes)
-             │           ├─ Ouroboros: Shift focus back to LSE-only analysis
-             │           ├─ Universe Scanner: Still monitoring both, LSE priority
-             │           └─ Final 30 minutes of UK/US overlap window
+16:00        🏁 NYSE/NASDAQ CLOSES (US Only Now)
+             (transition  ├─ US market ends (after-hours begins, ignored)
+             period)     ├─ UK ISA already closed (ended at 16:30 UTC = 17:30 CET)
+             │           ├─ Final US trades settled
+             │           ├─ Ouroboros: Shift analysis to Asia prep
+             │           ├─ Universe Scanner: US market closed, monitoring Asia
+             │           └─ No more LSE or US trading
 
-16:30        🏁 LSE CLOSES
-             (transition  ├─ UK ISA market ends
+16:00-16:30  🏁 FINAL US CLOSE WINDOW (30 minutes)
+             (US only)   ├─ US market already closed at 16:00 UTC
+             │           ├─ (NOTE: This overlaps with LSE still open if 16:30 is LSE close)
+             │           ├─ Actually US closes at 16:00, LSE closes at 16:30
+             │           ├─ Ouroboros: Analyzing final trades
+             │           └─ Universe Scanner: Transitioning to Asia focus
+
+16:30        🏁 LSE CLOSES (Now Only Maintenance)
+             (transition  ├─ UK ISA market officially ends
              period)     ├─ Final UK trades settled
              │           ├─ Telegram: 📊 UK Daily Summary
              │           │  └─ Example: "3 trades, 2W/1L, +£150 P&L"
-             │           ├─ Ouroboros: Shift to US after-hours + Asia pre-market
-             │           │  ├─ Registry scraper (any US delistings today?)
+             │           ├─ Ouroboros: Shift to Asia-only analysis
+             │           │  ├─ Registry scraper (any delistings today?)
              │           │  ├─ Alpha quality review (daily metrics)
-             │           │  └─ Regime re-calibration (US→Asia transition)
-             │           └─ Universe Scanner: Monitoring for US after-hours changes
+             │           │  └─ Regime re-calibration (LSE/US→Asia transition)
+             │           └─ Universe Scanner: Now ONLY monitoring Asia
 
-16:30-22:00  🔧 MAINTENANCE WINDOW (5.5 hours)
+16:30-22:00  🔧 MAINTENANCE WINDOW (5.5 hours) - NO TRADING
              (US after-  ├─ US after-hours (ignored, low liquidity)
-             hours +     ├─ Asia pre-market warming up
-             Asia prep)  ├─ No new trades expected (maintenance period)
+             hours +     ├─ LSE closed (no longer trading)
+             Asia prep)  ├─ Asia pre-market warming up
+             │           ├─ NO new trades expected (no markets open)
+             │           ├─ System in MAINTENANCE MODE
              │           ├─ Ouroboros: 24/7 analytics CONTINUE
              │           │  ├─ Deep dive analysis of UK/US day trades
              │           │  ├─ Bayesian regime hunting (find Asia patterns)
@@ -332,7 +342,7 @@ Result: Universe never stale, always reflects current market reality
 - **Expected Trades:** 1-2
 - **Expected P&L:** £50-150
 
-### Phase 2: LSE + US Overlap (14:30-16:30, 2 hours) ← PEAK ACTIVITY
+### Phase 2: LSE + US Overlap (14:30-16:00 UTC, 1.5 hours) ← PEAK ACTIVITY
 - **Markets Open:** 12 LSE ETPs + 18 US equities (30 total)
 - **Trading:** Continuous every 60 sec (maximum universe)
 - **Ouroboros:** Analyzing 30 symbols simultaneously
@@ -340,9 +350,17 @@ Result: Universe never stale, always reflects current market reality
 - **Expected Trades:** 1-3 (most active period)
 - **Expected P&L:** £100-250
 
-### Maintenance (16:30-22:00, 5.5 hours)
-- **Markets Open:** Asia pre-market (no active trading)
-- **Trading:** Paused (no signals expected)
+### US Only Close (16:00-16:30 UTC, 30 minutes)
+- **Markets Open:** US equities only (LSE already closed at 16:30 UTC = 17:30 CET)
+- **Trading:** Final US trades before 16:00 UTC close
+- **Ouroboros:** Analyzing final US day trades
+- **Universe Scanner:** Monitoring final US activity
+- **Expected Trades:** 0-1
+- **Expected P&L:** £0-50
+
+### Maintenance (16:30-22:00 UTC, 5.5 hours) ← NO TRADING
+- **Markets Open:** NONE (US closed, LSE closed, Asia pre-market only)
+- **Trading:** Paused (no active markets)
 - **Ouroboros:** Deep analysis of daily trades, Asia pattern hunting
 - **Universe Scanner:** Preparing Asia universe for open
 - **Expected Trades:** 0
@@ -373,6 +391,8 @@ Universe Scans:      ~144+ per day (continuous)
 Expected Trades:     2-8 per day
   Phase 1 (LSE+Euro): 1-2 trades
   Phase 2 (LSE+US):   1-3 trades (peak)
+  US Only Close:      0-1 trades
+  Maintenance:        0 trades (no markets)
   Phase 3 (Asia):     1-2 trades
 
 P&L Expected:        £200-550 per day (average £375)
