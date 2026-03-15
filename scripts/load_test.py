@@ -282,7 +282,7 @@ class LoadTester:
                 write_latencies.append(batch_latency)
                 total_writes += batch_size
 
-                await asyncio.sleep(0.1)
+                time.sleep(0.1)
 
         finally:
             # Cleanup
