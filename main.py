@@ -121,6 +121,8 @@ except ImportError as _e:
 try:
     from core.tier_based_entry_logic import TierBasedEntryDetector, EntryType, EntrySignal
     from core.tier_exit_enforcer import SessionExitEnforcer, ExitReason
+    from core.volume_analytics import VolumeAnalytics
+    from core.order_placement_engine import OrderPlacementEngine
     _TIER_BASED_AVAILABLE = True
 except ImportError as _e:
     _TIER_BASED_AVAILABLE = False
@@ -158,6 +160,15 @@ try:
 except ImportError as _e:
     _MASTER_ORCHESTRATOR_AVAILABLE = False
     logging.getLogger("nzt48.main").warning("Master Orchestrator not available: %s", _e)
+
+# PHASE 2b: IB Gateway Health Monitor + Market Session Scheduler
+try:
+    from core.ib_gateway_health_monitor import IBGatewayHealthMonitor
+    from core.market_session_scheduler import MarketSessionScheduler
+    _IB_GATEWAY_HEALTH_AVAILABLE = True
+except ImportError as _e:
+    _IB_GATEWAY_HEALTH_AVAILABLE = False
+    logging.getLogger("nzt48.main").warning("IB Gateway health monitor not available: %s", _e)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # V3.0 Microstructure + ML modules — imported with graceful fallback
@@ -995,11 +1006,15 @@ class NZT48Orchestrator:
         # Tier-Based Entry Logic & Exit Enforcement
         self.tier_entry_detector = None
         self.tier_exit_enforcer = None
+        self.volume_analytics = None
+        self.order_placement_engine = None
         if _TIER_BASED_AVAILABLE:
             try:
                 self.tier_entry_detector = TierBasedEntryDetector()
                 self.tier_exit_enforcer = SessionExitEnforcer()
-                logger.info("Tier-based trading system initialized (Type A/B/C entry patterns, position sizing, Tier 3 exit discipline)")
+                self.volume_analytics = VolumeAnalytics()
+                self.order_placement_engine = OrderPlacementEngine()
+                logger.info("Tier-based trading system initialized (Type A/B/C/D entry patterns, volume analytics, stop order placement, Tier 3 exit discipline)")
             except Exception as _tier_err:
                 logger.warning("Tier-based trading system init failed: %s", _tier_err)
 
@@ -1021,6 +1036,26 @@ class NZT48Orchestrator:
                 logger.info("CloudWatch metrics emitter loaded but unavailable (boto3/creds missing)")
         except Exception as _cw_err:
             logger.warning("CloudWatch metrics emitter init failed (non-critical): %s", _cw_err)
+
+        # PHASE 2b: IB Gateway Health Monitor + Market Session Scheduler
+        # 3-layer resilience: continuous health checks, auto-restart, market-aware alerts
+        self.market_session_scheduler = None
+        self.ib_gateway_health_monitor = None
+        if _IB_GATEWAY_HEALTH_AVAILABLE:
+            try:
+                self.market_session_scheduler = MarketSessionScheduler(ib_client=None)
+                self.ib_gateway_health_monitor = IBGatewayHealthMonitor(
+                    host="ib-gateway",  # Docker service name
+                    port=4002,  # Paper trading port
+                    market_scheduler=self.market_session_scheduler,
+                    telegram_notifier=self._notifier if hasattr(self, '_notifier') else None,
+                )
+                logger.info("IB Gateway health monitor initialized (continuous 30s checks, auto-restart after 3 failures)")
+                logger.info("Market session scheduler initialized (timezone-aware, DST-adaptive)")
+            except Exception as _ib_health_err:
+                logger.warning("IB Gateway health monitor init failed (non-critical): %s", _ib_health_err)
+                self.market_session_scheduler = None
+                self.ib_gateway_health_monitor = None
 
         # Trading Discipline Engine — absolute veto power over every trade
         # "Today's excellence is tomorrow's average. No trade > bad trade."
@@ -3671,9 +3706,10 @@ class NZT48Orchestrator:
 
         This wires in the TierBasedEntryDetector to:
         1. Classify ticker tier based on volatility
-        2. Adjust position size per tier
-        3. Apply entry pattern metadata
-        4. Enforce Tier 3 session exit discipline
+        2. Compute volume metrics (trend, RVOL, divergence)
+        3. Adjust position size per tier
+        4. Apply entry pattern metadata
+        5. Enforce Tier 3 session exit discipline
 
         Args:
             signal: Signal object to enhance
@@ -3686,6 +3722,10 @@ class NZT48Orchestrator:
             # Get indicator data from signal if available
             rsi = getattr(signal.indicators, 'rsi', 50.0) if signal.indicators else 50.0
             rvol = getattr(signal.indicators, 'rvol', 0.8) if signal.indicators else 0.8
+            current_vol = getattr(signal.indicators, 'volume', 0.0) if signal.indicators else 0.0
+            vol_ma20 = getattr(signal.indicators, 'vol_ma20', 1.0) if signal.indicators else 1.0
+            current_close = getattr(signal, 'price', 0.0) if signal else 0.0
+            previous_close = getattr(signal.indicators, 'prev_close', current_close) if signal.indicators else current_close
 
             # Estimate tier from daily range (simplified from historical data)
             daily_range_pct = 5.0  # Default
@@ -3702,6 +3742,26 @@ class NZT48Orchestrator:
                 daily_range_pct=daily_range_pct,
             )
 
+            # NEW: Compute volume metrics (volume_trend, vol_divergence)
+            volume_trend = "flat"  # Default
+            vol_divergence = False
+            if self.volume_analytics:
+                volume_metrics = self.volume_analytics.get_volume_metrics(
+                    ticker=ticker,
+                    current_vol=current_vol,
+                    vol_ma20=vol_ma20,
+                    current_close=current_close,
+                    previous_close=previous_close,
+                    last_3_bars_vols=None,
+                )
+                volume_trend = volume_metrics.volume_trend
+                vol_divergence = volume_metrics.vol_divergence
+
+                # Log volume analysis
+                self.volume_analytics.log_volume_analysis(
+                    ticker, volume_metrics, context="tier_logic"
+                )
+
             # Adjust signal position size by tier (as % of account)
             # The dynamic_sizer will use this as a baseline
             if tier_class.position_size_pct > 0:
@@ -3711,10 +3771,13 @@ class NZT48Orchestrator:
                 signal._tier_info['tier'] = tier_class.tier
                 signal._tier_info['position_size_pct'] = tier_class.position_size_pct
                 signal._tier_info['holding_style'] = tier_class.holding_style
+                signal._tier_info['volume_trend'] = volume_trend
+                signal._tier_info['vol_divergence'] = vol_divergence
 
             logger.debug(
-                "Tier logic applied: %s tier=%d, pos_size=%.2f%%, style=%s",
-                ticker, tier_class.tier, tier_class.position_size_pct * 100, tier_class.holding_style
+                "Tier logic applied: %s tier=%d, pos_size=%.2f%%, style=%s, vol_trend=%s",
+                ticker, tier_class.tier, tier_class.position_size_pct * 100,
+                tier_class.holding_style, volume_trend
             )
         except Exception as _tier_err:
             logger.debug(f"Tier logic application failed for {ticker}: {_tier_err}")
@@ -3752,6 +3815,14 @@ class NZT48Orchestrator:
                 msg = (
                     f"📈 OVERBOUGHT FADE: {entry_signal.ticker}\n"
                     f"RSI {entry_signal.rsi:.0f} (overbought) | Entry {entry_signal.entry_price:.2f} → "
+                    f"Target {entry_signal.target_price:.2f}\n"
+                    f"Confidence {entry_signal.confidence:.0f}% | {entry_signal.rationale}"
+                )
+            elif entry_type == "TYPE_D":
+                # 💪 Type D support bounce
+                msg = (
+                    f"💪 SUPPORT BOUNCE: {entry_signal.ticker}\n"
+                    f"Price at low, RSI {entry_signal.rsi:.0f} (oversold) | Entry {entry_signal.entry_price:.2f} → "
                     f"Target {entry_signal.target_price:.2f}\n"
                     f"Confidence {entry_signal.confidence:.0f}% | {entry_signal.rationale}"
                 )
@@ -9531,6 +9602,30 @@ class NZT48Orchestrator:
 
         # Initialize Google Sheets
         self.sheets.initialize()
+
+        # PHASE 2b: Start IB Gateway Health Monitor
+        # 3-layer resilience: continuous health checks every 30s, auto-restart after 3 failures,
+        # market-aware alerts 10min before market open
+        if self.ib_gateway_health_monitor:
+            try:
+                # Wait for IB Gateway to become ready (max 5 minutes)
+                logger.info("Waiting for IB Gateway to become ready...")
+                gateway_ready = await self.ib_gateway_health_monitor.wait_for_ready(timeout_seconds=300)
+                if not gateway_ready:
+                    logger.warning(
+                        "IB Gateway not ready after 5 minutes. "
+                        "Trading will proceed but may encounter connection issues."
+                    )
+
+                # Start background health monitoring loop
+                _health_task = asyncio.create_task(
+                    self.ib_gateway_health_monitor.monitor_loop(check_interval_seconds=30)
+                )
+                self._background_tasks.add(_health_task)
+                _health_task.add_done_callback(self._background_tasks.discard)
+                logger.info("IB Gateway health monitor loop started (background task)")
+            except Exception as _health_err:
+                logger.warning("IB Gateway health monitor startup failed: %s", _health_err)
 
         # Set up signal handlers for kill switch (method 3)
         def handle_signal(signum, frame):

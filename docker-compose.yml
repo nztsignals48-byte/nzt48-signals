@@ -50,23 +50,49 @@ services:
 
   # IB Gateway — headless IBKR API via IBC (auto-reconnect, auto-restart)
   # Image: gnzsnz/ib-gateway (IB Gateway + IBC, Xvfb for headless)
-  # Weekly maintenance: user must approve 2FA on phone every Monday morning
+  # PHASE 2b: Enhanced resilience with 2FA timeout auto-recovery
+  #
+  # 2FA Handling:
+  # - TWOFA_TIMEOUT_ACTION=restart: Automatically restarts on 2FA timeout (no manual intervention)
+  # - TWOFA_TIMEOUT=120: Gives 2 minutes for 2FA approval before restarting
+  # - restart_policy: Auto-restart container on failure (max 5 retries with 10s delay)
+  # - healthcheck: Continuous port 4002 monitoring (every 30s, 3 consecutive failures mark unhealthy)
+  #
+  # Integration with IBGatewayHealthMonitor:
+  # - Docker healthcheck monitors port availability continuously
+  # - Python monitor_loop() provides application-level health checks (socket-based)
+  # - If Docker healthcheck fails 5x: container marked unhealthy (dashboard visible)
+  # - If Python monitor detects 3 failures: initiates docker-compose restart
+  # - If 2FA timeout occurs: IBC auto-restarts process within container
+  #
+  # Weekly Maintenance:
+  # - Monday morning (07:50 UK): Telegram reminder for 2FA approval
+  # - User approves on phone; IBC handles login + 2FA automatically
+  # - If approval doesn't happen within 2 minutes: IBC restarts and retries
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: nzt48-ib-gateway
     restart: unless-stopped
+    restart_policy:
+      condition: on-failure
+      max_retries: 5
+      delay: 10s
     env_file:
       - .env.production
     environment:
       # TWS_USERID / TWS_PASSWORD / TRADING_MODE injected via env_file (.env.production)
       # Previously used ${IBKR_USERNAME} interpolation which reads from HOST shell, not env_file
       - READ_ONLY_API=false  # Must be false for paper order placement
-      - TWOFA_TIMEOUT_ACTION=restart
+
+      # PHASE 2b: 2FA Resilience Configuration
+      - TWOFA_TIMEOUT_ACTION=restart  # Auto-restart on 2FA timeout (no manual intervention)
+      - TWOFA_TIMEOUT=120             # 2-minute window for 2FA approval before restart
+
       # Accept API connections from Docker network (nzt48 container connects via bridge IP)
       - TWS_ACCEPT_INCOMING=accept
     expose:
-      - "4002"
-      - "4004"
+      - "4002"  # Paper trading port
+      - "4004"  # Live trading port (unused for now)
     mem_limit: 1024m
     logging:
       driver: json-file
@@ -74,11 +100,12 @@ services:
         max-size: "5m"
         max-file: "2"
     healthcheck:
+      # PHASE 2b Enhanced: Continuous socket test to port 4002
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4002' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
+      interval: 30s      # Check every 30 seconds
+      timeout: 5s        # Timeout after 5 seconds
+      retries: 3         # Mark unhealthy after 3 consecutive failures
+      start_period: 60s  # Grace period during startup
 
   # Redis — Mandate 9: Persistent Chandelier state + session cache
   #

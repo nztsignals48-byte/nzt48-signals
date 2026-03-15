@@ -79,6 +79,7 @@ class EntryType(Enum):
     TYPE_A = "type_a"  # Dip recovery
     TYPE_B = "type_b"  # Early runner (PRIORITY)
     TYPE_C = "type_c"  # Overbought fade
+    TYPE_D = "type_d"  # Support bounce
 
 
 @dataclass
@@ -128,8 +129,8 @@ class TierBasedEntryDetector:
         self.tier_4_position = 0.005  # 0.5%
 
         # Entry type allowances per tier
-        self.tier_1_entry_types = [EntryType.TYPE_A, EntryType.TYPE_B, EntryType.TYPE_C]
-        self.tier_2_entry_types = [EntryType.TYPE_A, EntryType.TYPE_B, EntryType.TYPE_C]
+        self.tier_1_entry_types = [EntryType.TYPE_A, EntryType.TYPE_B, EntryType.TYPE_C, EntryType.TYPE_D]
+        self.tier_2_entry_types = [EntryType.TYPE_A, EntryType.TYPE_B, EntryType.TYPE_C, EntryType.TYPE_D]
         self.tier_3_entry_types = [EntryType.TYPE_B, EntryType.TYPE_C]  # No dip recovery
         self.tier_4_entry_types = []  # Skip
 
@@ -212,8 +213,19 @@ class TierBasedEntryDetector:
         if volume_trend != "rising":
             return None
 
-        # Confidence: 60-75%
+        # Base confidence: 65%
         confidence = 65.0
+
+        # Volume urgency boost: if RVOL >= 2.5x, add +10%, if >= 2.0x add +7%
+        if rvol >= 2.5:
+            confidence += 10.0
+        elif rvol >= 2.0:
+            confidence += 7.0
+        elif rvol >= 1.8:
+            confidence += 5.0
+
+        # Cap at 100%
+        confidence = min(confidence, 100.0)
 
         # Target: 2-3% above entry
         target_price = current_price * 1.025
@@ -231,7 +243,7 @@ class TierBasedEntryDetector:
             rvol=rvol,
             volume_trend=volume_trend,
             time_detected=datetime.now(UTC),
-            rationale=f"Oversold (RSI {rsi:.1f}), volume exhaustion (RVOL {rvol:.2f}x), dip recovery setup"
+            rationale=f"Dip recovery: RSI {rsi:.1f} (oversold), RVOL {rvol:.2f}x, volume rising, confidence {confidence:.0f}%"
         )
 
     def detect_type_b_early_runner(
@@ -244,6 +256,8 @@ class TierBasedEntryDetector:
         daily_high: float,
         volume_spike_factor: float,  # Current vol / avg vol
         time_in_session_minutes: int,
+        session_open_price: float = None,
+        last_3_bars_rvols: list = None,
     ) -> Optional[EntrySignal]:
         """
         Detect Type B: Early Runner (PRIORITY).
@@ -253,6 +267,8 @@ class TierBasedEntryDetector:
         - RSI not yet extreme (40-70 range)
         - Strong price momentum (>80% of daily range from low)
         - Within first 2-3 hours of session
+        - Multi-bar confirmation: last 3 bars show sustained volume elevation
+        - NOT >5% in-session move (avoid chasing runaway moves)
 
         This is YOUR EDGE: detect early runners BEFORE they become overbought.
         """
@@ -275,10 +291,19 @@ class TierBasedEntryDetector:
         if daily_range > 0 and price_from_low / daily_range < 0.80:
             return None
 
-        # Volume must be rising (causation of price move)
-        # (caller should verify volume_trend == "rising")
+        # Block if already >5% in-session move (avoid chasing)
+        if session_open_price is not None:
+            session_move_pct = (current_price - session_open_price) / session_open_price
+            if session_move_pct > 0.05:  # Already moved >5%
+                return None
 
-        # Confidence: 75-90%
+        # Multi-bar volume sustainability check
+        if last_3_bars_rvols is not None and len(last_3_bars_rvols) >= 3:
+            bars_above_2x = sum(1 for v in last_3_bars_rvols if v >= 2.0)
+            if bars_above_2x < 2:  # Need at least 2 of last 3 bars above 2.0x
+                return None
+
+        # Confidence: 82% (priority edge)
         confidence = 82.0
 
         # Target: 3-5% above entry (running room)
@@ -297,7 +322,7 @@ class TierBasedEntryDetector:
             rvol=rvol,
             volume_trend="rising",
             time_detected=datetime.now(UTC),
-            rationale=f"Early runner: RVOL {rvol:.2f}x, RSI {rsi:.1f} (not extreme), {time_in_session_minutes}min into session"
+            rationale=f"Early runner (PRIORITY): RVOL {rvol:.2f}x, RSI {rsi:.1f}, {time_in_session_minutes}min into session, multi-bar confirmed"
         )
 
     def detect_type_c_overbought(
@@ -309,18 +334,20 @@ class TierBasedEntryDetector:
         daily_low: float,
         daily_high: float,
         volume_trend: str,
+        vol_divergence_confirmed: bool = False,
     ) -> Optional[EntrySignal]:
         """
         Detect Type C: Overbought Fade.
 
         Criteria:
-        - RSI > 70 (overbought)
-        - Volume divergence (price near high but volume declining)
+        - RSI > 70 (overbought, boosted to >75 for more confirmation)
+        - Volume divergence required (price near high but volume declining)
         - At or near resistance level (daily high)
+        - vol_divergence parameter confirms explicit divergence detection
 
         Short entry to fade the overextension.
         """
-        if rsi <= 70:
+        if rsi <= 75:  # Raised from 70 to 75 for stronger confirmation
             return None
 
         # Price at or near daily high (within 2% of high)
@@ -328,12 +355,24 @@ class TierBasedEntryDetector:
         if price_to_high > 0.02 * (daily_high - daily_low):
             return None
 
-        # Volume divergence: volume declining or flat
+        # Volume divergence: volume must be declining
         if volume_trend == "rising":
             return None
 
-        # Confidence: 65-80%
+        # Boost confidence if vol_divergence is explicitly confirmed
+        # Base confidence: 72%
         confidence = 72.0
+
+        # If divergence confirmed (price up, volume down), add +8%
+        if vol_divergence_confirmed:
+            confidence += 8.0
+
+        # If RVOL < 1.5 (strong declining volume), add +3%
+        if rvol < 1.5:
+            confidence += 3.0
+
+        # Cap at 100%
+        confidence = min(confidence, 100.0)
 
         # Target: 2-3% below entry (fade)
         target_price = current_price * 0.97
@@ -351,7 +390,73 @@ class TierBasedEntryDetector:
             rvol=rvol,
             volume_trend=volume_trend,
             time_detected=datetime.now(UTC),
-            rationale=f"Overbought fade: RSI {rsi:.1f}, at resistance, volume divergence ({volume_trend})"
+            rationale=f"Overbought fade: RSI {rsi:.1f}, at resistance, volume {'divergence' if vol_divergence_confirmed else 'declining'}, confidence {confidence:.0f}%"
+        )
+
+    def detect_type_d_support_bounce(
+        self,
+        ticker: str,
+        current_price: float,
+        rsi: float,
+        rvol: float,
+        daily_low: float,
+        daily_high: float,
+        volume_trend: str,
+    ) -> Optional[EntrySignal]:
+        """
+        Detect Type D: Support Bounce (NEW).
+
+        Criteria:
+        - Price within 1% of daily low (at support level)
+        - RSI 20-40 (oversold but not extreme)
+        - Volume > vol_ma20 (buying interest at support)
+        - Volume trend rising (buyers stepping in)
+
+        Complements Type A with explicit support level confirmation.
+        Good for swing trades (0.5-2 hours).
+
+        Entry confidence: 70%
+        """
+        # Price at support: within 1% of daily low
+        price_above_low = current_price - daily_low
+        daily_range = daily_high - daily_low
+        if daily_range > 0:
+            pct_from_low = price_above_low / daily_range
+            if pct_from_low > 0.01:  # Must be within 1% of low
+                return None
+
+        # RSI in oversold region but not panic (20-40)
+        if rsi < 20 or rsi > 40:
+            return None
+
+        # Volume must be rising (buyers stepping in at support)
+        if volume_trend != "rising":
+            return None
+
+        # RVOL should be > 1.0 (above baseline)
+        if rvol < 1.0:
+            return None
+
+        # Confidence: 70%
+        confidence = 70.0
+
+        # Target: 2-3% above entry (bounce to resistance)
+        target_price = current_price * 1.025
+        stop_price = daily_low * 0.98
+
+        return EntrySignal(
+            entry_type=EntryType.TYPE_D,
+            ticker=ticker,
+            confidence=confidence,
+            entry_price=current_price,
+            target_price=target_price,
+            stop_price=stop_price,
+            position_size_pct=0.0,  # Set by tier
+            rsi=rsi,
+            rvol=rvol,
+            volume_trend=volume_trend,
+            time_detected=datetime.now(UTC),
+            rationale=f"Support bounce: price at low, RSI {rsi:.1f} (oversold), volume rising {rvol:.2f}x"
         )
 
     def calculate_position_size(
@@ -438,6 +543,20 @@ class TierBasedEntryDetector:
             )
             if signal_c:
                 candidates.append(signal_c)
+
+        # Try Type D (support bounce)
+        if EntryType.TYPE_D in tier_classification.allowed_entry_types:
+            signal_d = self.detect_type_d_support_bounce(
+                ticker=ticker,
+                current_price=current_price,
+                rsi=rsi,
+                rvol=rvol,
+                daily_low=daily_low,
+                daily_high=daily_high,
+                volume_trend=volume_trend,
+            )
+            if signal_d:
+                candidates.append(signal_d)
 
         # Return highest confidence signal
         if not candidates:

@@ -47,6 +47,7 @@ class ExecutionDispatcher:
         self._locked_tickers: set = set()
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._last_order: Any = None  # Last order placed (for introspection)
 
     async def submit(self, priority: OrderPriority, ticker: str, action: str,
                      params: Optional[dict] = None) -> bool:
@@ -85,8 +86,227 @@ class ExecutionDispatcher:
         if self._broker is None:
             logger.warning("DISPATCH: no broker connected — dry run")
             return
-        # TODO: Route to actual broker API calls
-        pass
+
+        try:
+            action = item.action.upper()
+
+            # ===================================================================
+            # ENTRY ORDERS
+            # ===================================================================
+            if action in ('BUY', 'SELL'):
+                await self._execute_entry_order(item)
+
+            # ===================================================================
+            # EXIT ORDERS
+            # ===================================================================
+            elif action in ('CLOSE', 'FLATTEN', 'PARTIAL_EXIT'):
+                await self._execute_exit_order(item)
+
+            # ===================================================================
+            # CANCEL/REPLACE
+            # ===================================================================
+            elif action == 'CANCEL':
+                await self._execute_cancel_order(item)
+
+            elif action == 'REPLACE':
+                await self._execute_replace_order(item)
+
+            # ===================================================================
+            # EMERGENCY FLATTEN (highest priority)
+            # ===================================================================
+            elif action == 'EMERGENCY_FLATTEN':
+                await self._execute_emergency_flatten(item)
+
+            else:
+                logger.warning("DISPATCH: unknown action '%s' for %s", action, item.ticker)
+
+        except Exception as e:
+            logger.error("DISPATCH ERROR in _execute: %s %s — %s", item.action, item.ticker, e, exc_info=True)
+            raise
+
+    async def _execute_entry_order(self, item: DispatchItem) -> None:
+        """Route entry signal to broker (maker limit or market)."""
+        params = item.params
+        ticker = item.ticker
+        side = item.action.upper()  # 'BUY' or 'SELL'
+        quantity = int(params.get('quantity', 0))
+        price = float(params.get('price', 0.0))
+        limit_price = params.get('limit_price')
+
+        if quantity <= 0:
+            logger.warning("DISPATCH: invalid quantity %d for %s", quantity, ticker)
+            return
+
+        try:
+            if limit_price and limit_price > 0:
+                # Maker-only limit order (GTC)
+                order = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._broker.place_maker_limit(
+                        ticker=ticker,
+                        side=side,
+                        quantity=quantity,
+                        price=limit_price,
+                        tif='GTC'
+                    )
+                )
+            else:
+                # Market order (emergency only)
+                order = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._broker.place_market_order(
+                        ticker=ticker,
+                        side=side,
+                        quantity=quantity
+                    )
+                )
+
+            if order:
+                logger.info(
+                    "DISPATCH: entry order placed: %s %s %d @%s | order_id=%s",
+                    side, ticker, quantity, limit_price or "MKT", getattr(order, 'id', 'N/A')
+                )
+                self._last_order = order
+            else:
+                logger.error("DISPATCH: entry order rejected for %s %s", ticker, side)
+
+        except Exception as e:
+            logger.error("DISPATCH: entry order failed for %s — %s", ticker, e, exc_info=True)
+            raise
+
+    async def _execute_exit_order(self, item: DispatchItem) -> None:
+        """Route exit signal to broker (market close)."""
+        params = item.params
+        ticker = item.ticker
+        quantity = int(params.get('quantity', 0))
+
+        if quantity <= 0:
+            logger.warning("DISPATCH: invalid exit quantity %d for %s", quantity, ticker)
+            return
+
+        try:
+            # Determine side (opposite of original entry)
+            entry_side = params.get('entry_side', 'BUY')
+            exit_side = 'SELL' if entry_side == 'BUY' else 'BUY'
+
+            # Market close order
+            order = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._broker.place_market_order(
+                    ticker=ticker,
+                    side=exit_side,
+                    quantity=quantity
+                )
+            )
+
+            if order:
+                logger.info(
+                    "DISPATCH: exit order placed: %s %s %d | order_id=%s",
+                    exit_side, ticker, quantity, getattr(order, 'id', 'N/A')
+                )
+                self._last_order = order
+            else:
+                logger.error("DISPATCH: exit order rejected for %s", ticker)
+
+        except Exception as e:
+            logger.error("DISPATCH: exit order failed for %s — %s", ticker, e, exc_info=True)
+            raise
+
+    async def _execute_cancel_order(self, item: DispatchItem) -> None:
+        """Cancel an open order by order ID."""
+        params = item.params
+        order_id = params.get('order_id')
+
+        if not order_id:
+            logger.warning("DISPATCH: no order_id provided for CANCEL")
+            return
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._broker.cancel_order(order_id)
+            )
+
+            if result:
+                logger.info("DISPATCH: order %s cancelled", order_id)
+            else:
+                logger.warning("DISPATCH: cancel failed for order %s", order_id)
+
+        except Exception as e:
+            logger.error("DISPATCH: cancel failed for order %s — %s", order_id, e, exc_info=True)
+            raise
+
+    async def _execute_replace_order(self, item: DispatchItem) -> None:
+        """Replace/modify an open order (new price/quantity)."""
+        params = item.params
+        order_id = params.get('order_id')
+        new_price = params.get('new_price')
+        new_quantity = params.get('new_quantity')
+
+        if not order_id or (not new_price and not new_quantity):
+            logger.warning("DISPATCH: incomplete REPLACE params for %s", item.ticker)
+            return
+
+        try:
+            order = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._broker.modify_order(
+                    order_id=order_id,
+                    new_price=new_price,
+                    new_quantity=new_quantity
+                )
+            )
+
+            if order:
+                logger.info("DISPATCH: order %s replaced | price=%s qty=%s", order_id, new_price, new_quantity)
+            else:
+                logger.warning("DISPATCH: replace failed for order %s", order_id)
+
+        except Exception as e:
+            logger.error("DISPATCH: replace failed for order %s — %s", order_id, e, exc_info=True)
+            raise
+
+    async def _execute_emergency_flatten(self, item: DispatchItem) -> None:
+        """Emergency flatten: close ALL positions for this ticker at market."""
+        params = item.params
+        ticker = item.ticker
+
+        try:
+            # Get current position from broker
+            position = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._broker.get_position(ticker)
+            )
+
+            if position is None or position.get('quantity', 0) == 0:
+                logger.info("DISPATCH: no position to flatten for %s", ticker)
+                return
+
+            quantity = int(abs(position['quantity']))
+            side = 'SELL' if position['quantity'] > 0 else 'BUY'
+
+            # Market close order
+            order = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._broker.place_market_order(
+                    ticker=ticker,
+                    side=side,
+                    quantity=quantity
+                )
+            )
+
+            if order:
+                logger.critical(
+                    "DISPATCH: EMERGENCY FLATTEN executed: %s %s %d | order_id=%s",
+                    side, ticker, quantity, getattr(order, 'id', 'N/A')
+                )
+                self._last_order = order
+            else:
+                logger.error("DISPATCH: EMERGENCY FLATTEN failed for %s", ticker)
+
+        except Exception as e:
+            logger.error("DISPATCH: EMERGENCY FLATTEN failed for %s — %s", ticker, e, exc_info=True)
+            raise
 
     def start(self) -> None:
         self._task = asyncio.ensure_future(self.run())

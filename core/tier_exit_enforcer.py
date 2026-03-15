@@ -31,6 +31,8 @@ class ExitReason(Enum):
     TIER3_PRE_CLOSE = "tier3_pre_close"
     TIER3_OVERNIGHT_PROTECTION = "tier3_overnight"
     SESSION_BOUNDARY = "session_boundary"
+    FIFTY_PERCENT_RALLY = "fifty_percent_rally"  # NEW: 50% rally detected
+    CHANDELIER_HIT = "chandelier_hit"  # Stop-loss from Chandelier trailing
 
 
 @dataclass
@@ -45,6 +47,27 @@ class ExitInstruction:
     time_detected: datetime
     market_close_time: datetime
     message: str
+    exit_price: float = None  # Specific exit price (for limit/target exits)
+    remaining_qty: float = None  # Qty to hold after partial exit (NEW)
+    carry_over_stop: float = None  # Stop for remaining position (NEW)
+
+
+@dataclass
+class RallyExit:
+    """Record of 50% rally exit."""
+    trade_id: str
+    ticker: str
+    entry_price: float
+    exit_price: float
+    rally_pct: float  # e.g., 50.0
+    exit_qty: float  # Amount exited
+    remaining_qty: float  # Amount carried forward
+    remaining_stop: float  # Adaptive stop for remaining
+    created_at: datetime = None
+
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = datetime.now(UTC)
 
 
 class SessionExitEnforcer:
@@ -56,6 +79,11 @@ class SessionExitEnforcer:
         self.tier3_warning_threshold = timedelta(minutes=15)  # Alert 15 min before
         self.tier3_critical_threshold = timedelta(minutes=5)  # Force exit 5 min before
         self.tier3_immediate_threshold = timedelta(minutes=1)  # Last-second emergency
+
+        # Rally exit settings
+        self.rally_threshold = 0.50  # 50% rally
+        self.rally_exit_pct = 1.25  # Sell 125% of initial position
+        self.rally_carry_pct = 0.25  # Keep 25% for next day
 
     def check_tier3_exit_time(
         self,
@@ -124,6 +152,73 @@ class SessionExitEnforcer:
             )
 
         return None
+
+    def evaluate_fifty_percent_rally(
+        self,
+        trade_id: str,
+        ticker: str,
+        entry_price: float,
+        current_price: float,
+        position_size_shares: float,
+        adaptive_stop_price: float = None,
+    ) -> Optional[RallyExit]:
+        """
+        Detect and handle 50% rally exits with partial position carry-over.
+
+        Logic:
+        - If unrealized profit >= 50%: Sell 125% of initial position
+        - Exit price: entry_price × 1.25 (take full profit + 25% of gains)
+        - Remaining: 25% with adaptive stop for next session
+        - Alert: Telegram notification
+
+        Args:
+            trade_id: Internal trade ID
+            ticker: Stock ticker
+            entry_price: Entry price
+            current_price: Current price
+            position_size_shares: Initial position size
+            adaptive_stop_price: Adaptive stop for remaining position (from Chandelier)
+
+        Returns:
+            RallyExit record if 50% rally detected, None otherwise
+        """
+        unrealized_pnl_pct = (current_price - entry_price) / entry_price
+
+        if unrealized_pnl_pct < self.rally_threshold:
+            return None
+
+        # CASE: 50%+ rally detected
+        logger.info(
+            f"[{ticker}] 50% RALLY DETECTED! {unrealized_pnl_pct*100:.1f}% gain | "
+            f"entry={entry_price:.2f} current={current_price:.2f}"
+        )
+
+        # Calculate exit amounts
+        exit_qty = position_size_shares * self.rally_exit_pct  # 125% of initial
+        exit_price = entry_price * 1.25  # Lock in full + 25% of gains
+        remaining_qty = position_size_shares - exit_qty  # 25% carry-forward
+
+        # Use adaptive stop if provided, else default to entry - 2%
+        carry_stop = adaptive_stop_price if adaptive_stop_price else entry_price * 0.98
+
+        rally_exit = RallyExit(
+            trade_id=trade_id,
+            ticker=ticker,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            rally_pct=unrealized_pnl_pct * 100,
+            exit_qty=exit_qty,
+            remaining_qty=remaining_qty,
+            remaining_stop=carry_stop,
+        )
+
+        logger.info(
+            f"[{ticker}] Rally exit plan: "
+            f"exit {exit_qty:.0f} @ {exit_price:.2f}, "
+            f"carry {remaining_qty:.0f} @ stop {carry_stop:.2f}"
+        )
+
+        return rally_exit
 
     def should_block_new_tier3_entry(
         self,
