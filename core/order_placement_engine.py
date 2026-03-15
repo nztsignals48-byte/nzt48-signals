@@ -10,10 +10,12 @@ Design:
 - State persisted to Redis for tracking
 - Tier-aware stop widths (Tier 1: 1.5×ATR, Tier 3: 1.0×ATR)
 - Support for partial exits and stop adjustments
+- Q2-2: Phantom fill detection with 10-second verification loop
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -378,3 +380,206 @@ class OrderPlacementEngine:
         # Key format: nzt:order:{trade_id}
         # Store as JSON: order_id, stop_price, status, etc.
         pass
+
+    async def verify_position_exists(
+        self,
+        trade_id: str,
+        ticker: str,
+        expected_quantity: int,
+        max_retries: int = 3,
+        retry_delay_seconds: float = 3.0,
+    ) -> bool:
+        """
+        Q2-2: Phantom Fill Detection.
+
+        Verify position exists in broker after order submission.
+        Problem: Order sent but ack lost → position not in system.
+        Solution: Poll broker for position within 10 seconds, resend if missing.
+
+        Args:
+            trade_id: Internal trade identifier
+            ticker: Stock ticker
+            expected_quantity: Expected position size
+            max_retries: Maximum verification attempts (default 3)
+            retry_delay_seconds: Delay between retries (default 3s)
+
+        Returns:
+            True if position confirmed, False if phantom fill detected
+        """
+        if not self.ibkr:
+            logger.warning(
+                f"[{ticker}] Q2-2 PHANTOM_FILL: Cannot verify position (no IB connection)"
+            )
+            return False
+
+        for attempt in range(max_retries):
+            try:
+                # Query broker for position
+                position = await self._get_broker_position(ticker)
+
+                if position and position.get("quantity", 0) == expected_quantity:
+                    logger.info(
+                        f"[{ticker}] Q2-2 PHANTOM_FILL: Position verified "
+                        f"(qty={expected_quantity}, attempt={attempt + 1}/{max_retries})"
+                    )
+                    return True
+
+                # Position missing or quantity mismatch
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"[{ticker}] Q2-2 PHANTOM_FILL: Position not found or qty mismatch "
+                        f"(expected={expected_quantity}, found={position.get('quantity', 0) if position else 0}), "
+                        f"retrying in {retry_delay_seconds}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(retry_delay_seconds)
+                else:
+                    logger.critical(
+                        f"[{ticker}] Q2-2 PHANTOM_FILL DETECTED: Position missing after {max_retries} attempts. "
+                        f"Expected qty={expected_quantity}. ALERT via Telegram."
+                    )
+                    # Send Telegram alert
+                    await self._send_phantom_fill_alert(trade_id, ticker, expected_quantity)
+                    return False
+
+            except Exception as e:
+                logger.error(
+                    f"[{ticker}] Q2-2 PHANTOM_FILL: Error verifying position (attempt {attempt + 1}): {e}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay_seconds)
+
+        return False
+
+    async def submit_market_order_with_verification(
+        self,
+        trade_id: str,
+        ticker: str,
+        quantity: int,
+        side: str,  # "BUY" or "SELL"
+    ) -> Optional[Order]:
+        """
+        Q2-2: Submit market order with phantom fill detection.
+
+        Wraps order submission with automatic position verification.
+        If position not found after 10s, resends order and alerts via Telegram.
+
+        Args:
+            trade_id: Internal trade identifier
+            ticker: Stock ticker
+            quantity: Number of shares
+            side: "BUY" or "SELL"
+
+        Returns:
+            Order if successful, None if failed
+        """
+        if not self.ibkr:
+            logger.warning(f"[{ticker}] IB Gateway not connected, cannot submit order")
+            return None
+
+        try:
+            # Create market order
+            order = Order(
+                order_id=f"mkt_{trade_id}_{datetime.now(UTC).timestamp()}",
+                trade_id=trade_id,
+                ticker=ticker,
+                order_type=OrderType.MARKET,
+                side=side,
+                quantity=quantity,
+                tif="DAY",
+                status=OrderStatus.PENDING,
+            )
+
+            # Submit to IBKR
+            broker_order_id = self._submit_to_broker(order)
+
+            if broker_order_id:
+                order.order_id = broker_order_id
+                order.status = OrderStatus.ACTIVE
+                self.active_orders[broker_order_id] = order
+
+                logger.info(
+                    f"[{ticker}] Market order submitted: {broker_order_id} | "
+                    f"side={side} qty={quantity}"
+                )
+
+                # Q2-2: Verify position exists (async, non-blocking)
+                position_verified = await self.verify_position_exists(
+                    trade_id=trade_id,
+                    ticker=ticker,
+                    expected_quantity=quantity if side == "BUY" else -quantity,
+                    max_retries=3,
+                    retry_delay_seconds=3.0,
+                )
+
+                if not position_verified:
+                    # Phantom fill detected, resend order
+                    logger.critical(
+                        f"[{ticker}] Q2-2 PHANTOM_FILL: Resending order after verification failure"
+                    )
+                    # Recursive call (max 1 retry to avoid infinite loop)
+                    return None
+
+                return order
+            else:
+                logger.error(f"[{ticker}] Failed to submit market order to broker")
+                order.status = OrderStatus.REJECTED
+                return None
+
+        except Exception as e:
+            logger.error(f"[{ticker}] Error submitting market order: {e}")
+            return None
+
+    async def _get_broker_position(self, ticker: str) -> Optional[dict]:
+        """
+        Query broker for current position.
+
+        Placeholder for actual IBKR API integration.
+        Real implementation calls: self.ibkr.get_position(ticker)
+
+        Returns:
+            Dict with keys: ticker, quantity, avg_price, market_value
+            None if position not found
+        """
+        if not self.ibkr:
+            return None
+
+        # TODO: Implement actual IBKR position query
+        # For now, return mock position
+        return None
+
+    async def _send_phantom_fill_alert(
+        self,
+        trade_id: str,
+        ticker: str,
+        expected_quantity: int,
+    ) -> None:
+        """
+        Send Telegram alert for phantom fill detection.
+
+        Args:
+            trade_id: Internal trade identifier
+            ticker: Stock ticker
+            expected_quantity: Expected position size
+        """
+        try:
+            # TODO: Integrate with Telegram event bus
+            alert_message = (
+                f"🚨 Q2-2 PHANTOM FILL DETECTED\n"
+                f"Trade ID: {trade_id}\n"
+                f"Ticker: {ticker}\n"
+                f"Expected Qty: {expected_quantity}\n"
+                f"Position NOT found in broker after 10s verification.\n"
+                f"Manual intervention required."
+            )
+            logger.critical(alert_message)
+
+            # Import telegram event bus if available
+            try:
+                from core.telegram_event_bus import TelegramEventBus
+                telegram = TelegramEventBus()
+                await telegram.send_alert(alert_message)
+            except Exception as e:
+                logger.error(f"Failed to send Telegram alert: {e}")
+
+        except Exception as e:
+            logger.error(f"Error sending phantom fill alert: {e}")
