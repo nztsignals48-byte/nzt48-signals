@@ -1,6 +1,10 @@
 """
 L-03: Neural Hawkes Exit Engine -- LSTM (Phase Q3-Q4 skeleton).
 
+FEATURE STATUS: INCOMPLETE - NOT ENABLED FOR Q2 DEPLOYMENT
+Estimated completion: 40% (skeleton only)
+Scheduled for: Q3/Q4
+
 Models event intensity lambda(t) for 4 event types:
   1. Adverse price movement
   2. Spread blowout
@@ -22,6 +26,10 @@ from enum import Enum
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# FEATURE FLAG: Disable for Q2 deployment (incomplete implementation)
+# Set to True in Q3/Q4 when LSTM model training is complete
+NEURAL_HAWKES_ENABLED = False
 
 
 # ── Event Types ─────────────────────────────────────────────────────────────
@@ -94,16 +102,22 @@ class NeuralHawkesExit:
 
     def __init__(self) -> None:
         self._model = None  # Placeholder for trained LSTM model
-        self._enabled: bool = False
-        logger.info(
-            "NeuralHawkesExit: skeleton initialized (Q3-Q4). "
-            "Model not loaded — predictions will return p_exit=0.0"
-        )
+        self._enabled: bool = NEURAL_HAWKES_ENABLED  # Controlled by feature flag
+        if not NEURAL_HAWKES_ENABLED:
+            logger.warning(
+                "NeuralHawkesExit: DISABLED via feature flag (incomplete Q3/Q4 feature). "
+                "All predictions will return p_exit=0.0 (HOLD)"
+            )
+        else:
+            logger.info(
+                "NeuralHawkesExit: skeleton initialized (Q3-Q4). "
+                "Model not loaded — predictions will return p_exit=0.0"
+            )
 
     @property
     def is_enabled(self) -> bool:
-        """True when a trained model is loaded and ready for inference."""
-        return self._enabled and self._model is not None
+        """True when feature flag is enabled AND a trained model is loaded."""
+        return NEURAL_HAWKES_ENABLED and self._enabled and self._model is not None
 
     def load_model(self, model_path: str) -> bool:
         """

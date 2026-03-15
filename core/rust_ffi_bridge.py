@@ -98,7 +98,7 @@ class FFIStatus(enum.Enum):
     ERROR = "error"
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class FFIOrderRequest:
     """Order request passed across the FFI boundary.
 
@@ -116,7 +116,7 @@ class FFIOrderRequest:
     account: str = "ISA"
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class FFIOrderResponse:
     """Response from the Rust execution engine.
 
@@ -132,14 +132,14 @@ class FFIOrderResponse:
     timestamp_ns: int = 0               # nanosecond precision wall clock
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class FFICancelRequest:
     """Cancel request passed across the FFI boundary."""
     order_id: str
     exchange_order_id: str = ""
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class FFICancelResponse:
     """Response from cancel request."""
     order_id: str
@@ -229,13 +229,13 @@ class RustFFIBridge:
     def _load_rust_module(self) -> None:
         """Attempt to import the compiled Rust extension module.
 
-        TODO (Q3): Build Rust crate with maturin, install as wheel.
-            cd nzt48-rust-engine && maturin develop --release
+        IMPLEMENTATION SCHEDULED: Q3/Q4
+        Build process: cd nzt48-rust-engine && maturin develop --release
         """
         try:
-            # TODO: import nzt48_rust_engine as rust_mod
-            # self._rust_module = rust_mod
-            # self._status = FFIStatus.LOADED
+            # SCHEDULED Q3/Q4: import nzt48_rust_engine as rust_mod
+            # SCHEDULED Q3/Q4: self._rust_module = rust_mod
+            # SCHEDULED Q3/Q4: self._status = FFIStatus.LOADED
             self._status = FFIStatus.NOT_LOADED
             logger.info("Rust FFI module not yet available (Q3/Q4 target)")
         except ImportError:
@@ -264,7 +264,7 @@ class RustFFIBridge:
         Returns:
             True if FIX Logon successful, False otherwise.
 
-        TODO (Q3):
+        IMPLEMENTATION SCHEDULED Q3:
             - Pass credentials to Rust connect()
             - Handle FIX Logon/Logout sequence
             - Start heartbeat monitoring thread
@@ -273,17 +273,17 @@ class RustFFIBridge:
             logger.warning("Cannot connect: Rust FFI module not loaded")
             return False
 
-        # TODO: result = self._rust_module.connect(host, port, sender_comp_id, target_comp_id)
-        # self._status = FFIStatus.CONNECTED if result else FFIStatus.ERROR
+        # SCHEDULED Q3/Q4: result = self._rust_module.connect(host, port, sender_comp_id, target_comp_id)
+        # SCHEDULED Q3/Q4: self._status = FFIStatus.CONNECTED if result else FFIStatus.ERROR
         raise NotImplementedError("Rust FIX session not yet implemented (Q3/Q4)")
 
     def disconnect(self) -> None:
         """Gracefully disconnect FIX session.
 
-        TODO (Q3): Send FIX Logout, wait for confirmation, release resources.
+        IMPLEMENTATION SCHEDULED Q3: Send FIX Logout, wait for confirmation, release resources.
         """
         if self._rust_module is not None:
-            # TODO: self._rust_module.disconnect()
+            # SCHEDULED Q3/Q4: self._rust_module.disconnect()
             pass
         self._status = FFIStatus.NOT_LOADED
         logger.info("Rust FFI bridge disconnected")
@@ -303,7 +303,7 @@ class RustFFIBridge:
         Performance Target:
             < 10μs signal-to-wire (measured from Python call to FIX wire)
 
-        TODO (Q3):
+        IMPLEMENTATION SCHEDULED Q3:
             1. Serialize FFIOrderRequest to bytes (struct.pack for repr(C))
             2. Call self._rust_module.submit_order(request_bytes)
             3. Deserialize FFIOrderResponse from returned bytes
@@ -316,13 +316,13 @@ class RustFFIBridge:
                 error_msg="Rust FFI module not available",
             )
 
-        # TODO: Implement FFI call
-        # t0 = time.perf_counter_ns()
-        # response_bytes = self._rust_module.submit_order(serialize(request))
-        # latency_us = (time.perf_counter_ns() - t0) / 1000.0
-        # self._total_orders += 1
-        # self._latency_sum_us += latency_us
-        # return deserialize(response_bytes)
+        # SCHEDULED Q3/Q4: Implement FFI call
+        # SCHEDULED Q3/Q4: t0 = time.perf_counter_ns()
+        # SCHEDULED Q3/Q4: response_bytes = self._rust_module.submit_order(serialize(request))
+        # SCHEDULED Q3/Q4: latency_us = (time.perf_counter_ns() - t0) / 1000.0
+        # SCHEDULED Q3/Q4: self._total_orders += 1
+        # SCHEDULED Q3/Q4: self._latency_sum_us += latency_us
+        # SCHEDULED Q3/Q4: return deserialize(response_bytes)
         raise NotImplementedError("Rust FFI submit_order not yet implemented (Q3/Q4)")
 
     def cancel_order_fast(self, request: FFICancelRequest) -> FFICancelResponse:
@@ -337,7 +337,7 @@ class RustFFIBridge:
         Performance Target:
             < 5μs cancel-to-wire
 
-        TODO (Q3):
+        IMPLEMENTATION SCHEDULED Q3:
             1. Serialize FFICancelRequest to bytes
             2. Call self._rust_module.cancel_order(request_bytes)
             3. Deserialize FFICancelResponse
@@ -350,7 +350,7 @@ class RustFFIBridge:
                 error_msg="Rust FFI module not available",
             )
 
-        # TODO: Implement FFI call
+        # SCHEDULED Q3/Q4: Implement FFI call
         raise NotImplementedError("Rust FFI cancel_order not yet implemented (Q3/Q4)")
 
     def amend_order_fast(
@@ -373,7 +373,7 @@ class RustFFIBridge:
         Performance Target:
             < 8μs amend-to-wire
 
-        TODO (Q3):
+        IMPLEMENTATION SCHEDULED Q3:
             1. Call self._rust_module.amend_order(order_id, new_price, new_qty)
             2. Validate exchange CancelReplace acknowledgment
             3. Update local order book state
@@ -385,7 +385,7 @@ class RustFFIBridge:
                 error_msg="Rust FFI module not available",
             )
 
-        # TODO: Implement FFI call
+        # SCHEDULED Q3/Q4: Implement FFI call
         raise NotImplementedError("Rust FFI amend_order not yet implemented (Q3/Q4)")
 
     def heartbeat_check(self) -> float:
@@ -399,7 +399,7 @@ class RustFFIBridge:
         Returns:
             Round-trip latency in microseconds, or -1.0 if failed.
 
-        TODO (Q3):
+        IMPLEMENTATION SCHEDULED Q3:
             1. Call self._rust_module.heartbeat()
             2. If latency > HEARTBEAT_INTERVAL_US, set status = HEARTBEAT_FAIL
             3. Log warning and trigger alert via Telegram event bus
@@ -407,15 +407,15 @@ class RustFFIBridge:
         if not self.is_available():
             return -1.0
 
-        # TODO: Implement heartbeat
-        # t0 = time.perf_counter_ns()
-        # latency_us = self._rust_module.heartbeat()
-        # if latency_us > HEARTBEAT_INTERVAL_US:
-        #     self._status = FFIStatus.HEARTBEAT_FAIL
-        #     logger.critical("QA-01 VIOLATED: Rust heartbeat %.1fμs > %dμs",
-        #                     latency_us, HEARTBEAT_INTERVAL_US)
-        # self._last_heartbeat_us = latency_us
-        # return latency_us
+        # SCHEDULED Q3/Q4: Implement heartbeat
+        # SCHEDULED Q3/Q4: t0 = time.perf_counter_ns()
+        # SCHEDULED Q3/Q4: latency_us = self._rust_module.heartbeat()
+        # SCHEDULED Q3/Q4: if latency_us > HEARTBEAT_INTERVAL_US:
+        # SCHEDULED Q3/Q4:     self._status = FFIStatus.HEARTBEAT_FAIL
+        # SCHEDULED Q3/Q4:     logger.critical("QA-01 VIOLATED: Rust heartbeat %.1fμs > %dμs",
+        # SCHEDULED Q3/Q4:                     latency_us, HEARTBEAT_INTERVAL_US)
+        # SCHEDULED Q3/Q4: self._last_heartbeat_us = latency_us
+        # SCHEDULED Q3/Q4: return latency_us
         raise NotImplementedError("Rust FFI heartbeat not yet implemented (Q3/Q4)")
 
     def get_stats(self) -> dict:

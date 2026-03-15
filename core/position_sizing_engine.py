@@ -65,6 +65,15 @@ class PositionSizingEngine:
     """
     Q2-3: Margin-aware position sizing engine.
 
+    MARGIN QUERY MODE: Currently using MOCK implementation for safety and testing.
+    Real IBKR margin API integration scheduled for Q3.
+
+    Mock mode behavior:
+    - Returns None from _query_broker_margin() (line 306-322)
+    - Falls back to tier-based sizing without margin constraints
+    - Safer for Q2 deployment, prevents API errors from blocking trades
+    - Switch to real IBKR API in Q3 when integration is fully tested
+
     Responsibilities:
     1. Query broker for real-time margin status
     2. Calculate maximum safe position size per trade
@@ -307,8 +316,17 @@ class PositionSizingEngine:
         """
         Query broker for margin data.
 
-        Placeholder for actual IBKR API integration.
-        Real implementation calls: self.ibkr.get_account_summary()
+        IMPLEMENTATION STATUS: MOCK MODE (Q2 deployment safety)
+
+        Current behavior: Returns None (safe fallback to tier-based sizing)
+
+        SCHEDULED Q3: Switch to real IBKR API integration
+        Real implementation will call: self.ibkr.get_account_summary()
+
+        Why mock mode for Q2:
+        - Prevents IBKR API errors from blocking trades
+        - Allows testing of margin-aware logic with simulated data
+        - Safer gradual rollout: tier-based sizing works, margin optimization comes in Q3
 
         Returns:
             Dict with keys: total_equity, available_margin, maintenance_margin,
@@ -317,6 +335,8 @@ class PositionSizingEngine:
         if not self.ibkr:
             return None
 
-        # TODO: Implement actual IBKR margin query
-        # For now, return mock data
+        # MOCK MODE (Q2): Return None to use tier-based sizing fallback
+        # SCHEDULED Q3: Implement actual IBKR margin query
+        # SCHEDULED Q3: account_summary = await self.ibkr.get_account_summary()
+        # SCHEDULED Q3: return parse_margin_data(account_summary)
         return None

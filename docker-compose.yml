@@ -28,6 +28,16 @@ services:
       - REDIS_URL=redis://:nzt48redis@redis:6379/0
       - IBKR_HOST=ib-gateway
       - IBKR_PORT=4002   # 4002=paper, 4004=live (gnzsnz image)
+      # Q2 Feature Flags (deployed and ready)
+      - ENABLE_PARALLEL_SCANNING=true
+      - ENABLE_MARGIN_MONITORING=true
+      - ENABLE_PHANTOM_FILL_DETECTION=true
+      - ENABLE_QUOTE_CACHING=true
+      # Q3/Q4 Feature Flags (incomplete, disabled)
+      - ENABLE_RUST_FFI_BRIDGE=false
+      - ENABLE_NEURAL_HAWKES=false
+      - ENABLE_ML_MODELS=false
+      - ENABLE_MULTI_REGION=false
     mem_limit: 1536m
     memswap_limit: 2048m
     cpus: 1.0
@@ -72,11 +82,7 @@ services:
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: nzt48-ib-gateway
-    restart: unless-stopped
-    restart_policy:
-      condition: on-failure
-      max_retries: 5
-      delay: 10s
+    restart: on-failure
     env_file:
       - .env.production
     environment:
