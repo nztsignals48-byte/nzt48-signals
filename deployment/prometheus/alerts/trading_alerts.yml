@@ -1,0 +1,193 @@
+# ==============================================================================
+# NZT-48 Prometheus Alert Rules
+# Critical trading system alerts for P&L, win rate, system health
+# ==============================================================================
+groups:
+  # ============================================================================
+  # CRITICAL: Trading Performance Alerts (P0)
+  # ============================================================================
+  - name: trading_performance
+    interval: 30s
+    rules:
+    # Daily P&L negative
+    - alert: NZT48DailyPnLNegative
+      expr: nzt48_daily_pnl_total_pounds < -200
+      for: 5m
+      labels:
+        severity: critical
+        category: trading
+      annotations:
+        summary: "Daily P&L is negative ({{ $value | humanize }})"
+        description: "NZT-48 daily P&L is £{{ $value | humanize }}. Review trades and check for adverse selection."
+
+    # Win rate below threshold
+    - alert: NZT48WinRateLow
+      expr: nzt48_win_rate_percentage < 40
+      for: 10m
+      labels:
+        severity: warning
+        category: trading
+      annotations:
+        summary: "Win rate below 40% ({{ $value | humanize }}%)"
+        description: "NZT-48 win rate is {{ $value | humanize }}%. Expected: ≥40%. Check entry quality and regime filters."
+
+    # Circuit breaker triggered
+    - alert: NZT48CircuitBreakerActive
+      expr: nzt48_circuit_breaker_active == 1
+      for: 1m
+      labels:
+        severity: critical
+        category: trading
+      annotations:
+        summary: "Circuit breaker activated - trading halted"
+        description: "NZT-48 circuit breaker is active. All trading halted. Manual intervention required."
+
+    # Daily heat level RED
+    - alert: NZT48HeatLevelRed
+      expr: nzt48_daily_heat_percentage > 4.0
+      for: 5m
+      labels:
+        severity: critical
+        category: risk
+      annotations:
+        summary: "Heat level RED: -{{ $value | humanize }}% daily drawdown"
+        description: "NZT-48 daily drawdown is -{{ $value | humanize }}%. Maximum allowed: -4.0%. Trading should be halted."
+
+    # Position size exceeds limit
+    - alert: NZT48PositionSizeExceeded
+      expr: nzt48_position_count > 5
+      for: 2m
+      labels:
+        severity: warning
+        category: risk
+      annotations:
+        summary: "Position count exceeded: {{ $value }}"
+        description: "NZT-48 has {{ $value }} open positions. Maximum allowed: 5."
+
+    # Leverage exceeds limit
+    - alert: NZT48LeverageExceeded
+      expr: nzt48_total_leverage > 3.0
+      for: 2m
+      labels:
+        severity: warning
+        category: risk
+      annotations:
+        summary: "Leverage exceeded: {{ $value }}x"
+        description: "NZT-48 total leverage is {{ $value }}x. Maximum allowed: 3.0x."
+
+  # ============================================================================
+  # CRITICAL: System Health Alerts (P0)
+  # ============================================================================
+  - name: system_health
+    interval: 30s
+    rules:
+    # IB Gateway down
+    - alert: NZT48IBGatewayDown
+      expr: up{job="nzt48-ib-gateway"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        category: infrastructure
+      annotations:
+        summary: "IB Gateway is down"
+        description: "NZT-48 cannot connect to IB Gateway. All order execution halted. Check IB Gateway logs and 2FA status."
+
+    # Redis down
+    - alert: NZT48RedisDown
+      expr: up{job="nzt48-redis"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        category: infrastructure
+      annotations:
+        summary: "Redis is down"
+        description: "NZT-48 Redis is unreachable. Chandelier exits and circuit breaker state lost. Immediate intervention required."
+
+    # Trading engine down
+    - alert: NZT48EngineDown
+      expr: up{job="nzt48-engine"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        category: infrastructure
+      annotations:
+        summary: "Trading engine is down"
+        description: "NZT-48 trading engine is unreachable. No signals or orders being processed."
+
+    # High CPU usage
+    - alert: NZT48HighCPUUsage
+      expr: rate(process_cpu_seconds_total{job="nzt48-engine"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        category: performance
+      annotations:
+        summary: "High CPU usage: {{ $value | humanizePercentage }}"
+        description: "NZT-48 CPU usage is {{ $value | humanizePercentage }}. Check for infinite loops or excessive signal processing."
+
+    # High memory usage
+    - alert: NZT48HighMemoryUsage
+      expr: process_resident_memory_bytes{job="nzt48-engine"} > 1.5e9  # 1.5GB
+      for: 5m
+      labels:
+        severity: warning
+        category: performance
+      annotations:
+        summary: "High memory usage: {{ $value | humanize1024 }}"
+        description: "NZT-48 memory usage is {{ $value | humanize1024 }}. Check for memory leaks or excessive caching."
+
+  # ============================================================================
+  # WARNING: Data Feed Alerts (P1)
+  # ============================================================================
+  - name: data_feeds
+    interval: 60s
+    rules:
+    # Market data lag
+    - alert: NZT48MarketDataLag
+      expr: nzt48_market_data_lag_seconds > 30
+      for: 2m
+      labels:
+        severity: warning
+        category: data
+      annotations:
+        summary: "Market data lag: {{ $value }}s behind"
+        description: "NZT-48 market data is {{ $value }}s behind real-time. Check IB Gateway connection and TWS feed."
+
+    # Signal generation stalled
+    - alert: NZT48SignalStalled
+      expr: rate(nzt48_signals_generated_total[5m]) == 0 AND nzt48_is_market_open == 1
+      for: 10m
+      labels:
+        severity: warning
+        category: trading
+      annotations:
+        summary: "No signals generated in 10 minutes during market hours"
+        description: "NZT-48 has not generated any signals. Check universe scanning and indicator calculation."
+
+  # ============================================================================
+  # INFO: Performance Metrics (P2)
+  # ============================================================================
+  - name: performance_metrics
+    interval: 300s  # 5-minute evaluation
+    rules:
+    # Entry quality below target
+    - alert: NZT48EntryQualityLow
+      expr: nzt48_entry_quality_percentage < 60
+      for: 1h
+      labels:
+        severity: info
+        category: trading
+      annotations:
+        summary: "Entry quality below target: {{ $value | humanize }}%"
+        description: "NZT-48 entry quality is {{ $value | humanize }}%. Target: ≥60%. Review entry timing and RVOL filters."
+
+    # Sharpe ratio below target
+    - alert: NZT48SharpeRatioLow
+      expr: nzt48_sharpe_ratio < 2.0
+      for: 6h
+      labels:
+        severity: info
+        category: performance
+      annotations:
+        summary: "Sharpe ratio below target: {{ $value | humanize }}"
+        description: "NZT-48 Sharpe ratio is {{ $value | humanize }}. Target: ≥2.0. Review risk-adjusted returns."

@@ -1,0 +1,99 @@
+# ==============================================================================
+# NZT-48 ConfigMap
+# Settings.yaml configuration for trading engine
+# ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nzt48-config
+  namespace: nzt48
+  labels:
+    app: nzt48
+data:
+  # settings.yaml is mounted from this ConfigMap
+  # In production, update this ConfigMap and restart pods to apply changes
+  settings.yaml: |
+    # NZT-48 Trading System Configuration (Kubernetes)
+    # Version controlled via ConfigMap
+
+    system:
+      name: "NZT-48"
+      version: "8.0"
+      mode: "PAPER"  # PAPER or LIVE
+      timezone: "Europe/London"
+      uk_timezone: "Europe/London"
+      log_level: "INFO"
+      db_path: "/app/data/nzt48.db"
+      kill_switch_file: "/app/data/KILL_SWITCH"
+      starting_equity: 10000
+
+    # Market hours and trading windows
+    market_hours:
+      lse_open: "08:00"
+      lse_close: "16:30"
+      us_pre_market: "09:00"
+      us_open: "14:30"
+      us_close: "21:00"
+      us_after_hours: "22:00"
+
+    # Risk management
+    risk:
+      max_daily_drawdown_pct: 4.0
+      max_heat_level: 4.0
+      max_positions: 5
+      max_leverage: 3.0
+      position_size_pct: 2.0
+      min_win_rate: 0.40
+      circuit_breaker_threshold: -0.03
+
+    # Strategy parameters
+    strategies:
+      s15_daily_target:
+        enabled: true
+        target_pct: 2.0
+        max_trades_per_day: 10
+        min_rvol: 1.5
+        min_adx: 25
+        chandelier_multiplier: 2.5
+
+      s3_mean_reversion:
+        enabled: false  # Dormant in V2 (ISA mode)
+        z_threshold: 2.0
+        lookback_days: 20
+
+    # ISA Universe (12 leveraged ETPs on LSE)
+    uk_isa:
+      enabled: true
+      tickers:
+        - QQQ3.L
+        - 3LUS.L
+        - 3SEM.L
+        - GPT3.L
+        - NVD3.L
+        - TSL3.L
+        - TSM3.L
+        - MU2.L
+        - QQQS.L
+        - 3USS.L
+        - QQQ5.L
+        - SP5L.L
+
+    # Monitoring and alerts
+    monitoring:
+      prometheus_enabled: true
+      metrics_port: 8000
+      telegram_alerts: true
+      gsheets_sync: true
+
+    # Data feeds
+    feeds:
+      ibkr_enabled: true
+      yfinance_enabled: true
+      cache_ttl_seconds: 60
+
+    # Learning engine
+    learning:
+      adaptive_learning_enabled: true
+      ml_meta_model_enabled: true
+      confidence_decay_enabled: true
+      retraining_interval_days: 7

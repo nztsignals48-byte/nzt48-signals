@@ -244,45 +244,85 @@ All Tier 3 entries use **max 2% position size**:
 
 ---
 
-## Integration with Universe Scanner
+## Integration with Universe Scanner (Phase-Specific Filtering)
 
-The Universe Scanner will now provide **all three signals**:
+**Key:** We don't scan all 36k tickers. We scan **phase-specific subsets only**:
+
+```
+PHASE 1 (08:00-14:30 UTC):
+  Scan: LSE leverage ETPs (~100 total, filter to ~12-15 passing)
+        + European stocks (~50 candidates)
+  Skip: US, Asia (markets closed)
+
+PHASE 2 (14:30-16:30 UTC):
+  Scan: LSE leverage ETPs (from Phase 1)
+        + US equities (18 baseline candidates)
+        + Any emerging Tier 3 runners (detected by RVOL spike)
+  Skip: Asia (market not open yet)
+
+PHASE 3 (16:30-21:00 UTC):
+  Scan: US equities only (18 candidates)
+  Skip: LSE (closed), Asia (not yet)
+
+PHASE 5 (22:00-08:00 UTC):
+  Scan: Asia tickers (TSM, ASML ADRs, indices, ~10 candidates)
+  Skip: LSE (closed), US (closed)
+```
+
+**Result: ~200 tickers scanned per phase, not 36,000**
+
+The Universe Scanner will now provide **all three signals** for each phase:
 
 ```json
 {
   "timestamp": "2026-03-14T14:30:00Z",
-  "ticker": "SNDK",
-  "tier": "volatile",
-  "daily_range_pct": 8.8,
-  "current_signals": [
+  "phase": "phase_2",
+  "scan_scope": "LSE + US only (not Asia, not all 36k)",
+  "tickers_scanned": 32,  // 12 LSE + 18 US + 2 emerging
+  "tier_3_detected": [
     {
-      "type": "A_DIP_RECOVERY",
-      "trigger": "RSI <30",
-      "price": 580,
-      "rvol": 2.5,
-      "target": 620,
-      "confidence": 0.62
-    },
-    {
-      "type": "B_EARLY_RUNNER",
-      "trigger": "RVOL spike >2.5x, RSI 40-50",
-      "price": 625,
-      "rvol": 3.2,
-      "target": 665,
-      "confidence": 0.58
-    },
-    {
-      "type": "C_OVERBOUGHT_FADE",
-      "trigger": "RSI >75, volume divergence",
-      "price": 660,
-      "rvol": 1.6,
-      "target": 625,
-      "confidence": 0.52
+      "ticker": "SNDK",
+      "tier": "volatile",
+      "daily_range_pct": 8.8,
+      "current_signals": [
+        {
+          "type": "A_DIP_RECOVERY",
+          "trigger": "RSI <30",
+          "price": 580,
+          "rvol": 2.5,
+          "target": 620,
+          "confidence": 0.62
+        },
+        {
+          "type": "B_EARLY_RUNNER",
+          "trigger": "RVOL spike >2.5x, RSI 40-50",
+          "price": 625,
+          "rvol": 3.2,
+          "target": 665,
+          "confidence": 0.58
+        },
+        {
+          "type": "C_OVERBOUGHT_FADE",
+          "trigger": "RSI >75, volume divergence",
+          "price": 660,
+          "rvol": 1.6,
+          "target": 625,
+          "confidence": 0.52
+        }
+      ],
+      "recommendation": "Type B early runner is highest probability. Enter early on RVOL spike."
     }
-  ],
-  "recommendation": "Type B early runner is highest probability for volatile runners. Enter early on RVOL spike."
+  ]
 }
 ```
+
+**Computational Cost:**
+- Phase 1: ~150 tickers × 10-20ms = 1.5-3 sec per scan
+- Phase 2: ~32 tickers × 10-20ms = 0.3-0.6 sec per scan
+- Phase 3: ~18 tickers × 10-20ms = 0.2-0.4 sec per scan
+- Phase 5: ~10 tickers × 10-20ms = 0.1-0.2 sec per scan
+
+**All within budget.** Not 36k scanning, phase-specific subsets only.
 
 ---
 

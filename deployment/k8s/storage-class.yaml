@@ -1,0 +1,41 @@
+# ==============================================================================
+# NZT-48 Storage Classes
+# AWS EFS for ReadWriteMany (multi-pod access to SQLite)
+# AWS EBS for ReadWriteOnce (Redis AOF persistence)
+# ==============================================================================
+
+# EFS StorageClass for SQLite database (ReadWriteMany)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nzt48-storage
+  labels:
+    app: nzt48
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap  # EFS Access Point
+  fileSystemId: fs-XXXXXXXX  # Replace with actual EFS ID
+  directoryPerms: "700"
+  gidRangeStart: "1000"
+  gidRangeEnd: "2000"
+  basePath: "/nzt48"
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+
+---
+# EBS StorageClass for Redis (ReadWriteOnce, faster I/O)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nzt48-storage-fast
+  labels:
+    app: nzt48
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3  # General Purpose SSD v3
+  iops: "3000"
+  throughput: "125"
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain

@@ -1,0 +1,78 @@
+# ==============================================================================
+# NZT-48 Kubernetes Services
+# Internal networking for engine, Redis, IB Gateway
+# ==============================================================================
+
+# Trading engine API service (LoadBalancer for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nzt48-api
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: engine
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+spec:
+  type: LoadBalancer  # Use ClusterIP + Ingress in production
+  selector:
+    app: nzt48
+    component: engine
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+
+---
+# Redis headless service (for StatefulSet)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nzt48-redis
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: redis
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app: nzt48
+    component: redis
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+
+---
+# IB Gateway service (internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nzt48-ib-gateway
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: ib-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: nzt48
+    component: ib-gateway
+  ports:
+  - name: paper-api
+    port: 4002
+    targetPort: 4002
+    protocol: TCP
+  - name: live-api
+    port: 4004
+    targetPort: 4004
+    protocol: TCP

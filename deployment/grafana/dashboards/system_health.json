@@ -1,0 +1,216 @@
+{
+  "dashboard": {
+    "title": "NZT-48 System Health",
+    "uid": "nzt48-system",
+    "version": 1,
+    "timezone": "Europe/London",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "tags": ["nzt48", "infrastructure", "health"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Uptime",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "up{job=\"nzt48-engine\"}",
+            "legendFormat": "Engine",
+            "refId": "A"
+          },
+          {
+            "expr": "up{job=\"nzt48-redis\"}",
+            "legendFormat": "Redis",
+            "refId": "B"
+          },
+          {
+            "expr": "up{job=\"nzt48-ib-gateway\"}",
+            "legendFormat": "IB Gateway",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "mappings": [
+              {"type": "value", "value": "0", "text": "DOWN"},
+              {"type": "value", "value": "1", "text": "UP"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "orientation": "horizontal"
+        }
+      },
+      {
+        "id": 2,
+        "title": "CPU Usage (%)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 8, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(process_cpu_seconds_total{job=\"nzt48-engine\"}[5m]) * 100",
+            "legendFormat": "CPU %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "CPU", "max": 100},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [80], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 3,
+        "title": "Memory Usage (MB)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes{job=\"nzt48-engine\"} / 1024 / 1024",
+            "legendFormat": "Memory (MB)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "decmbytes", "label": "Memory"},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [1500], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "title": "API Response Time (ms)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"nzt48-engine\"}[5m])) * 1000",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"nzt48-engine\"}[5m])) * 1000",
+            "legendFormat": "p95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"nzt48-engine\"}[5m])) * 1000",
+            "legendFormat": "p99",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Latency"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Market Data Lag (seconds)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "nzt48_market_data_lag_seconds",
+            "legendFormat": "Data Lag",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Lag"},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [30], "type": "gt"},
+              "query": {"params": ["A", "2m", "now"]},
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 6,
+        "title": "Database Query Time (ms)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 18},
+        "targets": [
+          {
+            "expr": "rate(nzt48_db_query_duration_seconds_sum[5m]) / rate(nzt48_db_query_duration_seconds_count[5m]) * 1000",
+            "legendFormat": "Avg Query Time",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Query Time"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Redis Operations/sec",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 18},
+        "targets": [
+          {
+            "expr": "rate(redis_commands_processed_total{job=\"nzt48-redis\"}[5m])",
+            "legendFormat": "Commands/sec",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Ops/sec"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Error Rate (errors/min)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(nzt48_errors_total[5m]) * 60",
+            "legendFormat": "{{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Errors/min"},
+          {"show": false}
+        ]
+      }
+    ]
+  }
+}

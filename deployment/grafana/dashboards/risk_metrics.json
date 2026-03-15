@@ -1,0 +1,319 @@
+{
+  "dashboard": {
+    "title": "NZT-48 Risk Metrics",
+    "uid": "nzt48-risk",
+    "version": 1,
+    "timezone": "Europe/London",
+    "refresh": "15s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "tags": ["nzt48", "risk", "compliance"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_circuit_breaker_active",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "mappings": [
+              {"type": "value", "value": "0", "text": "ACTIVE"},
+              {"type": "value", "value": "1", "text": "TRIPPED"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Kill Switch Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_kill_switch_active",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "mappings": [
+              {"type": "value", "value": "0", "text": "TRADING"},
+              {"type": "value", "value": "1", "text": "KILLED"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 3,
+        "title": "Total Leverage",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_total_leverage",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 4,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 2},
+                {"color": "orange", "value": 2.5},
+                {"color": "red", "value": 3}
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 4,
+        "title": "Margin Usage (%)",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_margin_usage_percentage",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "orange", "value": 70},
+                {"color": "red", "value": 85}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Drawdown (£)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "nzt48_current_drawdown_pounds",
+            "legendFormat": "Current Drawdown",
+            "refId": "A"
+          },
+          {
+            "expr": "nzt48_max_drawdown_pounds",
+            "legendFormat": "Max Drawdown",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "currencyGBP", "label": "Drawdown"},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [-400], "type": "lt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 6,
+        "title": "VaR (99% 1-day)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "nzt48_var_99_1day_pounds",
+            "legendFormat": "VaR (99%)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "currencyGBP", "label": "VaR"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Position Size Distribution (£)",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "nzt48_position_size_pounds",
+            "legendFormat": "{{ticker}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyGBP",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 300},
+                {"color": "red", "value": 500}
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "displayMode": "gradient",
+          "showUnfilled": true
+        }
+      },
+      {
+        "id": 8,
+        "title": "Stop Loss Distances (ATR)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "nzt48_stop_loss_distance_atr",
+            "legendFormat": "{{ticker}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "ATR Multiple"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Regime Detection",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "nzt48_regime_state",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "mappings": [
+              {"type": "value", "value": "0", "text": "BULL"},
+              {"type": "value", "value": "1", "text": "BEAR"},
+              {"type": "value", "value": "2", "text": "RANGE"},
+              {"type": "value", "value": "3", "text": "CRISIS"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1},
+                {"color": "yellow", "value": 2},
+                {"color": "dark-red", "value": 3}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 10,
+        "title": "VIX Level",
+        "type": "graph",
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 20},
+        "targets": [
+          {
+            "expr": "nzt48_vix_level",
+            "legendFormat": "VIX",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "VIX"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 11,
+        "title": "ISA Compliance Check",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 20},
+        "targets": [
+          {
+            "expr": "nzt48_isa_compliance_violations",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "value_and_name"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+# ==============================================================================
+# NZT-48 Ingress
+# External HTTP/HTTPS access to API with TLS termination
+# ==============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nzt48-ingress
+  namespace: nzt48
+  labels:
+    app: nzt48
+  annotations:
+    # NGINX ingress controller annotations
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Rate limiting (100 req/min per IP)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+
+    # CORS headers
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://nzt48.example.com"
+
+    # TLS cert manager (optional)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # Connection timeout
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - nzt48.example.com
+    secretName: nzt48-tls-cert
+
+  rules:
+  - host: nzt48.example.com
+    http:
+      paths:
+      # API endpoints
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: nzt48-api
+            port:
+              number: 8000
+
+      # WebSocket endpoint
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: nzt48-api
+            port:
+              number: 8000
+
+      # Metrics endpoint (restrict to internal IPs only)
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: nzt48-api
+            port:
+              number: 8000

@@ -1,0 +1,26 @@
+# NZT-48 Terraform Variables
+# Copy this file to terraform.tfvars and fill in your values
+
+environment       = "production"
+primary_region    = "us-east-1"
+secondary_region  = "eu-west-1"
+
+# SSH access - RESTRICT TO YOUR IP
+allowed_ssh_cidr = ["YOUR.IP.ADDRESS.HERE/32"]
+
+# RDS configuration
+rds_instance_class = "db.t4g.micro" # Free tier
+db_username        = "nzt48admin"
+db_password        = "CHANGE_THIS_TO_SECURE_PASSWORD"
+
+# Redis configuration
+redis_auth_token = "CHANGE_THIS_TO_SECURE_TOKEN"
+
+# Route53
+route53_zone_name = "example.com" # Your domain
+
+# Optional features
+enable_redis_cluster     = false # Start false, enable later
+enable_route53_failover  = true
+health_check_interval_seconds = 30
+health_check_failure_threshold = 3

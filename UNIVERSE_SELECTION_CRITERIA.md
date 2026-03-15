@@ -106,17 +106,29 @@ Exit:   123.50 (+2.9%, £1,450 on £10k, scalp)
 
 ### Example Trade (Volatile / Your SNDK Pattern):
 ```
-Scenario 1 - Dip Buy:
-  Entry:  SNDK @ 580 (RSI <30 after session dip, RVOL 2.5x)
-  Hold:   30-60 minutes (bounce expected)
+Scenario 1 - BUY THE DIP (oversold recovery):
+  Entry:  SNDK @ 580 (RSI <30, after sharp session dip, RVOL 2.5x)
+  Hold:   30-60 minutes (waiting for bounce)
   Exit:   620 (+6.9%, £3,450 on £10k, intraday scalp) ✅
+  Logic:  Buy weakness, sell strength within same session
 
-Scenario 2 - Bounce Sell:
-  Entry:  SNDK @ 660 (RSI >75 after morning spike)
-  Hold:   45 minutes (pullback expected)
-  Exit:   620 (-6.1%, BUT profit taken on way down) ✅
+Scenario 2 - BUY THE EARLY RUNNER (before the bounce):
+  Entry:  SNDK @ 595 (RSI 35-45, RVOL spike, volume explosion)
+  Hold:   60-90 minutes (catching momentum BEFORE spike to 660)
+  Exit:   640 (+7.6%, ride the early wave) ✅
+  Logic:  Get in EARLY on volume surge, before RSI extremes
+
+Scenario 3 - BOUNCE SELL (overbought reversal):
+  Entry:  SNDK @ 660 (RSI >75, after morning spike, volume cooling)
+  Hold:   30-45 minutes (waiting for pullback)
+  Exit:   620 (-6.1%, but profit taken on way down) ✅
+  Logic:  Fade the extremes, scalp the reversal
 
 Key Rule: MUST be OUT before market close (16:30 UTC for US)
+Entry Types:
+  • Dips (RSI <30) = oversold recovery scalps
+  • Early runners (RVOL spike, RSI 35-50) = momentum catches
+  • Overbought fades (RSI >75) = reversal scalps
 ```
 
 ### Critical Guardrails for Tier 3:

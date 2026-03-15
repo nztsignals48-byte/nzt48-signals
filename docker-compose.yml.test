@@ -1,0 +1,120 @@
+# NZT-48 Trading System — Docker Compose
+# Engine + API via supervisord | IB Gateway via IBC | Redis for state
+# Optimised for AWS EC2 t3.small (upgrading to t3.medium)
+
+services:
+  # Trading engine + API server (managed by supervisord)
+  nzt48:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # H-03: IMAGE_PARITY — pass git SHA at build time
+        # Override via: docker compose build --build-arg GIT_SHA=$(git rev-parse HEAD) nzt48
+        GIT_SHA: ${GIT_SHA:-unknown}
+    container_name: nzt48
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - nzt48-data:/app/data
+      - ./config:/app/config:ro
+      - ./credentials:/app/credentials:ro
+    env_file:
+      - .env.production
+    environment:
+      - NZT48_API_URL=http://localhost:8000
+      - GOOGLE_SHEETS_CREDS=/app/credentials/gsheets-service-account.json
+      - REDIS_URL=redis://:nzt48redis@redis:6379/0
+      - IBKR_HOST=ib-gateway
+      - IBKR_PORT=4002   # 4002=paper, 4004=live (gnzsnz image)
+    mem_limit: 1536m
+    memswap_limit: 2048m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  # IB Gateway — headless IBKR API via IBC (auto-reconnect, auto-restart)
+  # Image: gnzsnz/ib-gateway (IB Gateway + IBC, Xvfb for headless)
+  # Weekly maintenance: user must approve 2FA on phone every Monday morning
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: nzt48-ib-gateway
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      # TWS_USERID / TWS_PASSWORD / TRADING_MODE injected via env_file (.env.production)
+      # Previously used ${IBKR_USERNAME} interpolation which reads from HOST shell, not env_file
+      - READ_ONLY_API=false  # Must be false for paper order placement
+      - TWOFA_TIMEOUT_ACTION=restart
+      # Accept API connections from Docker network (nzt48 container connects via bridge IP)
+      - TWS_ACCEPT_INCOMING=accept
+    expose:
+      - "4002"
+      - "4004"
+    mem_limit: 1024m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4002' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # Redis — Mandate 9: Persistent Chandelier state + session cache
+  #
+  # H-13: Database separation policy:
+  #   DB 0 (default): Critical state — positions, Chandelier exits, circuit breakers,
+  #                   kill switch, equity, frozen config. Policy: noeviction (never lose state).
+  #   DB 1:           Telemetry/metrics — feature snapshots, ML training buffers,
+  #                   CloudWatch scratchpad. Policy: allkeys-lru (evict oldest when full).
+  #
+  #   The REDIS_URL env var on nzt48 service uses /0 (DB 0) by default.
+  #   Telemetry code should use DB 1 via core/redis_config.py constants.
+  #   See: core/redis_config.py for REDIS_DB_STATE and REDIS_DB_TELEMETRY constants.
+  #
+  redis:
+    image: redis:7-alpine
+    container_name: nzt48-redis
+    command: redis-server --appendonly yes --appendfsync everysec --requirepass nzt48redis --maxmemory 400mb --maxmemory-policy noeviction
+    # No host port — only accessible via Docker network (security hardening)
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "nzt48redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  nzt48-data:
+    driver: local
+  redis_data:
+    driver: local

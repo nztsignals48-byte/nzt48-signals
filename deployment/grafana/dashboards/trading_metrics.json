@@ -1,0 +1,252 @@
+{
+  "dashboard": {
+    "title": "NZT-48 Trading Metrics",
+    "uid": "nzt48-trading",
+    "version": 1,
+    "timezone": "Europe/London",
+    "refresh": "10s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "tags": ["nzt48", "trading", "performance"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Daily P&L (£)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_daily_pnl_realized_pounds",
+            "legendFormat": "Realized P&L",
+            "refId": "A"
+          },
+          {
+            "expr": "nzt48_daily_pnl_unrealized_pounds",
+            "legendFormat": "Unrealized P&L",
+            "refId": "B"
+          },
+          {
+            "expr": "nzt48_daily_pnl_total_pounds",
+            "legendFormat": "Total P&L",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "currencyGBP", "label": "P&L (£)"},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [-200], "type": "lt"},
+              "query": {"params": ["C", "5m", "now"]},
+              "type": "query"
+            }
+          ],
+          "name": "Daily P&L Alert",
+          "message": "Daily P&L is negative below -£200"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Win Rate (%)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_win_rate_percentage",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 40},
+                {"color": "green", "value": 50}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 3,
+        "title": "Daily Heat Level (%)",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "nzt48_daily_heat_percentage",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 5,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 2},
+                {"color": "orange", "value": 3},
+                {"color": "red", "value": 4}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Trade Count (Today)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "increase(nzt48_trades_total[1d])",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Entry Quality (%)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 4},
+        "targets": [
+          {
+            "expr": "nzt48_entry_quality_percentage",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "green", "value": 60}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Position Count",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "nzt48_position_count",
+            "legendFormat": "Open Positions",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Positions"},
+          {"show": false}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [5], "type": "gt"},
+              "query": {"params": ["A", "2m", "now"]},
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Sharpe Ratio (Rolling 20d)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "nzt48_sharpe_ratio",
+            "legendFormat": "Sharpe Ratio",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Sharpe"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Signal Generation Rate (signals/min)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "rate(nzt48_signals_generated_total[5m]) * 60",
+            "legendFormat": "Signals/min",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Signals/min"},
+          {"show": false}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Chandelier Exit Rungs",
+        "type": "piechart",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "nzt48_chandelier_rung_1_exits_total",
+            "legendFormat": "Rung 1 (Breakeven)",
+            "refId": "A"
+          },
+          {
+            "expr": "nzt48_chandelier_rung_2_exits_total",
+            "legendFormat": "Rung 2 (+0.4%)",
+            "refId": "B"
+          },
+          {
+            "expr": "nzt48_chandelier_rung_3_exits_total",
+            "legendFormat": "Rung 3 (+0.8%)",
+            "refId": "C"
+          },
+          {
+            "expr": "nzt48_chandelier_rung_4_exits_total",
+            "legendFormat": "Rung 4 (+1.2%)",
+            "refId": "D"
+          },
+          {
+            "expr": "nzt48_chandelier_rung_5_exits_total",
+            "legendFormat": "Rung 5 (Runner)",
+            "refId": "E"
+          }
+        ],
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right"}
+        }
+      }
+    ]
+  }
+}

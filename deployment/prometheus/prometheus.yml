@@ -1,0 +1,89 @@
+# ==============================================================================
+# NZT-48 Prometheus Configuration
+# Scrapes metrics from trading engine, Redis, and IB Gateway health
+# ==============================================================================
+global:
+  scrape_interval: 15s  # Scrape every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  scrape_timeout: 10s
+  external_labels:
+    cluster: 'nzt48-production'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager:9093
+
+# Load alert rules
+rule_files:
+  - '/etc/prometheus/alerts/*.yml'
+
+# Scrape configurations
+scrape_configs:
+  # NZT-48 Trading Engine (FastAPI /metrics endpoint)
+  - job_name: 'nzt48-engine'
+    honor_labels: true
+    metrics_path: '/metrics'
+    static_configs:
+    - targets:
+      - 'nzt48:8000'  # Docker Compose
+      # - 'nzt48-api.nzt48.svc.cluster.local:8000'  # Kubernetes
+    scrape_interval: 5s  # High-frequency for trading metrics
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: instance
+      replacement: 'nzt48-engine'
+
+  # Redis metrics (via redis_exporter)
+  - job_name: 'nzt48-redis'
+    static_configs:
+    - targets:
+      - 'redis-exporter:9121'  # Requires redis_exporter sidecar
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: instance
+      replacement: 'nzt48-redis'
+
+  # IB Gateway health (custom exporter or node_exporter)
+  - job_name: 'nzt48-ib-gateway'
+    static_configs:
+    - targets:
+      - 'ib-gateway:9100'  # Requires node_exporter or custom health endpoint
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: instance
+      replacement: 'nzt48-ib-gateway'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+    - targets:
+      - 'localhost:9090'
+
+  # Node exporter (for EC2 system metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+    - targets:
+      - 'node-exporter:9100'
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: instance
+      replacement: 'ec2-host'
+
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 30d  # Keep 30 days of data
+    retention.size: 10GB
+    wal_compression: true
+
+# Remote write (optional - send to Grafana Cloud or other TSDB)
+# remote_write:
+#   - url: https://prometheus-prod.grafana.net/api/prom/push
+#     basic_auth:
+#       username: YOUR_GRAFANA_CLOUD_USER
+#       password: YOUR_GRAFANA_CLOUD_API_KEY

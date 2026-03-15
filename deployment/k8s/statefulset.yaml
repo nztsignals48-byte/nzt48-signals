@@ -1,0 +1,106 @@
+# ==============================================================================
+# NZT-48 Redis StatefulSet
+# Persistent Redis for state management (Chandelier exits, circuit breakers)
+# ==============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nzt48-redis
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: redis
+    tier: data
+spec:
+  serviceName: nzt48-redis
+  replicas: 1  # Single instance with persistent storage
+  selector:
+    matchLabels:
+      app: nzt48
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: nzt48
+        component: redis
+        tier: data
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --appendfsync
+        - everysec
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        - --maxmemory
+        - 400mb
+        - --maxmemory-policy
+        - noeviction
+        ports:
+        - name: redis
+          containerPort: 6379
+          protocol: TCP
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nzt48-secrets
+              key: redis-password
+
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        # Health checks
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+      labels:
+        app: nzt48
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+      storageClassName: nzt48-storage

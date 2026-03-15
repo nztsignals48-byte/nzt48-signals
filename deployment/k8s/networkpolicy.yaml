@@ -1,0 +1,166 @@
+# ==============================================================================
+# NZT-48 Network Policies
+# Zero-trust network segmentation for security
+# ==============================================================================
+
+# Allow engine to access Redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nzt48-engine-to-redis
+  namespace: nzt48
+spec:
+  podSelector:
+    matchLabels:
+      app: nzt48
+      component: engine
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow Redis access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: nzt48
+          component: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # Allow IB Gateway access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: nzt48
+          component: ib-gateway
+    ports:
+    - protocol: TCP
+      port: 4002
+    - protocol: TCP
+      port: 4004
+
+  # Allow external HTTPS (for yfinance, Google Sheets, Telegram)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# Restrict Redis to only accept connections from engine
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nzt48-redis-ingress
+  namespace: nzt48
+spec:
+  podSelector:
+    matchLabels:
+      app: nzt48
+      component: redis
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: nzt48
+          component: engine
+    ports:
+    - protocol: TCP
+      port: 6379
+
+---
+# Restrict IB Gateway to only accept connections from engine
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nzt48-ib-gateway-ingress
+  namespace: nzt48
+spec:
+  podSelector:
+    matchLabels:
+      app: nzt48
+      component: ib-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: nzt48
+          component: engine
+    ports:
+    - protocol: TCP
+      port: 4002
+    - protocol: TCP
+      port: 4004
+
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow IBKR API access (port 4001/4002 for IBKR servers)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 4001
+    - protocol: TCP
+      port: 4002
+    - protocol: TCP
+      port: 443
+
+---
+# Allow Prometheus scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nzt48-prometheus-scrape
+  namespace: nzt48
+spec:
+  podSelector:
+    matchLabels:
+      app: nzt48
+      component: engine
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow Prometheus to scrape metrics
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8000
+
+  # Allow Ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000

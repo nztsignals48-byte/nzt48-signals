@@ -1,0 +1,265 @@
+# ==============================================================================
+# NZT-48 Kubernetes Deployment
+# High-availability deployment for trading engine + API
+# ==============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nzt48-engine
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: engine
+    tier: backend
+spec:
+  replicas: 2  # 2-3 replicas for HA (not mandatory for paper trading)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero-downtime deployment
+  selector:
+    matchLabels:
+      app: nzt48
+      component: engine
+  template:
+    metadata:
+      labels:
+        app: nzt48
+        component: engine
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # CRITICAL: Anti-affinity to spread replicas across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - nzt48
+              topologyKey: kubernetes.io/hostname
+
+      # Init container to wait for Redis
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z nzt48-redis 6379; do echo waiting for redis; sleep 2; done;']
+
+      containers:
+      - name: nzt48
+        image: nzt48-engine:latest  # Replace with ECR URI in production
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: NZT48_API_URL
+          value: "http://localhost:8000"
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: nzt48-secrets
+              key: redis-url
+        - name: IBKR_HOST
+          value: "nzt48-ib-gateway"
+        - name: IBKR_PORT
+          value: "4002"
+        - name: NZT48_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: nzt48-secrets
+              key: api-key
+        - name: GOOGLE_SHEETS_CREDS
+          value: "/app/credentials/gsheets-service-account.json"
+
+        # Mount config from ConfigMap
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: credentials
+          mountPath: /app/credentials
+          readOnly: true
+        - name: data
+          mountPath: /app/data
+
+        # Resource limits (adjust based on load testing)
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1500m"
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Graceful shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+
+      volumes:
+      - name: config
+        configMap:
+          name: nzt48-config
+      - name: credentials
+        secret:
+          secretName: nzt48-credentials
+      - name: data
+        persistentVolumeClaim:
+          claimName: nzt48-data-pvc
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+
+---
+# ==============================================================================
+# IB Gateway Deployment (Single instance - stateful connection to IBKR)
+# ==============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nzt48-ib-gateway
+  namespace: nzt48
+  labels:
+    app: nzt48
+    component: ib-gateway
+    tier: backend
+spec:
+  replicas: 1  # MUST be 1 (stateful IBKR connection)
+  strategy:
+    type: Recreate  # Cannot have multiple IB Gateway instances with same credentials
+  selector:
+    matchLabels:
+      app: nzt48
+      component: ib-gateway
+  template:
+    metadata:
+      labels:
+        app: nzt48
+        component: ib-gateway
+        tier: backend
+    spec:
+      containers:
+      - name: ib-gateway
+        image: ghcr.io/gnzsnz/ib-gateway:stable
+        ports:
+        - name: paper-api
+          containerPort: 4002
+          protocol: TCP
+        - name: live-api
+          containerPort: 4004
+          protocol: TCP
+        env:
+        - name: TWS_USERID
+          valueFrom:
+            secretKeyRef:
+              name: nzt48-secrets
+              key: ibkr-username
+        - name: TWS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nzt48-secrets
+              key: ibkr-password
+        - name: TRADING_MODE
+          value: "paper"
+        - name: READ_ONLY_API
+          value: "false"
+        - name: TWOFA_TIMEOUT_ACTION
+          value: "restart"
+        - name: TWOFA_TIMEOUT
+          value: "120"
+        - name: TWS_ACCEPT_INCOMING
+          value: "accept"
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+        # Health check via socket test
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "echo > /dev/tcp/localhost/4002 || exit 1"]
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "echo > /dev/tcp/localhost/4002 || exit 1"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      terminationGracePeriodSeconds: 30
+
+---
+# ==============================================================================
+# Persistent Volume Claim for SQLite database + reports
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nzt48-data-pvc
+  namespace: nzt48
+  labels:
+    app: nzt48
+spec:
+  accessModes:
+  - ReadWriteMany  # RWX for multi-replica access (use EFS on AWS)
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: nzt48-storage  # Define in storage-class.yaml
+
+---
+# ==============================================================================
+# Namespace
+# ==============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nzt48
+  labels:
+    name: nzt48
+    environment: production
