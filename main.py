@@ -123,6 +123,7 @@ try:
     from core.tier_exit_enforcer import SessionExitEnforcer, ExitReason
     from core.volume_analytics import VolumeAnalytics
     from core.order_placement_engine import OrderPlacementEngine
+    from core.indicator_enhancements import IndicatorEnhancements
     _TIER_BASED_AVAILABLE = True
 except ImportError as _e:
     _TIER_BASED_AVAILABLE = False
@@ -1008,13 +1009,15 @@ class NZT48Orchestrator:
         self.tier_exit_enforcer = None
         self.volume_analytics = None
         self.order_placement_engine = None
+        self.indicator_enhancements = None
         if _TIER_BASED_AVAILABLE:
             try:
                 self.tier_entry_detector = TierBasedEntryDetector()
                 self.tier_exit_enforcer = SessionExitEnforcer()
                 self.volume_analytics = VolumeAnalytics()
                 self.order_placement_engine = OrderPlacementEngine()
-                logger.info("Tier-based trading system initialized (Type A/B/C/D entry patterns, volume analytics, stop order placement, Tier 3 exit discipline)")
+                self.indicator_enhancements = IndicatorEnhancements()
+                logger.info("Tier-based trading system initialized (Type A/B/C/D entry patterns, volume analytics, Q1 indicator enhancements, stop order placement, Tier 3 exit discipline)")
             except Exception as _tier_err:
                 logger.warning("Tier-based trading system init failed: %s", _tier_err)
 

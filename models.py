@@ -236,6 +236,17 @@ class IndicatorSnapshot:
     intraday_momentum_pct: float = 0.0     # First-hour price change %
     sentiment_composite: float = 50.0      # 0-100 composite sentiment
 
+    # Phase Q1 — Indicator Enhancements (+1.3 Sharpe)
+    macd_bearish_div: bool = False         # MACD bearish divergence (fade signal)
+    macd_bullish_div: bool = False         # MACD bullish divergence (entry signal)
+    macd_div_strength: float = 0.0         # 0-100 divergence strength
+    vol_ma50: float = 0.0                  # 50-bar volume MA (longer trend)
+    vol_acceleration: bool = False         # vol_ma20 > vol_ma50 (bullish volume)
+    price_action_bullish: bool = False     # close > open (recovery confirmation)
+    bb_dynamic_upper: float = 0.0          # Regime-adaptive BB upper
+    bb_dynamic_middle: float = 0.0         # Regime-adaptive BB middle
+    bb_dynamic_lower: float = 0.0          # Regime-adaptive BB lower
+
     # Sprint 1 — T-05/T-06/T-07: FAST/SLOW tier indicators
     roc_30: Optional[float] = None          # T-05: 30-bar Rate of Change (%) — 30 min on 1-min bars
     adx_delta: Optional[float] = None       # T-06: ADX change per bar (trend acceleration)

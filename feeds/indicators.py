@@ -342,6 +342,55 @@ class IndicatorEngine:
         except Exception:
             logger.debug("RVOL trajectory failed for %s", ticker, exc_info=True)
 
+        # --- Q1: MACD Divergence Detection ---
+        try:
+            from core.indicator_enhancements import IndicatorEnhancements
+            enhancer = IndicatorEnhancements()
+            macd_div = enhancer.detect_macd_divergence(df_trend, lookback=20)
+            snap.macd_bearish_div = macd_div["bearish_divergence"]
+            snap.macd_bullish_div = macd_div["bullish_divergence"]
+            snap.macd_div_strength = macd_div["divergence_strength"]
+        except Exception:
+            logger.debug("MACD divergence failed for %s", ticker, exc_info=True)
+
+        # --- Q1: Vol_MA50 (50-bar volume MA) ---
+        try:
+            if len(df) >= 50:
+                snap.vol_ma50 = float(df["Volume"].iloc[-50:].mean())
+        except Exception:
+            logger.debug("Vol_MA50 failed for %s", ticker, exc_info=True)
+
+        # --- Q1: Volume Acceleration (vol_ma20 > vol_ma50) ---
+        try:
+            if len(df) >= 50:
+                vol_ma20 = float(df["Volume"].iloc[-20:].mean())
+                vol_ma50 = snap.vol_ma50
+                if vol_ma20 > 0 and vol_ma50 > 0:
+                    snap.vol_acceleration = vol_ma20 > vol_ma50
+        except Exception:
+            logger.debug("Volume acceleration failed for %s", ticker, exc_info=True)
+
+        # --- Q1: Price Action Filter (close > open) ---
+        try:
+            last_bar = df.iloc[-1]
+            close = float(last_bar["Close"])
+            open_price = float(last_bar["Open"])
+            snap.price_action_bullish = close > open_price
+        except Exception:
+            logger.debug("Price action filter failed for %s", ticker, exc_info=True)
+
+        # --- Q1: Dynamic Bollinger Bands (regime-adaptive) ---
+        try:
+            from core.indicator_enhancements import IndicatorEnhancements
+            enhancer = IndicatorEnhancements()
+            # Determine regime from VIX (if available from cross-asset macro)
+            regime = "neutral"  # Default
+            # TODO: wire in VIX from cross_asset_macro if available
+            bb_dyn = enhancer.calc_dynamic_bollinger_bands(df, period=20, regime=regime)
+            snap.bb_dynamic_upper, snap.bb_dynamic_middle, snap.bb_dynamic_lower = bb_dyn
+        except Exception:
+            logger.debug("Dynamic Bollinger Bands failed for %s", ticker, exc_info=True)
+
         return snap
 
     # ------------------------------------------------------------------ #

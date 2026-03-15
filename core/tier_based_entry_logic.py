@@ -187,6 +187,7 @@ class TierBasedEntryDetector:
         daily_low: float,
         daily_high: float,
         volume_trend: str,
+        current_open: float = None,
     ) -> Optional[EntrySignal]:
         """
         Detect Type A: Dip Recovery.
@@ -196,6 +197,7 @@ class TierBasedEntryDetector:
         - RVOL > 1.5x (selling exhaustion)
         - Price near daily low but not at absolute bottom
         - Volume trend turning positive
+        - Q2-1: Recovery bar must be bullish (close > open)
         """
         if rsi > 35:
             return None
@@ -213,16 +215,29 @@ class TierBasedEntryDetector:
         if volume_trend != "rising":
             return None
 
+        # Q2-1: Require recovery bar to be bullish (close > open)
+        if current_open is not None:
+            if not self.validate_type_a_recovery_bar(current_price, current_open):
+                logger.debug(
+                    f"[{ticker}] Type A REJECTED: recovery bar bearish "
+                    f"(close={current_price:.2f} <= open={current_open:.2f})"
+                )
+                return None
+
         # Base confidence: 65%
         confidence = 65.0
 
-        # Volume urgency boost: if RVOL >= 2.5x, add +10%, if >= 2.0x add +7%
-        if rvol >= 2.5:
-            confidence += 10.0
+        # Q1: Volume urgency boost with 4-tier system (1.5x/2.0x/2.5x/4.0x)
+        if rvol >= 4.0:
+            confidence += 12.0  # Extreme exhaustion volume
+        elif rvol >= 2.5:
+            confidence += 10.0  # Very high urgency
         elif rvol >= 2.0:
-            confidence += 7.0
+            confidence += 7.0   # High urgency
         elif rvol >= 1.8:
-            confidence += 5.0
+            confidence += 5.0   # Moderate urgency
+        elif rvol >= 1.5:
+            confidence += 2.0   # Low urgency
 
         # Cap at 100%
         confidence = min(confidence, 100.0)
@@ -243,8 +258,52 @@ class TierBasedEntryDetector:
             rvol=rvol,
             volume_trend=volume_trend,
             time_detected=datetime.now(UTC),
-            rationale=f"Dip recovery: RSI {rsi:.1f} (oversold), RVOL {rvol:.2f}x, volume rising, confidence {confidence:.0f}%"
+            rationale=f"Dip recovery: RSI {rsi:.1f} (oversold), RVOL {rvol:.2f}x, volume rising, Q2 bullish bar, confidence {confidence:.0f}%"
         )
+
+    def validate_multibar_rising_rvol(
+        self,
+        last_3_bars_rvols: Optional[list] = None,
+        min_bars_threshold: int = 2,
+        rvol_threshold: float = 2.0,
+    ) -> bool:
+        """
+        Q2-1: Multi-Bar Confirmation Logic (Type B validation).
+
+        Require last 3 bars with rising RVOL before entry to filter false signals.
+
+        Args:
+            last_3_bars_rvols: List of RVOL values for last 3 bars (oldest to newest)
+            min_bars_threshold: Minimum number of bars that must exceed threshold (default 2)
+            rvol_threshold: RVOL threshold each bar must exceed (default 2.0x)
+
+        Returns:
+            True if multi-bar confirmation passes, False otherwise
+        """
+        if last_3_bars_rvols is None or len(last_3_bars_rvols) < 3:
+            return False
+
+        bars_above_threshold = sum(1 for v in last_3_bars_rvols if v >= rvol_threshold)
+        return bars_above_threshold >= min_bars_threshold
+
+    def validate_type_a_recovery_bar(
+        self,
+        current_price: float,
+        current_open: float,
+    ) -> bool:
+        """
+        Q2-1: Type A validation - require close > open on recovery bar.
+
+        Ensures the recovery bar is actually bullish (buyers in control).
+
+        Args:
+            current_price: Current close price
+            current_open: Current bar's open price
+
+        Returns:
+            True if recovery bar is bullish (close > open)
+        """
+        return current_price > current_open
 
     def detect_type_b_early_runner(
         self,
@@ -267,7 +326,7 @@ class TierBasedEntryDetector:
         - RSI not yet extreme (40-70 range)
         - Strong price momentum (>80% of daily range from low)
         - Within first 2-3 hours of session
-        - Multi-bar confirmation: last 3 bars show sustained volume elevation
+        - Q2-1 Multi-bar confirmation: last 3 bars show sustained volume elevation (REQUIRED)
         - NOT >5% in-session move (avoid chasing runaway moves)
 
         This is YOUR EDGE: detect early runners BEFORE they become overbought.
@@ -297,11 +356,13 @@ class TierBasedEntryDetector:
             if session_move_pct > 0.05:  # Already moved >5%
                 return None
 
-        # Multi-bar volume sustainability check
-        if last_3_bars_rvols is not None and len(last_3_bars_rvols) >= 3:
-            bars_above_2x = sum(1 for v in last_3_bars_rvols if v >= 2.0)
-            if bars_above_2x < 2:  # Need at least 2 of last 3 bars above 2.0x
-                return None
+        # Q2-1: MANDATORY Multi-bar volume sustainability check
+        if not self.validate_multibar_rising_rvol(last_3_bars_rvols, min_bars_threshold=2, rvol_threshold=2.0):
+            logger.debug(
+                f"[{ticker}] Type B REJECTED: multi-bar RVOL confirmation failed "
+                f"(last_3_bars={last_3_bars_rvols})"
+            )
+            return None
 
         # Confidence: 82% (priority edge)
         confidence = 82.0
@@ -322,7 +383,7 @@ class TierBasedEntryDetector:
             rvol=rvol,
             volume_trend="rising",
             time_detected=datetime.now(UTC),
-            rationale=f"Early runner (PRIORITY): RVOL {rvol:.2f}x, RSI {rsi:.1f}, {time_in_session_minutes}min into session, multi-bar confirmed"
+            rationale=f"Early runner (PRIORITY): RVOL {rvol:.2f}x, RSI {rsi:.1f}, {time_in_session_minutes}min into session, Q2 multi-bar confirmed"
         )
 
     def detect_type_c_overbought(
