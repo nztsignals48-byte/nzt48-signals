@@ -702,7 +702,7 @@ def process_tick(msg):
     # Hurst > 0.55 on 5-min bars = trending. Momentum OK.
     # Hurst 0.45-0.55 = random. Reduce confidence.
     # =========================================================================
-    if n_5min_bars >= 5:
+    if n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
         if hurst < 0.40:
             # Strongly mean-reverting on 5-min timeframe — suppress momentum signals
             _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
@@ -716,7 +716,9 @@ def process_tick(msg):
     # FIX 9: Volume trend gate — require rising volume for momentum entry
     # Flat/falling volume = noise move. Rising volume = real flow.
     # =========================================================================
-    if n_5min_bars >= 5 and vol_slope <= 0:
+    # Only gate on volume slope when we actually have volume data
+    has_volume = any(b.get("volume", 0) > 0 for b in bars_5m[-5:]) if bars_5m else False
+    if n_5min_bars >= 5 and has_volume and vol_slope <= 0:
         # Volume not rising — suppress momentum signal
         # Only allow if very high confidence from other factors
         leverage_conf_floor = max(leverage_conf_floor, 75)
@@ -895,10 +897,12 @@ def process_tick(msg):
     ask = msg.get("ask", 0)
     if bid > 0 and ask > 0:
         spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
-        if spread_pct > 0.5:
+        # Leverage-aware spread limits: LSE ETPs have wider structural spreads
+        spread_limit = 2.0 if leverage >= 3 else 0.5  # 2% for leveraged, 0.5% for unleveraged
+        if spread_pct > spread_limit:
             _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
                            {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},
-                           "spread={:.2f}% > 0.5%".format(spread_pct))
+                           "spread={:.2f}% > {:.1f}%".format(spread_pct, spread_limit))
             return no_signal_base
 
     # G2: Extension filter — reject if price moved >3% from session VWAP
