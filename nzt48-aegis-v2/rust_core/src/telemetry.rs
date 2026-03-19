@@ -201,6 +201,11 @@ impl Telemetry {
             .inc();
     }
 
+    /// Get the count for a specific veto reason.
+    pub fn veto_count(&self, reason: &str) -> u64 {
+        self.veto_counts.get(reason).map_or(0, |c| c.get())
+    }
+
     /// Snapshot of all key metrics for logging/reporting.
     pub fn snapshot(&self) -> TelemetrySnapshot {
         self.snapshot_with_mode("UNKNOWN")

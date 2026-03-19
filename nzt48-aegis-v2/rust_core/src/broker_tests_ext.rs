@@ -26,6 +26,8 @@ mod tests {
             state: OrderState::Filled,
             origin_order_id: "test".to_string(),
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         }
     }
 

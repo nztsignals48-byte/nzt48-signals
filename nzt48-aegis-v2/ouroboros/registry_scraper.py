@@ -54,7 +54,7 @@ ISA_BASELINE: Dict[str, EtpProduct] = {
     "QQQS.L": EtpProduct("QQQS.L", "WisdomTree QQQ 3x Daily Short", -3, "Technology", "LSE", "GBP", is_inverse=True),
     "3USS.L": EtpProduct("3USS.L", "WisdomTree S&P 500 3x Daily Short", -3, "US_Broad", "LSE", "GBP", is_inverse=True),
     "QQQ5.L": EtpProduct("QQQ5.L", "Leverage Shares 5x QQQ", 5, "Technology", "LSE", "GBP"),
-    "SP5L.L": EtpProduct("SP5L.L", "Leverage Shares 5x S&P 500", 5, "US_Broad", "LSE", "GBP"),
+    "5SPY.L": EtpProduct("5SPY.L", "Leverage Shares 5x S&P 500", 5, "US_Broad", "LSE", "GBP"),
 }
 
 

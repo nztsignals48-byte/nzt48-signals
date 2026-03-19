@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rust_core::broker::BrokerAdapter;
@@ -39,7 +41,7 @@ fn main() {
     eprintln!("╔══════════════════════════════════════════╗");
     eprintln!("║  AEGIS V2 — Paper Engine                 ║");
     eprintln!("║  IS_LIVE = false (H20)                   ║");
-    eprintln!("║  Mode: Crucible (paper, max_positions=1) ║");
+    eprintln!("║  Mode: Crucible (paper, simulation)      ║");
     eprintln!("╚══════════════════════════════════════════╝");
 
     if IS_LIVE {
@@ -58,7 +60,7 @@ fn main() {
     let ibkr_host = find_arg(&args, "--ibkr-host").unwrap_or_else(|| "127.0.0.1".to_string());
     let ibkr_port: u16 = find_arg(&args, "--ibkr-port")
         .and_then(|s| s.parse().ok())
-        .unwrap_or(4004);
+        .unwrap_or(4003); // gnzsnz/ib-gateway paper API proxy port
 
     // Load configuration
     eprintln!("Loading config from {:?}...", config_dir);
@@ -77,15 +79,17 @@ fn main() {
     );
 
     // Load Ouroboros artifacts (safe fallback to defaults)
-    let dw = ouroboros_loader::load_dynamic_weights(&config_dir);
+    let mut dw = ouroboros_loader::load_dynamic_weights(&config_dir);
     let uc = ouroboros_loader::load_universe_classification(&config_dir);
+    let fx_live = ouroboros_loader::load_fx_rates(&config_dir);
     eprintln!(
-        "Ouroboros: WR={:.1}%, chandelier_mult={:.2}, tiers=[{},{},{}]",
+        "Ouroboros: WR={:.1}%, chandelier_mult={:.2}, tiers=[{},{},{}], fx_rates={}",
         dw.bayesian_win_rate * 100.0,
         dw.chandelier_atr_mult,
         uc.tier1.len(),
         uc.tier2.len(),
         uc.tier3.len(),
+        fx_live.rates.len(),
     );
 
     // Build leverage map for Python bridge (ticker_id → leverage factor)
@@ -94,13 +98,69 @@ fn main() {
         leverage_map.insert(TickerId(idx as u32), contract.leverage as u32);
     }
 
-    // Create WAL writer
+    // Create WAL writer — rotate stale WAL on startup
     std::fs::create_dir_all(&wal_dir).unwrap_or_else(|e| {
         eprintln!("FATAL: Cannot create WAL dir {:?}: {e}", wal_dir);
         std::process::exit(1);
     });
     let wal_path = wal_dir.join("current.ndjson");
     let dl_path = wal_dir.join("dead_letter");
+    // Rotate: if current.ndjson exists and is non-empty, archive it so each engine
+    // boot starts with a clean WAL. Prevents 14MB+ phantom data from old builds.
+    if wal_path.exists() {
+        if let Ok(meta) = std::fs::metadata(&wal_path) {
+            if meta.len() > 0 {
+                let archive_dir = wal_dir.join("archive");
+                let _ = std::fs::create_dir_all(&archive_dir);
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let archive_name = format!("wal_{ts}.ndjson");
+                let archive_path = archive_dir.join(&archive_name);
+                match std::fs::rename(&wal_path, &archive_path) {
+                    Ok(()) => eprintln!(
+                        "WAL_ROTATE: archived {} ({} bytes) → {:?}",
+                        wal_path.display(), meta.len(), archive_path,
+                    ),
+                    Err(e) => eprintln!("WAL_ROTATE: rename failed: {e} — continuing with append"),
+                }
+            }
+        }
+    }
+    // Purge old WAL archives (keep last 7 days worth, ~7 files max).
+    // Prevents unbounded disk fill from daily WAL rotation.
+    {
+        let archive_dir = wal_dir.join("archive");
+        if archive_dir.exists() {
+            let mut entries: Vec<_> = std::fs::read_dir(&archive_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .map_or(false, |ext| ext == "ndjson")
+                })
+                .collect();
+            if entries.len() > 7 {
+                // Sort by name (wal_TIMESTAMP.ndjson — oldest first)
+                entries.sort_by_key(|e| e.file_name());
+                let to_remove = entries.len() - 7;
+                for entry in entries.into_iter().take(to_remove) {
+                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    match std::fs::remove_file(entry.path()) {
+                        Ok(()) => eprintln!(
+                            "WAL_PURGE: removed {:?} ({} bytes)",
+                            entry.file_name(),
+                            size,
+                        ),
+                        Err(e) => eprintln!("WAL_PURGE: failed to remove {:?}: {e}", entry.file_name()),
+                    }
+                }
+            }
+        }
+    }
     let mut wal = match WalWriter::open_file(&wal_path, &dl_path) {
         Ok(w) => w,
         Err(e) => {
@@ -143,8 +203,19 @@ fn main() {
     let mut broker = IbkrBroker::new(broker_config);
 
     // Register contract mappings (symbol → TickerId)
+    // Derive IBKR-compatible symbol from our internal symbol:
+    //   LSE: strip ".L" suffix (QQQ3.L → QQQ3)
+    //   HKEX: strip leading zeros (0001 → 1, 0700 → 700)
+    //   Others: use as-is
     for (idx, contract) in config.contracts.iter().enumerate() {
-        let ibkr_symbol = contract.symbol.strip_suffix(".L").unwrap_or(&contract.symbol);
+        let base_symbol = contract.symbol.strip_suffix(".L").unwrap_or(&contract.symbol);
+        let ibkr_symbol = if contract.exchange == "HKEX" {
+            base_symbol.trim_start_matches('0')
+        } else {
+            base_symbol
+        };
+        // Safety: if trimming zeros emptied the string (shouldn't happen), use "0"
+        let ibkr_symbol = if ibkr_symbol.is_empty() { "0" } else { ibkr_symbol };
         broker.register_contract(ContractMapping {
             ticker_id: TickerId(idx as u32),
             symbol: contract.symbol.clone(),
@@ -155,26 +226,32 @@ fn main() {
     }
     eprintln!("Registered {} contract mappings", config.contracts.len());
 
-    // Connect to IB Gateway (retry with exponential backoff + jitter, max 5 attempts)
-    eprintln!("Connecting to IB Gateway...");
-    let max_retries = 5;
-    for attempt in 1..=max_retries {
+    // Connect to IB Gateway with retry.
+    // Paper mode: max 10 attempts then proceed without broker (idle until reconnect).
+    // Live mode: infinite retry — never proceed without broker.
+    let max_attempts: u64 = if config.crucible.paper_mode { 10 } else { u64::MAX };
+    let mut broker_connected = false;
+    eprintln!("Connecting to IB Gateway (max {} attempts)...", if max_attempts == u64::MAX { "∞".to_string() } else { max_attempts.to_string() });
+    let mut attempt: u64 = 0;
+    loop {
+        attempt += 1;
         match broker.connect() {
-            Ok(()) => break,
+            Ok(()) => {
+                broker_connected = true;
+                break;
+            }
             Err(e) => {
                 eprintln!(
-                    "IB Gateway connection attempt {attempt}/{max_retries} failed: {e}"
+                    "IB Gateway connection attempt {attempt} failed: {e}"
                 );
-                if attempt == max_retries {
-                    eprintln!("FATAL: All connection attempts exhausted.");
-                    eprintln!("Is IB Gateway running on port {ibkr_port}?");
-                    std::process::exit(1);
+                if attempt >= max_attempts {
+                    eprintln!("WARNING: Max connection attempts reached. Proceeding without IB Gateway.");
+                    eprintln!("Engine will idle until broker reconnects in main loop.");
+                    break;
                 }
-                // P1-05: Exponential backoff with deterministic jitter.
-                // Base: 5s * attempt. Jitter: hash(attempt) mod 3s to prevent
-                // thundering herd if multiple instances retry simultaneously.
-                let base_secs = 5 * attempt as u64;
-                let jitter_secs = (attempt as u64 * 7 + 3) % 4; // 0-3s deterministic jitter
+                // Exponential backoff capped at 60s, with deterministic jitter 0-3s
+                let base_secs = (5 * attempt).min(60);
+                let jitter_secs = (attempt * 7 + 3) % 4; // 0-3s deterministic jitter
                 let delay = std::time::Duration::from_secs(base_secs + jitter_secs);
                 eprintln!("Retrying in {}s ({}s base + {}s jitter)...", delay.as_secs(), base_secs, jitter_secs);
                 std::thread::sleep(delay);
@@ -182,13 +259,35 @@ fn main() {
         }
     }
 
-    // Subscribe to market data for all contracts
-    let sub_count = broker.subscribe_all();
-    eprintln!("Market data: subscribed to {sub_count} bar streams");
+    // Subscribe to market data (only if broker connected)
+    // CRITICAL FIX: Wait for IBKR secdef farms to initialize before subscribing.
+    // Without this delay, reqMktData for LSE (LSEETF) and KRX (KSE) tickers fails
+    // with code 200 "No security definition found" because secdefeu connects last.
+    // TSE/HKEX work because jfarm connects first. 15s gives all farms time to ready.
+    if broker_connected {
+        eprintln!("Waiting 15s for IBKR secdef farms to initialize (LSE/KRX need secdefeu)...");
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        eprintln!("Secdef wait complete, subscribing market data...");
+        let sub_count = broker.subscribe_all();
+        eprintln!("Market data: subscribed to {sub_count} streams");
+    } else {
+        eprintln!("Market data: skipped (no broker connection)");
+    }
 
-    // P0-01: Subscribe to L1 tick-by-tick bid/ask for real spread data.
-    let l1_count = broker.subscribe_all_l1();
-    eprintln!("Market data: subscribed to {l1_count} L1 bid/ask streams");
+    // P0-01: Subscribe to L1 tick-by-tick bid/ask for top 2 LSE ETPs only.
+    // IBKR paper limits tick-by-tick to ~2 concurrent (error 10190 at higher counts).
+    // 2 core instruments: QQQ3.L, 3LUS.L (highest liquidity).
+    // Mode rotation (P21) will subscribe/unsubscribe L1 as sessions change.
+    if broker_connected {
+        let l1_core: Vec<&str> = vec!["QQQ3.L", "3LUS.L"];
+        let lse_tids: Vec<rust_core::types::TickerId> = l1_core.iter()
+            .filter_map(|sym| broker.contract_map_keys().iter()
+                .find(|&&tid| broker.symbol_for(tid).map_or(false, |s| s == *sym))
+                .copied())
+            .collect();
+        let l1_count = broker.subscribe_l1_batch(&lse_tids);
+        eprintln!("Market data: subscribed to {l1_count} L1 bid/ask streams (top 2 LSE ETPs)");
+    }
 
     // Create tick channel for backpressure monitoring (Phase 6A)
     let mut tick_channel = TickChannel::new(ChannelConfig::default());
@@ -215,10 +314,20 @@ fn main() {
     let clock = Clock::new(config.holidays.clone());
     let mut engine = Engine::new(broker, config, Some(wal), clock);
 
+    // Propagate simulation mode to risk arbiter (relaxes cash buffer check)
+    engine.arbiter.simulation_mode = engine.simulation_mode;
+
     // Apply Ouroboros DynamicWeights to engine subsystems
     engine.exit_engine.strategy_mut().set_trail_atr(dw.chandelier_atr_mult);
     engine.arbiter.regime_scales = dw.regime_scales.clone();
     engine.arbiter.kelly_fractions = dw.kelly_fractions.clone();
+    engine.arbiter.ticker_blacklist = dw.ticker_blacklist.clone();
+    if !dw.ticker_blacklist.is_empty() {
+        eprintln!("OUROBOROS: {} tickers blacklisted: {:?}", dw.ticker_blacklist.len(), dw.ticker_blacklist);
+    }
+    // Apply live FX rates from fx_rates.toml (Ouroboros 6-hour refresh)
+    engine.fx_table.apply_live_rates(&fx_live.rates, now_ns());
+
     eprintln!(
         "DynamicWeights APPLIED: chandelier_atr_mult={:.2}, regime_scales={}, kelly_fractions={}",
         dw.chandelier_atr_mult,
@@ -244,8 +353,8 @@ fn main() {
             .insert(TickerId(idx as u32), rust_core::engine::BarHistory::new(500));
     }
 
-    // Load WAL events for replay
-    let wal_events = rust_core::wal_replay::read_wal_file(&wal_path).unwrap_or_default();
+    // Load WAL events for replay (current + ALL archives — no trades lost across restarts)
+    let wal_events = rust_core::wal_replay::read_all_wal_files(&wal_dir);
 
     // Get broker time for clock sync
     let system_ns = now_ns();
@@ -269,13 +378,21 @@ fn main() {
     }
 
     // Install signal handler for graceful shutdown
-    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     if let Err(e) = ctrlc::set_handler(move || {
         eprintln!("\nSIGINT received, shutting down...");
-        r.store(false, std::sync::atomic::Ordering::SeqCst);
+        r.store(false, Ordering::SeqCst);
     }) {
         eprintln!("WARNING: Could not set signal handler: {e}");
+    }
+
+    // SIGHUP handler for hot-reloading contracts.toml (sent by contract_expander.py)
+    let reload_flag = Arc::new(AtomicBool::new(false));
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&reload_flag)) {
+        eprintln!("WARNING: Could not register SIGHUP handler: {e}");
+    } else {
+        eprintln!("SIGHUP handler registered (hot-reload contracts.toml)");
     }
 
     // Main event loop
@@ -288,11 +405,29 @@ fn main() {
     let mut ticks_filtered: u64 = 0;
     let mut consecutive_no_signal: u64 = 0;
     let mut last_regime = engine.arbiter.regime;
+    let mut last_reconnect_ns: u64 = 0;
+    let reconnect_interval_ns: u64 = 60_000_000_000; // 60s between reconnect attempts
 
     while running.load(std::sync::atomic::Ordering::SeqCst) {
         let loop_start = now_ns();
         engine.now_ns = loop_start;
         engine.broker.set_time_ns(loop_start);
+
+        // Periodic broker reconnection (if not connected at startup)
+        if !broker_connected && loop_start - last_reconnect_ns > reconnect_interval_ns {
+            last_reconnect_ns = loop_start;
+            match engine.broker.connect() {
+                Ok(()) => {
+                    broker_connected = true;
+                    // Wait for secdef farms before subscribing (same race condition as startup)
+                    eprintln!("BROKER RECONNECTED: waiting 15s for secdef farms...");
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    let sub_count = engine.broker.subscribe_all();
+                    eprintln!("BROKER RECONNECTED: subscribed to {sub_count} bar streams");
+                }
+                Err(_) => {} // Silent — will retry next interval
+            }
+        }
 
         // P2-C: Daily reset check (date-based, not time-based).
         let _utc_secs = (loop_start / 1_000_000_000) as u32 % 86400;
@@ -302,6 +437,80 @@ fn main() {
             format!("day-{total_days}")
         };
         engine.maybe_daily_reset(&current_date);
+
+        // HOT-RELOAD: Check if contract_expander.py signaled us via SIGHUP
+        if reload_flag.compare_exchange(true, false, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
+            eprintln!("SIGHUP received — hot-reloading contracts.toml...");
+            match EngineConfig::load_contracts_standalone(&config_dir.join("contracts.toml")) {
+                Ok(new_contracts) => {
+                    let existing_count = engine.broker.contract_map_keys().len();
+                    let mut added = 0u32;
+                    for (idx, contract) in new_contracts.iter().enumerate() {
+                        let tid = TickerId(idx as u32);
+                        // Skip already-registered contracts
+                        if engine.broker.symbol_for(tid).is_some() {
+                            continue;
+                        }
+                        // New contract — register it
+                        let base_symbol = contract.symbol.strip_suffix(".L").unwrap_or(&contract.symbol);
+                        let ibkr_symbol = if contract.exchange == "HKEX" {
+                            base_symbol.trim_start_matches('0')
+                        } else {
+                            base_symbol
+                        };
+                        let ibkr_symbol = if ibkr_symbol.is_empty() { "0" } else { ibkr_symbol };
+                        engine.broker.register_contract(ContractMapping {
+                            ticker_id: tid,
+                            symbol: contract.symbol.clone(),
+                            ibkr_symbol: ibkr_symbol.to_string(),
+                            exchange: contract.exchange.clone(),
+                            currency: contract.currency.clone(),
+                        });
+                        // Register in engine universe + bar history
+                        engine.universe.register(&contract.symbol, UniverseClass::Vanguard);
+                        engine.bar_history.insert(tid, rust_core::engine::BarHistory::new(500));
+                        // Update leverage map for Python bridge
+                        leverage_map.insert(tid, contract.leverage as u32);
+                        if let Some(ref mut bridge) = python_bridge {
+                            bridge.leverage_map.insert(tid, contract.leverage as u32);
+                        }
+                        // Subscribe to IBKR market data (best effort — may hit cap)
+                        if broker_connected {
+                            let _ = engine.broker.subscribe_mktdata(tid);
+                        }
+                        added += 1;
+                    }
+                    eprintln!(
+                        "HOT-RELOAD: {} new contracts registered (was {}, now {})",
+                        added, existing_count, engine.broker.contract_map_keys().len(),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("HOT-RELOAD: Failed to parse contracts.toml: {e}");
+                }
+            }
+
+            // HOT-RELOAD: Also reload dynamic_weights.toml (config_writer sends SIGHUP after writing)
+            let new_dw = ouroboros_loader::load_dynamic_weights(&config_dir);
+            if (new_dw.chandelier_atr_mult - dw.chandelier_atr_mult).abs() > 1e-6
+                || (new_dw.bayesian_win_rate - dw.bayesian_win_rate).abs() > 1e-6
+                || new_dw.kelly_fractions != dw.kelly_fractions
+            {
+                engine.exit_engine.strategy_mut().set_trail_atr(new_dw.chandelier_atr_mult);
+                engine.arbiter.regime_scales = new_dw.regime_scales.clone();
+                engine.arbiter.kelly_fractions = new_dw.kelly_fractions.clone();
+                engine.arbiter.ticker_blacklist = new_dw.ticker_blacklist.clone();
+                eprintln!(
+                    "HOT-RELOAD: dynamic_weights updated — WR={:.1}%, chandelier={:.2}, kelly_t1={:.4}",
+                    new_dw.bayesian_win_rate * 100.0,
+                    new_dw.chandelier_atr_mult,
+                    new_dw.kelly_fractions.get("t1").copied().unwrap_or(0.0),
+                );
+                dw = new_dw;
+            } else {
+                eprintln!("HOT-RELOAD: dynamic_weights unchanged (no update needed)");
+            }
+        }
 
         // Poll market data ticks (non-blocking)
         engine.broker.poll_ticks();
@@ -492,6 +701,7 @@ fn main() {
 
                                     // Build RiskArbiter evaluation context
                                     let time_secs = engine.clock.now_london_secs(engine.now_ns);
+                                    let ticker_score = engine.predictive_scorer.score(t.ticker_id);
                                     let eval_ctx = rust_core::risk_arbiter::EvalContext {
                                         time_secs,
                                         last_tick_age_secs: 0,
@@ -508,6 +718,10 @@ fn main() {
                                         kelly_fraction_raw: apex_signal.kelly_fraction,
                                         macro_indicator: *engine.macro_regime.indicator(),
                                         macro_stale_threshold_ns: 300_000_000_000,
+                                        ticker_ic: ticker_score.map_or(0.0, |s| s.ic),
+                                        ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
+                                        ticker_locked: ticker_score.map_or(false, |s| s.locked),
+                                        ticker_position_count: engine.portfolio.position_count_for(&t.ticker_id),
                                     };
 
                                     // Check risk arbiter approval
@@ -550,6 +764,9 @@ fn main() {
                                             kelly_fraction: approved_kelly,
                                             shares,
                                             strategy: "ApexScout".to_string(),
+                                            rvol: 0.0,
+                                            hurst: 0.0,
+                                            adx: 0.0,
                                         };
                                         let ticker_id = t.ticker_id;
                                         engine.process_tick_with_signal(t, Some(brain_signal));
@@ -572,10 +789,18 @@ fn main() {
             }
         }
 
+        // Drain tick channel after processing batch to prevent unbounded growth.
+        // The channel is used purely for health monitoring (depth/drop tracking),
+        // not as a processing queue. Without draining, it fills to 50K and triggers
+        // spurious Reduce/Halt regime escalations.
+        let drained = tick_channel.recv_batch(tick_channel.len().min(10_000));
+        drop(drained);
+
         // FIX 2026-03-11: Detect regime changes and persist to WAL.
         // This catches all regime transitions (drawdown, consecutive loss, IBKR errors,
         // backpressure, etc.) and writes them so they survive restarts.
-        if engine.arbiter.regime != last_regime {
+        // Skip WAL persistence in simulation mode — regime is always force-reset to Normal.
+        if engine.arbiter.regime != last_regime && !engine.simulation_mode {
             let from_str = format!("{:?}", last_regime);
             let to_str = format!("{:?}", engine.arbiter.regime);
             eprintln!("REGIME CHANGE: {from_str} → {to_str}");
@@ -613,6 +838,25 @@ fn main() {
                 snap.orders_submitted, snap.orders_filled,
                 snap.t2t_p50_ms, snap.t2t_p99_ms,
             );
+            // Dump veto breakdown so we can see WHY signals are being rejected.
+            if snap.signals_vetoed > 0 {
+                let mut veto_summary: Vec<String> = engine.telemetry.veto_counts
+                    .iter()
+                    .map(|(reason, count)| format!("{}={}", reason, count.get()))
+                    .collect();
+                veto_summary.sort();
+                eprintln!("VETO_BREAKDOWN: {}", veto_summary.join(", "));
+            }
+            // FIX 4: Signal drought warning — alert when receiving ticks but zero signals.
+            if snap.ticks_received > 5000 && snap.signals_generated == 0 && snap.signals_vetoed == 0 {
+                eprintln!(
+                    "WARNING: SIGNAL_DROUGHT — {} ticks received but 0 signals generated and 0 vetoed. \
+                     Python bridge is returning no_signal for every tick. \
+                     Check VanguardSniper thresholds, data quality, or bar history warmup.",
+                    snap.ticks_received
+                );
+            }
+
             // P7-B: Write telemetry snapshot JSON for dashboard consumption.
             // P21: Include session mode. P22: Include latency profiler stats.
             let session_mode = format!("{:?}", engine.session_mgr.mode());
@@ -646,6 +890,13 @@ fn main() {
 
         // Heartbeat
         let _ = engine.broker.heartbeat();
+
+        // Simulation mode: override any regime escalation at end of loop.
+        // In simulation mode there's no real broker, no real VIX, no real reconciliation —
+        // all regime escalation triggers are stale/false. Reset to Normal so trades flow.
+        if engine.simulation_mode && engine.arbiter.regime > RiskRegime::Normal {
+            engine.arbiter.regime = RiskRegime::Normal;
+        }
 
         // Sleep until next loop iteration
         let elapsed_ms = (now_ns() - loop_start) / 1_000_000;

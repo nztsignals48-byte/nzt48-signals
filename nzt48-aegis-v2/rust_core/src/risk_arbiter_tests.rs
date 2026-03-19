@@ -27,6 +27,8 @@ mod tests {
             state: OrderState::Filled,
             origin_order_id: "test".to_string(),
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         }
     }
 
@@ -107,13 +109,13 @@ mod tests {
         }
     }
 
-    // ── Acceptance Test 9: Time 15:46 → REJECTED ──
+    // ── Acceptance Test 9: Time 20:56 → REJECTED (past 20:55 cutoff) ──
     #[test]
     fn test_too_late_in_session() {
         let mut arb = RiskArbiter::new(RiskConfig::default());
         let p = PortfolioState::new(10_000.0);
         let mut ctx = default_ctx();
-        ctx.time_secs = 15 * 3600 + 46 * 60; // 15:46
+        ctx.time_secs = 20 * 3600 + 56 * 60; // 20:56 London (past 20:55 cutoff)
         let decision = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
         assert!(!decision.approved);
         assert_eq!(decision.reason, VetoReason::TooLateInSession);
@@ -177,25 +179,32 @@ mod tests {
     fn test_max_positions_reached() {
         let mut arb = RiskArbiter::new(RiskConfig::default());
         let mut p = PortfolioState::new(100_000.0);
+        // max_positions = 6, so fill 6 positions
         p.add_position(make_position(1, 100, 10.0, 9.5));
         p.add_position(make_position(2, 100, 20.0, 19.0));
         p.add_position(make_position(3, 100, 30.0, 29.0));
+        p.add_position(make_position(4, 100, 40.0, 39.0));
+        p.add_position(make_position(5, 100, 50.0, 49.0));
+        p.add_position(make_position(6, 100, 60.0, 59.0));
         let ctx = default_ctx();
-        let decision = arb.evaluate(TickerId(4), Direction::Long, 80.0, 0.1, &p, &ctx);
+        let decision = arb.evaluate(TickerId(7), Direction::Long, 80.0, 0.1, &p, &ctx);
         assert!(!decision.approved);
         assert_eq!(decision.reason, VetoReason::MaxPositionsReached);
     }
 
-    // ── Acceptance Test 14: 2 filled + 1 pending → 4th REJECTED (H34) ──
+    // ── Acceptance Test 14: 5 filled + 1 pending → 7th REJECTED (H34) ──
     #[test]
     fn test_pending_plus_filled_count() {
         let mut arb = RiskArbiter::new(RiskConfig::default());
         let mut p = PortfolioState::new(100_000.0);
         p.add_position(make_position(1, 100, 10.0, 9.5));
         p.add_position(make_position(2, 100, 20.0, 19.0));
-        p.set_pending_count(1); // 2 filled + 1 pending = 3 = max
+        p.add_position(make_position(3, 100, 30.0, 29.0));
+        p.add_position(make_position(4, 100, 40.0, 39.0));
+        p.add_position(make_position(5, 100, 50.0, 49.0));
+        p.set_pending_count(1); // 5 filled + 1 pending = 6 = max
         let ctx = default_ctx();
-        let decision = arb.evaluate(TickerId(4), Direction::Long, 80.0, 0.1, &p, &ctx);
+        let decision = arb.evaluate(TickerId(7), Direction::Long, 80.0, 0.1, &p, &ctx);
         assert!(!decision.approved);
         assert_eq!(decision.reason, VetoReason::MaxPositionsReached);
     }
@@ -233,7 +242,7 @@ mod tests {
         }
     }
 
-    // ── Acceptance Test 17: Portfolio heat 6.1% → REJECTED ──
+    // ── Acceptance Test 17: Portfolio heat 15.1% → REJECTED ──
     #[test]
     fn test_portfolio_heat_exceeded() {
         let cfg = RiskConfig {
@@ -242,13 +251,15 @@ mod tests {
         };
         let mut arb = RiskArbiter::new(cfg);
         let mut p = PortfolioState::new(100_000.0);
-        // 3 positions with wide stops: risk per position = 2033
-        // Total heat = 6100 / 100000 * 100 = 6.1%
-        p.add_position(make_position(1, 100, 100.0, 79.67)); // risk = 2033
-        p.add_position(make_position(2, 100, 100.0, 79.67)); // risk = 2033
-        p.add_position(make_position(3, 100, 100.0, 79.66)); // risk = 2034
+        // 5 positions with wide stops: risk per position = ~3033
+        // Total heat = 15100 / 100000 * 100 = 15.1%
+        p.add_position(make_position(1, 100, 100.0, 69.67)); // risk = 3033
+        p.add_position(make_position(2, 100, 100.0, 69.67)); // risk = 3033
+        p.add_position(make_position(3, 100, 100.0, 69.67)); // risk = 3033
+        p.add_position(make_position(4, 100, 100.0, 69.67)); // risk = 3033
+        p.add_position(make_position(5, 100, 100.0, 69.68)); // risk = 3032
         let ctx = default_ctx();
-        let decision = arb.evaluate(TickerId(4), Direction::Long, 80.0, 0.1, &p, &ctx);
+        let decision = arb.evaluate(TickerId(6), Direction::Long, 80.0, 0.1, &p, &ctx);
         assert!(!decision.approved);
         assert_eq!(decision.reason, VetoReason::PortfolioHeatExceeded);
     }
@@ -380,16 +391,18 @@ mod tests {
         }
     }
 
-    // ── Auction period blocking ──
+    // ── Auction period — REMOVED (was LSE-specific, global engine uses spread veto) ──
     #[test]
-    fn test_auction_period_blocked() {
+    fn test_auction_period_not_blocked_global() {
+        // CHECK 12 removed: auction periods no longer block entries globally.
+        // Spread veto (CHECK 13) provides natural protection during auctions.
         let mut arb = RiskArbiter::new(RiskConfig::default());
         let p = PortfolioState::new(10_000.0);
         let mut ctx = default_ctx();
-        ctx.time_secs = 7 * 3600 + 55 * 60; // 07:55 — open auction
-        let decision = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
-        assert!(!decision.approved);
-        assert_eq!(decision.reason, VetoReason::AuctionPeriod);
+        ctx.time_secs = 7 * 3600 + 55 * 60; // 07:55 — was LSE open auction
+        let _decision = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
+        // Now allowed (spread veto is the guard, not auction blocking)
+        // Note: will still be rejected if spread is too wide or kelly ramp gate active
     }
 
     // ── SC-05: Minimum entry size gate ──
@@ -489,13 +502,73 @@ mod tests {
     // ── Phase 15: Expanded risk checks ──
 
     #[test]
-    fn test_duplicate_position_rejected() {
+    fn test_duplicate_position_rejected_default() {
         let mut arb = RiskArbiter::new(RiskConfig::default());
         let mut p = PortfolioState::new(10_000.0);
         p.add_position(make_position(1, 10, 100.0, 95.0));
-        let ctx = default_ctx();
+        let mut ctx = default_ctx();
+        ctx.ticker_position_count = 1; // Already holding 1
+        ctx.ticker_ic = 0.0;
+        ctx.ticker_trade_count = 0;
         let d = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
         assert!(!d.approved);
+        assert_eq!(d.reason, VetoReason::DuplicatePosition);
+    }
+
+    #[test]
+    fn test_momentum_reentry_60pct_wr() {
+        // IC >= 0.10 (60% WR) + 10 trades → 2nd position allowed
+        let cfg = RiskConfig {
+            kelly_ramp_trades: 250,
+            minimum_entry_gbp: 500.0,
+            ..Default::default()
+        };
+        let mut arb = RiskArbiter::new(cfg);
+        let mut p = PortfolioState::new(100_000.0);
+        p.add_position(make_position(1, 10, 100.0, 95.0));
+        let mut ctx = default_ctx();
+        ctx.ticker_position_count = 1;
+        ctx.ticker_ic = 0.10; // 60% WR
+        ctx.ticker_trade_count = 15;
+        ctx.ticker_locked = false;
+        let d = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
+        assert!(d.approved, "60% WR with 15 trades should allow 2nd position");
+    }
+
+    #[test]
+    fn test_momentum_reentry_70pct_wr() {
+        // IC >= 0.20 (70% WR) + 20 trades → up to 3 positions
+        let cfg = RiskConfig {
+            kelly_ramp_trades: 250,
+            minimum_entry_gbp: 500.0,
+            ..Default::default()
+        };
+        let mut arb = RiskArbiter::new(cfg);
+        let mut p = PortfolioState::new(100_000.0);
+        p.add_position(make_position(1, 10, 100.0, 95.0));
+        p.add_position(make_position(11, 10, 100.0, 95.0)); // 2nd position (different ticker_id for portfolio)
+        let mut ctx = default_ctx();
+        ctx.ticker_position_count = 2; // Already holding 2
+        ctx.ticker_ic = 0.20; // 70% WR
+        ctx.ticker_trade_count = 25;
+        ctx.ticker_locked = false;
+        let d = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
+        assert!(d.approved, "70% WR with 25 trades should allow 3rd position");
+    }
+
+    #[test]
+    fn test_momentum_reentry_locked_blocked() {
+        // Locked ticker → no re-entry regardless of IC
+        let mut arb = RiskArbiter::new(RiskConfig::default());
+        let mut p = PortfolioState::new(100_000.0);
+        p.add_position(make_position(1, 10, 100.0, 95.0));
+        let mut ctx = default_ctx();
+        ctx.ticker_position_count = 1;
+        ctx.ticker_ic = 0.30; // Great IC but locked
+        ctx.ticker_trade_count = 50;
+        ctx.ticker_locked = true;
+        let d = arb.evaluate(TickerId(1), Direction::Long, 80.0, 0.1, &p, &ctx);
+        assert!(!d.approved, "Locked ticker should block re-entry");
         assert_eq!(d.reason, VetoReason::DuplicatePosition);
     }
 

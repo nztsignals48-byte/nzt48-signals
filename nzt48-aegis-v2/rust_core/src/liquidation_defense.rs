@@ -84,9 +84,12 @@ impl LiquidationDefense {
     }
 
     /// Reset daily state for a new trading day.
+    /// Also resets consecutive stop loss counter — new day, clean slate.
+    /// This enables auto-recovery from H12 Halt (3 consecutive losses).
     pub fn daily_reset(&mut self, equity: f64) {
         self.daily_drawdown_pct = 0.0;
         self.start_of_day_equity = equity;
+        self.consecutive_stop_losses = 0;
     }
 
     /// Reset ISA deposits for a new tax year (April 6).

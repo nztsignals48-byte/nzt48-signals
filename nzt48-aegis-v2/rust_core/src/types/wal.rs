@@ -37,6 +37,42 @@ pub enum WalPayload {
         strategy: String,
         kelly_fraction: f64,
         approved_size: f64,
+        /// Human-readable symbol (e.g. "QQQ3.L"). Added in schema_version=1.
+        #[serde(default)]
+        symbol: String,
+        /// Share count. Added in schema_version=1.
+        #[serde(default)]
+        qty: u32,
+        /// Native currency (e.g. "GBP", "USD"). Added in schema_version=1.
+        #[serde(default)]
+        currency: String,
+        /// RVOL at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_rvol: f64,
+        /// Hurst exponent at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_hurst: f64,
+        /// ADX at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_adx: f64,
+        /// Bid-ask spread at entry in percent. For execution cost analysis.
+        #[serde(default)]
+        spread_pct: f64,
+        /// Price distance from VWAP at entry in percent. For extension detection.
+        #[serde(default)]
+        vwap_distance_pct: f64,
+        /// Volume trend slope at entry. Positive = rising volume = real flow.
+        #[serde(default)]
+        volume_slope: f64,
+        /// Leverage factor of the instrument (3, 5, etc). For leverage-aware analysis.
+        #[serde(default)]
+        leverage: u8,
+        /// Trading session mode at entry (e.g. "ModeB", "ModeBPlus"). For session analysis.
+        #[serde(default)]
+        session_mode: String,
+        /// Entry price in native currency.
+        #[serde(default)]
+        entry_price: f64,
     },
     BrokerAck {
         order_id: String,
@@ -62,6 +98,72 @@ pub enum WalPayload {
         final_pnl: f64,
         entry_time_ns: u64,
         exit_time_ns: u64,
+        /// Human-readable symbol (e.g. "QQQ3.L"). Added in schema_version=1.
+        #[serde(default)]
+        symbol: String,
+        /// Share count closed. Added in schema_version=1.
+        #[serde(default)]
+        qty: u32,
+        /// Risk regime at time of entry (e.g. "Normal", "Reduce"). For Ouroboros learning.
+        #[serde(default)]
+        regime_at_entry: String,
+        /// Confidence score at entry. For Ouroboros learning.
+        #[serde(default)]
+        confidence: f64,
+        /// Highest chandelier rung reached (1-5). For exit ladder calibration.
+        #[serde(default)]
+        highest_rung: u8,
+        /// Strategy name (e.g. "VanguardSniper"). For per-strategy analysis.
+        #[serde(default)]
+        strategy: String,
+        /// Exchange MIC (e.g. "XLON"). For per-exchange analysis.
+        #[serde(default)]
+        exchange: String,
+        /// Entry price in GBP. For Ouroboros MAE/MFE analysis.
+        #[serde(default)]
+        entry_price: f64,
+        /// Exit price in GBP. For Ouroboros MAE/MFE analysis.
+        #[serde(default)]
+        exit_price: f64,
+        /// RVOL at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_rvol: f64,
+        /// Hurst exponent at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_hurst: f64,
+        /// ADX at entry (Phase H: indicator context for Ouroboros learning).
+        #[serde(default)]
+        entry_adx: f64,
+        /// Spread at entry in percent.
+        #[serde(default)]
+        entry_spread_pct: f64,
+        /// Spread at exit in percent.
+        #[serde(default)]
+        exit_spread_pct: f64,
+        /// VWAP distance at entry in percent.
+        #[serde(default)]
+        entry_vwap_pct: f64,
+        /// Volume slope at entry (positive = rising).
+        #[serde(default)]
+        entry_vol_slope: f64,
+        /// Leverage factor (3, 5, etc).
+        #[serde(default)]
+        leverage: u8,
+        /// Session mode at entry (ModeA, ModeB, ModeBPlus, ModeC).
+        #[serde(default)]
+        session_mode: String,
+        /// Hold duration in seconds (convenience field, also computable from timestamps).
+        #[serde(default)]
+        hold_secs: u64,
+        /// Exit reason (Chandelier, EOD, Halt, Signal, TimeStop).
+        #[serde(default)]
+        exit_reason: String,
+        /// Maximum Adverse Excursion: worst unrealized P&L during position lifetime.
+        #[serde(default)]
+        mae: f64,
+        /// Maximum Favorable Excursion: best unrealized P&L during position lifetime.
+        #[serde(default)]
+        mfe: f64,
     },
     RiskStateChange {
         from: String,
@@ -77,6 +179,11 @@ pub enum WalPayload {
         equity: f64,
         high_water: f64,
         hash: String,
+        /// Per-position snapshot: JSON array of {symbol, qty, entry_price, current_price,
+        /// unrealized_pnl, rung, stop_price, highest_high, exchange}
+        /// Added 2026-03-18 for Google Sheets Open_Positions tab + per-ticker unrealised P&L
+        #[serde(default)]
+        open_positions: Vec<serde_json::Value>,
     },
     SystemReady {
         wal_events_replayed: u64,
@@ -111,6 +218,16 @@ pub enum WalPayload {
     ReconciliationCleared {
         cleared_by: String,
         timestamp_ns: u64,
+    },
+    /// Chandelier rung advance — persists rung state across restarts.
+    /// Written when trailing_rung increases for an open position.
+    RungAdvanced {
+        ticker_id: u32,
+        order_id: String,
+        old_rung: u8,
+        new_rung: u8,
+        stop_price: f64,
+        highest_high: f64,
     },
     /// P2-C: Daily reset event for crash recovery.
     DailyReset {

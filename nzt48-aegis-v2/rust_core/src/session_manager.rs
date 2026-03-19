@@ -1,33 +1,48 @@
-//! P21: Multi-Session Regime Transitions.
-//! 5-mode TradingMode enum: DARK, MODE_A (Asian), MODE_B (European), AUCTION, CARRY.
-//! Automatic regime escalation based on mode transitions.
+//! P21: Unified Session Manager.
+//! Simplified 3-mode SessionMode: DARK, ACTIVE, CARRY.
+//! ACTIVE runs 22 hours/day watching all 6 markets simultaneously.
+//! Dark = 21:00-23:00 London (maintenance window).
+//! Carry = overnight positions during Dark hours.
+//!
+//! Market closures are handled naturally — tickers from closed markets
+//! score lower in Ouroboros and rotate out on the next 15-min refresh.
 
-/// Trading session mode — determines what the engine is doing at any moment.
+/// Trading session mode — simplified unified architecture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionMode {
-    /// No trading — outside all market hours.
+    /// No trading — maintenance window (21:00-23:00 London).
     Dark,
-    /// Asian session scanning (TSE, HKEX, ASX).
-    ModeA,
-    /// European session trading (LSE, XETRA, Euronext) 08:00-14:30.
-    ModeB,
-    /// US overlap mode (14:30-16:30 UTC) — 80 LSE + 20 US lines.
-    ModeBPlus,
-    /// Opening or closing auction period.
-    Auction,
-    /// Overnight carry management (positions held overnight).
+    /// Unified active mode — all 6 markets monitored simultaneously.
+    /// Runs 22 hours/day: 23:00-21:00 London.
+    /// 100 tickers (IBKR max), refreshed every 15 min by Ouroboros.
+    /// LSE leveraged/inverse ETPs always prioritised (first 12 slots).
+    Active,
+    /// Overnight carry management (positions held during Dark hours).
     Carry,
+    // Legacy aliases — kept for backwards compatibility during transition.
+    // All map to Active internally.
+    /// Legacy: Asian session (now maps to Active).
+    ModeA,
+    /// Legacy: European session (now maps to Active).
+    ModeB,
+    /// Legacy: US overlap (now maps to Active).
+    ModeBPlus,
+    /// Legacy: US-only (now maps to Active).
+    ModeC,
+    /// Legacy: Auction (now maps to Active).
+    Auction,
 }
 
 impl std::fmt::Display for SessionMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionMode::Dark => write!(f, "DARK"),
-            SessionMode::ModeA => write!(f, "MODE_A"),
-            SessionMode::ModeB => write!(f, "MODE_B"),
-            SessionMode::ModeBPlus => write!(f, "MODE_B_PLUS"),
-            SessionMode::Auction => write!(f, "AUCTION"),
+            SessionMode::Active => write!(f, "ACTIVE"),
             SessionMode::Carry => write!(f, "CARRY"),
+            // Legacy modes display as ACTIVE
+            SessionMode::ModeA | SessionMode::ModeB |
+            SessionMode::ModeBPlus | SessionMode::ModeC |
+            SessionMode::Auction => write!(f, "ACTIVE"),
         }
     }
 }
@@ -67,50 +82,19 @@ impl SessionManager {
     }
 
     /// Determine the correct mode based on London time (seconds from midnight).
+    /// Unified architecture: ACTIVE from 23:00-21:00 London (22 hours).
+    /// DARK from 21:00-23:00 London (2 hours maintenance + Ouroboros nightly).
+    /// CARRY if positions are held during DARK hours.
     pub fn compute_mode(london_time_secs: u32, has_open_positions: bool) -> SessionMode {
-        const AUCTION_OPEN_START: u32 = 7 * 3600 + 50 * 60;  // 07:50
-        const AUCTION_OPEN_END: u32 = 8 * 3600;      // 08:00
-        const MODE_B_PLUS_START: u32 = 14 * 3600 + 30 * 60;  // 14:30 (US opens)
-        const MODE_B_PLUS_END: u32 = 16 * 3600 + 30 * 60;    // 16:30 (LSE closes)
-        const AUCTION_CLOSE_END: u32 = 16 * 3600 + 35 * 60;  // 16:35
-        const OUROBOROS_START: u32 = 23 * 3600 + 45 * 60;    // 23:45
+        const ACTIVE_START: u32 = 23 * 3600;  // 23:00 London — markets begin (Asia)
+        const ACTIVE_END: u32 = 21 * 3600;    // 21:00 London — US closes
 
-        // Ouroboros maintenance window: 23:45-00:00 is always Dark (highest priority).
-        if london_time_secs >= OUROBOROS_START {
-            return SessionMode::Dark;
+        // Active hours: 23:00-23:59 and 00:00-21:00 London (wraps midnight)
+        if london_time_secs >= ACTIVE_START || london_time_secs < ACTIVE_END {
+            return SessionMode::Active;
         }
 
-        // Asian session: 23:00-23:45 and 00:00-07:50 London (wraps midnight).
-        // Condition: s >= 82800 (23:00) && s < 85740 (23:45) || s < 28200 (07:50)
-        const ASIA_START: u32 = 23 * 3600;           // 23:00
-        if london_time_secs >= ASIA_START || london_time_secs < AUCTION_OPEN_START {
-            if has_open_positions {
-                return SessionMode::Carry;
-            }
-            return SessionMode::ModeA;
-        }
-
-        // LSE opening auction: 07:50-08:00.
-        if london_time_secs < AUCTION_OPEN_END {
-            return SessionMode::Auction;
-        }
-
-        // European continuous trading: 08:00-14:30.
-        if london_time_secs < MODE_B_PLUS_START {
-            return SessionMode::ModeB;
-        }
-
-        // US overlap: 14:30-16:30 UTC (80 LSE + 20 US lines).
-        if london_time_secs < MODE_B_PLUS_END {
-            return SessionMode::ModeBPlus;
-        }
-
-        // LSE closing auction: 16:30-16:35.
-        if london_time_secs < AUCTION_CLOSE_END {
-            return SessionMode::Auction;
-        }
-
-        // Post-close carry: 16:35-23:45 (Ouroboros runs at 23:50).
+        // Dark hours: 21:00-23:00 London. Carry if positions, else Dark.
         if has_open_positions {
             return SessionMode::Carry;
         }
@@ -148,43 +132,29 @@ impl SessionManager {
     }
 
     /// Whether entries should be frozen during this transition.
-    fn should_freeze_entries(from: SessionMode, to: SessionMode) -> bool {
-        matches!(
-            (from, to),
-            (SessionMode::ModeB, SessionMode::ModeBPlus)
-                | (SessionMode::ModeB, SessionMode::Auction)
-                | (SessionMode::ModeB, SessionMode::Carry)
-                | (SessionMode::ModeB, SessionMode::Dark)
-                | (SessionMode::ModeBPlus, SessionMode::Auction)
-                | (SessionMode::ModeBPlus, SessionMode::Carry)
-                | (SessionMode::ModeBPlus, SessionMode::Dark)
-                | (SessionMode::Auction, SessionMode::Carry)
-                | (SessionMode::Auction, SessionMode::Dark)
-        )
+    fn should_freeze_entries(_from: SessionMode, to: SessionMode) -> bool {
+        // Freeze entries when transitioning TO Dark or Carry
+        matches!(to, SessionMode::Dark | SessionMode::Carry)
     }
 
     /// Whether carry checks should be triggered.
-    fn should_trigger_carry(from: SessionMode, to: SessionMode) -> bool {
+    fn should_trigger_carry(_from: SessionMode, to: SessionMode) -> bool {
         matches!(to, SessionMode::Carry)
-            || matches!(
-                (from, to),
-                (SessionMode::Carry, SessionMode::ModeA)
-                    | (SessionMode::Carry, SessionMode::ModeB)
-                    | (SessionMode::Carry, SessionMode::ModeBPlus)
-            )
     }
 
     /// Whether new entries are allowed in the current mode.
     pub fn entries_allowed(&self) -> bool {
-        matches!(self.current_mode, SessionMode::ModeB | SessionMode::ModeBPlus)
+        matches!(self.current_mode, SessionMode::Active
+            | SessionMode::ModeA | SessionMode::ModeB
+            | SessionMode::ModeBPlus | SessionMode::ModeC
+            | SessionMode::Auction)
     }
 
     /// Whether scanning is active in the current mode.
     pub fn scanning_active(&self) -> bool {
-        matches!(
-            self.current_mode,
-            SessionMode::ModeA | SessionMode::ModeB
-        )
+        matches!(self.current_mode, SessionMode::Active
+            | SessionMode::ModeA | SessionMode::ModeB
+            | SessionMode::ModeBPlus | SessionMode::ModeC)
     }
 
     /// Get transition history.
@@ -205,71 +175,104 @@ mod tests {
 
     #[test]
     fn test_mode_computation_dark() {
-        assert_eq!(SessionManager::compute_mode(23 * 3600 + 50 * 60, false), SessionMode::Dark);
+        // 21:00-23:00 London is Dark (no positions)
+        assert_eq!(SessionManager::compute_mode(21 * 3600, false), SessionMode::Dark);
+        assert_eq!(SessionManager::compute_mode(21 * 3600 + 30 * 60, false), SessionMode::Dark);
+        assert_eq!(SessionManager::compute_mode(22 * 3600, false), SessionMode::Dark);
+        assert_eq!(SessionManager::compute_mode(22 * 3600 + 59 * 60, false), SessionMode::Dark);
     }
 
     #[test]
-    fn test_mode_computation_mode_a() {
-        assert_eq!(SessionManager::compute_mode(3 * 3600, false), SessionMode::ModeA);
+    fn test_mode_computation_active_all_hours() {
+        // Unified ACTIVE mode: 23:00-21:00 London (22 hours)
+        // Asian hours
+        assert_eq!(SessionManager::compute_mode(23 * 3600, false), SessionMode::Active);
+        assert_eq!(SessionManager::compute_mode(23 * 3600 + 30 * 60, false), SessionMode::Active);
+        assert_eq!(SessionManager::compute_mode(3 * 3600, false), SessionMode::Active);
+        // European hours
+        assert_eq!(SessionManager::compute_mode(8 * 3600, false), SessionMode::Active);
+        assert_eq!(SessionManager::compute_mode(12 * 3600, false), SessionMode::Active);
+        // US overlap
+        assert_eq!(SessionManager::compute_mode(14 * 3600 + 30 * 60, false), SessionMode::Active);
+        // US-only
+        assert_eq!(SessionManager::compute_mode(18 * 3600, false), SessionMode::Active);
+        assert_eq!(SessionManager::compute_mode(20 * 3600 + 59 * 60, false), SessionMode::Active);
+        // Midnight
+        assert_eq!(SessionManager::compute_mode(0, false), SessionMode::Active);
     }
 
     #[test]
-    fn test_mode_computation_carry_overnight() {
-        assert_eq!(SessionManager::compute_mode(3 * 3600, true), SessionMode::Carry);
+    fn test_mode_computation_active_with_positions() {
+        // Active mode stays Active even with positions (unlike old Carry during Asian)
+        assert_eq!(SessionManager::compute_mode(3 * 3600, true), SessionMode::Active);
+        assert_eq!(SessionManager::compute_mode(12 * 3600, true), SessionMode::Active);
     }
 
     #[test]
-    fn test_mode_computation_auction_open() {
-        assert_eq!(SessionManager::compute_mode(7 * 3600 + 55 * 60, false), SessionMode::Auction);
-    }
-
-    #[test]
-    fn test_mode_computation_mode_b() {
-        assert_eq!(SessionManager::compute_mode(12 * 3600, false), SessionMode::ModeB);
-    }
-
-    #[test]
-    fn test_mode_computation_auction_close() {
-        assert_eq!(SessionManager::compute_mode(16 * 3600 + 32 * 60, false), SessionMode::Auction);
+    fn test_mode_computation_carry_during_dark() {
+        // 21:00-23:00 with positions → Carry
+        assert_eq!(SessionManager::compute_mode(21 * 3600 + 30 * 60, true), SessionMode::Carry);
+        assert_eq!(SessionManager::compute_mode(22 * 3600, true), SessionMode::Carry);
     }
 
     #[test]
     fn test_transition_generates_event() {
         let mut mgr = SessionManager::new();
-        // Dark → ModeA
-        let trans = mgr.update(3 * 3600, false, 1000);
+        // Dark → Active at 23:00
+        let trans = mgr.update(23 * 3600, false, 1000);
         assert!(trans.is_some());
         let t = trans.expect("transition exists");
         assert_eq!(t.from, SessionMode::Dark);
-        assert_eq!(t.to, SessionMode::ModeA);
+        assert_eq!(t.to, SessionMode::Active);
     }
 
     #[test]
     fn test_no_transition_same_mode() {
         let mut mgr = SessionManager::new();
-        // Dark → Dark (late night, no positions)
-        let trans = mgr.update(23 * 3600 + 55 * 60, false, 1000);
+        // Dark → Dark during maintenance window
+        let trans = mgr.update(21 * 3600 + 30 * 60, false, 1000);
         assert!(trans.is_none()); // Already Dark
     }
 
     #[test]
-    fn test_entries_only_in_mode_b() {
+    fn test_entries_allowed_active() {
         let mut mgr = SessionManager::new();
-        mgr.update(12 * 3600, false, 1000); // ModeB
+        mgr.update(12 * 3600, false, 1000); // Active
         assert!(mgr.entries_allowed());
-        mgr.update(3 * 3600, false, 2000); // ModeA
+    }
+
+    #[test]
+    fn test_entries_not_allowed_dark() {
+        let mgr = SessionManager::new(); // Starts Dark
         assert!(!mgr.entries_allowed());
     }
 
     #[test]
-    fn test_freeze_on_close() {
-        let freeze = SessionManager::should_freeze_entries(SessionMode::ModeB, SessionMode::Auction);
+    fn test_freeze_to_dark() {
+        let freeze = SessionManager::should_freeze_entries(SessionMode::Active, SessionMode::Dark);
         assert!(freeze);
     }
 
     #[test]
     fn test_carry_trigger() {
-        let carry = SessionManager::should_trigger_carry(SessionMode::ModeB, SessionMode::Carry);
+        let carry = SessionManager::should_trigger_carry(SessionMode::Active, SessionMode::Carry);
         assert!(carry);
+    }
+
+    #[test]
+    fn test_22_hours_coverage() {
+        // Verify exactly 22 hours are Active and 2 hours are Dark
+        let mut active_minutes = 0u32;
+        let mut dark_minutes = 0u32;
+        for minute in 0..(24 * 60) {
+            let secs = minute * 60;
+            match SessionManager::compute_mode(secs, false) {
+                SessionMode::Active => active_minutes += 1,
+                SessionMode::Dark => dark_minutes += 1,
+                _ => panic!("Unexpected mode at minute {}", minute),
+            }
+        }
+        assert_eq!(active_minutes, 22 * 60); // 22 hours active
+        assert_eq!(dark_minutes, 2 * 60);    // 2 hours dark
     }
 }

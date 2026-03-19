@@ -152,7 +152,7 @@ def main():
         "QQQS.L": 9,
         "3USS.L": 10,
         "QQQ5.L": 11,
-        "SP5L.L": 12,
+        "5SPY.L": 12,
     }
 
     output_path = os.path.join(

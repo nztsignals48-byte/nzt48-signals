@@ -117,6 +117,11 @@ impl QuoteImbalanceDetector {
             Some(ts) => ts,
             None => return false,
         };
+        // Need at least MEDIAN_WINDOW samples to build a stable baseline.
+        // Without this, early volatile spreads cause false spoof detections.
+        if ts.window.len() < MEDIAN_WINDOW {
+            return false;
+        }
         let latest = match ts.window.back() {
             Some(s) => s,
             None => return false,

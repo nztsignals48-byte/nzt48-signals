@@ -1,0 +1,368 @@
+# AEGIS V2 — Adaptive Strategy Configuration
+# Every threshold is configurable. Ouroboros can override via dynamic_weights.toml.
+# DO NOT hardcode strategy parameters in Rust code — always read from here.
+#
+# Strategy Families:
+#   S17 = VWAP DipBuy (Mean Reversion)
+#   S18 = Gap Fade (Mean Reversion)
+#   S19 = RSI(2)/IBS (Daily Mean Reversion)
+#   S20 = Cross-Market Momentum (Continuation)
+#   S21 = Intraday Momentum (Continuation)
+#
+# Each strategy has: entry conditions, exit conditions, filters, session eligibility,
+# regime eligibility, sizing overrides, and adaptive parameter ranges.
+
+schema_version = 1
+
+# ============================================================================
+# GLOBAL STRATEGY SETTINGS
+# ============================================================================
+
+[global]
+# AUDIT-ADJUSTED (2026-03-18)
+# Quant audit: "Concentrate on 2 strategies, not 5. Complexity without proportional edge."
+# Fund manager: "At £10k, concentration is your friend. Run 2 strategies only."
+max_active_strategies = 2
+# Minimum confidence floor — raised from 45 per risk audit: "45 is barely above coin-flip"
+confidence_floor = 55.0
+# Strategy priority ranking (1 = highest priority, evaluated first)
+# Fund manager consensus: Cross-Market Momentum primary, VWAP DipBuy secondary.
+# S18 Gap Fade: demoted to disabled (audit: "weakest link, barely covers costs")
+# S21 Intraday Momentum: demoted to disabled (audit: "inoperable as specified")
+# S19 RSI/IBS: kept enabled but low priority (multi-day decay concern)
+priority_order = ["cross_market_momentum", "vwap_dip_buy", "rsi_ibs", "gap_fade", "intraday_momentum"]
+
+# ============================================================================
+# S17: VWAP DIP BUY (Mean Reversion)
+# ============================================================================
+# Buy when price drops 2σ below intraday VWAP, target reversion to VWAP.
+# Session: LSE midday (10:30-14:30 UK) and US overlap (14:30-16:00 UK)
+# Regime: Range-bound/mean-reverting only (ADX < 25, Hurst < 0.50)
+
+[strategy.vwap_dip_buy]
+enabled = true
+priority = 2
+family = "mean_reversion"
+base_confidence = 70.0
+
+# Entry conditions
+entry_vwap_sigma = 2.0           # Entry at VWAP minus N standard deviations
+entry_scale_in_sigma = 3.0       # Scale-in at deeper deviation
+entry_volume_filter = "declining" # "declining" = noise dip, "accelerating" = real breakdown
+entry_vwap_slope_max = 0.01      # |VWAP slope| must be < this (flat = range-bound)
+
+# Exit conditions
+exit_target = "vwap"             # Primary target: reversion to VWAP
+exit_target_conservative = "vwap_minus_1sigma" # Conservative: 1σ below VWAP
+exit_stop_sigma = 3.0            # Stop at VWAP minus N standard deviations
+exit_stop_atr_mult = 2.0         # Alternative: N × ATR below entry
+exit_time_stop_minutes = 90      # Max hold before forced exit
+exit_eod_flatten = true          # Always flatten before LSE close
+
+# Filters (ALL must pass)
+filter_adx_max = 25.0            # ADX must be < this (no strong trend)
+filter_hurst_max = 0.50          # Hurst must be < this (mean-reverting regime)
+filter_rvol_min = 0.0            # No minimum RVOL (any volume OK for MR)
+filter_rvol_max = 3.0            # RVOL must be < this (not a panic dump)
+filter_spread_max_bps = 15       # Spread must be < 15 bps
+filter_vix_max = 30.0            # VIX must be < 30 (too volatile above)
+filter_broad_market_not_at_lows = true  # SPY/QQQ not at intraday lows
+filter_no_news_catalyst = true   # No earnings/FOMC within 2 hours
+
+# Session eligibility (London local time)
+session_eligible = ["10:30-14:30", "14:30-16:00"]
+session_blocked = ["08:00-08:30", "16:00-16:30"]  # Opening chaos + close mechanics
+
+# Regime eligibility
+regime_eligible = ["mean_reverting", "random"]
+regime_blocked = ["trending"]
+
+# Sizing overrides
+sizing_mult = 1.0                # Normal sizing
+sizing_scale_in = [0.6, 0.4]    # 60% at 2σ, 40% at 3σ
+
+# Ticker eligibility (empty = all eligible)
+ticker_whitelist = []            # Empty = use universe
+ticker_preferred = ["QQQ3.L", "3LUS.L"]  # Prefer tight-spread index products
+
+# Adaptive parameter ranges (Ouroboros may adjust within these)
+[strategy.vwap_dip_buy.adaptive_ranges]
+entry_vwap_sigma = [1.5, 3.0]
+exit_stop_sigma = [2.5, 4.0]
+exit_time_stop_minutes = [60, 180]
+filter_adx_max = [20.0, 30.0]
+base_confidence = [55.0, 85.0]
+
+# ============================================================================
+# S18: GAP FADE (Mean Reversion)
+# ============================================================================
+# Fade overnight gaps that are liquidity-driven (not information-driven).
+# Session: LSE open (08:15-10:00 UK)
+# Regime: Any (gap fading is regime-agnostic)
+
+[strategy.gap_fade]
+enabled = true
+priority = 1                     # Highest priority — morning-only, time-sensitive
+family = "mean_reversion"
+base_confidence = 72.0
+
+# Entry conditions
+entry_min_gap_pct = 1.5          # Minimum gap on 3x ETP (= ~0.5% on underlying)
+entry_max_gap_pct = 6.0          # Maximum gap (larger = less likely to fill)
+entry_direction = "fade"         # Always trade against the gap direction
+entry_delay_minutes = 15         # Wait 15 min after open (let gap establish)
+
+# Exit conditions
+exit_target_fill_pct = 0.75      # Target 75% gap fill (not 100%)
+exit_stop_pct = 1.5              # Stop = 1.5× gap distance in extension direction
+exit_time_stop_minutes = 120     # Max hold 2 hours (Stubinger & Schneider optimal)
+exit_eod_flatten = true
+
+# Filters (ALL must pass)
+filter_rvol_5min_max = 2.0       # First 5-min RVOL must be < 2x (liquidity gap)
+filter_rvol_5min_veto = 5.0      # RVOL > 5x = information gap, DO NOT TRADE
+filter_no_earnings = true        # No earnings release on gapping stock
+filter_no_macro_release = true   # No CPI/FOMC/PMI within 1 hour
+filter_spread_max_bps = 20       # Spread must be < 20 bps
+filter_vix_max = 35.0            # VIX must be < 35
+
+# Session eligibility
+session_eligible = ["08:15-10:00"]
+session_blocked = ["08:00-08:15"]  # First 15 min too chaotic
+
+# Day-of-week adjustments
+day_confidence_adj = { Mon = -5.0, Tue = 0.0, Wed = 0.0, Thu = 5.0, Fri = 5.0 }
+
+# Regime eligibility (gaps are regime-agnostic)
+regime_eligible = ["mean_reverting", "random", "trending"]
+regime_blocked = []
+
+# Sizing overrides
+sizing_mult = 0.8                # 80% of normal (gap trades are inherently risky)
+
+# Ticker eligibility
+ticker_preferred = ["QQQ3.L", "3LUS.L", "NVD3.L"]
+
+# Adaptive parameter ranges
+[strategy.gap_fade.adaptive_ranges]
+entry_min_gap_pct = [1.0, 3.0]
+exit_target_fill_pct = [0.50, 1.00]
+exit_time_stop_minutes = [60, 180]
+base_confidence = [60.0, 85.0]
+
+# ============================================================================
+# S19: RSI(2)/IBS MEAN REVERSION (Daily)
+# ============================================================================
+# Buy when RSI(2) < 5 AND IBS < 0.20, exit when close > 5-day SMA.
+# Session: Near US close (20:30-21:00 UK) — enter at EOD
+# Regime: Uptrend required (price > 200-day SMA)
+# WARNING: Multi-day hold on 3x products costs 0.5-1% in decay.
+
+[strategy.rsi_ibs]
+enabled = true
+priority = 3
+family = "mean_reversion"
+base_confidence = 75.0
+
+# Entry conditions (checked on daily bars, not intraday)
+entry_rsi_period = 2
+entry_rsi_threshold = 5.0        # RSI(2) must be < this
+entry_rsi_threshold_3x = 2.5     # Stricter for 3x products (deeper oversold)
+entry_ibs_threshold = 0.20       # IBS must be < this
+entry_ibs_threshold_3x = 0.10    # Stricter for 3x products
+entry_above_sma200 = true        # Price must be > 200-day SMA
+entry_max_above_sma200_pct = 5.0 # Price must be < 5% above 200-day SMA
+entry_macro_filter = true        # 126-day SPX return must be positive
+entry_timing = "close"           # Enter seconds before market close
+
+# Exit conditions (checked on daily bars)
+exit_rule = "close_above_5sma"   # Exit when close > 5-day SMA
+exit_rsi_above = 50.0            # Alternative: exit when RSI(2) > 50
+exit_stop_pct = 5.0              # Hard stop at -5% (for 3x products)
+exit_max_hold_days = 10          # Absolute max hold
+
+# Filters
+filter_vix_above_100d_ma = true  # VIX > 100-day VIX MA improves performance
+filter_no_earnings_week = true   # No earnings within 5 days
+filter_spread_max_bps = 20
+
+# Session eligibility
+session_eligible = ["20:30-21:00"]  # Enter at US session close
+session_blocked = []
+
+# Regime eligibility
+regime_eligible = ["mean_reverting", "random"]
+regime_blocked = ["trending"]    # In a trend, don't buy the dip
+
+# Sizing overrides
+sizing_mult = 0.6                # Reduced — multi-day hold has decay risk
+sizing_3x_penalty = 0.5          # Additional 50% reduction for 3x products
+
+# Ticker eligibility — works on indices, not single stocks
+ticker_whitelist = ["QQQ3.L", "3LUS.L", "QQQS.L", "3USS.L"]
+
+# Adaptive parameter ranges
+[strategy.rsi_ibs.adaptive_ranges]
+entry_rsi_threshold = [2.0, 10.0]
+entry_ibs_threshold = [0.05, 0.30]
+exit_stop_pct = [3.0, 8.0]
+base_confidence = [65.0, 85.0]
+
+# ============================================================================
+# S20: CROSS-MARKET MOMENTUM (Continuation)
+# ============================================================================
+# US market direction in first 15 min predicts LSE 3x ETP continuation.
+# Session: US overlap (14:45-16:00 UK)
+# Regime: Trending required
+
+[strategy.cross_market_momentum]
+enabled = true
+priority = 2
+family = "momentum"
+base_confidence = 65.0
+
+# Entry conditions
+entry_spy_direction_minutes = 15  # Wait 15 min after US open
+entry_spy_min_move_pct = 0.3     # S&P 500 must move > 0.3% in first 15 min
+entry_alignment = "same"          # Trade LSE ETP in same direction as US
+
+# Exit conditions
+exit_trail_atr_mult = 1.5       # Trail 1.5× ATR below peak
+exit_time_stop_minutes = 90     # Max hold 90 minutes
+exit_eod_flatten = true         # Always flatten before LSE close
+
+# Filters
+filter_adx_min = 20.0           # ADX must be > 20 (some trend)
+filter_rvol_min = 1.2           # RVOL must be > 1.2 (active market)
+filter_spread_max_bps = 15
+filter_hurst_min = 0.50         # Hurst must be > 0.50 (trending)
+
+# Session eligibility
+session_eligible = ["14:45-16:00"]
+session_blocked = ["08:00-14:30", "16:00-16:30"]
+
+# Regime eligibility
+regime_eligible = ["trending"]
+regime_blocked = ["mean_reverting"]
+
+# Sizing overrides
+sizing_mult = 1.2               # Boost — best liquidity window
+
+# Ticker eligibility
+ticker_preferred = ["QQQ3.L", "3LUS.L", "NVD3.L"]
+
+# Adaptive parameter ranges
+[strategy.cross_market_momentum.adaptive_ranges]
+entry_spy_min_move_pct = [0.2, 0.5]
+exit_trail_atr_mult = [1.0, 2.5]
+base_confidence = [55.0, 80.0]
+
+# ============================================================================
+# S21: INTRADAY MOMENTUM (Continuation, Gao et al. 2018)
+# ============================================================================
+# First half-hour return predicts last half-hour return.
+# Session: US power hour (20:00-21:00 UK) based on morning signal
+# Regime: Stronger on volatile days
+
+[strategy.intraday_momentum]
+enabled = true
+priority = 4
+family = "momentum"
+base_confidence = 60.0
+
+# Entry conditions
+entry_signal_window = "first_30min"  # Calculate return from prev close to 10:00 ET
+entry_min_signal_pct = 0.3           # First-half-hour return must exceed 0.3%
+entry_timing = "15:30 ET"            # Enter at 3:30 PM ET (20:30 UK)
+
+# Exit conditions
+exit_timing = "16:00 ET"             # Exit at close (21:00 UK)
+exit_stop_pct = 1.5                  # Hard stop at -1.5%
+
+# Filters
+filter_volatile_day_boost = true     # Stronger on high-vol days (Gao et al.)
+filter_high_volume_day = true        # Stronger on high-volume days
+filter_spread_max_bps = 15
+
+# Session eligibility
+session_eligible = ["20:30-21:00"]
+session_blocked = []
+
+# Regime eligibility
+regime_eligible = ["trending", "random"]
+regime_blocked = ["mean_reverting"]
+
+# Sizing overrides
+sizing_mult = 0.7                    # Reduced — short hold, uncertain
+
+# Ticker eligibility — US-tracking LSE ETPs only
+ticker_whitelist = ["QQQ3.L", "3LUS.L", "NVD3.L", "TSL3.L"]
+
+# Adaptive parameter ranges
+[strategy.intraday_momentum.adaptive_ranges]
+entry_min_signal_pct = [0.2, 0.5]
+exit_stop_pct = [1.0, 3.0]
+base_confidence = [50.0, 75.0]
+
+# ============================================================================
+# BLACKOUT WINDOWS (Global — applies to ALL strategies)
+# ============================================================================
+
+[blackout_windows]
+# These windows block ALL entries regardless of strategy.
+# Research: LSE open, US open, and LSE close have highest stop-sweep risk.
+windows = [
+    { start = "07:50", end = "08:00", reason = "LSE opening auction" },
+    { start = "16:30", end = "16:35", reason = "LSE closing auction" },
+]
+
+# ============================================================================
+# SPREAD MONITORING
+# ============================================================================
+
+[spread_monitoring]
+# Suppress entries when spread exceeds threshold
+entry_suppress_spread_bps = 25       # Block entry if spread > 25 bps
+stop_suppress_spread_mult = 2.0      # Suppress stop execution if spread > 2× average
+spread_refresh_secs = 30             # Recalculate rolling average every 30s
+spread_lookback_bars = 100           # Rolling average over last 100 bars
+
+# ============================================================================
+# SESSION-SPECIFIC AGGRESSIVENESS
+# ============================================================================
+
+[session_aggressiveness]
+# Multiplicative sizing factor by session (London local time)
+# Ouroboros can adjust these based on session performance
+"08:00-08:30" = 0.5               # Half size — opening volatility
+"08:30-10:30" = 1.0               # Full size — trend establishment
+"10:30-14:30" = 0.8               # Reduced — lower liquidity midday
+"14:30-16:00" = 1.2               # Boosted — best liquidity (US overlap)
+"16:00-16:30" = 0.3               # Minimal — closing mechanics
+"20:00-21:00" = 0.7               # Reduced — US direct stocks only
+
+# ============================================================================
+# TICKER PRIORITY RANKING (Updated every 2 hours by Ouroboros)
+# ============================================================================
+
+[ticker_ranking]
+# This section is overwritten by the 2-hourly ranking job.
+# Format: ticker = score (0-100). Higher = more tradeable right now.
+# Factors: spread quality, RVOL, regime fit, recent performance, session fit.
+refresh_interval_minutes = 120
+max_ranked_tickers = 100
+
+# Default rankings (overwritten at runtime)
+[ticker_ranking.current]
+"QQQ3.L" = 95
+"3LUS.L" = 90
+"NVD3.L" = 85
+"3SEM.L" = 75
+"TSL3.L" = 70
+"QQQS.L" = 65
+"3USS.L" = 60
+"QQQ5.L" = 55
+"TSM3.L" = 50
+"MU2.L" = 45
+"GPT3.L" = 40
+"SP5L.L" = 35

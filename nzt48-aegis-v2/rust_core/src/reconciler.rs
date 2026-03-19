@@ -212,6 +212,8 @@ mod tests {
             state: OrderState::Filled,
             origin_order_id: format!("order-{tid}"),
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         }
     }
 

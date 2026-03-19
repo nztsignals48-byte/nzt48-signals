@@ -1,3 +1,62 @@
-# Ouroboros nightly analytics — runs after LSE close (16:30 GMT = ~12:30 ET)
-# 18:00 ET every weekday (Mon-Fri) — gives 1.5h buffer after LSE close
-0 18 * * 1-5 cd /app && python3 -m ouroboros.cli --config-dir /app/config --wal-path /app/events/current.ndjson --day-count $(( ($(date +%s) - 1741478400) / 86400 )) 2>&1 | tee -a /app/events/ouroboros.log
+# Ouroboros v6.0 Nightly Learning Loop — 23:50 ET = 04:50 UTC (EST) Mon-Fri
+# MUST run during DARK window (21:00-23:00 London = 21:00-23:00 UTC GMT / 22:00-00:00 BST)
+50 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.nightly_v6 >> /var/log/ouroboros.log 2>&1
+
+# Ouroboros Config Writer — 04:51 UTC Mon-Fri (right after nightly_v6, writes dynamic_weights.toml)
+51 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.config_writer >> /var/log/config_writer.log 2>&1
+
+# Ouroboros v6.0 Backfill Simulator — 07:00 UTC daily Mon-Fri (pre-market learning)
+0 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.backfill_simulator >> /var/log/ouroboros_backfill.log 2>&1
+
+# ISA Universe Refresh — 06:00 UTC daily Mon-Fri (before any market open)
+0 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.universe_refresh >> /var/log/universe_refresh.log 2>&1
+
+# Smart Ticker Selector — 06:30 UTC daily Mon-Fri (full daily re-score after universe refresh)
+30 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector.log 2>&1
+
+# UNIFIED 15-minute ticker rotation — runs 22 hours/day (23:00-21:00 UTC Mon-Fri)
+# Single unified watchlist across ALL 6 markets. Market-hours-aware:
+# only includes tickers from exchanges currently open + LSE leveraged ETPs always.
+# Ouroboros learns and improves rankings every 15 min with live price data.
+# NO --skip-fetch: always uses live yfinance data for accurate scoring.
+
+# Asian + pre-market hours: every 15 min from 23:00-07:45 UTC (Mon-Fri)
+# 23:xx runs on Sunday night for Monday Asian open
+*/15 23 * * 0-4 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
+*/15 0-7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
+
+# European + US overlap + US-only hours: every 15 min from 08:00-20:45 UTC (Mon-Fri)
+*/15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
+
+# Session Briefing PDFs + Telegram (at session open)
+# Asian session briefing: 00:55 UTC Mon-Fri (5 min before Asian scan starts)
+55 0 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session asian --send-telegram >> /var/log/session_pdf.log 2>&1
+
+# European session briefing: 07:55 UTC Mon-Fri (5 min before European scan)
+55 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session european --send-telegram >> /var/log/session_pdf.log 2>&1
+
+# American session briefing: 14:25 UTC Mon-Fri (5 min before US open)
+25 14 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session american --send-telegram >> /var/log/session_pdf.log 2>&1
+
+# US-only session briefing: 16:30 UTC Mon-Fri (EU markets closed, US-only remainder)
+30 16 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session us_only --send-telegram >> /var/log/session_pdf.log 2>&1
+
+# Daily Simulated Trade Report — 21:15 UTC Mon-Fri (just after DARK window starts)
+15 21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.daily_sim_report --send-telegram >> /var/log/sim_report.log 2>&1
+
+# Telegram heartbeat — every 4 hours during weekdays
+0 0,4,8,12,16,20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.telegram_notify --heartbeat >> /var/log/telegram.log 2>&1
+
+# FX Rate Refresh — every 6 hours Mon-Fri (live yfinance rates → fx_rates.toml)
+0 0,6,12,18 * * 1-5 cd /app && python3 -m python_brain.ouroboros.fx_refresh >> /var/log/fx_refresh.log 2>&1
+
+# Google Sheets Sync — every 5 min Mon-Fri (drain Redis queue → spreadsheet)
+*/5 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.sheets_sync >> /var/log/sheets_sync.log 2>&1
+
+# Contract Expander — every 6 hours Mon-Fri (auto-grows contracts.toml from scored universe)
+# Runs after ticker_selector has scored the universe. Validates via yfinance, appends new
+# contracts, and sends SIGHUP to engine for hot-reload.
+0 1,7,13,19 * * 1-5 cd /app && python3 -m python_brain.ouroboros.contract_expander >> /var/log/contract_expander.log 2>&1
+
+# IBKR Full Universe Scanner — 22:00 UTC every Sunday (weekly deep scan)
+0 22 * * 0 cd /app && python3 -m python_brain.ouroboros.ibkr_scanner >> /var/log/ibkr_scanner.log 2>&1

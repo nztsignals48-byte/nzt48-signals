@@ -105,6 +105,8 @@ mod tests {
             state: OrderState::ExitRegistered,
             origin_order_id: order_id,
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         };
         let engine = ExitEngine::with_default_chandelier();
         // No exit at current price
@@ -274,6 +276,8 @@ mod tests {
             state: OrderState::ExitRegistered,
             origin_order_id: oid,
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         };
         assert!(
             engine

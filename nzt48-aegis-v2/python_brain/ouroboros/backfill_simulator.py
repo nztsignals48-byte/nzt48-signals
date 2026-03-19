@@ -1,0 +1,593 @@
+"""Ouroboros v6.0 — Backfill Simulator.
+
+Pulls 7-day historical data via yfinance for the 12 primary LSE ETPs and
+simulates trades using the same indicators and strategies the live engine uses.
+
+Generates a simulation report showing:
+  - Total simulated trades, win rate, profit factor
+  - Per-ticker and per-entry-type performance
+  - Best/worst days
+  - Hypothetical equity curve ("if we had this last week...")
+
+Usage: python3 -m python_brain.ouroboros.backfill_simulator
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import sys
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = Path(os.environ.get("AEGIS_ROOT", Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(_PROJECT_ROOT / "python_brain"))
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+from brain.indicators.hurst import classify_regime, estimate_hurst
+from brain.indicators.volume_analytics import calculate_rvol
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
+REPORTS_DIR = DATA_DIR / "ouroboros_reports"
+
+PRIMARY_TICKERS = [
+    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
+    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
+]
+
+LEVERAGE_MAP = {
+    "QQQ3.L": 3, "3LUS.L": 3, "3SEM.L": 3, "GPT3.L": 3,
+    "NVD3.L": 3, "TSL3.L": 3, "TSM3.L": 3, "MU2.L": 2,
+    "QQQS.L": 3, "3USS.L": 3, "QQQ5.L": 5, "5SPY.L": 5,
+}
+
+# Chandelier exit ladder (5 rungs): ATR multiplier for each rung
+CHANDELIER_RUNGS = [3.0, 2.5, 2.0, 1.5, 1.0]
+CHANDELIER_ATR_PERIOD = 14
+
+# Entry signal thresholds
+RSI_OVERSOLD = 30
+RSI_OVERBOUGHT = 70
+RSI_PERIOD = 14
+RVOL_ENTRY_THRESHOLD = 1.8
+VOLUME_SURGE_MULT = 2.0
+
+STARTING_EQUITY = 10_000.0  # GBP
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [Backfill] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("backfill_sim")
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+@dataclass
+class SimTrade:
+    """A simulated trade."""
+    ticker: str
+    date: str
+    entry_type: str  # TypeA/B/C/D
+    entry_price: float
+    exit_price: float
+    entry_bar: int
+    exit_bar: int
+    rung_achieved: int
+    pnl: float
+    pnl_pct: float
+    hold_bars: int
+    regime: str
+
+
+@dataclass
+class DayResult:
+    """Simulation results for one day."""
+    date: str
+    trades: List[SimTrade] = field(default_factory=list)
+    total_pnl: float = 0.0
+    win_count: int = 0
+    loss_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Technical indicators (pure functions)
+# ---------------------------------------------------------------------------
+def compute_rsi(prices: np.ndarray, period: int = RSI_PERIOD) -> np.ndarray:
+    """Wilder's RSI. Returns array same length as prices (NaN-padded)."""
+    n = len(prices)
+    rsi = np.full(n, np.nan)
+    if n < period + 1:
+        return rsi
+
+    deltas = np.diff(prices)
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    avg_gain = np.mean(gains[:period])
+    avg_loss = np.mean(losses[:period])
+
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss < 1e-10:
+            rsi[i + 1] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi[i + 1] = 100.0 - (100.0 / (1.0 + rs))
+
+    return rsi
+
+
+def compute_atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = CHANDELIER_ATR_PERIOD) -> np.ndarray:
+    """Average True Range (Wilder smoothing). Returns array same length as input."""
+    n = len(closes)
+    atr = np.full(n, np.nan)
+    if n < period + 1:
+        return atr
+
+    # True Range
+    tr = np.empty(n - 1)
+    for i in range(1, n):
+        hl = highs[i] - lows[i]
+        hc = abs(highs[i] - closes[i - 1])
+        lc = abs(lows[i] - closes[i - 1])
+        tr[i - 1] = max(hl, hc, lc)
+
+    # Wilder smoothing
+    atr_val = np.mean(tr[:period])
+    atr[period] = atr_val
+    for i in range(period, len(tr)):
+        atr_val = (atr_val * (period - 1) + tr[i]) / period
+        atr[i + 1] = atr_val
+
+    return atr
+
+
+# ---------------------------------------------------------------------------
+# Entry signal classification
+# ---------------------------------------------------------------------------
+def classify_entries(
+    closes: np.ndarray,
+    volumes: np.ndarray,
+    rsi: np.ndarray,
+    rvol_arr: np.ndarray,
+    regime: str,
+) -> List[Tuple[int, str]]:
+    """Identify entry signals and classify as Type A/B/C/D.
+
+    Type A: Momentum breakout (RSI > 50 + RVOL surge + trending regime)
+    Type B: Volume anomaly (RVOL > 2x + any regime)
+    Type C: Oversold bounce (RSI < 30 + mean_reverting regime)
+    Type D: Continuation (price above 20-bar EMA + trending regime)
+
+    Returns list of (bar_index, entry_type).
+    """
+    entries: List[Tuple[int, str]] = []
+    n = len(closes)
+    if n < 21:
+        return entries
+
+    # 20-bar EMA
+    ema20 = np.full(n, np.nan)
+    ema20[0] = closes[0]
+    alpha = 2.0 / 21.0
+    for i in range(1, n):
+        ema20[i] = alpha * closes[i] + (1 - alpha) * ema20[i - 1]
+
+    # Scan for entries (skip first 21 bars for indicator warmup)
+    last_entry_bar = -10  # Cooldown: min 5 bars between entries
+    for i in range(21, n - 5):  # Leave room for exit simulation
+        if i - last_entry_bar < 5:
+            continue
+        if np.isnan(rsi[i]) or np.isnan(rvol_arr[i]):
+            continue
+
+        # Type A: Momentum breakout
+        if rsi[i] > 50 and rvol_arr[i] > RVOL_ENTRY_THRESHOLD and regime == "trending":
+            entries.append((i, "TypeA"))
+            last_entry_bar = i
+            continue
+
+        # Type B: Volume anomaly
+        if rvol_arr[i] > VOLUME_SURGE_MULT:
+            entries.append((i, "TypeB"))
+            last_entry_bar = i
+            continue
+
+        # Type C: Oversold bounce
+        if rsi[i] < RSI_OVERSOLD and regime == "mean_reverting":
+            entries.append((i, "TypeC"))
+            last_entry_bar = i
+            continue
+
+        # Type D: Continuation
+        if closes[i] > ema20[i] and regime == "trending" and rsi[i] > 40:
+            # Only trigger if price just crossed above EMA
+            if i > 0 and closes[i - 1] <= ema20[i - 1]:
+                entries.append((i, "TypeD"))
+                last_entry_bar = i
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Chandelier exit simulation
+# ---------------------------------------------------------------------------
+def simulate_chandelier_exit(
+    closes: np.ndarray,
+    highs: np.ndarray,
+    lows: np.ndarray,
+    atr: np.ndarray,
+    entry_bar: int,
+    entry_price: float,
+) -> Tuple[int, float, int]:
+    """Simulate Chandelier exit with 5-rung trailing stop ladder.
+
+    Returns (exit_bar, exit_price, highest_rung_achieved).
+    """
+    n = len(closes)
+    highest_since_entry = entry_price
+    current_rung = 0
+
+    for i in range(entry_bar + 1, min(entry_bar + 60, n)):  # Max hold: 60 bars
+        if np.isnan(atr[i]):
+            continue
+
+        highest_since_entry = max(highest_since_entry, highs[i])
+
+        # Check rung progression (based on % gain from entry)
+        pct_gain = (highest_since_entry - entry_price) / max(entry_price, 1e-9)
+        if pct_gain > 0.02:
+            current_rung = max(current_rung, 4)
+        elif pct_gain > 0.015:
+            current_rung = max(current_rung, 3)
+        elif pct_gain > 0.01:
+            current_rung = max(current_rung, 2)
+        elif pct_gain > 0.005:
+            current_rung = max(current_rung, 1)
+
+        # Chandelier stop based on current rung
+        rung_mult = CHANDELIER_RUNGS[min(current_rung, len(CHANDELIER_RUNGS) - 1)]
+        stop_price = highest_since_entry - rung_mult * atr[i]
+
+        if closes[i] <= stop_price or lows[i] <= stop_price:
+            exit_price = max(stop_price, lows[i])  # Slippage-conservative
+            return i, exit_price, current_rung
+
+    # Force exit at end of simulation window
+    exit_bar = min(entry_bar + 59, n - 1)
+    return exit_bar, closes[exit_bar], current_rung
+
+
+# ---------------------------------------------------------------------------
+# Main simulation
+# ---------------------------------------------------------------------------
+def fetch_historical_data(tickers: List[str], period: str = "7d") -> Dict[str, Any]:
+    """Fetch historical data via yfinance."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        log.error("yfinance not installed. Run: pip install yfinance")
+        return {}
+
+    data = {}
+    for ticker in tickers:
+        log.info("Fetching %s (%s)...", ticker, period)
+        try:
+            df = yf.download(ticker, period=period, interval="5m", progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                log.warning("No data for %s (may be delisted or illiquid)", ticker)
+                continue
+            # Flatten MultiIndex columns if present
+            if hasattr(df.columns, 'levels'):
+                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            data[ticker] = df
+            log.info("  %s: %d bars fetched", ticker, len(df))
+        except Exception as e:
+            log.warning("Failed to fetch %s: %s", ticker, e)
+    return data
+
+
+def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
+    """Simulate trades for one ticker across all available data."""
+    trades: List[SimTrade] = []
+
+    closes = df["Close"].values.astype(np.float64)
+    highs = df["High"].values.astype(np.float64)
+    lows = df["Low"].values.astype(np.float64)
+    volumes = df["Volume"].values.astype(np.float64)
+
+    if len(closes) < 30:
+        log.warning("%s: insufficient data (%d bars), skipping", ticker, len(closes))
+        return trades
+
+    # Compute indicators
+    rsi = compute_rsi(closes, RSI_PERIOD)
+    atr = compute_atr(highs, lows, closes, CHANDELIER_ATR_PERIOD)
+
+    # RVOL array (rolling relative volume)
+    rvol_arr = np.zeros(len(volumes))
+    for i in range(21, len(volumes)):
+        vol_list = volumes[i - 21:i].tolist()
+        vol_list.append(volumes[i])
+        rvol_arr[i] = calculate_rvol(vol_list, window=20)
+
+    # Hurst / regime (calculated over entire series)
+    hurst = estimate_hurst(closes.tolist(), max_lag=20)
+    regime = classify_regime(hurst)
+
+    # Get dates for reporting
+    if hasattr(df.index, 'date'):
+        dates = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df.index]
+    else:
+        dates = [str(i) for i in range(len(df))]
+
+    # Classify entry signals
+    entries = classify_entries(closes, volumes, rsi, rvol_arr, regime)
+
+    for entry_bar, entry_type in entries:
+        entry_price = closes[entry_bar]
+        if entry_price <= 0:
+            continue
+
+        exit_bar, exit_price, rung = simulate_chandelier_exit(
+            closes, highs, lows, atr, entry_bar, entry_price,
+        )
+
+        pnl = exit_price - entry_price
+        pnl_pct = pnl / entry_price * 100.0
+
+        trades.append(SimTrade(
+            ticker=ticker,
+            date=dates[entry_bar] if entry_bar < len(dates) else "unknown",
+            entry_type=entry_type,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            entry_bar=entry_bar,
+            exit_bar=exit_bar,
+            rung_achieved=rung,
+            pnl=pnl,
+            pnl_pct=pnl_pct,
+            hold_bars=exit_bar - entry_bar,
+            regime=regime,
+        ))
+
+    return trades
+
+
+def generate_simulation_report(
+    all_trades: List[SimTrade],
+    elapsed_secs: float,
+) -> str:
+    """Generate comprehensive simulation report."""
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    report_path = REPORTS_DIR / f"backfill_sim_{today}.txt"
+
+    total = len(all_trades)
+    wins = [t for t in all_trades if t.pnl > 0]
+    losses = [t for t in all_trades if t.pnl <= 0]
+    win_rate = len(wins) / total if total > 0 else 0.0
+    gross_wins = sum(t.pnl for t in wins)
+    gross_losses = abs(sum(t.pnl for t in losses))
+    profit_factor = gross_wins / max(gross_losses, 1e-9)
+    total_pnl = sum(t.pnl for t in all_trades)
+    avg_rung = sum(t.rung_achieved for t in all_trades) / total if total > 0 else 0.0
+
+    # Per-ticker
+    by_ticker: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        by_ticker[t.ticker].append(t)
+
+    # Per-entry-type
+    by_type: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        by_type[t.entry_type].append(t)
+
+    # Per-day
+    by_day: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        day_key = t.date[:10]
+        by_day[day_key].append(t)
+
+    # Hypothetical equity curve
+    equity = STARTING_EQUITY
+    kelly_frac = 0.10  # Conservative Kelly for simulation
+    equity_curve = [equity]
+    for t in sorted(all_trades, key=lambda x: x.entry_bar):
+        position_size = equity * kelly_frac
+        shares = math.floor(position_size / max(t.entry_price, 1e-9))
+        if shares <= 0:
+            continue
+        trade_pnl = shares * t.pnl
+        equity += trade_pnl
+        equity_curve.append(equity)
+
+    lines = [
+        f"{'=' * 70}",
+        f"  OUROBOROS v6.0 BACKFILL SIMULATION REPORT",
+        f"  Generated: {today}  |  Elapsed: {elapsed_secs:.1f}s",
+        f"{'=' * 70}",
+        "",
+        "SUMMARY",
+        f"  Total simulated trades: {total}",
+        f"  Wins:                   {len(wins)}",
+        f"  Losses:                 {len(losses)}",
+        f"  Win rate:               {win_rate:.1%}",
+        f"  Profit factor:          {profit_factor:.2f}",
+        f"  Total PnL (per share):  GBP {total_pnl:+.4f}",
+        f"  Avg rung achieved:      {avg_rung:.1f}",
+        f"  Avg hold (bars):        {sum(t.hold_bars for t in all_trades) / max(total, 1):.0f}",
+        "",
+        "HYPOTHETICAL EQUITY (10K starting, 10% Kelly fraction)",
+        f"  Starting equity:  GBP {STARTING_EQUITY:,.2f}",
+        f"  Ending equity:    GBP {equity:,.2f}",
+        f"  Return:           {((equity - STARTING_EQUITY) / STARTING_EQUITY) * 100:+.2f}%",
+        "",
+    ]
+
+    # Per-ticker table
+    lines += ["PER-TICKER PERFORMANCE", "-" * 70]
+    lines.append(f"  {'Ticker':12s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s} {'Regime':>14s}")
+    for ticker in PRIMARY_TICKERS:
+        tt = by_ticker.get(ticker, [])
+        if not tt:
+            lines.append(f"  {ticker:12s} {'0':>6s} {'--':>5s} {'--':>6s} {'--':>10s} {'no data':>14s}")
+            continue
+        tw = sum(1 for t in tt if t.pnl > 0)
+        tp = sum(t.pnl for t in tt)
+        regime = tt[0].regime if tt else "?"
+        lines.append(
+            f"  {ticker:12s} {len(tt):6d} {tw:5d} {tw / len(tt):6.0%} "
+            f"{tp:+10.4f} {regime:>14s}"
+        )
+
+    # Per-entry-type table
+    lines += ["", "PER-ENTRY-TYPE PERFORMANCE", "-" * 70]
+    lines.append(f"  {'Type':10s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s} {'Avg Rung':>10s}")
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        tt = by_type.get(etype, [])
+        if not tt:
+            lines.append(f"  {etype:10s} {'0':>6s} {'--':>5s} {'--':>6s} {'--':>10s} {'--':>10s}")
+            continue
+        tw = sum(1 for t in tt if t.pnl > 0)
+        tp = sum(t.pnl for t in tt)
+        ar = sum(t.rung_achieved for t in tt) / len(tt)
+        lines.append(
+            f"  {etype:10s} {len(tt):6d} {tw:5d} {tw / len(tt):6.0%} "
+            f"{tp:+10.4f} {ar:10.1f}"
+        )
+
+    # Per-day table
+    lines += ["", "PER-DAY PERFORMANCE", "-" * 70]
+    lines.append(f"  {'Date':12s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s}")
+    for day, day_trades in sorted(by_day.items()):
+        dw = sum(1 for t in day_trades if t.pnl > 0)
+        dp = sum(t.pnl for t in day_trades)
+        lines.append(
+            f"  {day:12s} {len(day_trades):6d} {dw:5d} "
+            f"{dw / len(day_trades):6.0%} {dp:+10.4f}"
+        )
+
+    # Best/worst
+    if all_trades:
+        best = max(all_trades, key=lambda t: t.pnl)
+        worst = min(all_trades, key=lambda t: t.pnl)
+        lines += [
+            "",
+            f"BEST TRADE:  {best.ticker} on {best.date} — {best.entry_type} "
+            f"PnL={best.pnl:+.4f} ({best.pnl_pct:+.2f}%) rung={best.rung_achieved}",
+            f"WORST TRADE: {worst.ticker} on {worst.date} — {worst.entry_type} "
+            f"PnL={worst.pnl:+.4f} ({worst.pnl_pct:+.2f}%) rung={worst.rung_achieved}",
+        ]
+
+    lines += [
+        "",
+        f"  If we had these improvements last week, GBP {STARTING_EQUITY:,.0f} "
+        f"would be GBP {equity:,.2f} now",
+        "",
+        f"{'=' * 70}",
+        "",
+    ]
+
+    report_text = "\n".join(lines)
+    report_path.write_text(report_text)
+    log.info("Simulation report written: %s", report_path)
+
+    # Also save JSON sidecar
+    json_path = REPORTS_DIR / f"backfill_sim_{today}.json"
+    json_data = {
+        "date": today,
+        "total_trades": total,
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": win_rate,
+        "profit_factor": profit_factor,
+        "total_pnl_per_share": total_pnl,
+        "avg_rung": avg_rung,
+        "starting_equity": STARTING_EQUITY,
+        "ending_equity": equity,
+        "return_pct": ((equity - STARTING_EQUITY) / STARTING_EQUITY) * 100,
+        "per_ticker": {
+            t: {
+                "trades": len(tt),
+                "wins": sum(1 for x in tt if x.pnl > 0),
+                "total_pnl": sum(x.pnl for x in tt),
+            }
+            for t, tt in by_ticker.items()
+        },
+        "per_entry_type": {
+            et: {
+                "trades": len(tt),
+                "wins": sum(1 for x in tt if x.pnl > 0),
+                "total_pnl": sum(x.pnl for x in tt),
+            }
+            for et, tt in by_type.items()
+        },
+    }
+    json_path.write_text(json.dumps(json_data, indent=2))
+
+    return report_text
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+def run_backfill() -> int:
+    """Execute the backfill simulation."""
+    start = time.monotonic()
+    log.info("Ouroboros v6.0 Backfill Simulator starting...")
+
+    # Fetch historical data
+    data = fetch_historical_data(PRIMARY_TICKERS, period="7d")
+    if not data:
+        log.error("No historical data fetched. Aborting.")
+        return 1
+
+    log.info("Data fetched for %d/%d tickers", len(data), len(PRIMARY_TICKERS))
+
+    # Simulate trades for each ticker
+    all_trades: List[SimTrade] = []
+    for ticker, df in data.items():
+        trades = simulate_ticker(ticker, df)
+        all_trades.extend(trades)
+        log.info("  %s: %d simulated trades", ticker, len(trades))
+
+    elapsed = time.monotonic() - start
+    log.info("Simulation complete: %d total trades in %.1fs", len(all_trades), elapsed)
+
+    # Generate report
+    report = generate_simulation_report(all_trades, elapsed)
+    print(report)
+
+    return 0
+
+
+def main():
+    """CLI entry point."""
+    try:
+        sys.exit(run_backfill())
+    except Exception as e:
+        log.error("Backfill simulator crashed: %s", e, exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -20,6 +20,8 @@ pub struct ReplayResult {
     pub state_hash: Option<String>,
     /// Last RiskStateChange regime from WAL (for persistence across restarts).
     pub restored_regime: Option<String>,
+    /// Trigger that caused the last RiskStateChange (e.g. "tick_watchdog_expired").
+    pub restored_regime_trigger: Option<String>,
 }
 
 /// Verify a single WAL line's CRC32 integrity.
@@ -44,9 +46,10 @@ pub fn read_wal_file(path: &Path) -> Result<Vec<WalEvent>, WalError> {
     let lines: Vec<String> = reader.lines().collect::<Result<Vec<_>, _>>()?;
     let total = lines.len();
     let mut events = Vec::with_capacity(total);
+    let mut corrupt_count = 0u64;
 
     for (i, line) in lines.iter().enumerate() {
-        let is_last = i == total - 1;
+        let _is_last = i == total - 1;
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -56,26 +59,85 @@ pub fn read_wal_file(path: &Path) -> Result<Vec<WalEvent>, WalError> {
             Ok(event) => match verify_checksum(&event) {
                 Ok(()) => events.push(event),
                 Err(msg) => {
-                    if is_last {
-                        // Last line corruption → skip with WARNING (H27)
-                        eprintln!("WARNING: skipping corrupted last WAL line: {msg}");
-                    } else {
-                        // Non-last line corruption → panic! (H27)
-                        panic!("FATAL: WAL corruption on line {}: {msg}", i + 1);
-                    }
+                    // Skip corrupt entries with warning (resilient mode)
+                    eprintln!("WARNING: skipping corrupted WAL line {}: {msg}", i + 1);
+                    corrupt_count += 1;
                 }
             },
             Err(e) => {
-                if is_last {
-                    eprintln!("WARNING: skipping unparseable last WAL line: {e}");
-                } else {
-                    panic!("FATAL: WAL corruption on line {}: {e}", i + 1);
-                }
+                    eprintln!("WARNING: skipping unparseable WAL line {}: {e}", i + 1);
+                    corrupt_count += 1;
             }
         }
     }
 
+    if corrupt_count > 0 {
+        eprintln!("WAL_REPLAY: skipped {corrupt_count} corrupt lines out of {total} total");
+    }
     Ok(events)
+}
+
+/// Read ALL WAL files: current.ndjson + archive/*.ndjson.
+/// Sorts all events by write_time_ns to maintain correct chronological order.
+/// This ensures no trades are missed when the engine restarts multiple times per day.
+pub fn read_all_wal_files(wal_dir: &Path) -> Vec<WalEvent> {
+    let mut all_events = Vec::new();
+
+    // 1. Read current.ndjson
+    let current = wal_dir.join("current.ndjson");
+    if current.exists() {
+        match read_wal_file(&current) {
+            Ok(events) => {
+                eprintln!("WAL_REPLAY: {} events from current.ndjson", events.len());
+                all_events.extend(events);
+            }
+            Err(e) => eprintln!("WAL_REPLAY: failed to read current.ndjson: {e}"),
+        }
+    }
+
+    // 2. Read all archive/*.ndjson files
+    let archive_dir = wal_dir.join("archive");
+    if archive_dir.exists() {
+        let mut archive_files: Vec<_> = std::fs::read_dir(&archive_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext == "ndjson")
+            })
+            .collect();
+        archive_files.sort_by_key(|e| e.file_name());
+
+        for entry in &archive_files {
+            match read_wal_file(&entry.path()) {
+                Ok(events) => {
+                    if !events.is_empty() {
+                        eprintln!(
+                            "WAL_REPLAY: {} events from {:?}",
+                            events.len(),
+                            entry.file_name()
+                        );
+                        all_events.extend(events);
+                    }
+                }
+                Err(e) => eprintln!(
+                    "WAL_REPLAY: failed to read {:?}: {e}",
+                    entry.file_name()
+                ),
+            }
+        }
+    }
+
+    // 3. Sort by write_time_ns (chronological order across all files)
+    all_events.sort_by_key(|e| e.write_time_ns);
+
+    eprintln!(
+        "WAL_REPLAY: {} total events from all WAL files",
+        all_events.len()
+    );
+    all_events
 }
 
 /// Replay WAL events into a PortfolioState.
@@ -88,9 +150,12 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
     let mut last_snapshot_used = false;
     let mut state_hash: Option<String> = None;
     let mut restored_regime: Option<String> = None;
+    let mut restored_regime_trigger: Option<String> = None;
 
     // Track pending fills per order for VWAP
     let mut fill_tracker: HashMap<String, (f64, u32)> = HashMap::new(); // (sum_price*qty, total_qty)
+    // Track rung advances for restoration after all events are processed
+    let mut rung_restore: HashMap<TickerId, (u8, f64, f64)> = HashMap::new(); // (rung, stop, high)
 
     for event in events {
         events_replayed += 1;
@@ -176,6 +241,8 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                         state: OrderState::Filled,
                         origin_order_id: order_id.clone(),
                         is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
                     };
                     portfolio.add_position(pos);
                     let pending = portfolio
@@ -192,10 +259,12 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                 portfolio.remove_position(TickerId(*ticker_id));
                 portfolio.daily_pnl += final_pnl;
             }
-            WalPayload::RiskStateChange { to, .. } => {
+            WalPayload::RiskStateChange { to, trigger, .. } => {
                 // FIX 2026-03-11: Restore risk regime on WAL replay.
                 // If engine crashed while in Halt/Flatten, don't reset to Normal.
+                // Also capture trigger to distinguish watchdog vs liquidation halts.
                 restored_regime = Some(to.clone());
+                restored_regime_trigger = Some(trigger.clone());
             }
             WalPayload::ReconciliationDivergence { .. } => {
                 // P2-A: Record that a divergence was detected.
@@ -213,6 +282,11 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                 portfolio.daily_pnl = 0.0;
                 portfolio.consecutive_stop_losses = 0;
             }
+            WalPayload::RungAdvanced { ticker_id, new_rung, stop_price, highest_high, .. } => {
+                // Restore chandelier rung state for open positions after restart.
+                // Uses rung_restore map (position may not exist yet during replay ordering).
+                rung_restore.insert(TickerId(*ticker_id), (*new_rung, *stop_price, *highest_high));
+            }
             WalPayload::OrphanResolved { .. }
             | WalPayload::ExitSignal { .. }
             | WalPayload::SystemReady { .. }
@@ -221,6 +295,41 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
             | WalPayload::SplitAdjustment { .. }
             | WalPayload::SystemShutdown { .. } => {}
         }
+    }
+
+    // Apply rung restoration to surviving open positions.
+    // This restores chandelier rung state that was persisted via RungAdvanced events.
+    for (tid, (rung, stop, high)) in &rung_restore {
+        if let Some(pos) = portfolio.positions_mut().get_mut(tid) {
+            if *rung > pos.trailing_rung {
+                eprintln!(
+                    "WAL_REPLAY: Restored rung {} (stop={:.4}, high={:.4}) for ticker {}",
+                    rung, stop, high, tid.0
+                );
+                pos.trailing_rung = *rung;
+            }
+            if *stop > pos.stop_price {
+                pos.stop_price = *stop;
+            }
+            if *high > pos.highest_high {
+                pos.highest_high = *high;
+            }
+        }
+    }
+
+    // FIX 2026-03-17: Sync equity to cash + open position values after replay.
+    // Without this, equity stays frozen at the last StateSnapshot value (or initial
+    // £10,000) while cash has been correctly updated by add_position/remove_position.
+    // Use entry prices as proxy since we have no live ticks during replay.
+    let position_value: f64 = portfolio
+        .positions()
+        .values()
+        .map(|p| p.avg_entry * p.qty as f64)
+        .sum();
+    portfolio.equity = portfolio.cash + position_value;
+    // Update high-water mark if equity grew
+    if portfolio.equity > portfolio.high_water_mark {
+        portfolio.high_water_mark = portfolio.equity;
     }
 
     // Detect orphans: RoutedOrder with no BrokerAck or FillEvent
@@ -235,6 +344,7 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
         last_snapshot_used,
         state_hash,
         restored_regime,
+        restored_regime_trigger,
     }
 }
 

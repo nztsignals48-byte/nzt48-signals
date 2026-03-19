@@ -38,6 +38,9 @@ pub struct ExchangeProfile {
 
 impl ExchangeProfile {
     /// Is the exchange open at this UTC time (seconds from midnight)?
+    /// Note: open_utc_secs/close_utc_secs are GMT baselines. For BST-affected exchanges
+    /// (XLON, XDUB), the engine's ModeB gate uses London local time via the Clock,
+    /// so this static check is only used for non-critical auxiliary functions.
     pub fn is_open(&self, utc_secs: u32) -> bool {
         utc_secs >= self.open_utc_secs && utc_secs < self.close_utc_secs
     }

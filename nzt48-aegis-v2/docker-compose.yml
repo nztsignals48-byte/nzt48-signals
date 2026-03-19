@@ -1,6 +1,8 @@
 # AEGIS V2 — Docker Compose (Self-Contained)
 # Includes IB Gateway, Redis, and Rust engine — no V1 dependency.
-# IB Gateway: gnzsnz/ib-gateway (paper mode, port 4004)
+# IB Gateway: gnzsnz/ib-gateway (TRADING_MODE=live for real market data, port 4003)
+# Engine: IS_LIVE=false, simulation_mode=true — NEVER submits real orders
+# We connect live to get real market data; all trading is simulated internally
 # Client ID: 101
 #
 # Usage:
@@ -20,21 +22,18 @@ services:
       aegis-redis:
         condition: service_healthy
       ib-gateway:
-        condition: service_healthy
+        condition: service_started  # Engine handles broker reconnect gracefully; don't block on IB Gateway health
+    env_file:
+      - .env
     environment:
       - IBKR_HOST=ib-gateway
-      - IBKR_PORT=4004
+      - IBKR_PORT=4003
       - REDIS_URL=redis://:nzt48redis@aegis-redis:6379/0
       - IS_LIVE=false
-    command: >
-      aegis
-        --config-dir /app/config
-        --wal-dir /app/events
-        --ibkr-host ib-gateway
-        --ibkr-port 4004
     volumes:
-      - ./config:/app/config:ro
+      - ./config:/app/config
       - aegis-events:/app/events
+      - aegis-data:/app/data
     # SC-01a: Graceful shutdown grace period (flatten positions + wait fills)
     stop_grace_period: 60s
     # SC-16: Shared memory for IPC
@@ -54,7 +53,8 @@ services:
   # IB Gateway — headless IBKR API via IBC (auto-reconnect, auto-restart)
   # Image: gnzsnz/ib-gateway (IB Gateway + IBC, Xvfb for headless)
   # Weekly maintenance: user must approve 2FA on phone every Monday morning
-  # Port 4004 = paper trading API (gnzsnz image convention)
+  # Port 4003 = live trading API socat proxy (gnzsnz image convention)
+  # TRADING_MODE=live in .env.production — engine IS_LIVE=false prevents real orders
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: aegis-ib-gateway
@@ -66,8 +66,8 @@ services:
       - TWOFA_TIMEOUT_ACTION=restart
       - TWS_ACCEPT_INCOMING=accept
     expose:
-      - "4002"
-      - "4004"
+      - "4001"
+      - "4003"
     deploy:
       resources:
         limits:
@@ -78,7 +78,7 @@ services:
         max-size: "5m"
         max-file: "2"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4004' || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4003' || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -118,6 +118,7 @@ services:
 
 volumes:
   aegis-events:
+  aegis-data:
   aegis-redis-data:
 
 networks:

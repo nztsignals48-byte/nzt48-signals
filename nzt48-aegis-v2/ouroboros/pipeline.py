@@ -103,7 +103,7 @@ def _try_garch_calibration(config_dir: Path, ticker_ids: Optional[Dict[str, int]
         ticker_ids = {
             "QQQ3.L": 1, "3LUS.L": 2, "3SEM.L": 3, "GPT3.L": 4,
             "NVD3.L": 5, "TSL3.L": 6, "TSM3.L": 7, "MU2.L": 8,
-            "QQQS.L": 9, "3USS.L": 10, "QQQ5.L": 11, "SP5L.L": 12,
+            "QQQS.L": 9, "3USS.L": 10, "QQQ5.L": 11, "5SPY.L": 12,
         }
 
     output_path = str(config_dir / "garch_params.json")

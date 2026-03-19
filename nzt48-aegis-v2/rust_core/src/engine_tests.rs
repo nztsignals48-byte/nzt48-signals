@@ -80,12 +80,12 @@ mod tests {
     #[test]
     fn test_config_loaded_from_toml() {
         let config = EngineConfig::load(&config_dir()).expect("load");
-        assert_eq!(config.risk.max_positions, 3);
+        assert_eq!(config.risk.max_positions, 6);
         assert_eq!(config.ibkr.client_id_executioner, 101);
         assert_eq!(config.ibkr.reqmktdata_pacing_ms, 10);
         assert!(config.crucible.paper_mode);
-        // P21: Mode A/B contracts — 12 LSE + 20 TSE + 20 HKEX + 20 ASX + 14 XETRA + 6 Euronext = 92
-        assert_eq!(config.contracts.len(), 92);
+        // P21: 11 LSE + 20 TSE + 20 HKEX + 13 XETRA + 6 Euronext + 1 KRX + 30 US = 101
+        assert_eq!(config.contracts.len(), 101);
         assert!(config.tickers.len() >= 12);
     }
 
@@ -99,7 +99,7 @@ mod tests {
             .find(|c| c.symbol == "QQQ3.L")
             .expect("QQQ3.L");
         assert_eq!(qqq3.leverage, 3);
-        assert_eq!(qqq3.exchange, "LSE");
+        assert_eq!(qqq3.exchange, "LSEETF");
         assert_eq!(qqq3.currency, "GBP");
         assert_eq!(qqq3.sector, "Technology");
     }
@@ -289,8 +289,8 @@ mod tests {
         engine
             .startup(&[], 1_700_000_000, 1_700_000_000_000_000_000)
             .expect("startup");
-        // Crucible max_positions_override = 1
-        assert_eq!(engine.arbiter.config.max_positions, 1);
+        // Crucible max_positions_override = 4
+        assert_eq!(engine.arbiter.config.max_positions, 4);
     }
 
     // ── Test 16: Shutdown cancels pending orders ──

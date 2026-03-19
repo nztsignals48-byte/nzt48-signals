@@ -303,7 +303,8 @@ mod tests {
         ));
     }
 
-    // ── Test 14: Erroneous tick filter — >5% from 1s MA (H77) ──
+    // ── Test 14: Erroneous tick filter — >15% from 1s MA (H77) ──
+    // Threshold raised from 5% to 15% to accommodate 3x leveraged ETPs.
     #[test]
     fn test_erroneous_tick_filter() {
         let mut universe = Universe::new(UniverseConfig::default());
@@ -315,16 +316,22 @@ mod tests {
             universe.route_tick(&tick, 1_000_000_000),
             RouteResult::Vanguard(_)
         ));
-        // Erroneous tick: 10.0 EMA, tick at 10.60 (6% deviation > 5% threshold)
+        // 6% deviation now PASSES (below 15% threshold) — needed for 3x ETPs
         let tick = make_tick(id, 10.60);
         assert!(matches!(
             universe.route_tick(&tick, 2_000_000_000),
-            RouteResult::Filtered(FilterReason::ErroneousTick)
+            RouteResult::Vanguard(_)
         ));
-        // Normal tick still works (EMA wasn't corrupted by the erroneous tick)
-        let tick = make_tick(id, 10.04);
+        // Erroneous tick: 16%+ deviation from EMA still filtered
+        let tick = make_tick(id, 12.20);
         assert!(matches!(
             universe.route_tick(&tick, 3_000_000_000),
+            RouteResult::Filtered(FilterReason::ErroneousTick)
+        ));
+        // Normal tick still works after erroneous filter
+        let tick = make_tick(id, 10.10);
+        assert!(matches!(
+            universe.route_tick(&tick, 4_000_000_000),
             RouteResult::Vanguard(_)
         ));
     }

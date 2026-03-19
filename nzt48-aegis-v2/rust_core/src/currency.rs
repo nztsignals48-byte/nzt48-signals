@@ -1,9 +1,11 @@
-//! Phase 12: Currency handling for European equity routing.
+//! Phase 12: Currency handling for global equity routing.
 //! FX rate table, currency conversion, minimum fee awareness.
+//! Supports all 6 market regions: Asia (JPY, KRW, HKD, AUD, SGD, NZD),
+//! Europe (EUR, CHF, SEK, NOK, DKK, PLN), US (USD), UK (GBP).
 
 use std::collections::HashMap;
 
-/// Supported trading currencies.
+/// Supported trading currencies (all 6 market regions).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Currency {
     GBP,
@@ -14,6 +16,17 @@ pub enum Currency {
     DKK,
     PLN,
     USD,
+    // Asian currencies
+    JPY,
+    KRW,
+    HKD,
+    AUD,
+    SGD,
+    NZD,
+    // Emerging
+    TWD,
+    CNY,
+    INR,
 }
 
 impl Currency {
@@ -28,6 +41,15 @@ impl Currency {
             "DKK" => Some(Currency::DKK),
             "PLN" => Some(Currency::PLN),
             "USD" => Some(Currency::USD),
+            "JPY" => Some(Currency::JPY),
+            "KRW" => Some(Currency::KRW),
+            "HKD" => Some(Currency::HKD),
+            "AUD" => Some(Currency::AUD),
+            "SGD" => Some(Currency::SGD),
+            "NZD" => Some(Currency::NZD),
+            "TWD" => Some(Currency::TWD),
+            "CNY" | "CNH" | "RMB" => Some(Currency::CNY),
+            "INR" => Some(Currency::INR),
             _ => None,
         }
     }
@@ -43,6 +65,15 @@ impl Currency {
             Currency::DKK => "DKK",
             Currency::PLN => "PLN",
             Currency::USD => "USD",
+            Currency::JPY => "JPY",
+            Currency::KRW => "KRW",
+            Currency::HKD => "HKD",
+            Currency::AUD => "AUD",
+            Currency::SGD => "SGD",
+            Currency::NZD => "NZD",
+            Currency::TWD => "TWD",
+            Currency::CNY => "CNY",
+            Currency::INR => "INR",
         }
     }
 }
@@ -69,15 +100,27 @@ pub struct FxRateTable {
 impl FxRateTable {
     pub fn new() -> Self {
         let mut rates = HashMap::new();
-        // Default rates (updated nightly by Ouroboros)
+        // Default rates (updated every 6h by cron FX refresh)
+        // European
         rates.insert(Currency::GBP, 1.0);
-        rates.insert(Currency::EUR, 0.86); // 1 EUR ≈ £0.86
-        rates.insert(Currency::CHF, 0.89); // 1 CHF ≈ £0.89
-        rates.insert(Currency::SEK, 0.074); // 1 SEK ≈ £0.074
-        rates.insert(Currency::NOK, 0.072); // 1 NOK ≈ £0.072
-        rates.insert(Currency::DKK, 0.115); // 1 DKK ≈ £0.115
-        rates.insert(Currency::PLN, 0.20); // 1 PLN ≈ £0.20
-        rates.insert(Currency::USD, 0.79); // 1 USD ≈ £0.79
+        rates.insert(Currency::EUR, 0.86);   // 1 EUR ≈ £0.86
+        rates.insert(Currency::CHF, 0.89);   // 1 CHF ≈ £0.89
+        rates.insert(Currency::SEK, 0.074);  // 1 SEK ≈ £0.074
+        rates.insert(Currency::NOK, 0.072);  // 1 NOK ≈ £0.072
+        rates.insert(Currency::DKK, 0.115);  // 1 DKK ≈ £0.115
+        rates.insert(Currency::PLN, 0.20);   // 1 PLN ≈ £0.20
+        rates.insert(Currency::USD, 0.79);   // 1 USD ≈ £0.79
+        // Asian
+        rates.insert(Currency::JPY, 0.0053); // 1 JPY ≈ £0.0053 (~189 JPY/GBP)
+        rates.insert(Currency::KRW, 0.00056);// 1 KRW ≈ £0.00056 (~1,786 KRW/GBP)
+        rates.insert(Currency::HKD, 0.101);  // 1 HKD ≈ £0.101 (~9.9 HKD/GBP)
+        rates.insert(Currency::AUD, 0.51);   // 1 AUD ≈ £0.51
+        rates.insert(Currency::SGD, 0.59);   // 1 SGD ≈ £0.59
+        rates.insert(Currency::NZD, 0.47);   // 1 NZD ≈ £0.47
+        // Emerging
+        rates.insert(Currency::TWD, 0.024);  // 1 TWD ≈ £0.024
+        rates.insert(Currency::CNY, 0.109);  // 1 CNY ≈ £0.109
+        rates.insert(Currency::INR, 0.0094); // 1 INR ≈ £0.0094
         Self {
             rates_to_gbp: rates,
             fx_minimum_fee_gbp: 2.0, // Amendment A1
@@ -104,6 +147,43 @@ impl FxRateTable {
             gbp_amount / rate
         } else {
             gbp_amount
+        }
+    }
+
+    /// Apply live FX rates from ouroboros_loader::FxRates.
+    /// Keys are "XXXGBP" (e.g., "USDGBP" = 0.75).
+    /// Falls back to defaults for any missing currency.
+    pub fn apply_live_rates(&mut self, live: &std::collections::HashMap<String, f64>, now_ns: u64) {
+        let mapping: &[(&str, Currency)] = &[
+            ("USDGBP", Currency::USD),
+            ("EURGBP", Currency::EUR),
+            ("CHFGBP", Currency::CHF),
+            ("SEKGBP", Currency::SEK),
+            ("NOKGBP", Currency::NOK),
+            ("DKKGBP", Currency::DKK),
+            ("PLNGBP", Currency::PLN),
+            ("JPYGBP", Currency::JPY),
+            ("KRWGBP", Currency::KRW),
+            ("HKDGBP", Currency::HKD),
+            ("AUDGBP", Currency::AUD),
+            ("SGDGBP", Currency::SGD),
+            ("NZDGBP", Currency::NZD),
+            ("TWDGBP", Currency::TWD),
+            ("CNYGBP", Currency::CNY),
+            ("INRGBP", Currency::INR),
+        ];
+        let mut updated = 0u32;
+        for (key, cur) in mapping {
+            if let Some(&rate) = live.get(*key) {
+                if rate > 0.0 {
+                    self.rates_to_gbp.insert(*cur, rate);
+                    updated += 1;
+                }
+            }
+        }
+        if updated > 0 {
+            self.last_update_ns = now_ns;
+            eprintln!("FX: applied {updated} live rates from fx_rates.toml");
         }
     }
 

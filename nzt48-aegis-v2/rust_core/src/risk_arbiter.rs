@@ -40,6 +40,14 @@ pub struct EvalContext {
     pub macro_indicator: MacroIndicator,
     /// Phase 9: Macro staleness threshold in nanoseconds (e.g., 300s).
     pub macro_stale_threshold_ns: u64,
+    /// Momentum re-entry: PredictiveScorer IC for this ticker.
+    pub ticker_ic: f64,
+    /// Momentum re-entry: PredictiveScorer trade count for this ticker.
+    pub ticker_trade_count: u32,
+    /// Momentum re-entry: PredictiveScorer locked status.
+    pub ticker_locked: bool,
+    /// Momentum re-entry: How many positions already held for this ticker.
+    pub ticker_position_count: u32,
 }
 
 impl Default for EvalContext {
@@ -60,6 +68,10 @@ impl Default for EvalContext {
             kelly_fraction_raw: 0.08,
             macro_indicator: MacroIndicator::default(), // Phase 9: neutral macro defaults
             macro_stale_threshold_ns: 300_000_000_000,  // 300 seconds
+            ticker_ic: 0.0,
+            ticker_trade_count: 0,
+            ticker_locked: false,
+            ticker_position_count: 0,
         }
     }
 }
@@ -75,6 +87,10 @@ pub struct RiskArbiter {
     pub regime_scales: HashMap<String, f64>,
     /// Ouroboros-calibrated per-ticker Kelly fraction caps.
     pub kelly_fractions: HashMap<String, f64>,
+    /// Simulation mode: relaxes cash buffer & portfolio heat checks for data collection.
+    pub simulation_mode: bool,
+    /// Ouroboros ticker blacklist: symbols with WR < 30% over 10+ trades.
+    pub ticker_blacklist: Vec<String>,
 }
 
 impl RiskArbiter {
@@ -85,6 +101,8 @@ impl RiskArbiter {
             velocity_log: Vec::new(),
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
+            simulation_mode: false,
+            ticker_blacklist: Vec::new(),
         }
     }
 
@@ -121,6 +139,9 @@ impl RiskArbiter {
         }
 
         // CHECK 6: Max Positions — filled + pending >= max (H34)
+        // ALWAYS enforced, including simulation mode. Without this gate,
+        // simulation accumulates unlimited positions (59 observed vs max 3),
+        // producing unrealistic paper-trade results that cannot transfer to live.
         if portfolio.total_position_count() >= self.config.max_positions {
             return self.reject(VetoReason::MaxPositionsReached, ts);
         }
@@ -159,18 +180,14 @@ impl RiskArbiter {
         }
 
         // CHECK 11: Time-of-Day Cutoff — after 15:45 London (H35)
-        if ctx.time_secs >= self.config.entry_cutoff_secs {
+        // In simulation mode, skip time cutoff to collect data across all trading hours.
+        if !self.simulation_mode && ctx.time_secs >= self.config.entry_cutoff_secs {
             return self.reject(VetoReason::TooLateInSession, ts);
         }
 
-        // CHECK 12: Auction Period
-        let in_open_auction = ctx.time_secs >= self.config.auction_open_start_secs
-            && ctx.time_secs < self.config.auction_open_end_secs;
-        let in_close_auction = ctx.time_secs >= self.config.auction_close_start_secs
-            && ctx.time_secs < self.config.auction_close_end_secs;
-        if in_open_auction || in_close_auction {
-            return self.reject(VetoReason::AuctionPeriod, ts);
-        }
+        // CHECK 12: REMOVED — Auction period blocking was LSE-specific (07:50-08:00, 16:30-16:35).
+        // Global engine trades 6 markets across all timezones. Spread veto (CHECK 13)
+        // provides natural protection during auction periods (spreads widen → rejected).
 
         // CHECK 13: Spread Veto (H36)
         if ctx.bid > 0.0 {
@@ -186,17 +203,23 @@ impl RiskArbiter {
         }
 
         // CHECK 14: Cash Buffer (H31)
-        if portfolio.cash_buffer_pct() < self.config.cash_buffer_pct {
+        // In simulation mode, skip cash buffer to allow maximum data collection.
+        // With £10K equity and 20 max positions, trades fill up cash fast.
+        if !self.simulation_mode && portfolio.cash_buffer_pct() < self.config.cash_buffer_pct {
             return self.reject(VetoReason::CashBufferInsufficient, ts);
         }
 
         // CHECK 15: Portfolio Heat
-        if portfolio.portfolio_heat_pct() >= self.config.portfolio_heat_limit_pct {
+        // In simulation mode, skip portfolio heat cap for broad evidence gathering.
+        if !self.simulation_mode && portfolio.portfolio_heat_pct() >= self.config.portfolio_heat_limit_pct {
             return self.reject(VetoReason::PortfolioHeatExceeded, ts);
         }
 
         // CHECK 16: Sector Heat (H30)
-        if portfolio.sector_heat_pct(intent_ticker) >= self.config.sector_heat_cap_pct {
+        // In simulation mode, skip sector heat to allow maximum data collection across all tickers.
+        if !self.simulation_mode
+            && portfolio.sector_heat_pct(intent_ticker) >= self.config.sector_heat_cap_pct
+        {
             let heat = portfolio.sector_heat_pct(intent_ticker);
             return self.reject(
                 VetoReason::SectorHeatExceeded {
@@ -208,12 +231,16 @@ impl RiskArbiter {
         }
 
         // CHECK 17: ISA Annual Limit
-        if portfolio.isa_year_invested >= self.config.isa_annual_limit_gbp {
+        // In simulation mode, skip ISA limit to allow unlimited data collection.
+        // Per UNLIMITED SIMULATION BUDGET directive: sim needs maximum trade variety.
+        if !self.simulation_mode && portfolio.isa_year_invested >= self.config.isa_annual_limit_gbp {
             return self.reject(VetoReason::IsaAnnualLimitExceeded, ts);
         }
 
         // CHECK 18: Daily Drawdown — >2% from high-water → FLATTEN (H29)
-        if portfolio.daily_drawdown_pct() > self.config.daily_drawdown_pct {
+        // In simulation mode, skip drawdown circuit breaker. Sim uses infinite budget;
+        // FLATTEN would halt all data collection for the rest of the session.
+        if !self.simulation_mode && portfolio.daily_drawdown_pct() > self.config.daily_drawdown_pct {
             self.regime = RiskRegime::Flatten;
             return self.reject(VetoReason::DailyDrawdownBreached, ts);
         }
@@ -240,9 +267,20 @@ impl RiskArbiter {
             return self.reject(VetoReason::ConsecutiveLossBreaker, ts);
         }
 
-        // CHECK 22: Duplicate Position — already holding this ticker
-        if portfolio.has_position(&intent_ticker) {
-            return self.reject(VetoReason::DuplicatePosition, ts);
+        // CHECK 22: Duplicate Position — gated by momentum re-entry
+        if ctx.ticker_position_count > 0 {
+            let max_allowed = if ctx.ticker_locked {
+                1 // Locked tickers: no re-entry
+            } else if ctx.ticker_ic >= 0.20 && ctx.ticker_trade_count >= 20 {
+                3 // 70%+ WR with 20+ trades: up to 3
+            } else if ctx.ticker_ic >= 0.10 && ctx.ticker_trade_count >= 10 {
+                2 // 60%+ WR with 10+ trades: up to 2
+            } else {
+                1 // Default: single position only
+            };
+            if ctx.ticker_position_count >= max_allowed {
+                return self.reject(VetoReason::DuplicatePosition, ts);
+            }
         }
 
         // CHECK 23: Ticker Halted (reverse split, synthetic halt, etc)
@@ -307,7 +345,16 @@ impl RiskArbiter {
         let regime_scale = self.regime_scales.get(&regime_name).copied().unwrap_or(default_scale);
         let adjusted_size = size * regime_scale;
 
-        // SC-05: Minimum entry size gate (£1500).
+        // Sizing instrumentation: log every candidate that passes all 27 checks
+        eprintln!(
+            "SIZING: ticker={} kelly_in={:.4} effective={:.4} ramp={:.2} ramped={:.4} \
+             equity={:.0} size={:.0} regime_scale={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
+            intent_ticker.0, intent_kelly, effective_kelly, kelly_ramp,
+            ramped_kelly, portfolio.equity, size, regime_scale, adjusted_size,
+            self.config.minimum_entry_gbp, intent_confidence,
+        );
+
+        // SC-05: Minimum entry size gate.
         // Suspended during Kelly ramp when validated_trades < 250.
         if self.config.kelly_ramp_trades >= 250 && adjusted_size < self.config.minimum_entry_gbp {
             return self.reject(

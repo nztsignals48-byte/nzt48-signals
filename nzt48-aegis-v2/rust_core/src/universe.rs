@@ -84,7 +84,8 @@ pub struct UniverseConfig {
     pub amihud_threshold: f64,
     /// ASER threshold (0.005 = 0.5%) — tickers above this are filtered (H36).
     pub aser_threshold: f64,
-    /// Erroneous tick deviation threshold (0.05 = 5%) from 1s EMA (H77).
+    /// Erroneous tick deviation threshold from 1s EMA (H77).
+    /// Set to 15% to accommodate 3x leveraged ETPs (which can move 5%+ in seconds).
     pub erroneous_tick_pct: f64,
     /// Reverse split detection threshold (5.0 = 500%) overnight move (H76).
     pub reverse_split_pct: f64,
@@ -103,7 +104,7 @@ impl Default for UniverseConfig {
         Self {
             amihud_threshold: 1.0,
             aser_threshold: 0.005,
-            erroneous_tick_pct: 0.05,
+            erroneous_tick_pct: 0.15, // 15% to accommodate 3x leveraged ETPs
             reverse_split_pct: 5.0,
             synthetic_halt_ns: 30_000_000_000,
             apex_snapshot_interval_ns: 60_000_000_000,
@@ -300,7 +301,11 @@ impl Universe {
         }
 
         // Synthetic halt detection (H122): no ticks for 30s
+        // FIX: Update last_tick_ns even on filtered ticks to prevent permanent lockout.
+        // Previously, once a ticker was halted, last_tick_ns never updated, making
+        // (now_ns - last_tick_ns) grow forever and permanently blocking the ticker.
         if state.last_tick_ns > 0 && now_ns > state.last_tick_ns + self.config.synthetic_halt_ns {
+            state.last_tick_ns = now_ns; // Reset so next tick can pass through
             return RouteResult::Filtered(FilterReason::SyntheticHalt);
         }
 

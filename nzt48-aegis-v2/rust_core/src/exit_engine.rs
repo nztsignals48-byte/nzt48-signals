@@ -25,24 +25,52 @@ pub trait ExitStrategy: Send {
                           _amihud: f64, _heat: f64, _is_reduce: bool) {}
 }
 
-/// Chandelier 5-rung profit ladder (Le Beau 1999).
-/// Rung thresholds (ATR from entry): [0.5, 1.0, 1.5, 2.0, 3.0]
-/// Stop offsets (ATR from entry):     [0.0, 0.25, 0.5, 1.0, trail 1.5 ATR from high]
+/// Chandelier trailing-stop-only strategy — NO partial sells, FULL position rides.
+///
+/// The stop tightens as profit grows. The ONLY exit trigger is when price hits the stop.
+/// All sells are 100% of position.
+///
+/// Rung thresholds (percentage gain from entry):
+///   Rung 1: Entry          → Stop = entry - 2x ATR (widened from 1x to reduce noise exits)
+///   Rung 2: +2% from entry → Stop = breakeven INCLUDING round-trip fees
+///   Rung 3: +4% from entry → Trail 1.0x ATR below peak (NO partial sell)
+///   Rung 4: +6% from entry → Trail 0.75x ATR below peak (NO partial sell)
+///   Rung 5: +8% from entry → Trail 0.5x ATR below peak (NO partial sell)
+///   Beyond: every +2% more → keep trailing at 0.5x ATR below peak
 pub struct ChandelierStrategy {
-    /// ATR multiples to reach each rung (from entry price).
-    pub rung_thresholds: [f64; 5],
-    /// Stop offset from entry in ATR multiples (rungs 1-4). Rung 5 is trailing.
-    pub rung_stops: [f64; 4],
-    /// Trailing distance in ATR multiples for rung 5.
+    /// Percentage gain thresholds to reach each rung [0.0, 0.02, 0.04, 0.06, 0.08].
+    pub rung_pct_thresholds: [f64; 5],
+    /// ATR trailing multiplier for Rung 3.
+    pub rung3_trail_atr: f64,
+    /// ATR trailing multiplier for Rung 4.
+    pub rung4_trail_atr: f64,
+    /// ATR trailing multiplier for Rung 5+ (tightest trail, lets winners run).
     pub rung5_trail_atr: f64,
+    /// Estimated round-trip fee as a fraction of entry price.
+    /// Covers: entry commission + exit commission + spread cost.
+    /// Default 0.002 (0.2%) — conservative for LSE leveraged ETPs.
+    pub round_trip_fee_pct: f64,
 }
 
 impl Default for ChandelierStrategy {
     fn default() -> Self {
         Self {
-            rung_thresholds: [0.5, 1.0, 1.5, 2.0, 3.0],
-            rung_stops: [0.0, 0.25, 0.5, 1.0],
-            rung5_trail_atr: 1.5,
+            // AUDIT-RESTRUCTURED for compounding optimality (2026-03-18).
+            // Quant audit: "Rung spacing too wide. A system that wins 60% at +1.2%
+            // compounds faster than one that wins 50% at +2.0%."
+            // Old: [0.0, 0.02, 0.04, 0.06, 0.08] — Rung 2 at +2% was too far,
+            // most trades never reached breakeven lock.
+            // New: tighter rungs prioritize Rung 3 attainment (the "compounding unit").
+            rung_pct_thresholds: [0.0, 0.008, 0.015, 0.025, 0.040],
+            // Rung 1: entry         → Stop = entry - 1.5x ATR (tightened from 2x)
+            // Rung 2: +0.8%        → Stop = breakeven + fees (lock in near-zero quickly)
+            // Rung 3: +1.5%        → Trail 1.0x ATR below peak (the compounding unit)
+            // Rung 4: +2.5%        → Trail 0.75x ATR below peak
+            // Rung 5: +4.0%        → Trail 0.5x ATR below peak (tail capture)
+            rung3_trail_atr: 1.0,    // Rung 3: 1.0x ATR below peak
+            rung4_trail_atr: 0.75,   // Rung 4: 0.75x ATR below peak
+            rung5_trail_atr: 0.5,    // Rung 5+: 0.5x ATR below peak (tightest)
+            round_trip_fee_pct: 0.003, // 0.3% round-trip (conservative for LSE 3x ETPs)
         }
     }
 }
@@ -51,26 +79,36 @@ impl ExitStrategy for ChandelierStrategy {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
         let rung = self.compute_rung(pos, high, atr);
         match rung {
-            0 => pos.stop_price, // No rung reached, keep initial stop
-            1..=4 => {
-                let offset = self.rung_stops[(rung - 1) as usize];
-                pos.avg_entry + offset * atr
+            // Rung 0: not yet at entry rung — keep initial stop
+            0 => pos.stop_price,
+            // Rung 1: entry. Stop = entry - 1.5x ATR (audit-tightened from 2x for compounding)
+            // Tighter initial stop reduces per-trade loss, improving break-even Rung 2+ rate
+            1 => pos.avg_entry - 1.5 * atr,
+            // Rung 2: +2% gain. Stop = breakeven INCLUDING round-trip fees.
+            // You literally cannot lose money once this rung is reached.
+            2 => {
+                let fee_amount = pos.avg_entry * self.round_trip_fee_pct;
+                pos.avg_entry + fee_amount
             }
-            _ => {
-                // Rung 5: trail from highest_high
-                high - self.rung5_trail_atr * atr
-            }
+            // Rung 3: +4% gain. Trail 1.0x ATR below peak. NO partial sell.
+            3 => high - self.rung3_trail_atr * atr,
+            // Rung 4: +6% gain. Trail 0.75x ATR below peak. NO partial sell.
+            4 => high - self.rung4_trail_atr * atr,
+            // Rung 5+: +8%+ gain. Trail 0.5x ATR below peak. NO partial sell.
+            // For every additional +2%, stop stays at 0.5x ATR below peak.
+            _ => high - self.rung5_trail_atr * atr,
         }
     }
 
-    fn compute_rung(&self, pos: &PositionState, high: f64, atr: f64) -> u8 {
-        if atr <= 0.0 {
+    fn compute_rung(&self, pos: &PositionState, high: f64, _atr: f64) -> u8 {
+        if pos.avg_entry <= 0.0 {
             return 0;
         }
-        let profit_atr = (high - pos.avg_entry) / atr;
+        // Percentage gain from entry (based on highest high, not current price)
+        let gain_pct = (high - pos.avg_entry) / pos.avg_entry;
         let mut rung = 0u8;
-        for (i, &threshold) in self.rung_thresholds.iter().enumerate() {
-            if profit_atr >= threshold {
+        for (i, &threshold) in self.rung_pct_thresholds.iter().enumerate() {
+            if gain_pct >= threshold {
                 rung = (i + 1) as u8;
             }
         }
@@ -186,13 +224,21 @@ impl ExitEngine {
         }
 
         // Priority 4: Hard stop-loss
+        // Gap-down protection: if price gapped THROUGH stop (current_price < stop_price),
+        // fire MarketSell immediately — don't wait for a limit fill that may never come.
         if current_price <= position.stop_price {
+            let gapped_through = current_price < position.stop_price;
             checks.push(ExitCheck {
                 reason: ExitReason::HardStopLoss,
                 priority: ExitPriority::HardStopLoss,
-                order_type: ExitOrderType::LimitAtStop,
-                limit_price: Some(position.stop_price),
-                tif: TimeInForce::Day, // Normal exit = DAY (H69)
+                order_type: if gapped_through {
+                    // Stop breached by gap/slippage — emergency market sell
+                    ExitOrderType::MarketSell
+                } else {
+                    ExitOrderType::LimitAtStop
+                },
+                limit_price: if gapped_through { None } else { Some(position.stop_price) },
+                tif: if gapped_through { TimeInForce::Ioc } else { TimeInForce::Day },
             });
         }
 
@@ -203,12 +249,18 @@ impl ExitEngine {
                 .strategy
                 .compute_stop(position, position.highest_high, atr);
             if current_price <= chandelier_stop && chandelier_stop > position.stop_price {
+                let gapped_through = current_price < chandelier_stop;
                 checks.push(ExitCheck {
                     reason: ExitReason::ChandelierTrailing,
                     priority: ExitPriority::ChandelierStop,
-                    order_type: ExitOrderType::LimitAtStop,
-                    limit_price: Some(chandelier_stop),
-                    tif: TimeInForce::Day,
+                    order_type: if gapped_through {
+                        // Stop breached by gap/slippage — emergency market sell
+                        ExitOrderType::MarketSell
+                    } else {
+                        ExitOrderType::LimitAtStop
+                    },
+                    limit_price: if gapped_through { None } else { Some(chandelier_stop) },
+                    tif: if gapped_through { TimeInForce::Ioc } else { TimeInForce::Day },
                 });
             }
         }
@@ -266,7 +318,9 @@ impl ExitEngine {
 
     /// Update position tracking on each tick. Call BEFORE evaluate.
     /// Updates highest_high (H70), rung, and stop price (H68: ratchet UP only).
-    pub fn update_tracking(&self, position: &mut PositionState, current_price: f64, atr: f64) {
+    /// Returns Some((old_rung, new_rung)) if rung advanced, None otherwise.
+    /// Caller should write RungAdvanced WAL event when Some is returned.
+    pub fn update_tracking(&self, position: &mut PositionState, current_price: f64, atr: f64) -> Option<(u8, u8)> {
         // Update highest_high
         if current_price > position.highest_high {
             position.highest_high = current_price;
@@ -275,9 +329,13 @@ impl ExitEngine {
         let new_rung = self
             .strategy
             .compute_rung(position, position.highest_high, atr);
-        if new_rung > position.trailing_rung {
+        let rung_advanced = if new_rung > position.trailing_rung {
+            let old = position.trailing_rung;
             position.trailing_rung = new_rung;
-        }
+            Some((old, new_rung))
+        } else {
+            None
+        };
         // Compute new stop (H68: can NEVER decrease)
         let new_stop = self
             .strategy
@@ -285,6 +343,7 @@ impl ExitEngine {
         if new_stop > position.stop_price {
             position.stop_price = new_stop;
         }
+        rung_advanced
     }
 
     /// Price spike filter (H71): detect if a price drop is likely a spike artifact.
@@ -497,13 +556,17 @@ impl ExitStrategy for InfiniteChandelier {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
         let rung = self.compute_rung(pos, high, atr);
         match rung {
+            // Rungs 0-4: delegate to base ChandelierStrategy (same new logic)
             0 => pos.stop_price,
-            1..=4 => {
-                let offset = self.base.rung_stops[(rung - 1) as usize];
-                pos.avg_entry + offset * atr
+            1 => pos.avg_entry - 1.5 * atr, // AUDIT-FIX: match base ChandelierStrategy (was 1.0x)
+            2 => {
+                let fee_amount = pos.avg_entry * self.base.round_trip_fee_pct;
+                pos.avg_entry + fee_amount
             }
+            3 => high - self.base.rung3_trail_atr * atr,
+            4 => high - self.base.rung4_trail_atr * atr,
             _ => {
-                // Rung 5+: adaptive trailing with multipliers
+                // Rung 5+: adaptive trailing with multipliers applied to rung5 trail
                 self.adaptive_trail(high, atr)
             }
         }

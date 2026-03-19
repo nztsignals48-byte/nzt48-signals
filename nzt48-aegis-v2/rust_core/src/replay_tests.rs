@@ -271,8 +271,8 @@ mod tests {
             };
             engine.process_tick(tick);
         }
-        // Inject >5% erroneous spike
-        let spike = inject_spike_tick(tid, 10.0, 0.08, base_ns + 3_000_000_000);
+        // Inject >15% erroneous spike (threshold raised for 3x ETP compatibility)
+        let spike = inject_spike_tick(tid, 10.0, 0.20, base_ns + 3_000_000_000);
         engine.process_tick(spike);
         assert!(
             engine.counters.erroneous_ticks >= 1,

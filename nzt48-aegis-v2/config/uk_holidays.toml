@@ -1,4 +1,4 @@
-# UK Bank Holidays — 2026-2027
+# UK Bank Holidays — 2026-2029
 # Updated annually by human operator in January.
 # Source: https://www.gov.uk/bank-holidays
 # If current year's holidays are missing on boot → log CRITICAL warning.
@@ -26,4 +26,28 @@ year_2027 = [
     "2027-08-30",  # Summer bank holiday
     "2027-12-27",  # Christmas Day (substitute)
     "2027-12-28",  # Boxing Day (substitute)
+]
+
+# 2028 UK Bank Holidays
+year_2028 = [
+    "2028-01-03",  # New Year's Day (substitute)
+    "2028-04-14",  # Good Friday
+    "2028-04-17",  # Easter Monday
+    "2028-05-01",  # Early May bank holiday
+    "2028-05-29",  # Spring bank holiday
+    "2028-08-28",  # Summer bank holiday
+    "2028-12-25",  # Christmas Day
+    "2028-12-26",  # Boxing Day
+]
+
+# 2029 UK Bank Holidays
+year_2029 = [
+    "2029-01-01",  # New Year's Day
+    "2029-03-30",  # Good Friday
+    "2029-04-02",  # Easter Monday
+    "2029-05-07",  # Early May bank holiday
+    "2029-05-28",  # Spring bank holiday
+    "2029-08-27",  # Summer bank holiday
+    "2029-12-25",  # Christmas Day
+    "2029-12-26",  # Boxing Day
 ]

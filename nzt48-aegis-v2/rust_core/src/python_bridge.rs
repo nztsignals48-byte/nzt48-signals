@@ -27,18 +27,29 @@ pub struct BrainSignal {
     pub shares: u32,
     #[pyo3(get)]
     pub strategy: String,
+    // AUDIT-FIX: Indicator context for Ouroboros learning.
+    // Captured at signal generation time, written to WAL for win/loss analysis.
+    #[pyo3(get)]
+    pub rvol: f64,
+    #[pyo3(get)]
+    pub hurst: f64,
+    #[pyo3(get)]
+    pub adx: f64,
 }
 
 #[pymethods]
 impl BrainSignal {
     #[new]
-    #[pyo3(signature = (direction, confidence, kelly_fraction, shares, strategy))]
+    #[pyo3(signature = (direction, confidence, kelly_fraction, shares, strategy, rvol=0.0, hurst=0.0, adx=0.0))]
     fn new(
         direction: String,
         confidence: f64,
         kelly_fraction: f64,
         shares: u32,
         strategy: String,
+        rvol: f64,
+        hurst: f64,
+        adx: f64,
     ) -> Self {
         Self {
             direction,
@@ -46,6 +57,9 @@ impl BrainSignal {
             kelly_fraction,
             shares,
             strategy,
+            rvol,
+            hurst,
+            adx,
         }
     }
 }
@@ -298,6 +312,9 @@ impl PythonBridge {
             kelly_fraction: resp.get("kelly_fraction")?.as_f64()?,
             shares: resp.get("shares")?.as_u64()? as u32,
             strategy: resp.get("strategy")?.as_str()?.to_string(),
+            rvol: resp.get("rvol").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            hurst: resp.get("hurst").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            adx: resp.get("adx").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -375,6 +392,9 @@ impl PythonBridge {
             kelly_fraction: resp.get("kelly_fraction")?.as_f64()?,
             shares: resp.get("shares")?.as_u64()? as u32,
             strategy: resp.get("strategy")?.as_str()?.to_string(),
+            rvol: resp.get("rvol").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            hurst: resp.get("hurst").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            adx: resp.get("adx").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -457,6 +477,9 @@ mod tests {
             kelly_fraction: 0.12,
             shares: 50,
             strategy: "VanguardSniper".into(),
+            rvol: 1.5,
+            hurst: 0.55,
+            adx: 25.0,
         };
         assert_eq!(signal.shares, 50);
         assert_eq!(signal.confidence, 78.5);

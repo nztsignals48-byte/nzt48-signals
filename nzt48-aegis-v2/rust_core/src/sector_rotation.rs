@@ -38,7 +38,7 @@ pub fn sector_for_ticker(ticker_id: TickerId) -> Sector {
         9 => Sector::Technology,     // QQQS.L
         10 => Sector::USBroad,       // 3USS.L
         11 => Sector::Technology,    // QQQ5.L
-        12 => Sector::USBroad,       // SP5L.L
+        12 => Sector::USBroad,       // 5SPY.L
         _ => Sector::Unknown,
     }
 }

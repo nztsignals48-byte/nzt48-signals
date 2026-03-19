@@ -114,6 +114,11 @@ impl PortfolioState {
         &self.positions
     }
 
+    /// Mutable access to positions (for WAL replay rung restoration).
+    pub fn positions_mut(&mut self) -> &mut HashMap<TickerId, PositionState> {
+        &mut self.positions
+    }
+
     /// Filled + pending combined (H34).
     pub fn total_position_count(&self) -> u32 {
         self.positions.len() as u32 + self.pending_count
@@ -221,6 +226,24 @@ impl PortfolioState {
         self.positions.contains_key(ticker_id)
     }
 
+    /// Count how many open positions exist for a specific ticker.
+    /// Used by momentum re-entry logic to allow winners to have multiple positions.
+    pub fn position_count_for(&self, ticker_id: &TickerId) -> u32 {
+        if self.positions.contains_key(ticker_id) { 1 } else { 0 }
+    }
+
+    /// Mark-to-market: recalculate equity from cash + sum of position market values.
+    /// FIX: equity was set at construction and NEVER updated, always showing initial value.
+    pub fn mark_to_market(&mut self, last_prices: &std::collections::HashMap<TickerId, f64>) {
+        let position_value: f64 = self.positions.values().map(|p| {
+            let price = last_prices.get(&p.ticker_id).copied().unwrap_or(p.avg_entry);
+            price * p.qty as f64
+        }).sum();
+        self.equity = self.cash + position_value;
+        // Update daily P&L
+        self.daily_pnl = self.equity - self.high_water_mark;
+    }
+
     pub fn update_high_water(&mut self) {
         if self.equity > self.high_water_mark {
             self.high_water_mark = self.equity;
@@ -281,6 +304,8 @@ mod tests {
             state: OrderState::Filled,
             origin_order_id: "test".to_string(),
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         }
     }
 

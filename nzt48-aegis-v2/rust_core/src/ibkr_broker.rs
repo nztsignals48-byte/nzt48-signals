@@ -1,14 +1,16 @@
 //! IbkrBroker — real IBKR adapter via `ibapi` crate.
 //! Implements BrokerAdapter trait + market data subscriptions.
 //!
-//! Connection: IB Gateway on localhost:4002 (paper) or 4001 (live).
+//! Connection: IB Gateway on localhost:4003 (gnzsnz paper proxy) or 4001 (live).
 //! Client ID: 101 (Executioner V2) per config.toml.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
-use ibapi::market_data::realtime::{BarSize, BidAsk, WhatToShow};
+use ibapi::contracts::tick_types::TickType;
+use ibapi::market_data::realtime::{BarSize, BidAsk, TickTypes, WhatToShow};
+use ibapi::orders::OrderUpdate;
 use ibapi::prelude::TradingHours;
 use ibapi::subscriptions::sync::Subscription;
 
@@ -31,7 +33,7 @@ impl Default for IbkrBrokerConfig {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
-            port: 4002,
+            port: 4003, // gnzsnz/ib-gateway paper API proxy port
             client_id: 101,
             rate_limit_per_sec: 50,
             heartbeat_timeout_ns: 60_000_000_000,
@@ -65,6 +67,42 @@ struct L1Subscription {
     sub: Subscription<BidAsk>,
 }
 
+/// reqMktData streaming subscription handle (works with delayed data).
+struct MktDataSubscription {
+    ticker_id: TickerId,
+    symbol: String,
+    sub: Subscription<TickTypes>,
+}
+
+/// Streaming tick accumulator — builds synthetic bars from reqMktData ticks.
+/// Throttled: only emits a MarketTick every 5 seconds to prevent backpressure.
+struct TickAccumulator {
+    bid: f64,
+    ask: f64,
+    last: f64,
+    high: f64,
+    low: f64,
+    volume: u64,
+    has_data: bool,
+    /// Nanosecond timestamp of last emitted tick (throttle to 5s cadence).
+    last_emit_ns: u64,
+}
+
+impl Default for TickAccumulator {
+    fn default() -> Self {
+        Self {
+            bid: 0.0,
+            ask: 0.0,
+            last: 0.0,
+            high: 0.0,
+            low: 0.0,
+            volume: 0,
+            has_data: false,
+            last_emit_ns: 0,
+        }
+    }
+}
+
 /// Real IBKR broker adapter via `ibapi` crate.
 pub struct IbkrBroker {
     config: IbkrBrokerConfig,
@@ -77,12 +115,20 @@ pub struct IbkrBroker {
     rate_limiter: TokenBucket,
     last_heartbeat_ns: u64,
     now_ns: u64,
-    // Market data
+    // Market data — dual track: reqRealTimeBars (primary) + reqMktData (fallback)
     bar_subs: Vec<BarSubscription>,
     l1_subs: Vec<L1Subscription>,
+    /// reqMktData streaming subscriptions (works with delayed data).
+    mktdata_subs: Vec<MktDataSubscription>,
+    /// Tick accumulators per ticker (for building synthetic bars from reqMktData).
+    tick_accum: HashMap<TickerId, TickAccumulator>,
+    /// Tickers that have bar failures — use reqMktData for these.
+    bar_failed_tickers: HashSet<TickerId>,
     /// Real-time L1 bid/ask cache from tick-by-tick subscriptions (P0-01).
     l1_cache: HashMap<TickerId, (f64, f64)>,
     pending_ticks: VecDeque<MarketTick>,
+    /// Order update stream subscription for fill detection (ibapi).
+    order_update_sub: Option<Subscription<OrderUpdate>>,
     // Contract mappings
     contract_map: HashMap<TickerId, ContractMapping>,
     // Cached positions/orders from last request
@@ -92,6 +138,14 @@ pub struct IbkrBroker {
     pub bar_high_low: HashMap<TickerId, Vec<(f64, f64)>>,
     /// SC-19: Reconnection count for client_id rotation on Error 326.
     reconnect_count: u32,
+    /// Diagnostic: total polls with zero data (for detecting silent subscription failures).
+    zero_data_polls: u32,
+    /// Diagnostic: total bars ever received (lifetime counter).
+    total_bars_received: u64,
+    /// Diagnostic: total L1 ticks ever received (lifetime counter).
+    total_l1_received: u64,
+    /// Diagnostic: subscription errors detected (ibapi bug #434 — errors come as ParseInt).
+    sub_errors_detected: u32,
 }
 
 impl IbkrBroker {
@@ -110,13 +164,21 @@ impl IbkrBroker {
             now_ns: 0,
             bar_subs: Vec::new(),
             l1_subs: Vec::new(),
+            mktdata_subs: Vec::new(),
+            tick_accum: HashMap::new(),
+            bar_failed_tickers: HashSet::new(),
             l1_cache: HashMap::new(),
             pending_ticks: VecDeque::new(),
+            order_update_sub: None,
             contract_map: HashMap::new(),
             cached_positions: Vec::new(),
             cached_orders: Vec::new(),
             bar_high_low: HashMap::new(),
             reconnect_count: 0,
+            zero_data_polls: 0,
+            total_bars_received: 0,
+            total_l1_received: 0,
+            sub_errors_detected: 0,
         }
     }
 
@@ -126,23 +188,37 @@ impl IbkrBroker {
     }
 
     /// Connect to IB Gateway via ibapi.
-    /// SC-14: reqMarketDataType(1) = RealTime. Requires active market data subscription.
-    /// Falls back to DelayedFrozen if RealTime fails (e.g. no subscription).
+    /// SC-14: Try RealTime first, fall back to DelayedFrozen for paper accounts.
+    /// Paper accounts need market data sharing enabled in Account Management.
     pub fn connect(&mut self) -> Result<(), BrokerError> {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         match Client::connect(&addr, self.config.client_id as i32) {
             Ok(client) => {
-                // SC-14: Request real-time data (Type 1). Requires market data subscription.
-                // Paper accounts share the live account's market data subscriptions.
-                if let Err(e) = client.switch_market_data_type(ibapi::market_data::MarketDataType::Realtime) {
-                    eprintln!("IBKR: switch_market_data_type(RealTime) failed: {e}, falling back to DelayedFrozen");
-                    let _ = client.switch_market_data_type(ibapi::market_data::MarketDataType::DelayedFrozen);
-                } else {
-                    eprintln!("IBKR: reqMarketDataType(1) — real-time (SC-14)");
+                // SC-14: Request Delayed data (Type 3) — provides real-time for exchanges with
+                // Type 3 (Delayed): real-time for subscribed exchanges (user has LSE L2),
+                // 15-min delayed for unsubscribed. LSE ETPs get real-time data.
+                // Type 1 would block data for unsubscribed exchanges entirely.
+                match client.switch_market_data_type(ibapi::market_data::MarketDataType::Delayed) {
+                    Ok(_) => eprintln!("IBKR: reqMarketDataType(3) — REAL-TIME for LSE (L2 sub), delayed for unsubscribed exchanges"),
+                    Err(e) => eprintln!("IBKR: switch_market_data_type(3) failed: {e}"),
                 }
 
                 // Monotonic: never accept a lower ID (IBKR can re-send during farm flaps)
                 self.next_valid_id = self.next_valid_id.max(client.next_order_id());
+
+                // Subscribe to order update stream for fill detection.
+                // This single subscription receives ALL order status, execution,
+                // and commission updates across all orders.
+                match client.order_update_stream() {
+                    Ok(sub) => {
+                        eprintln!("IBKR: order_update_stream subscribed (fill detection active)");
+                        self.order_update_sub = Some(sub);
+                    }
+                    Err(e) => {
+                        eprintln!("IBKR: order_update_stream failed: {e} (fills will NOT be detected)");
+                    }
+                }
+
                 self.client = Some(client);
                 self.connected = true;
                 self.last_heartbeat_ns = self.now_ns;
@@ -166,7 +242,11 @@ impl IbkrBroker {
     pub fn disconnect(&mut self) {
         self.bar_subs.clear();
         self.l1_subs.clear();
+        self.mktdata_subs.clear();
+        self.tick_accum.clear();
+        self.bar_failed_tickers.clear();
         self.l1_cache.clear();
+        self.order_update_sub = None;
         self.client = None;
         self.connected = false;
         self.events.push_back(BrokerEvent::Disconnected);
@@ -195,12 +275,149 @@ impl IbkrBroker {
         self.contract_map.insert(mapping.ticker_id, mapping);
     }
 
+    /// Dynamically register a contract inferred from symbol and watchlist metadata.
+    /// Used when watchlist introduces tickers not in contracts.toml.
+    /// Returns true if newly registered, false if already exists.
+    pub fn register_dynamic_contract(
+        &mut self,
+        ticker_id: TickerId,
+        symbol: &str,
+        exchange_hint: &str,
+        currency_hint: &str,
+    ) -> bool {
+        if self.contract_map.contains_key(&ticker_id) {
+            return false; // Already registered
+        }
+        let ibkr_symbol = Self::derive_ibkr_symbol(symbol, exchange_hint);
+
+        let ibkr_exch = Self::ibkr_exchange(exchange_hint);
+        eprintln!(
+            "CONTRACT_REG: ticker={} sym={} ibkr_sym={} exch={}→{} ccy={}",
+            ticker_id.0, symbol, ibkr_symbol,
+            exchange_hint, ibkr_exch, currency_hint
+        );
+        let mapping = ContractMapping {
+            ticker_id,
+            symbol: symbol.to_string(),
+            ibkr_symbol,
+            exchange: exchange_hint.to_string(),
+            currency: currency_hint.to_string(),
+        };
+        self.contract_map.insert(ticker_id, mapping);
+        true
+    }
+
+    /// Derive IBKR-compatible symbol from our internal symbol + exchange.
+    ///
+    /// Exchange suffix rules (yfinance → IBKR):
+    ///   .L  → strip (LSE/LSEETF)     .T  → strip (TSE/TSEJ)
+    ///   .AX → strip (ASX)             .KS → strip (KRX/KSE)
+    ///   .SI → strip (SGX)             .HK → strip (HKEX/SEHK)
+    ///   .SS → strip (SSE)             .SZ → strip (SZSE)
+    ///   .DE → strip (XETRA/IBIS)      .PA → strip (Euronext Paris)
+    ///   .AS → strip (Euronext Amsterdam) .BR → strip (Euronext Brussels)
+    ///   .LS → strip (Euronext Lisbon)  .MI → strip (Borsa Italiana)
+    ///   .MC → strip (Bolsa Madrid)     .SW → strip (SIX Swiss)
+    ///   .ST → strip (Nasdaq Stockholm) .OL → strip (Oslo Børs)
+    ///   .CO → strip (Nasdaq Copenhagen) .HE → strip (Nasdaq Helsinki)
+    ///
+    /// Exchange-specific transforms:
+    ///   HKEX: strip leading zeros (0001.HK → "1")
+    ///   KRX:  keep leading zeros  (005930.KS → "005930")
+    ///   TSE:  numeric codes as-is  (6758.T → "6758")
+    fn derive_ibkr_symbol(symbol: &str, exchange: &str) -> String {
+        // Strip all known exchange suffixes (yfinance convention)
+        let suffixes = [
+            ".L", ".T", ".AX", ".KS", ".SI", ".HK", ".SS", ".SZ",
+            ".DE", ".PA", ".AS", ".BR", ".LS", ".MI", ".MC", ".SW",
+            ".ST", ".OL", ".CO", ".HE",
+        ];
+        let base = suffixes.iter()
+            .find_map(|suffix| symbol.strip_suffix(suffix))
+            .unwrap_or(symbol);
+
+        // Exchange-specific transformations
+        let ibkr_sym = match exchange {
+            // HKEX/SEHK: strip leading zeros from numeric codes (0001 → 1)
+            "HKEX" | "SEHK" => base.trim_start_matches('0'),
+            // KRX/KSE: IBKR uses the full numeric code WITH leading zeros
+            // (005930 stays 005930). Do NOT strip.
+            "KRX" | "KSE" => base,
+            // All others: use base symbol as-is
+            _ => base,
+        };
+
+        // Safety: if trimming emptied the string (e.g. symbol "0" on HKEX), use "0"
+        let ibkr_sym = if ibkr_sym.is_empty() { "0" } else { ibkr_sym };
+        ibkr_sym.to_string()
+    }
+
+    /// Check if a ticker_id has a registered contract.
+    pub fn has_contract(&self, ticker_id: &TickerId) -> bool {
+        self.contract_map.contains_key(ticker_id)
+    }
+
+    /// Map our internal/watchlist exchange names to IBKR API exchange codes.
+    /// Covers all 6 market regions: Asia, Europe, US.
+    fn ibkr_exchange(exchange: &str) -> &str {
+        match exchange {
+            // === Asian ===
+            "TSE"          => "TSEJ",     // Tokyo Stock Exchange Japan
+            "HKEX"         => "SEHK",     // Stock Exchange of Hong Kong
+            "KRX"          => "KSE",      // Korea Exchange
+            "SGX"          => "SGX",      // Singapore Exchange
+            "ASX"          => "ASX",      // Australian Securities Exchange
+            // === European ===
+            "LSE"          => "LSE",      // London main market
+            "LSEETF"       => "LSEETF",   // London ETF/ETP segment
+            "XETRA"        => "IBIS",     // Frankfurt/XETRA
+            "EURONEXT"     => "SBF",      // Euronext Paris (default)
+            "EURONEXT_PA"  => "SBF",      // Euronext Paris
+            "EURONEXT_AS"  => "AEB",      // Euronext Amsterdam
+            "EURONEXT_BR"  => "BVME",     // Euronext Brussels
+            "EURONEXT_LS"  => "BVL",      // Euronext Lisbon
+            "SIX"          => "EBS",      // SIX Swiss Exchange (via IBKR code EBS)
+            "XSTO"         => "SFB",      // Nasdaq Stockholm
+            "XCSE"         => "XCSE",     // Nasdaq Copenhagen
+            "XOSL"         => "OSE",      // Oslo Børs
+            "XHEL"         => "HEX",      // Nasdaq Helsinki
+            "XMIL"         => "BVME",     // Borsa Italiana (Milan)
+            "XMAD"         => "BM",       // Bolsa de Madrid
+            "AEB"          => "AEB",      // Euronext Amsterdam (legacy)
+            "HEX"          => "HEX",      // Helsinki (legacy)
+            "SFB"          => "SFB",      // Nasdaq Nordic (legacy)
+            // === US ===
+            "SMART"        => "SMART",    // IBKR Smart routing (US default)
+            "NYSE"         => "SMART",    // Routed via SMART
+            "NASDAQ"       => "SMART",    // Routed via SMART
+            "AMEX"         => "SMART",    // Routed via SMART
+            // Pass through anything else
+            other          => other,
+        }
+    }
+
     /// Build an ibapi Contract from our config.
+    /// Maps internal exchange names to IBKR API codes.
+    ///
+    /// US equities use SMART routing (best execution across venues).
+    /// International equities use DIRECT exchange routing — SMART doesn't resolve
+    /// KRX, TSEJ, SEHK, etc. properly (returns code=200 "No security definition").
     fn build_contract(mapping: &ContractMapping) -> Contract {
+        let ibkr_exchange = Self::ibkr_exchange(&mapping.exchange);
+
+        // US equities: SMART routing with no primary hint (IBKR resolves automatically)
+        if ibkr_exchange == "SMART" {
+            return Contract::stock(&mapping.ibkr_symbol)
+                .on_exchange("SMART")
+                .in_currency(&mapping.currency)
+                .build();
+        }
+
+        // International equities: direct exchange routing
+        // IBKR requires the actual exchange code (TSEJ, SEHK, KSE, IBIS, etc.)
         Contract::stock(&mapping.ibkr_symbol)
-            .on_exchange(&mapping.exchange)
+            .on_exchange(ibkr_exchange)
             .in_currency(&mapping.currency)
-            .primary(&mapping.exchange)
             .build()
     }
 
@@ -215,12 +432,17 @@ impl IbkrBroker {
             })?
             .clone();
 
+        let ibkr_exchange = Self::ibkr_exchange(&mapping.exchange);
         let contract = Self::build_contract(&mapping);
+        eprintln!(
+            "IBKR: Subscribing bars for {} → ibkr_sym={} exchange={} currency={}",
+            mapping.symbol, mapping.ibkr_symbol, ibkr_exchange, mapping.currency
+        );
         match client.realtime_bars(
             &contract,
             BarSize::Sec5,
             WhatToShow::Trades,
-            TradingHours::Regular,
+            TradingHours::Extended,
         ) {
             Ok(sub) => {
                 eprintln!(
@@ -242,11 +464,90 @@ impl IbkrBroker {
     }
 
     /// Subscribe to bars for all registered contracts.
+    /// Dual-track: reqRealTimeBars (primary, needs paid subs) + reqMktData (fallback, delayed OK).
+    /// reqMktData emission is throttled to 5-second cadence in poll_ticks() to prevent
+    /// backpressure thrashing that occurred when mktdata emitted on every tick.
     pub fn subscribe_all(&mut self) -> u32 {
+        // IBKR paper accounts limit to ~100 concurrent data subscriptions.
+        // With 266+ contracts across 7 exchanges, we MUST cap subscriptions.
+        // Use reqMktData only (not dual-track) to halve the subscription count.
+        // reqMktData works with both real-time and delayed data.
+        const MAX_SUBSCRIPTIONS: usize = 100;
+
+        // CRITICAL FIX: Prioritize LSEETF (ISA core ETPs) first, then other exchanges.
+        // HashMap iteration order is non-deterministic — without sorting, LSE ETPs
+        // may be skipped when the 100-line cap is hit.
+        let mut ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
+        ticker_ids.sort_by(|a, b| {
+            let a_lse = self.contract_map.get(a)
+                .map(|m| m.exchange == "LSEETF")
+                .unwrap_or(false);
+            let b_lse = self.contract_map.get(b)
+                .map(|m| m.exchange == "LSEETF")
+                .unwrap_or(false);
+            // LSEETF first (true > false when reversed)
+            b_lse.cmp(&a_lse).then(a.0.cmp(&b.0))
+        });
+
+        let mut mkt_count = 0u32;
+        let mut skipped = 0u32;
+        for &tid in &ticker_ids {
+            if mkt_count as usize >= MAX_SUBSCRIPTIONS {
+                skipped += 1;
+                continue;
+            }
+            if self.subscribe_mktdata(tid).is_ok() {
+                mkt_count += 1;
+            }
+        }
+
+        eprintln!(
+            "SUBSCRIBE: {} reqMktData (cap={}, skipped={} over limit, total_contracts={})",
+            mkt_count, MAX_SUBSCRIPTIONS, skipped, ticker_ids.len()
+        );
+        mkt_count
+    }
+
+    /// Subscribe to reqMktData streaming for a contract (delayed-data compatible).
+    /// This is the fallback when reqRealTimeBars fails (e.g. paper account without shared subs).
+    pub fn subscribe_mktdata(&mut self, ticker_id: TickerId) -> Result<(), BrokerError> {
+        let client = self.client.as_ref().ok_or(BrokerError::NotConnected)?;
+        let mapping = self
+            .contract_map
+            .get(&ticker_id)
+            .ok_or_else(|| {
+                BrokerError::InvalidOrder(format!("No contract for ticker {}", ticker_id.0))
+            })?
+            .clone();
+
+        let contract = Self::build_contract(&mapping);
+        match client.market_data(&contract).subscribe() {
+            Ok(sub) => {
+                eprintln!(
+                    "IBKR: MktData subscribed for {} (ticker_id={}, exchange={})",
+                    mapping.symbol, ticker_id.0, mapping.exchange
+                );
+                self.mktdata_subs.push(MktDataSubscription {
+                    ticker_id,
+                    symbol: mapping.symbol,
+                    sub,
+                });
+                self.tick_accum.insert(ticker_id, TickAccumulator::default());
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("IBKR: MktData subscription failed for {}: {e}", mapping.symbol);
+                Err(BrokerError::InvalidOrder(format!("mktdata subscribe: {e}")))
+            }
+        }
+    }
+
+    /// Subscribe to reqMktData for all registered contracts (no bars, pure tick stream).
+    pub fn subscribe_all_mktdata(&mut self) -> u32 {
         let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
         let mut count = 0u32;
         for tid in ticker_ids {
-            if self.subscribe_bars(tid).is_ok() {
+            if self.subscribe_mktdata(tid).is_ok() {
                 count += 1;
             }
         }
@@ -360,20 +661,50 @@ impl IbkrBroker {
         self.l1_subs.len() as u32
     }
 
+    /// Return all registered TickerIds from the contract map.
+    pub fn contract_map_keys(&self) -> Vec<TickerId> {
+        self.contract_map.keys().copied().collect()
+    }
+
+    /// Return the symbol for a given TickerId, if registered.
+    pub fn symbol_for(&self, tid: TickerId) -> Option<&str> {
+        self.contract_map.get(&tid).map(|m| m.symbol.as_str())
+    }
+
     /// Poll all bar subscriptions and L1 tick-by-tick subscriptions. Non-blocking.
+    /// Includes ibapi bug #434 workaround: check subscription.error() for silent failures.
     pub fn poll_ticks(&mut self) {
         // 1. Drain L1 bid/ask ticks into cache (P0-01).
+        let mut l1_count = 0u32;
         for l1_sub in &self.l1_subs {
             while let Some(ba) = l1_sub.sub.try_next() {
+                l1_count += 1;
                 if ba.bid_price > 0.0 && ba.ask_price > 0.0 {
                     self.l1_cache.insert(l1_sub.ticker_id, (ba.bid_price, ba.ask_price));
                 }
             }
+            // ibapi bug #434: Check for errors that got silently converted to ParseInt.
+            // IBKR error 354 ("Not subscribed") arrives as "ParseInt: invalid digit" in ibapi.
+            if let Some(err) = l1_sub.sub.error() {
+                let err_str = format!("{err}");
+                if self.sub_errors_detected < 20 {
+                    eprintln!(
+                        "IBKR SUB ERROR [L1 {}]: {} (likely error 354 — no market data subscription shared to paper account)",
+                        l1_sub.symbol, err_str
+                    );
+                }
+                self.sub_errors_detected += 1;
+            }
         }
 
         // 2. Drain bar subscriptions, using L1 cache for bid/ask when available.
+        // Track which tickers got bar data this cycle to avoid duplicate ticks from mktdata.
+        let mut bar_tickers_this_cycle: HashSet<TickerId> = HashSet::new();
+        let mut bar_count = 0u32;
         for bar_sub in &self.bar_subs {
             while let Some(bar) = bar_sub.sub.try_next() {
+                bar_count += 1;
+                bar_tickers_this_cycle.insert(bar_sub.ticker_id);
                 let ts_ns = bar.date.unix_timestamp_nanos() as u64;
                 // P0-01: Use real L1 bid/ask from cache. Fall back to synthetic
                 // spread estimation only during cold start (before L1 data arrives).
@@ -402,6 +733,185 @@ impl IbkrBroker {
                     .or_default()
                     .push((bar.high, bar.low));
             }
+            // ibapi bug #434: Check for errors on bar subscriptions too.
+            if let Some(err) = bar_sub.sub.error() {
+                let err_str = format!("{err}");
+                if self.sub_errors_detected < 20 {
+                    eprintln!(
+                        "IBKR SUB ERROR [BAR {}]: {} (likely error 354/10168 — no market data subscription shared to paper account)",
+                        bar_sub.symbol, err_str
+                    );
+                }
+                self.sub_errors_detected += 1;
+            }
+        }
+
+        // 3. Drain reqMktData streaming subscriptions (fallback path).
+        // Accumulate bid/ask/last into TickAccumulator, but ONLY EMIT a MarketTick
+        // every 5 seconds per ticker. This prevents the backpressure thrashing (31K+
+        // halt/recover cycles) that occurred when emitting on every individual tick.
+        let five_sec_ns: u64 = 5_000_000_000;
+        let mut mkt_count = 0u32;
+        for mkt_sub in &self.mktdata_subs {
+            let has_bar_data = bar_tickers_this_cycle.contains(&mkt_sub.ticker_id);
+            // Drain ALL pending ticks into accumulator (non-blocking, no emission here)
+            while let Some(tick_type) = mkt_sub.sub.try_next() {
+                match &tick_type {
+                    TickTypes::Price(tp) => {
+                        if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
+                            match tp.tick_type {
+                                TickType::Bid | TickType::DelayedBid => {
+                                    if tp.price > 0.0 { acc.bid = tp.price; acc.has_data = true; }
+                                }
+                                TickType::Ask | TickType::DelayedAsk => {
+                                    if tp.price > 0.0 { acc.ask = tp.price; acc.has_data = true; }
+                                }
+                                TickType::Last | TickType::DelayedLast => {
+                                    if tp.price > 0.0 {
+                                        acc.last = tp.price;
+                                        if acc.high == 0.0 || tp.price > acc.high { acc.high = tp.price; }
+                                        if acc.low == 0.0 || tp.price < acc.low { acc.low = tp.price; }
+                                        acc.has_data = true;
+                                    }
+                                }
+                                TickType::High | TickType::DelayedHigh => {
+                                    if tp.price > 0.0 { acc.high = tp.price; }
+                                }
+                                TickType::Low | TickType::DelayedLow => {
+                                    if tp.price > 0.0 { acc.low = tp.price; }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    TickTypes::Size(ts) => {
+                        if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
+                            if matches!(ts.tick_type, TickType::Volume | TickType::DelayedVolume) {
+                                acc.volume = ts.size as u64;
+                            }
+                        }
+                    }
+                    TickTypes::PriceSize(ps) => {
+                        if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
+                            match ps.price_tick_type {
+                                TickType::Bid | TickType::DelayedBid => {
+                                    if ps.price > 0.0 { acc.bid = ps.price; acc.has_data = true; }
+                                }
+                                TickType::Ask | TickType::DelayedAsk => {
+                                    if ps.price > 0.0 { acc.ask = ps.price; acc.has_data = true; }
+                                }
+                                TickType::Last | TickType::DelayedLast => {
+                                    if ps.price > 0.0 {
+                                        acc.last = ps.price;
+                                        if acc.high == 0.0 || ps.price > acc.high { acc.high = ps.price; }
+                                        if acc.low == 0.0 || ps.price < acc.low { acc.low = ps.price; }
+                                        acc.has_data = true;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    TickTypes::Notice(notice) => {
+                        if self.sub_errors_detected < 50 {
+                            eprintln!(
+                                "IBKR NOTICE [MKT {}]: {:?}",
+                                mkt_sub.symbol, notice
+                            );
+                        }
+                        self.sub_errors_detected += 1;
+                    }
+                    _ => {}
+                }
+            }
+            // THROTTLED EMISSION: Emit synthetic bar every 5 seconds (matches reqRealTimeBars cadence).
+            // Only emit if this ticker did NOT get bar data (dedup with reqRealTimeBars).
+            if !has_bar_data {
+                if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
+                    if acc.has_data && acc.last > 0.0
+                        && self.now_ns >= acc.last_emit_ns + five_sec_ns
+                    {
+                        mkt_count += 1;
+                        let tick = MarketTick {
+                            ticker_id: mkt_sub.ticker_id,
+                            bid: if acc.bid > 0.0 { acc.bid } else { acc.last * 0.999 },
+                            ask: if acc.ask > 0.0 { acc.ask } else { acc.last * 1.001 },
+                            last: acc.last,
+                            volume: acc.volume,
+                            timestamp_ns: self.now_ns,
+                            recv_timestamp_ns: self.now_ns,
+                        };
+                        self.pending_ticks.push_back(tick);
+                        // Store high/low for ATR calculation (synthetic bar)
+                        if acc.high > 0.0 && acc.low > 0.0 {
+                            self.bar_high_low
+                                .entry(mkt_sub.ticker_id)
+                                .or_default()
+                                .push((acc.high, acc.low));
+                        }
+                        // Reset accumulator for next 5-second window
+                        acc.high = acc.last;
+                        acc.low = acc.last;
+                        acc.last_emit_ns = self.now_ns;
+                    }
+                }
+            }
+            // Check for errors on mktdata subscriptions
+            if let Some(err) = mkt_sub.sub.error() {
+                if self.sub_errors_detected < 50 {
+                    eprintln!(
+                        "IBKR SUB ERROR [MKT {}]: {}",
+                        mkt_sub.symbol, err
+                    );
+                }
+                self.sub_errors_detected += 1;
+            }
+        }
+
+        // Update lifetime counters
+        self.total_bars_received += (bar_count + mkt_count) as u64;
+        self.total_l1_received += l1_count as u64;
+
+        // Diagnostic: log data arrival
+        let any_data = bar_count > 0 || l1_count > 0 || mkt_count > 0;
+        if any_data {
+            let total = self.pending_ticks.len();
+            let poll_num = self.total_bars_received;
+            if poll_num <= 40 || poll_num % 720 == 0 {
+                eprintln!(
+                    "POLL: bars={} mkt={} l1={} pending={} bar_subs={} mkt_subs={} l1_subs={} lifetime={}",
+                    bar_count, mkt_count, l1_count, total,
+                    self.bar_subs.len(), self.mktdata_subs.len(), self.l1_subs.len(),
+                    self.total_bars_received
+                );
+            }
+        }
+
+        // Diagnostic: periodic warning if we have subscriptions but no data.
+        let total_subs = self.bar_subs.len() + self.mktdata_subs.len() + self.l1_subs.len();
+        if !any_data && total_subs > 0 {
+            self.zero_data_polls += 1;
+            // First warning at 500 polls (~60-120s), then every 3000 polls (~5 min)
+            if self.zero_data_polls == 500 || (self.zero_data_polls > 500 && self.zero_data_polls % 3000 == 0) {
+                eprintln!(
+                    "DATA_DROUGHT: {} consecutive polls with ZERO data (bar_subs={} mkt_subs={} l1_subs={} sub_errors={} lifetime={})",
+                    self.zero_data_polls, self.bar_subs.len(), self.mktdata_subs.len(),
+                    self.l1_subs.len(), self.sub_errors_detected, self.total_bars_received
+                );
+                if self.sub_errors_detected > 0 && self.total_bars_received == 0 {
+                    eprintln!(
+                        "DATA_DROUGHT: DIAGNOSIS — {} sub errors, ZERO data. \
+                         Likely causes: (1) LIVE TWS session blocking paper data (error 10197/420), \
+                         (2) reqRealTimeBars needs paid exchange subs, (3) contract resolution failures. \
+                         bar_subs={} mkt_subs={} l1_subs={}",
+                        self.sub_errors_detected,
+                        self.bar_subs.len(), self.mktdata_subs.len(), self.l1_subs.len()
+                    );
+                }
+            }
+        } else if any_data {
+            // Reset drought counter on any data
+            self.zero_data_polls = 0;
         }
     }
 
@@ -410,7 +920,8 @@ impl IbkrBroker {
         self.pending_ticks.drain(..).collect()
     }
 
-    /// Poll broker events (order updates, errors). Non-blocking.
+    /// Poll broker events (order fills, status updates, errors). Non-blocking.
+    /// Drains the ibapi order_update_stream subscription for fill detection.
     pub fn poll_events(&mut self) {
         if !self.connected {
             return;
@@ -421,6 +932,118 @@ impl IbkrBroker {
         {
             self.connected = false;
             self.events.push_back(BrokerEvent::Disconnected);
+            return;
+        }
+
+        // Drain order update subscription for fills and status updates.
+        // Reverse-lookup IBKR order_id → our order_id via order_id_map.
+        if let Some(ref sub) = self.order_update_sub {
+            while let Some(update) = sub.try_next() {
+                match update {
+                    OrderUpdate::ExecutionData(exec) => {
+                        let ibkr_id = exec.execution.order_id;
+                        let our_id = self
+                            .order_id_map
+                            .iter()
+                            .find(|(_, v)| **v == ibkr_id)
+                            .map(|(k, _)| k.clone());
+
+                        if let Some(our_order_id) = our_id {
+                            // Resolve ticker_id from contract symbol
+                            let exec_sym = exec.contract.symbol.as_str();
+                            let ticker_id = self
+                                .contract_map
+                                .iter()
+                                .find(|(_, m)| m.ibkr_symbol == exec_sym)
+                                .map(|(&tid, _)| tid)
+                                .unwrap_or(TickerId(0));
+
+                            eprintln!(
+                                "IBKR FILL: order={} ibkr_id={} ticker={} exec_id={} qty={} price={:.4} side={}",
+                                our_order_id, ibkr_id, ticker_id.0,
+                                exec.execution.execution_id, exec.execution.shares,
+                                exec.execution.price, exec.execution.side
+                            );
+                            self.events.push_back(BrokerEvent::Fill {
+                                order_id: our_order_id,
+                                ticker_id,
+                                filled_qty: exec.execution.shares as u32,
+                                remaining_qty: 0, // Updated by OrderStatus
+                                price: exec.execution.price,
+                                exec_id: exec.execution.execution_id.clone(),
+                                commission: 0.0, // Updated by CommissionReport
+                            });
+                        } else {
+                            eprintln!(
+                                "IBKR FILL (untracked): ibkr_id={} sym={} qty={} price={:.4}",
+                                ibkr_id, exec.contract.symbol,
+                                exec.execution.shares, exec.execution.price
+                            );
+                        }
+                    }
+                    OrderUpdate::CommissionReport(report) => {
+                        eprintln!(
+                            "IBKR COMMISSION: exec_id={} commission={:.2} currency={} pnl={:?}",
+                            report.execution_id, report.commission,
+                            report.currency, report.realized_pnl
+                        );
+                    }
+                    OrderUpdate::OrderStatus(status) => {
+                        let ibkr_id = status.order_id;
+                        let our_id = self
+                            .order_id_map
+                            .iter()
+                            .find(|(_, v)| **v == ibkr_id)
+                            .map(|(k, _)| k.clone());
+
+                        if let Some(our_order_id) = our_id {
+                            eprintln!(
+                                "IBKR STATUS: order={} ibkr_id={} status={} filled={} remaining={}",
+                                our_order_id, ibkr_id, status.status,
+                                status.filled, status.remaining
+                            );
+                        }
+                    }
+                    OrderUpdate::OpenOrder(_) => {
+                        // Order acknowledged by exchange — already handled via Ack event.
+                    }
+                    OrderUpdate::Message(notice) => {
+                        // Suppress noisy errors that flood logs:
+                        // 10190: tick-by-tick subscription limit (harmless, bars are primary)
+                        // 10197: competing live session (log once, then suppress)
+                        // 420: competing session from different IP (log once, then suppress)
+                        match notice.code {
+                            10190 => {} // Suppress entirely — tick-by-tick limit is expected
+                            10197 => {
+                                // "No market data during competing live session"
+                                // This means user's LIVE account is logged in elsewhere (TWS, mobile, other API)
+                                // IBKR blocks paper account market data when live session is active
+                                if self.sub_errors_detected < 5 {
+                                    eprintln!(
+                                        "IBKR BLOCKED: code=10197 — LIVE account session is active elsewhere. \
+                                         Paper account market data is BLOCKED until live TWS/Gateway is closed. \
+                                         Close TWS on your desktop/phone to unblock paper data."
+                                    );
+                                }
+                                self.sub_errors_detected += 1;
+                            }
+                            420 => {
+                                // "Trading TWS session is connected from a different IP address"
+                                if self.sub_errors_detected < 5 {
+                                    eprintln!(
+                                        "IBKR BLOCKED: code=420 — TWS session connected from different IP. \
+                                         Close competing TWS/Gateway sessions to unblock."
+                                    );
+                                }
+                                self.sub_errors_detected += 1;
+                            }
+                            _ => {
+                                eprintln!("IBKR ORDER NOTICE: code={} msg={}", notice.code, notice.message);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -570,6 +1193,12 @@ impl BrokerAdapter for IbkrBroker {
         self.config.client_id
     }
 
+    /// Re-subscribe to all market data after broker reconnection (Error 1102).
+    /// Delegates to the inherent subscribe_all() which handles LSEETF prioritization and caps.
+    fn resubscribe_all(&mut self) -> u32 {
+        self.subscribe_all()
+    }
+
     /// P21: Batch subscribe to L1 for a set of tickers (mode rotation).
     fn subscribe_l1_batch(&mut self, ticker_ids: &[TickerId]) -> u32 {
         let mut subscribed = 0u32;
@@ -606,6 +1235,54 @@ impl BrokerAdapter for IbkrBroker {
     fn l1_subscription_count(&self) -> u32 {
         self.l1_subs.len() as u32
     }
+
+    /// P21: Check if a ticker has a registered contract.
+    fn has_contract(&self, ticker_id: &TickerId) -> bool {
+        self.contract_map.contains_key(ticker_id)
+    }
+
+    /// P21: Dynamically register a contract from watchlist metadata.
+    fn register_dynamic_contract(
+        &mut self,
+        ticker_id: TickerId,
+        symbol: &str,
+        exchange: &str,
+        currency: &str,
+    ) -> bool {
+        if self.contract_map.contains_key(&ticker_id) {
+            return false;
+        }
+        let ibkr_symbol = IbkrBroker::derive_ibkr_symbol(symbol, exchange);
+        let mapping = ContractMapping {
+            ticker_id,
+            symbol: symbol.to_string(),
+            ibkr_symbol,
+            exchange: exchange.to_string(),
+            currency: currency.to_string(),
+        };
+        self.contract_map.insert(ticker_id, mapping);
+        true
+    }
+
+    /// P21-FX: Get the trading currency for a ticker from its contract mapping.
+    fn currency_for_ticker(&self, ticker_id: &TickerId) -> &str {
+        self.contract_map
+            .get(ticker_id)
+            .map(|m| m.currency.as_str())
+            .unwrap_or("GBP")
+    }
+
+    /// P21-FX: Get the exchange for a ticker from its contract mapping.
+    fn exchange_for_ticker(&self, ticker_id: &TickerId) -> &str {
+        self.contract_map
+            .get(ticker_id)
+            .map(|m| m.exchange.as_str())
+            .unwrap_or("XLON")
+    }
+
+    fn symbol_for(&self, ticker_id: TickerId) -> Option<String> {
+        self.contract_map.get(&ticker_id).map(|m| m.symbol.clone())
+    }
 }
 
 #[cfg(test)]
@@ -630,7 +1307,7 @@ mod tests {
     #[test]
     fn test_config_default_paper_port() {
         let config = IbkrBrokerConfig::default();
-        assert_eq!(config.port, 4002);
+        assert_eq!(config.port, 4003);
         assert_eq!(config.client_id, 101);
         assert_eq!(config.rate_limit_per_sec, 50);
     }

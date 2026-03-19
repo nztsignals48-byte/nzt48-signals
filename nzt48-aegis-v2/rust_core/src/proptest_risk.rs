@@ -76,6 +76,8 @@ mod tests {
                     state: OrderState::Filled,
                     origin_order_id: format!("order-{i}"),
                     is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
                 };
                 portfolio.add_position(pos);
             }

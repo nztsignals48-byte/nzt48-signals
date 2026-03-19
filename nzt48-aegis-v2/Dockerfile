@@ -29,8 +29,8 @@ COPY rust_core/ rust_core/
 COPY python_brain/ python_brain/
 COPY ouroboros/ ouroboros/
 
-# Build aegis binary (release)
-RUN cd rust_core && cargo build --release --bin aegis 2>&1
+# Build aegis binary (release) — build from workspace root
+RUN cargo build --release --bin aegis 2>&1
 RUN cp target/release/aegis /usr/local/bin/aegis && strip /usr/local/bin/aegis
 
 # Build PyO3 extension module (build wheel + install)
@@ -44,7 +44,10 @@ COPY crontab /app/crontab
 ARG GIT_SHA=unknown
 ENV GIT_SHA=${GIT_SHA}
 ENV PYTHONUNBUFFERED=1
-ENV TZ=America/New_York
+# CRITICAL FIX (2026-03-18 audit): Crontab entries are in UTC.
+# TZ=America/New_York caused ALL cron jobs to run 4-5h late (during market hours).
+# Ouroboros nightly was running at 09:50 UTC (LSE open!) instead of 04:50 UTC (DARK).
+ENV TZ=UTC
 
 # Config and WAL dirs are volume-mounted at runtime
 VOLUME ["/app/config", "/app/events"]

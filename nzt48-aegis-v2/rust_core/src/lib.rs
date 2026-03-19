@@ -38,6 +38,7 @@ pub mod isa_gate;
 pub mod liquidation_defense;
 pub mod log_thompson_sampler;
 pub mod market_config;
+pub mod market_scheduler;
 pub mod multiframe_vol;
 pub mod neural_hawkes;
 pub mod overnight_carry;
@@ -46,6 +47,7 @@ pub mod paper_broker;
 #[cfg(test)]
 mod pipeline_tests;
 pub mod portfolio;
+pub mod position_sizer;
 pub mod quote_imbalance;
 pub mod python_bridge;
 pub mod python_subprocess_manager;
@@ -74,12 +76,16 @@ pub mod live_readiness;
 pub mod predictive_scoring;
 pub mod session_manager;
 pub mod state_checkpoint;
+pub mod strategy_config;
 pub mod wal_actor;
 pub mod wal_compressor;
 pub mod wal_replay;
 #[cfg(test)]
 mod wal_tests;
 pub mod wal_writer;
+#[cfg(feature = "quantum_apex")]
 pub mod quantum_apex;
 #[cfg(test)]
 mod phase6_tests;
+pub mod regime_detector;
+pub mod entry_engine;

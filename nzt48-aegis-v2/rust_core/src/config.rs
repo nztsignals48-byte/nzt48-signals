@@ -44,15 +44,15 @@ pub struct RiskConfig {
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
-            max_positions: 3,
-            portfolio_heat_limit_pct: 6.0,
+            max_positions: 6,
+            portfolio_heat_limit_pct: 15.0,
             sector_heat_cap_pct: 33.0,
             cash_buffer_pct: 10.0,
             daily_drawdown_pct: 2.0,
             spread_veto_pct: 0.5,
             stale_data_threshold_secs: 120,
             confidence_floor: 65.0,
-            entry_cutoff_secs: 15 * 3600 + 45 * 60, // 15:45
+            entry_cutoff_secs: 20 * 3600 + 55 * 60, // 20:55 London (5 min before Dark at 21:00)
             auction_open_start_secs: 7 * 3600 + 50 * 60, // 07:50
             auction_open_end_secs: 8 * 3600,        // 08:00
             auction_close_start_secs: 16 * 3600 + 30 * 60, // 16:30
@@ -74,8 +74,8 @@ mod tests {
     #[test]
     fn test_default_values_match_config_toml() {
         let cfg = RiskConfig::default();
-        assert_eq!(cfg.max_positions, 3);
-        assert_eq!(cfg.portfolio_heat_limit_pct, 6.0);
+        assert_eq!(cfg.max_positions, 6);
+        assert_eq!(cfg.portfolio_heat_limit_pct, 15.0);
         assert_eq!(cfg.sector_heat_cap_pct, 33.0);
         assert_eq!(cfg.cash_buffer_pct, 10.0);
         assert_eq!(cfg.daily_drawdown_pct, 2.0);

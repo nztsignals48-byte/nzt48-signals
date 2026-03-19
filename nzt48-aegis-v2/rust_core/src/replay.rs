@@ -54,6 +54,7 @@ pub struct ReplayEngine {
     gap_cooldowns: HashMap<TickerId, u64>,
     pub now_ns: u64,
     pub time_secs: u32,
+    pub order_counter: u64,
 }
 
 impl ReplayEngine {
@@ -80,6 +81,7 @@ impl ReplayEngine {
             gap_cooldowns: HashMap::new(),
             now_ns: 0,
             time_secs: 36_000, // default 10:00 AM
+            order_counter: 0,
         }
     }
 
@@ -158,6 +160,8 @@ impl ReplayEngine {
                 let entry_time = pos.entry_timestamp_ns;
                 let exit_time = self.now_ns;
                 let tid_u32 = tid.0;
+                let close_qty = pos.qty;
+                let close_sym = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
                 self.counters.exits_triggered += 1;
                 self.write_wal(WalPayload::ExitSignal {
                     ticker_id: tid_u32,
@@ -169,6 +173,32 @@ impl ReplayEngine {
                     final_pnl,
                     entry_time_ns: entry_time,
                     exit_time_ns: exit_time,
+                    symbol: close_sym,
+                    qty: close_qty,
+                    regime_at_entry: String::new(),
+                    confidence: 0.0,
+                    highest_rung: 0,
+                    strategy: String::new(),
+                    exchange: String::new(),
+                    entry_price: 0.0,
+                    exit_price: 0.0,
+                    entry_rvol: 0.0,
+                    entry_hurst: 0.0,
+                    entry_adx: 0.0,
+                        spread_pct: 0.0,
+                        vwap_distance_pct: 0.0,
+                        volume_slope: 0.0,
+                        leverage: 0,
+                        session_mode: String::new(),
+                        entry_spread_pct: 0.0,
+                        exit_spread_pct: 0.0,
+                        entry_vwap_pct: 0.0,
+                        entry_vol_slope: 0.0,
+                        leverage: 0,
+                        session_mode: String::new(),
+                        hold_secs: 0,
+                        exit_reason: String::new(),                        entry_price: 0.0,                    mae: 0.0,
+                    mfe: 0.0,
                 });
                 self.portfolio.remove_position(tid);
                 self.positions.remove(&tid);
@@ -217,8 +247,10 @@ impl ReplayEngine {
         }
         self.counters.orders_approved += 1;
 
-        // 6. WAL write
-        let order_id = format!("order-{}", self.broker.next_valid_id());
+        // 6. WAL write — use monotonic counter for unique IDs
+        self.order_counter += 1;
+        let order_id = format!("order-{}", self.order_counter);
+        let replay_symbol = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
         self.write_wal(WalPayload::RoutedOrder {
             order_id: order_id.clone(),
             ticker_id: tid.0,
@@ -227,7 +259,18 @@ impl ReplayEngine {
             strategy: "MockBrain".to_string(),
             kelly_fraction: 0.08,
             approved_size: decision.adjusted_size,
-        });
+            symbol: replay_symbol,
+            qty: (decision.adjusted_size / routed_tick.ask).max(1.0) as u32,
+            currency: "GBP".to_string(),
+            entry_rvol: 0.0,
+            entry_hurst: 0.0,
+            entry_adx: 0.0,
+                        spread_pct: 0.0,
+                        vwap_distance_pct: 0.0,
+                        volume_slope: 0.0,
+                        leverage: 0,
+                        session_mode: String::new(),
+                        entry_price: 0.0,        });
 
         // 7. Submit + fill
         let qty = (decision.adjusted_size / routed_tick.ask).max(1.0) as u32;
@@ -285,6 +328,15 @@ impl ReplayEngine {
                         state: OrderState::ExitRegistered,
                         origin_order_id: order_id.clone(),
                         is_carried: false,
+                        entry_spread_pct: 0.0,
+                        exit_spread_pct: 0.0,
+                        entry_vwap_pct: 0.0,
+                        entry_vol_slope: 0.0,
+                        leverage: 0,
+                        session_mode: String::new(),
+                        hold_secs: 0,
+                        exit_reason: String::new(),                mae: 0.0,
+                mfe: 0.0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

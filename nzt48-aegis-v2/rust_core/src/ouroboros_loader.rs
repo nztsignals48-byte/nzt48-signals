@@ -19,6 +19,9 @@ pub struct DynamicWeights {
     pub regime_worst: String,
     pub regime_scales: HashMap<String, f64>,
     pub kelly_fractions: HashMap<String, f64>,
+    /// Tickers blacklisted by Ouroboros (WR < 30% over 10+ trades).
+    /// Engine should reject signals for these tickers.
+    pub ticker_blacklist: Vec<String>,
 }
 
 impl Default for DynamicWeights {
@@ -34,6 +37,7 @@ impl Default for DynamicWeights {
             regime_worst: "bear_volatile".to_string(),
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
+            ticker_blacklist: Vec::new(),
         }
     }
 }
@@ -56,6 +60,24 @@ struct RawDynamicWeights {
     exit: RawExit,
     regime: RawRegime,
     kelly_fractions: Option<HashMap<String, f64>>,
+    #[serde(default)]
+    ticker_blacklist: Option<RawTickerBlacklist>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    signal: Option<RawSignal>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawTickerBlacklist {
+    #[serde(default)]
+    tickers: Vec<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawSignal {
+    #[serde(default)]
+    #[allow(dead_code)]
+    confidence_floor: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +140,13 @@ fn _load_dw(path: &Path) -> Result<DynamicWeights, String> {
         }
     }
 
+    let blacklist = raw.ticker_blacklist
+        .map(|b| b.tickers)
+        .unwrap_or_default();
+    if !blacklist.is_empty() {
+        eprintln!("OUROBOROS: ticker blacklist loaded: {:?}", blacklist);
+    }
+
     Ok(DynamicWeights {
         bayesian_win_rate: raw.bayesian.win_rate,
         trade_count: raw.bayesian.trade_count,
@@ -129,6 +158,7 @@ fn _load_dw(path: &Path) -> Result<DynamicWeights, String> {
         regime_worst: raw.regime.worst,
         regime_scales,
         kelly_fractions: raw.kelly_fractions.unwrap_or_default(),
+        ticker_blacklist: blacklist,
     })
 }
 

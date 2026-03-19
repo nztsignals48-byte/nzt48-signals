@@ -1,6 +1,7 @@
 //! Live/Paper Engine — 8-step startup, tick processing, reconciliation, shutdown.
 //! Generic over BrokerAdapter: works with PaperBroker (testing) or IbkrBroker (live).
 
+use chrono::Timelike;
 use crate::asian_session::AsianSession;
 use crate::broker::{BrokerAdapter, BrokerError, BrokerEvent};
 use crate::clock::{Clock, TradingMode};
@@ -39,6 +40,10 @@ use crate::latency_profiler::{LatencyProfiler, PipelineStage};
 use crate::student_t_kalman::StudentTKalmanFilter;
 use crate::log_thompson_sampler::LogThompsonSampler;
 use crate::python_bridge::BrainSignal;
+use crate::regime_detector::{RegimeDetector, RegimeDecision};
+// Dead code removed: EarlyRunnerDetector (never instantiated, VanguardSniper handles all entries)
+use crate::position_sizer::KellyCalculator;
+use crate::market_scheduler::{self, TradingSession};
 use crate::reconciler;
 use crate::risk_arbiter::{EvalContext, RiskArbiter};
 use crate::types::{
@@ -325,6 +330,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub apex_candles: HashMap<TickerId, ApexCandle>,
     /// Hourly state hash tracking (H85).
     pub last_state_hash_ns: u64,
+    /// 5-minute heartbeat for status monitoring.
+    pub last_heartbeat_ns: u64,
     /// Phase 11: Current trading mode (5-mode clock).
     pub current_mode: TradingMode,
     /// P2-C: Last trading date for daily reset detection.
@@ -349,6 +356,9 @@ pub struct Engine<B: BrokerAdapter> {
     pub broker_circuit_breaker: CircuitBreaker,
     /// P4-B: Watchdog for tick liveness.
     pub tick_watchdog: Watchdog,
+    /// P4-B: True if current HALT was caused by tick watchdog (vs liquidation/panic/manual).
+    /// Used by tick recovery logic to auto-clear watchdog-only HALTs when data resumes.
+    pub halt_from_watchdog: bool,
     /// P5-A: EVT on GARCH residuals for tail risk CVaR.
     pub evt_registry: EvtRegistry,
     /// P5-D: Hayashi-Yoshida async covariance estimator.
@@ -399,14 +409,82 @@ pub struct Engine<B: BrokerAdapter> {
     pub kalman_filters: HashMap<TickerId, StudentTKalmanFilter>,
     /// P5-C: Log-Thompson sampler for multi-ticker allocation.
     pub thompson_sampler: LogThompsonSampler,
+    /// Phase 1C: Regime detector (jump-diffusion + Hurst).
+    pub regime_detector: RegimeDetector,
+    /// Phase 1C: Last regime decision per ticker (for logging / gating).
+    pub last_regime_decision: HashMap<TickerId, RegimeDecision>,
+    /// Phase 1C: Per-ticker Early Runner detectors (stateful — needs RVOL history).
+    // Dead code removed: early_runner_detectors (never populated, VanguardSniper handles all)
+    /// Phase 1C: Kelly calculator for Rust-side sizing (fractional 0.25).
+    pub kelly_calculator: KellyCalculator,
+    /// Phase 2: Current market scheduler session (6-phase global clock).
+    pub current_trading_session: TradingSession,
+    /// Watchlist hot-reload: last modified time per watchlist file (epoch secs).
+    pub watchlist_mtimes: HashMap<String, u64>,
+    /// Last time we rotated subscriptions from watchlist (15-min cycle, nanoseconds).
+    pub last_watchlist_rotation_ns: u64,
+    /// Monotonically incrementing counter for generating unique order IDs.
+    pub order_counter: u64,
+    /// P21-FX: Cached currency code per ticker (from broker contract map).
+    /// Used to convert native-currency prices to GBP for mark-to-market.
+    pub ticker_currencies: HashMap<TickerId, String>,
+    /// Simulation mode: when true, trades are simulated internally instead of
+    /// being submitted to the broker. The broker is still used for market data.
+    /// This prevents any real order submission to IBKR.
+    pub simulation_mode: bool,
+    /// Simulated trades log: records all simulated fills for reporting/PDF.
+    pub simulated_trades: Vec<SimulatedTrade>,
+}
+
+/// A simulated trade record for logging and daily PDF reporting.
+#[derive(Clone, Debug)]
+pub struct SimulatedTrade {
+    pub order_id: String,
+    pub ticker_id: TickerId,
+    pub symbol: String,
+    pub direction: Direction,
+    pub qty: u32,
+    pub fill_price_native: f64,
+    pub fill_price_gbp: f64,
+    pub currency: String,
+    pub confidence: f64,
+    pub kelly_fraction: f64,
+    pub trade_value_gbp: f64,
+    pub timestamp_ns: u64,
+    pub strategy: String,
+    pub status: SimTradeStatus,
+    pub exit_price_gbp: Option<f64>,
+    pub pnl_gbp: Option<f64>,
+    pub exit_timestamp_ns: Option<u64>,
+    /// Phase H: Indicator context captured at entry for Ouroboros learning.
+    pub entry_rvol: f64,
+    pub entry_hurst: f64,
+    pub entry_adx: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SimTradeStatus {
+    Open,
+    Closed,
 }
 
 impl<B: BrokerAdapter> Engine<B> {
     pub fn new(broker: B, config: EngineConfig, wal: Option<WalWriter>, clock: Clock) -> Self {
         let equity = config.crucible.starting_equity_gbp;
+        let is_simulation = config.crucible.paper_mode;
         let mut risk_config = config.risk.clone();
         if config.crucible.paper_mode {
             risk_config.max_positions = config.crucible.max_positions_override;
+            // FIX Issue #13: In paper mode, disable Kelly ramp to avoid dust positions.
+            // kelly_ramp_trades=250 → ramp = 250/250 = 1.0 (no scaling).
+            risk_config.kelly_ramp_trades = 250;
+            // FIX: Lower minimum entry for paper mode. Production minimum (£1500)
+            // requires Kelly ~0.15 which needs real trade history. Bootstrap Kelly
+            // with 3x vol_decay produces ~£700. Paper minimum = £100 (1% of equity).
+            risk_config.minimum_entry_gbp = 100.0;
+            // FIX: Widen spread veto for paper mode. 3x leveraged ETPs typically
+            // have 0.5-2.0% spreads. Production threshold (0.5%) blocks most LSE ETPs.
+            risk_config.spread_veto_pct = 2.0;
         }
         let arbiter = RiskArbiter::new(risk_config);
         Self {
@@ -430,6 +508,7 @@ impl<B: BrokerAdapter> Engine<B> {
             last_snapshot_ns: HashMap::new(),
             apex_candles: HashMap::new(),
             last_state_hash_ns: 0,
+            last_heartbeat_ns: 0,
             current_mode: TradingMode::Dark,
             last_trading_date: None,
             garch_registry: GarchRegistry::empty(),
@@ -437,11 +516,12 @@ impl<B: BrokerAdapter> Engine<B> {
             rotation_scanner: RotationScanner::new(0.05, 10), // 5% rotation strength threshold, max 10 candidates
             executioner: Executioner::new(),
             smart_router: SmartRouter::new(IsaGate::new("2026-04-06")),
-            subscription_manager: SubscriptionManager::new(100), // IBKR 100-line limit
+            subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
             telemetry: Telemetry::new(),
             panic_guard: PanicGuard::new(),
             broker_circuit_breaker: CircuitBreaker::new(5, 60, 30), // 5 errors/min, 30s cooldown
             tick_watchdog: Watchdog::new(120), // 120s timeout for tick liveness
+            halt_from_watchdog: false,
             evt_registry: EvtRegistry::default(),
             hy_engine: HayashiYoshidaEngine::default(),
             fx_table: FxRateTable::default(),
@@ -467,6 +547,17 @@ impl<B: BrokerAdapter> Engine<B> {
             latency_profiler: LatencyProfiler::new(),
             kalman_filters: HashMap::new(),
             thompson_sampler: LogThompsonSampler::new(),
+            regime_detector: RegimeDetector::new(),
+            last_regime_decision: HashMap::new(),
+            // early_runner_detectors removed (dead code)
+            kelly_calculator: KellyCalculator::new(),
+            current_trading_session: TradingSession::Closed,
+            watchlist_mtimes: HashMap::new(),
+            last_watchlist_rotation_ns: 0,
+            order_counter: 0,
+            ticker_currencies: HashMap::new(),
+            simulation_mode: is_simulation,
+            simulated_trades: Vec::new(),
         }
     }
 
@@ -477,9 +568,13 @@ impl<B: BrokerAdapter> Engine<B> {
         broker_time_secs: u64,
         system_time_ns: u64,
     ) -> Result<StartupResult, EngineError> {
-        // Step 1: Verify broker connection
-        if !self.broker.is_connected() {
+        // Step 1: Verify broker connection (skip in simulation mode — broker is optional)
+        let has_broker = self.broker.is_connected();
+        if !has_broker && !self.simulation_mode {
             return Err(EngineError::BrokerNotConnected);
+        }
+        if !has_broker {
+            eprintln!("STARTUP: No broker connection — simulation mode, skipping broker steps");
         }
 
         // Step 2: Sync clock (reqCurrentTime → offset)
@@ -493,10 +588,27 @@ impl<B: BrokerAdapter> Engine<B> {
         // Step 3: Replay WAL → portfolio state + risk regime
         let replay_result =
             crate::wal_replay::replay_from_snapshot(wal_events, &mut self.portfolio);
+        // FIX 2026-03-17: Recalculate equity from cash + open positions immediately
+        // after WAL replay.  mark_to_market() needs live prices, but we don't have
+        // ticks yet, so use entry prices as proxy (positions already carry avg_entry).
+        // This ensures equity is correct from startup instead of stuck at £10,000.
+        {
+            let entry_prices: std::collections::HashMap<TickerId, f64> = self
+                .portfolio
+                .positions()
+                .iter()
+                .map(|(&tid, pos)| (tid, pos.avg_entry))
+                .collect();
+            self.portfolio.mark_to_market(&entry_prices);
+            self.portfolio.update_high_water();
+        }
         eprintln!(
-            "STARTUP: WAL replayed {} events, {} orphans",
+            "STARTUP: WAL replayed {} events, {} orphans, equity=£{:.2} cash=£{:.2} positions={}",
             replay_result.events_replayed,
-            replay_result.orphaned_orders.len()
+            replay_result.orphaned_orders.len(),
+            self.portfolio.equity,
+            self.portfolio.cash,
+            self.portfolio.filled_count(),
         );
 
         // FIX 2026-03-11: Restore risk regime from WAL (prevents Halt bypass on restart).
@@ -509,39 +621,80 @@ impl<B: BrokerAdapter> Engine<B> {
             };
             if restored > RiskRegime::Normal {
                 self.arbiter.regime = restored;
+                // If Halt was from tick watchdog, enable auto-recovery when ticks resume.
+                if restored == RiskRegime::Halt {
+                    if let Some(ref trigger) = replay_result.restored_regime_trigger {
+                        if trigger == "tick_watchdog_expired" {
+                            self.halt_from_watchdog = true;
+                            eprintln!(
+                                "STARTUP: Restored risk regime from WAL: Halt (watchdog-sourced, auto-recovery enabled)"
+                            );
+                        } else {
+                            eprintln!(
+                                "STARTUP: Restored risk regime from WAL: Halt (trigger={trigger}, manual recovery required)"
+                            );
+                        }
+                    } else {
+                        eprintln!(
+                            "STARTUP: Restored risk regime from WAL: Halt (unknown trigger, safety brake preserved)"
+                        );
+                    }
+                } else {
+                    eprintln!(
+                        "STARTUP: Restored risk regime from WAL: {:?} (safety brake preserved)",
+                        restored
+                    );
+                }
+            }
+        }
+
+        // In simulation mode, always start with Normal regime (no stale WAL state).
+        if self.simulation_mode && self.arbiter.regime > RiskRegime::Normal {
+            eprintln!(
+                "STARTUP: Simulation mode — overriding WAL regime {:?} → Normal",
+                self.arbiter.regime
+            );
+            self.arbiter.regime = RiskRegime::Normal;
+        }
+
+        // Step 4: Reconcile positions with broker (skip if no broker)
+        let (_recon_mismatches, recon_matches) = if has_broker {
+            let broker_positions = self.broker.request_positions()?;
+            let recon = reconciler::reconcile_positions(&self.portfolio, &broker_positions);
+            if !recon.is_clean {
                 eprintln!(
-                    "STARTUP: Restored risk regime from WAL: {:?} (safety brake preserved)",
-                    restored
+                    "CRITICAL: {} position mismatches detected!",
+                    recon.mismatches.len()
                 );
+                // Trust broker, trigger FLATTEN (H130)
+                self.arbiter.regime = RiskRegime::Flatten;
             }
-        }
+            (recon.mismatches.len(), recon.matches)
+        } else {
+            eprintln!("STARTUP: Step 4 skipped (no broker — simulation mode)");
+            (0, 0)
+        };
 
-        // Step 4: Reconcile positions with broker
-        let broker_positions = self.broker.request_positions()?;
-        let recon = reconciler::reconcile_positions(&self.portfolio, &broker_positions);
-        if !recon.is_clean {
-            eprintln!(
-                "CRITICAL: {} position mismatches detected!",
-                recon.mismatches.len()
-            );
-            // Trust broker, trigger FLATTEN (H130)
-            self.arbiter.regime = RiskRegime::Flatten;
-        }
-
-        // Step 5: Resolve orphaned orders
-        let broker_orders = self.broker.request_open_orders()?;
-        let orphans = reconciler::detect_orphaned_orders(&self.tracked_orders, &broker_orders);
-        if !orphans.is_empty() {
-            eprintln!(
-                "WARNING: {} orphaned orders found: {:?}",
-                orphans.len(),
-                orphans
-            );
-            // Cancel orphans
-            for oid in &orphans {
-                let _ = self.broker.cancel_order(oid);
+        // Step 5: Resolve orphaned orders (skip if no broker)
+        let orphans = if has_broker {
+            let broker_orders = self.broker.request_open_orders()?;
+            let orphans = reconciler::detect_orphaned_orders(&self.tracked_orders, &broker_orders);
+            if !orphans.is_empty() {
+                eprintln!(
+                    "WARNING: {} orphaned orders found: {:?}",
+                    orphans.len(),
+                    orphans
+                );
+                // Cancel orphans
+                for oid in &orphans {
+                    let _ = self.broker.cancel_order(oid);
+                }
             }
-        }
+            orphans
+        } else {
+            eprintln!("STARTUP: Step 5 skipped (no broker — simulation mode)");
+            vec![]
+        };
 
         // Step 6: Register tickers from config into universe
         // Load universe classification from Ouroboros nightly artifacts (Tier 3 = Apex)
@@ -569,21 +722,38 @@ impl<B: BrokerAdapter> Engine<B> {
         }
         let tickers_registered = self.config.tickers.len();
 
+        // FIX 5: Mark FX rates as fresh at startup (hardcoded defaults are close enough
+        // for paper trading). Prevents stale warning every reconcile cycle.
+        self.fx_table.last_update_ns = system_time_ns;
+        eprintln!("STARTUP: FX rates initialized (defaults, marked fresh)");
+
         // Step 7: Write SystemReady to WAL
         self.now_ns = system_time_ns;
         self.write_wal(WalPayload::SystemReady {
             wal_events_replayed: replay_result.events_replayed,
-            positions_reconciled: recon.matches as u32,
+            positions_reconciled: recon_matches as u32,
         });
 
         // Step 8: Mark startup complete
         self.startup_complete = true;
+        eprintln!(
+            "ENGINE_MODE: {} — {}",
+            if self.simulation_mode { "SIMULATION (no real orders)" } else { "LIVE TRADING" },
+            if self.simulation_mode { "Using IBKR for market data only. All trades are simulated internally." }
+            else { "Orders will be submitted to IBKR." },
+        );
+        eprintln!(
+            "RISK_CONFIG: max_positions={} confidence_floor={:.0} cash_buffer_pct={:.1} spread_veto_pct={:.1} min_entry_gbp={:.0} simulation={}",
+            self.arbiter.config.max_positions, self.arbiter.config.confidence_floor,
+            self.arbiter.config.cash_buffer_pct, self.arbiter.config.spread_veto_pct,
+            self.arbiter.config.minimum_entry_gbp, self.simulation_mode,
+        );
         self.last_reconcile_ns = system_time_ns;
         self.last_state_hash_ns = system_time_ns;
 
         Ok(StartupResult {
             wal_events_replayed: replay_result.events_replayed,
-            positions_reconciled: recon.matches as u32,
+            positions_reconciled: recon_matches as u32,
             orphans_found: orphans.len(),
             clock_offset_secs: clock_offset,
             tickers_registered,
@@ -642,11 +812,60 @@ impl<B: BrokerAdapter> Engine<B> {
         // P4-B: Feed watchdog on every tick
         self.tick_watchdog.feed(tick.timestamp_ns);
 
+        // P4-C: Auto-recover from watchdog-induced HALT when ticks resume.
+        // Only clear HALT if it was caused by tick watchdog expiry (not by liquidation
+        // defense, panic guard, H12, or broker disconnect). The halt_from_watchdog flag
+        // is set exclusively by the watchdog expiry path in verify_hardening_invariants().
+        if self.arbiter.regime == RiskRegime::Halt && self.halt_from_watchdog {
+            eprintln!("WATCHDOG_RECOVERY: Ticks resumed — Halt -> Normal (watchdog-only)");
+            self.arbiter.regime = RiskRegime::Normal;
+            self.halt_from_watchdog = false;
+            self.write_wal(WalPayload::RiskStateChange {
+                from: "Halt".to_string(),
+                to: "Normal".to_string(),
+                trigger: "tick_watchdog_recovery".to_string(),
+            });
+        }
+
         let t2t_start_ns = self.now_ns; // For T2T latency logging (H118)
         self.now_ns = tick.timestamp_ns;
 
-        // Gap detection (H66): >2% gap → 15-min cooldown
+        // P21-FX: Convert tick prices from native currency to GBP.
+        // Cache the ticker's currency on first encounter.
         let tid = tick.ticker_id;
+        let currency_code = self.ticker_currencies.entry(tid)
+            .or_insert_with(|| self.broker.currency_for_ticker(&tid).to_string())
+            .clone();
+        let fx_currency = crate::currency::Currency::from_str_code(&currency_code);
+        // Keep native prices for order submission (IBKR needs native-currency limit price)
+        let native_ask = tick.ask;
+        let _native_bid = tick.bid;
+        // Convert tick to GBP for all internal calculations
+        let mut tick = tick;
+        if let Some(cur) = fx_currency {
+            if cur != crate::currency::Currency::GBP {
+                tick.bid = self.fx_table.to_gbp(tick.bid, cur);
+                tick.ask = self.fx_table.to_gbp(tick.ask, cur);
+                tick.last = self.fx_table.to_gbp(tick.last, cur);
+            }
+        }
+        // AUDIT-FIX (2026-03-18): GBX→GBP conversion for LSE instruments.
+        // IBKR sends LSE ETP prices in GBX (pence), not GBP (pounds).
+        // Detect: contract currency GBP + exchange LSEETF/LSE + price > 500.
+        // No LSE leveraged ETP is legitimately >£500/share (they range £1-200).
+        // 3SEM.L at 9894 GBX = £98.94 GBP. QQQ3.L at 3250 GBX = £32.50 GBP.
+        {
+            let exchange = self.broker.exchange_for_ticker(&tid);
+            let is_lse = matches!(exchange, "LSEETF" | "LSE");
+            let is_gbp = currency_code == "GBP";
+            if is_lse && is_gbp && tick.ask > 500.0 {
+                tick.bid /= 100.0;
+                tick.ask /= 100.0;
+                tick.last /= 100.0;
+            }
+        }
+
+        // Gap detection (H66): >2% gap → 15-min cooldown
         if let Some(&prev) = self.last_prices.get(&tid)
             && prev > 0.0
         {
@@ -704,13 +923,35 @@ impl<B: BrokerAdapter> Engine<B> {
             filter.state()
         };
 
-        self.last_prices.insert(tid, tick.last);
-
         // P5-D: Record tick for Hayashi-Yoshida covariance estimation
         self.hy_engine.record_tick(tid, tick.last, tick.timestamp_ns);
 
         // ATR from rolling bar history (Wilder's 14-period)
         let atr = self.current_atr(tid);
+
+        // Phase 1C: Regime detection (jump-diffusion + Hurst) on each tick.
+        // FIX: Calculate price_move BEFORE updating last_prices (was always 0.0).
+        let regime_decision = {
+            let rvol_val = self.bar_history.get(&tid)
+                .map(|h| h.realized_vol(6120.0))
+                .unwrap_or(0.30);
+            let price_move = if let Some(&prev) = self.last_prices.get(&tid)
+                && prev > 0.0
+            {
+                (tick.last - prev).abs()
+            } else {
+                0.0
+            };
+            let prices_for_hurst: Vec<f64> = self.bar_history.get(&tid)
+                .map(|h| h.closes.iter().copied().collect())
+                .unwrap_or_default();
+            self.regime_detector.evaluate(rvol_val, atr, price_move, &prices_for_hurst)
+        };
+        // Dead write removed: last_regime_decision was never read
+        // self.last_regime_decision.insert(tid, regime_decision);
+
+        // Update last_prices AFTER price_move calculation (FIX for Issue #14)
+        self.last_prices.insert(tid, tick.last);
 
         // Real London time from synced clock
         let time_secs = self.london_time_secs();
@@ -718,8 +959,261 @@ impl<B: BrokerAdapter> Engine<B> {
         // Phase 11: Determine current trading mode
         self.current_mode = TradingMode::from_london_secs(time_secs);
 
-        // Phase 11: In Dark/ModeC modes, no trading at all
-        if matches!(self.current_mode, TradingMode::Dark | TradingMode::ModeC) {
+        // ──────────────────────────────────────────────────────────────────
+        // EXIT EVALUATION — runs BEFORE Dark/Closed gates so positions can
+        // ALWAYS exit when price data arrives, regardless of session state.
+        // Without this, positions opened during a session would become
+        // permanently stuck when the session ends (TradingSession::Closed)
+        // or during the Dark maintenance window (21:00-23:00 London).
+        // ──────────────────────────────────────────────────────────────────
+        if let Some(pos) = self.positions.get_mut(&tid) {
+            // P4-C: Update InfiniteChandelier adaptive multipliers before exit evaluation.
+            if self.exit_engine.is_infinite_chandelier() {
+                let realized_vol = self
+                    .bar_history
+                    .get(&tid)
+                    .map(|h| h.realized_vol(6120.0))
+                    .unwrap_or(0.30);
+                let time_fraction = Clock::time_of_day_fraction(time_secs);
+                let momentum = if let Some(&prev) = self.last_prices.get(&tid)
+                    && prev > 0.0
+                {
+                    (tick.last - prev) / prev
+                } else {
+                    0.0
+                };
+                let amihud = self
+                    .bar_history
+                    .get(&tid)
+                    .map(|h| h.amihud())
+                    .unwrap_or(0.0);
+                let heat = self.portfolio.portfolio_heat_pct();
+                let is_reduce = self.arbiter.regime >= RiskRegime::Reduce;
+                self.exit_engine.strategy_mut().update_multipliers(
+                    realized_vol, time_fraction, momentum, amihud, heat, is_reduce,
+                );
+            }
+
+            if !self.exit_engine.is_price_spike(pos.highest_high, tick.last, tick.bid, tick.ask) {
+                if let Some((old_rung, new_rung)) = self.exit_engine.update_tracking(pos, tick.last, atr) {
+                    // Persist rung advance to WAL for crash recovery
+                    if let Some(ref mut wal) = self.wal {
+                        let evt = make_wal_event(self.now_ns, WalPayload::RungAdvanced {
+                            ticker_id: tid.0,
+                            order_id: pos.origin_order_id.clone(),
+                            old_rung,
+                            new_rung,
+                            stop_price: pos.stop_price,
+                            highest_high: pos.highest_high,
+                        });
+                        let _ = wal.append(&evt);
+                    }
+                }
+                pos.unrealized_pnl = (tick.last - pos.avg_entry) * pos.qty as f64;
+
+                // Update MAE/MFE (Maximum Adverse/Favorable Excursion)
+                if pos.unrealized_pnl < pos.mae {
+                    pos.mae = pos.unrealized_pnl;
+                }
+                if pos.unrealized_pnl > pos.mfe {
+                    pos.mfe = pos.unrealized_pnl;
+                }
+
+                let is_halt = self.arbiter.regime >= RiskRegime::Flatten;
+                let is_eod = Clock::eod_phase(time_secs).is_some();
+                let is_carried = self.carry_manager.is_carried(&tid);
+                let exit_result = self
+                    .exit_engine
+                    .evaluate(pos, tick.last, atr, time_secs, is_halt, is_eod, is_carried);
+                if let Some(ref result) = exit_result {
+                    let reason_str = format!("{:?}", result.signal.reason);
+                    let priority_str = format!("{:?}", result.signal.priority);
+                    let final_pnl = pos.unrealized_pnl - pos.total_commission;
+                    let entry_time = pos.entry_timestamp_ns;
+                    let exit_qty = pos.qty;
+                    let highest_rung = pos.trailing_rung;
+                    let entry_price_gbp = pos.avg_entry;
+                    let exit_price_gbp = tick.last;
+                    let pos_mae = pos.mae;
+                    let pos_mfe = pos.mfe;
+                    self.write_wal(WalPayload::ExitSignal {
+                        ticker_id: tid.0,
+                        reason: reason_str.clone(),
+                        priority: priority_str,
+                    });
+
+                    let exit_order_id = format!("exit-{}", uuid::Uuid::now_v7());
+                    let sell_limit = match result.signal.order_type {
+                        crate::types::ExitOrderType::LimitAtStop => {
+                            let raw = result.signal.limit_price.unwrap_or(tick.bid);
+                            round_to_tick_size(raw, &self.config)
+                        }
+                        crate::types::ExitOrderType::MarketSell
+                        | crate::types::ExitOrderType::MarketToLimit => {
+                            let raw = tick.bid * 0.999;
+                            round_to_tick_size(raw.max(0.01), &self.config)
+                        }
+                    };
+
+                    let exit_symbol = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+                    let exit_currency = self.ticker_currencies.get(&tid).cloned().unwrap_or_else(|| "GBP".to_string());
+                    self.write_wal(WalPayload::RoutedOrder {
+                        order_id: exit_order_id.clone(),
+                        ticker_id: tid.0,
+                        side: "Sell".to_string(),
+                        confidence: 0.0,
+                        strategy: reason_str.clone(),
+                        kelly_fraction: 0.0,
+                        approved_size: sell_limit * exit_qty as f64,
+                        symbol: exit_symbol,
+                        qty: exit_qty,
+                        currency: exit_currency,
+                        entry_rvol: 0.0,
+                        entry_hurst: 0.0,
+                        entry_adx: 0.0,
+                        spread_pct: 0.0,
+                        vwap_distance_pct: 0.0,
+                        volume_slope: 0.0,
+                        leverage: 0,
+                        session_mode: String::new(),
+                        entry_price: 0.0,
+                    });
+                    self.tracked_orders.push(exit_order_id.clone());
+
+                    self.executioner.track_order(TrackedOrder {
+                        order_id: exit_order_id.clone(),
+                        ticker_id: tid,
+                        lifecycle: OrderLifecycle::Submitted,
+                        submit_ns: self.now_ns,
+                        last_update_ns: self.now_ns,
+                        qty: exit_qty,
+                        filled_qty: 0,
+                        limit_price: sell_limit,
+                        retries: 0,
+                        is_exit: true,
+                    });
+
+                    if !self.simulation_mode {
+                        if let Err(e) = self.broker.submit_order(
+                            &exit_order_id, tid, OrderSide::Sell, exit_qty, sell_limit,
+                        ) {
+                            eprintln!(
+                                "EXIT: sell order FAILED for ticker={} qty={} err={e} — position remains!",
+                                tid.0, exit_qty
+                            );
+                            return;
+                        }
+                        let sell_events = self.broker.drain_events();
+                        for ev in &sell_events {
+                            self.process_broker_event(ev);
+                        }
+                    }
+
+                    eprintln!(
+                        "EXIT: {:?} ticker={} qty={} limit={sell_limit:.4} pnl=£{final_pnl:.2} rung={highest_rung} {}",
+                        result.signal.reason, tid.0, exit_qty,
+                        if self.simulation_mode { "[SIMULATED]" } else { "[LIVE]" },
+                    );
+
+                    let close_symbol = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+                    let regime_at_entry = format!("{:?}", self.arbiter.regime);
+                    let (entry_confidence, entry_strategy) = self.simulated_trades.iter()
+                        .rfind(|t| t.ticker_id == tid && t.status == SimTradeStatus::Open)
+                        .map(|t| (t.confidence, t.strategy.clone()))
+                        .unwrap_or((0.0, "unknown".to_string()));
+                    let exit_exchange = self.broker.exchange_for_ticker(&tid).to_string();
+                    // Look up indicator context from the SimulatedTrade that opened this position
+                    let (e_rvol, e_hurst, e_adx) = self.simulated_trades.iter()
+                        .rfind(|t| t.ticker_id == tid && t.status == SimTradeStatus::Open)
+                        .map(|t| (t.entry_rvol, t.entry_hurst, t.entry_adx))
+                        .unwrap_or((0.0, 0.0, 0.0));
+                    self.write_wal(WalPayload::PositionClosed {
+                        ticker_id: tid.0,
+                        final_pnl,
+                        entry_time_ns: entry_time,
+                        exit_time_ns: self.now_ns,
+                        symbol: close_symbol,
+                        qty: exit_qty,
+                        regime_at_entry,
+                        confidence: entry_confidence,
+                        highest_rung,
+                        strategy: entry_strategy,
+                        exchange: exit_exchange,
+                        entry_price: entry_price_gbp,
+                        exit_price: exit_price_gbp,
+                        entry_rvol: e_rvol,
+                        entry_hurst: e_hurst,
+                        entry_adx: e_adx,
+                        entry_spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
+                            (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
+                        } else { 0.0 },
+                        exit_spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
+                            (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
+                        } else { 0.0 },
+                        entry_vwap_pct: 0.0,
+                        entry_vol_slope: 0.0,
+                        leverage: self.leverage_map.get(&tid).copied().unwrap_or(1) as u8,
+                        session_mode: format!("{:?}", self.current_trading_session),
+                        hold_secs: if entry_time > 0 && self.now_ns > entry_time {
+                            (self.now_ns - entry_time) / 1_000_000_000
+                        } else { 0 },
+                        exit_reason: reason_str.clone(),
+                        mae: pos_mae,
+                        mfe: pos_mfe,
+                    });
+                    self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
+                    self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
+                    if final_pnl < 0.0 {
+                        self.liquidation_defense.record_stop_loss();
+                    } else {
+                        self.liquidation_defense.record_win();
+                    }
+                    let close_notional = tick.last * exit_qty as f64;
+                    if close_notional > 0.0 {
+                        let return_pct = final_pnl / close_notional * 100.0;
+                        self.thompson_sampler.observe(tid, return_pct);
+                    }
+                    self.portfolio.remove_position(tid);
+                    self.positions.remove(&tid);
+                    // AUDIT-FIX: Post-exit cooldown — prevent immediate re-entry spam.
+                    // After a stop-out, wait 5 minutes before re-entering same ticker.
+                    // Reuses gap_cooldowns HashMap (already per-ticker + checked before signal).
+                    let exit_cooldown_ns = 5 * 60 * 1_000_000_000u64; // 5 minutes
+                    self.gap_cooldowns.insert(tid, self.now_ns + exit_cooldown_ns);
+
+                    if self.simulation_mode {
+                        let exit_gbp = tick.bid;
+                        let now_ns = self.now_ns;
+                        for st in self.simulated_trades.iter_mut() {
+                            if st.ticker_id == tid && st.status == SimTradeStatus::Open {
+                                st.status = SimTradeStatus::Closed;
+                                st.exit_price_gbp = Some(exit_gbp);
+                                st.pnl_gbp = Some(final_pnl);
+                                st.exit_timestamp_ns = Some(now_ns);
+                                break;
+                            }
+                        }
+                        let sym = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+                        eprintln!(
+                            "SIM_EXIT: {} x{} @ {:.4} GBP pnl=£{:.2} rung={highest_rung}",
+                            sym, exit_qty, exit_gbp, final_pnl,
+                        );
+                    }
+                    return; // Position closed — done processing this tick
+                }
+            }
+        }
+
+        // Phase 11: In Dark mode, no new entries.
+        // ModeC (17:00-20:00 London) allows US-session trading.
+        // NOTE: Exits are processed ABOVE this gate — only entries are blocked.
+        if matches!(self.current_mode, TradingMode::Dark) {
+            return;
+        }
+
+        // Phase 2: Market scheduler gate — skip new entries if global session is Closed.
+        // NOTE: Exits are processed ABOVE this gate — only entries are blocked.
+        if self.current_trading_session == TradingSession::Closed {
             return;
         }
 
@@ -777,165 +1271,6 @@ impl<B: BrokerAdapter> Engine<B> {
             // This is a placeholder; actual snapshot feeding is in Phase 3
         }
 
-        // P4-C: Update InfiniteChandelier adaptive multipliers before exit evaluation.
-        if self.exit_engine.is_infinite_chandelier() {
-            let realized_vol = self
-                .bar_history
-                .get(&tid)
-                .map(|h| h.realized_vol(6120.0))
-                .unwrap_or(0.30);
-            let time_fraction = Clock::time_of_day_fraction(time_secs);
-            let momentum = if let Some(&prev) = self.last_prices.get(&tid)
-                && prev > 0.0
-            {
-                (tick.last - prev) / prev
-            } else {
-                0.0
-            };
-            let amihud = self
-                .bar_history
-                .get(&tid)
-                .map(|h| h.amihud())
-                .unwrap_or(0.0);
-            let heat = self.portfolio.portfolio_heat_pct();
-            let is_reduce = self.arbiter.regime >= RiskRegime::Reduce;
-            self.exit_engine.strategy_mut().update_multipliers(
-                realized_vol,
-                time_fraction,
-                momentum,
-                amihud,
-                heat,
-                is_reduce,
-            );
-        }
-
-        // Exit evaluation for existing positions (Phase 11: only when mode allows exits)
-        if self.current_mode.allows_exits() && let Some(pos) = self.positions.get_mut(&tid) {
-            if self
-                .exit_engine
-                .is_price_spike(pos.highest_high, tick.last, tick.bid, tick.ask)
-            {
-                return; // H71: price spike filter
-            }
-            self.exit_engine.update_tracking(pos, tick.last, atr);
-            pos.unrealized_pnl = (tick.last - pos.avg_entry) * pos.qty as f64;
-
-            let is_halt = self.arbiter.regime >= RiskRegime::Flatten;
-            let is_eod = Clock::eod_phase(time_secs).is_some();
-            // P21: Check if position is in carry state (stops frozen)
-            let is_carried = self.carry_manager.is_carried(&tid);
-            let exit_result = self
-                .exit_engine
-                .evaluate(pos, tick.last, atr, time_secs, is_halt, is_eod, is_carried);
-            if let Some(ref result) = exit_result {
-                let reason_str = format!("{:?}", result.signal.reason);
-                let priority_str = format!("{:?}", result.signal.priority);
-                let final_pnl = pos.unrealized_pnl - pos.total_commission;
-                let entry_time = pos.entry_timestamp_ns;
-                let exit_qty = pos.qty;
-
-                self.write_wal(WalPayload::ExitSignal {
-                    ticker_id: tid.0,
-                    reason: reason_str.clone(),
-                    priority: priority_str,
-                });
-
-                // Phase 2A: Submit SELL order to broker.
-                // ExitResult tells us the order type and limit price.
-                let exit_order_id = format!("exit-{}", uuid::Uuid::now_v7());
-                let sell_limit = match result.signal.order_type {
-                    crate::types::ExitOrderType::LimitAtStop => {
-                        // Use the exit signal's limit price (the stop level)
-                        let raw = result.signal.limit_price.unwrap_or(tick.bid);
-                        round_to_tick_size(raw, &self.config)
-                    }
-                    crate::types::ExitOrderType::MarketSell
-                    | crate::types::ExitOrderType::MarketToLimit => {
-                        // Market-like: use bid with small buffer below to ensure fill
-                        let raw = tick.bid * 0.999; // 10bps below bid for aggressive fill
-                        round_to_tick_size(raw.max(0.01), &self.config)
-                    }
-                };
-
-                self.write_wal(WalPayload::RoutedOrder {
-                    order_id: exit_order_id.clone(),
-                    ticker_id: tid.0,
-                    side: "Sell".to_string(),
-                    confidence: 0.0,
-                    strategy: reason_str,
-                    kelly_fraction: 0.0,
-                    approved_size: sell_limit * exit_qty as f64,
-                });
-                self.tracked_orders.push(exit_order_id.clone());
-
-                // P3-C: Track exit order in Executioner
-                self.executioner.track_order(TrackedOrder {
-                    order_id: exit_order_id.clone(),
-                    ticker_id: tid,
-                    lifecycle: OrderLifecycle::Submitted,
-                    submit_ns: self.now_ns,
-                    last_update_ns: self.now_ns,
-                    qty: exit_qty,
-                    filled_qty: 0,
-                    limit_price: sell_limit,
-                    retries: 0,
-                    is_exit: true,
-                });
-
-                if let Err(e) = self.broker.submit_order(
-                    &exit_order_id,
-                    tid,
-                    OrderSide::Sell,
-                    exit_qty,
-                    sell_limit,
-                ) {
-                    eprintln!(
-                        "EXIT: sell order FAILED for ticker={} qty={} err={e} — position remains!",
-                        tid.0, exit_qty
-                    );
-                    // Don't remove position if sell failed — let reconciliation catch it
-                    return;
-                }
-
-                eprintln!(
-                    "EXIT: {:?} ticker={} qty={} limit={sell_limit:.4}",
-                    result.signal.reason, tid.0, exit_qty
-                );
-
-                // Drain broker events from the sell submission
-                let sell_events = self.broker.drain_events();
-                for ev in &sell_events {
-                    self.process_broker_event(ev);
-                }
-
-                self.write_wal(WalPayload::PositionClosed {
-                    ticker_id: tid.0,
-                    final_pnl,
-                    entry_time_ns: entry_time,
-                    exit_time_ns: self.now_ns,
-                });
-                // P11: Clear sector position on close.
-                let close_notional = tick.last * exit_qty as f64;
-                self.sector_tracker.clear_position(tid, close_notional);
-                // P12: Record trade outcome in predictive scorer.
-                self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
-                // P16: Record stop loss or win in liquidation defense.
-                if final_pnl < 0.0 {
-                    self.liquidation_defense.record_stop_loss();
-                } else {
-                    self.liquidation_defense.record_win();
-                }
-                // P5-C: Observe return in Thompson sampler for allocation learning.
-                if close_notional > 0.0 {
-                    let return_pct = final_pnl / close_notional * 100.0;
-                    self.thompson_sampler.observe(tid, return_pct);
-                }
-                self.portfolio.remove_position(tid);
-                self.positions.remove(&tid);
-                return;
-            }
-        }
-
         // Skip signal generation if position exists or in cooldown
         if self.positions.contains_key(&tid) {
             return;
@@ -944,6 +1279,62 @@ impl<B: BrokerAdapter> Engine<B> {
             && self.now_ns < cooldown
         {
             return;
+        }
+
+        // AUDIT-FIX: Exchange-open check. Don't trade tickers on closed exchanges.
+        // HKEX closes 08:00 UTC, LSE 16:30 UTC, etc. Trading stale data from
+        // closed exchanges produces immediate stop-outs (0-minute hold trades).
+        {
+            let exchange = self.broker.exchange_for_ticker(&tid);
+            let utc_now = chrono::Utc::now();
+            let exchange_open = match exchange {
+                "HKEX" | "SEHK" => {
+                    // HKEX: 01:30-08:00 UTC (09:30-16:00 HKT), no DST
+                    let h = utc_now.hour();
+                    let m = utc_now.minute();
+                    (h > 1 || (h == 1 && m >= 30)) && h < 8
+                }
+                "TSEJ" | "TSE" => {
+                    // TSE: 00:00-06:00 UTC (09:00-15:00 JST), no DST, lunch 02:30-03:30 UTC
+                    let h = utc_now.hour();
+                    h < 6
+                }
+                "ASX" => {
+                    // ASX: 00:00-06:00 UTC (10:00-16:00 AEST), varies with DST
+                    let h = utc_now.hour();
+                    h < 6
+                }
+                "LSEETF" | "LSE" => {
+                    // LSE: Use existing clock module (handles BST)
+                    Clock::is_lse_open(time_secs)
+                }
+                "IBIS" | "XETRA" => {
+                    // XETRA: 08:00-16:30 CET = 07:00-15:30 UTC (winter), 06:00-14:30 UTC (summer)
+                    let h = utc_now.hour();
+                    h >= 7 && h < 16
+                }
+                "SBF" | "EURONEXT" | "EURONEXT_PA" | "AEB" | "EURONEXT_AS" => {
+                    let h = utc_now.hour();
+                    h >= 8 && h < 17
+                }
+                "SMART" | "NYSE" | "NASDAQ" | "AMEX" => {
+                    // US: 14:30-21:00 UTC (09:30-16:00 ET), varies with DST
+                    let h = utc_now.hour();
+                    h >= 14 && h < 21
+                }
+                "SGX" => {
+                    let h = utc_now.hour();
+                    h >= 1 && h < 9
+                }
+                "KSE" | "KRX" => {
+                    let h = utc_now.hour();
+                    h < 6
+                }
+                _ => true, // Unknown exchange: allow (fail-open)
+            };
+            if !exchange_open {
+                return; // Exchange closed — skip signal entirely
+            }
         }
 
         // Phase 11: Only ModeB allows new entries (replaces H35 cutoff + auction checks)
@@ -958,6 +1349,15 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // P12: Check if ticker is locked by predictive scorer (5 consecutive losses).
         if self.predictive_scorer.is_locked(tid) {
+            return;
+        }
+
+        // Phase 1C: Block entry if jump-diffusion signature detected.
+        if regime_decision.has_jump {
+            eprintln!(
+                "REGIME_GATE: ticker={} jump-diffusion detected, blocking entry",
+                tid.0
+            );
             return;
         }
 
@@ -981,11 +1381,17 @@ impl<B: BrokerAdapter> Engine<B> {
         // P16: Liquidation defense — halt if 3 consecutive stop losses (Blood Oath H12).
         if self.liquidation_defense.should_halt() {
             self.arbiter.regime = RiskRegime::Halt;
+            self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
         }
 
         // P6-E: European session entry gating (supplement to ModeB check).
-        if !self.european_session.entry_allowed("XLON", (self.now_ns / 1_000_000_000) as u32 % 86400) {
-            return;
+        // Only enforce XLON open hours during ModeB (European-only).
+        // During ModeBPlus/ModeC, US tickers trade — don't gate on XLON.
+        // During ModeA, Asian tickers trade — don't gate on XLON.
+        if matches!(self.current_mode, TradingMode::ModeB) {
+            if !self.european_session.entry_allowed("XLON", time_secs) {
+                return;
+            }
         }
 
         // Determine signal: from Python Brain (required for live/paper)
@@ -994,6 +1400,11 @@ impl<B: BrokerAdapter> Engine<B> {
         let Some(ref sig) = signal else {
             return; // No Python signal → no trade. Never generate phantom entries.
         };
+        // Signal arrival instrumentation
+        eprintln!(
+            "SIGNAL_ARRIVED: ticker={} dir={} conf={:.1} kelly={:.4} shares={}",
+            tid.0, sig.direction, sig.confidence, sig.kelly_fraction, sig.shares,
+        );
         let direction = if sig.direction == "Short" {
             Direction::Short
         } else {
@@ -1005,9 +1416,14 @@ impl<B: BrokerAdapter> Engine<B> {
         let shares_hint = sig.shares;
 
         // Risk arbiter evaluation with real time and spread
+        let ticker_score = self.predictive_scorer.score(tid);
         let ctx = EvalContext {
             time_secs,
-            last_tick_age_secs: 1,
+            last_tick_age_secs: if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
+                (self.now_ns - tick.recv_timestamp_ns) / 1_000_000_000
+            } else {
+                1 // Fallback: assume fresh if no timestamp
+            },
             bid: tick.bid,
             ask: tick.ask,
             broker_connected: self.broker.is_connected(),
@@ -1015,8 +1431,23 @@ impl<B: BrokerAdapter> Engine<B> {
             now_ns: self.now_ns,
             kelly_fraction_raw: kelly_fraction,
             garch_sigma,
+            ticker_ic: ticker_score.map_or(0.0, |s| s.ic),
+            ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
+            ticker_locked: ticker_score.map_or(false, |s| s.locked),
+            ticker_position_count: self.portfolio.position_count_for(&tid),
             ..EvalContext::default()
         };
+        // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)
+        if !self.arbiter.ticker_blacklist.is_empty() {
+            if let Some(symbol) = self.broker.symbol_for(tid) {
+                if self.arbiter.ticker_blacklist.iter().any(|b| b == &symbol) {
+                    eprintln!("BLACKLIST: {} rejected by Ouroboros blacklist (WR < 30%%)", symbol);
+                    self.telemetry.record_veto("TickerBlacklisted");
+                    return;
+                }
+            }
+        }
+
         let decision = self.arbiter.evaluate(
             tid,
             direction,
@@ -1026,15 +1457,44 @@ impl<B: BrokerAdapter> Engine<B> {
             &ctx,
         );
         if !decision.approved {
-            // P4-A: Record veto in telemetry
-            self.telemetry.record_veto(&format!("{:?}", decision.reason));
+            // P4-A: Record veto in telemetry + log reason (no more silent vetoes)
+            let reason_str = format!("{:?}", decision.reason);
+            self.telemetry.record_veto(&reason_str);
+            // Log first 10 vetoes per reason, then every 100th to avoid log flood
+            let veto_count = self.telemetry.veto_count(&reason_str);
+            if veto_count <= 10 || veto_count % 100 == 0 {
+                let sym = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+                eprintln!(
+                    "VETO: {} ticker={} sym={} reason={} (count={})",
+                    if self.simulation_mode { "[SIM]" } else { "[LIVE]" },
+                    tid.0, sym, reason_str, veto_count,
+                );
+            }
             return;
         }
-        // P4-A: Record approved signal
+        // P4-A: Record signal generation and approval in telemetry
+        self.telemetry.signals_generated.inc();
         self.telemetry.signals_approved.inc();
 
         // P6-C: ISA gate check before order submission.
-        let trade_value_gbp = tick.ask * shares_hint as f64;
+        // tick.ask is already GBP-converted, so trade_value is in GBP.
+        // Simulation: Kelly-anchored sizing with £500 base. Live: Python shares.
+        // Half-Kelly during early validation (< 250 trades).
+        // Applied BEFORE sizing so positions are actually half-sized, not just logged as half.
+        let total_trades_for_ramp = self.simulated_trades.len() as u64 + self.telemetry.orders_filled.get();
+        let sizing_kelly = if total_trades_for_ramp < 250 {
+            kelly_fraction * 0.5
+        } else {
+            kelly_fraction
+        };
+        let trade_value_gbp = if self.simulation_mode {
+            // AUDIT-FIX (2026-03-18): Kelly × equity — institutional sizing.
+            // Half-Kelly applied above for <250 trades (bootstrap phase).
+            let notional = sizing_kelly * self.portfolio.equity;
+            notional.clamp(100.0, self.portfolio.equity * 0.25) // Floor £100, cap 25% of equity
+        } else {
+            tick.ask * shares_hint.max(1) as f64
+        };
         // P3-D: SmartRouter — check ETP route (passthrough in Crucible mode).
         let symbol = self.config.contracts.get(tid.0 as usize)
             .map(|c| c.symbol.as_str())
@@ -1043,49 +1503,210 @@ impl<B: BrokerAdapter> Engine<B> {
             // ETP mapping exists — route through ETP wrapper (already using ETP in Crucible)
         }
         // P6-B: Exchange profile — validate tick rounding via exchange registry.
-        if let Some(profile) = self.exchange_registry.by_mic("XLON") {
+        let ticker_exchange = self.broker.exchange_for_ticker(&tid);
+        let exchange_mic = match ticker_exchange {
+            "LSEETF" | "LSE" => "XLON",
+            "TSEJ" | "TSE" => "XTKS",
+            "SEHK" | "HKEX" => "XHKG",
+            "KSE" | "KRX" => "XKRX",
+            "ASX" => "XASX",
+            "SGX" => "XSES",
+            "IBIS" | "XETRA" => "XETR",
+            "SBF" | "EURONEXT" | "EURONEXT_PA" => "XPAR",
+            "AEB" | "EURONEXT_AS" => "XAMS",
+            "SMART" | "NYSE" | "NASDAQ" | "AMEX" => "XNYS",
+            _ => "XLON",
+        };
+        if let Some(profile) = self.exchange_registry.by_mic(exchange_mic) {
             let _rounded = profile.round_tick(tick.ask);
         }
-        let isa_check = self.isa_gate.check("XLON", trade_value_gbp);
+        let isa_check = self.isa_gate.check(exchange_mic, trade_value_gbp);
         if !matches!(isa_check, crate::isa_gate::IsaCheckResult::Allowed) {
             eprintln!("ISA_GATE: rejected trade for ticker={}, result={isa_check:?}", tid.0);
             return;
         }
 
-        // Submit order
-        let order_id = format!("order-{}", self.broker.next_valid_id());
+        // Minimum position size gate: reject dust trades.
+        // Simulation: £20 min (need data). Live: £1500 min (commission drag).
+        let min_trade_gbp = if self.simulation_mode { 20.0 } else { 1500.0 };
+        if trade_value_gbp < min_trade_gbp {
+            return;
+        }
+
+        // Use sizing_kelly (half-Kelly already applied above for <250 trades)
+        let kelly_fraction = sizing_kelly;
+
+        // Submit order — use engine's monotonic counter for unique IDs
+        self.order_counter += 1;
+        let order_id = format!("order-{}", self.order_counter);
+        // P21-FX: Use NATIVE currency ask price for IBKR limit order (IBKR expects native).
         let limit_price =
-            tick.ask * (1.0 + self.config.execution.marketable_limit_buffer_pct / 100.0);
+            native_ask * (1.0 + self.config.execution.marketable_limit_buffer_pct / 100.0);
         // Round to tick size (H65)
         let limit_price = round_to_tick_size(limit_price, &self.config);
+
+        // Position size: In simulation mode, use Kelly-anchored notional (£500 base).
+        // In live mode, use Kelly-computed shares from Python signal.
+        // HIGH-PRICE GUARD: If 1 share costs more than the Kelly notional cap (£2000),
+        // skip entry entirely. Forcing min 1 share on £10k+ tickers creates unrealistic
+        // concentration that poisons simulation data quality.
+        if self.simulation_mode && tick.ask > 2000.0 {
+            eprintln!(
+                "SIZING_SKIP: ticker={} price=£{:.0} exceeds £2000 sim cap — no fractional shares",
+                tid.0, tick.ask,
+            );
+            return;
+        }
+        let qty = if self.simulation_mode {
+            // Use the Kelly-anchored trade_value_gbp computed above.
+            (trade_value_gbp / tick.ask).max(1.0) as u32
+        } else if shares_hint > 0 {
+            shares_hint
+        } else {
+            (decision.adjusted_size / native_ask).max(1.0) as u32
+        };
+
+        // Get symbol name for logging
+        let symbol_name = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+        let currency = self.ticker_currencies.get(&tid).cloned().unwrap_or_else(|| "GBP".to_string());
 
         self.write_wal(WalPayload::RoutedOrder {
             order_id: order_id.clone(),
             ticker_id: tid.0,
             side: format!("{direction:?}"),
             confidence,
-            strategy: strategy_name,
+            strategy: strategy_name.clone(),
             kelly_fraction,
             approved_size: decision.adjusted_size,
+            symbol: symbol_name.clone(),
+            qty,
+            currency: currency.clone(),
+            entry_rvol: sig.rvol,
+            entry_hurst: sig.hurst,
+            entry_adx: sig.adx,
+            spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
+                (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
+            } else { 0.0 },
+            vwap_distance_pct: 0.0,
+            volume_slope: 0.0,
+            leverage: self.leverage_map.get(&tid).copied().unwrap_or(1) as u8,
+            session_mode: format!("{:?}", self.current_trading_session),
+            entry_price: tick.ask,
         });
         self.tracked_orders.push(order_id.clone());
 
-        // Position size: prefer Python's Kelly-computed shares, else from arbiter
-        let qty = if shares_hint > 0 {
-            shares_hint
-        } else {
-            (decision.adjusted_size / tick.ask).max(1.0) as u32
-        };
+        if self.simulation_mode {
+            // SIMULATION MODE: Do NOT submit to broker. Create simulated fill immediately.
+            let sim_trade = SimulatedTrade {
+                order_id: order_id.clone(),
+                ticker_id: tid,
+                symbol: symbol_name.clone(),
+                direction,
+                qty,
+                fill_price_native: native_ask,
+                fill_price_gbp: tick.ask, // tick.ask is already GBP-converted
+                currency: currency.clone(),
+                confidence,
+                kelly_fraction,
+                trade_value_gbp: tick.ask * qty as f64,
+                timestamp_ns: self.now_ns,
+                strategy: strategy_name.clone(),
+                status: SimTradeStatus::Open,
+                exit_price_gbp: None,
+                pnl_gbp: None,
+                exit_timestamp_ns: None,
+                entry_rvol: sig.rvol,
+                entry_hurst: sig.hurst,
+                entry_adx: sig.adx,
+            };
 
-        if self
-            .broker
-            .submit_order(&order_id, tid, OrderSide::Buy, qty, limit_price)
-            .is_err()
-        {
-            return;
+            // Enriched SIM_TRADE log: full explainability per trade
+            let regime_str = format!("{:?}", self.arbiter.regime);
+            let mode_str = format!("{:?}", self.current_mode);
+            let evidence_maturity = if total_trades_for_ramp < 50 { "bootstrap" }
+                else if total_trades_for_ramp < 250 { "low-confidence" }
+                else { "mature" };
+            // Live-style constrained view: what would a £15k account do?
+            let live_equity = 15000.0_f64;
+            let live_kelly_notional = live_equity * kelly_fraction * 0.25; // quarter-Kelly for live
+            let live_would_qualify = live_kelly_notional >= 100.0;
+            eprintln!(
+                "SIM_TRADE: {} {:?} {} x{} @ {:.4} {} (GBP {:.4}) val=£{:.2} conf={:.0} kelly={:.4} regime={} mode={} evidence={} strategy={} exchange={} | LIVE_VIEW: notional=£{:.0} qualify={}",
+                order_id, direction, symbol_name, qty,
+                native_ask, currency, tick.ask,
+                sim_trade.trade_value_gbp, confidence, kelly_fraction,
+                regime_str, mode_str, evidence_maturity, strategy_name,
+                exchange_mic, live_kelly_notional, live_would_qualify,
+            );
+
+            // Track as position for exit management (Chandelier ladder)
+            let entry_price_gbp = tick.ask;
+            // AUDIT-FIX: Use 1.5×ATR for initial stop (matches Chandelier Rung 1).
+            // Fallback to 5% if ATR unavailable (cold start).
+            let atr_val = self.bar_history.get(&tid).map(|h| h.atr(14)).unwrap_or(0.0);
+            let stop_pct = if atr_val > 0.0 && entry_price_gbp > 0.0 {
+                (1.5 * atr_val / entry_price_gbp).clamp(0.01, 0.10) // 1-10% bounded
+            } else {
+                0.05 // Cold-start fallback
+            };
+            let stop = initial_stop_price(entry_price_gbp, stop_pct);
+            self.positions.insert(tid, PositionState {
+                ticker_id: tid,
+                qty,
+                avg_entry: entry_price_gbp,
+                stop_price: stop,
+                entry_timestamp_ns: self.now_ns,
+                origin_order_id: order_id.clone(),
+                unrealized_pnl: 0.0,
+                realized_pnl: 0.0,
+                highest_high: entry_price_gbp,
+                total_commission: 0.0,
+                trailing_rung: 0,
+                state: OrderState::Filled,
+                is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
+            });
+
+            self.simulated_trades.push(sim_trade);
+
+            // Also add to portfolio for HEARTBEAT tracking and risk calculations
+            let pos_copy = PositionState {
+                ticker_id: tid,
+                qty,
+                avg_entry: entry_price_gbp,
+                stop_price: stop,
+                entry_timestamp_ns: self.now_ns,
+                origin_order_id: order_id.clone(),
+                unrealized_pnl: 0.0,
+                realized_pnl: 0.0,
+                highest_high: entry_price_gbp,
+                total_commission: 0.0,
+                trailing_rung: 0,
+                state: OrderState::Filled,
+                is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
+            };
+            self.portfolio.add_position(pos_copy);
+
+            self.telemetry.orders_submitted.inc();
+            self.telemetry.orders_filled.inc();
+
+        } else {
+            // LIVE MODE: Submit to broker
+            if let Err(e) = self
+                .broker
+                .submit_order(&order_id, tid, OrderSide::Buy, qty, limit_price)
+            {
+                eprintln!(
+                    "ORDER_REJECTED: ticker={} order_id={} qty={} limit={:.4} error={:?}",
+                    tid.0, order_id, qty, limit_price, e
+                );
+                return;
+            }
+            self.telemetry.orders_submitted.inc();
         }
-        // P4-A: Record order submission in telemetry
-        self.telemetry.orders_submitted.inc();
 
         // P3-C: Track order in Executioner for lifecycle management
         self.executioner.track_order(TrackedOrder {
@@ -1095,7 +1716,7 @@ impl<B: BrokerAdapter> Engine<B> {
             submit_ns: self.now_ns,
             last_update_ns: self.now_ns,
             qty,
-            filled_qty: 0,
+            filled_qty: if self.simulation_mode { qty } else { 0 },
             limit_price,
             retries: 0,
             is_exit: false,
@@ -1107,8 +1728,9 @@ impl<B: BrokerAdapter> Engine<B> {
             let t2t_ms = t2t_ns as f64 / 1_000_000.0;
             self.latency_profiler.record_ms(PipelineStage::TickToTrade, t2t_ms);
             eprintln!(
-                "T2T: ticker={}, latency={:.3}ms, qty={qty}, price={limit_price:.4}",
-                tid.0, t2t_ms,
+                "T2T: ticker={} {} latency={:.3}ms qty={qty} price={limit_price:.4} {}",
+                tid.0, symbol_name, t2t_ms,
+                if self.simulation_mode { "[SIMULATED]" } else { "[LIVE]" },
             );
         }
 
@@ -1174,6 +1796,10 @@ impl<B: BrokerAdapter> Engine<B> {
             self.arbiter.regime = RiskRegime::Flatten;
         }
 
+        // FIX Issue #8: Mark-to-market — update equity from current prices
+        self.portfolio.mark_to_market(&self.last_prices);
+        self.portfolio.update_high_water();
+
         // P4-A: Record reconciliation in telemetry
         self.telemetry.reconciliation_runs.inc();
         if !result.is_clean {
@@ -1186,6 +1812,53 @@ impl<B: BrokerAdapter> Engine<B> {
         // P6-A: Check FX rate staleness
         if self.fx_table.is_stale(self.now_ns) {
             eprintln!("WARNING: FX rates stale (>24h) — using defaults");
+        }
+
+        // FIX 3: Reduce → Normal auto-recovery.
+        // If regime is Reduce and ALL spoof detectors are normalized (last 5 spreads
+        // within 3× median), no liquidation defense active, and no macro escalation,
+        // de-escalate to Normal. This prevents permanent Reduce from startup false positives.
+        if self.arbiter.regime == RiskRegime::Reduce
+            && !self.liquidation_defense.should_flatten()
+            && !self.liquidation_defense.should_halt()
+            && !self.cross_timezone.should_reduce_exposure()
+            && !self.macro_regime.should_escalate_regime()
+            && !self.broker_health.should_reduce(self.now_ns)
+            && self.portfolio.consecutive_stop_losses < 3
+        {
+            // Check that no tickers are currently spoofed
+            let any_spoofed = self.universe.tickers.keys().any(|&tid| {
+                self.quote_imbalance.is_spoofed(tid)
+            });
+            if !any_spoofed {
+                eprintln!("REGIME_RECOVERY: Reduce → Normal (all triggers cleared)");
+                self.arbiter.regime = RiskRegime::Normal;
+                self.write_wal(WalPayload::RiskStateChange {
+                    from: "Reduce".to_string(),
+                    to: "Normal".to_string(),
+                    trigger: "auto_clear_all_triggers_resolved".to_string(),
+                });
+            }
+        }
+
+        // P21-AUTO: Halt → Normal auto-recovery.
+        // Mirrors the Reduce → Normal pattern above. Clears Halt ONLY when ALL
+        // halt sources have resolved: broker connected, no liquidation defense,
+        // no panics, no watchdog expiry. This makes the engine fully autonomous.
+        if self.arbiter.regime == RiskRegime::Halt
+            && !self.halt_from_watchdog  // Watchdog has its own recovery path (line 716)
+            && !self.liquidation_defense.should_halt()
+            && !self.panic_guard.has_panicked()
+            && !self.broker_health.should_halt(self.now_ns)
+            && self.portfolio.consecutive_stop_losses < self.config.risk.consecutive_loss_halt
+        {
+            eprintln!("REGIME_RECOVERY: Halt → Normal (all halt sources cleared, broker healthy)");
+            self.arbiter.regime = RiskRegime::Normal;
+            self.write_wal(WalPayload::RiskStateChange {
+                from: "Halt".to_string(),
+                to: "Normal".to_string(),
+                trigger: "auto_clear_all_halt_sources_resolved".to_string(),
+            });
         }
 
         // P6-F: Cross-timezone carry risk assessment
@@ -1213,6 +1886,7 @@ impl<B: BrokerAdapter> Engine<B> {
         if self.broker_health.should_halt(self.now_ns) {
             eprintln!("BROKER_HEALTH: disconnect >120s → HALT");
             self.arbiter.regime = RiskRegime::Halt;
+            self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
         }
         if self.broker_health.should_reduce(self.now_ns) && self.arbiter.regime < RiskRegime::Reduce {
             eprintln!(
@@ -1235,10 +1909,89 @@ impl<B: BrokerAdapter> Engine<B> {
             eprintln!("CHECKPOINT: hash={hash:#018x}");
         }
 
+        // Simulation mode: prevent regime escalation (no stale VIX/macro data).
+        if self.simulation_mode && self.arbiter.regime > RiskRegime::Normal {
+            self.arbiter.regime = RiskRegime::Normal;
+        }
+
+        // P6-HEARTBEAT: 5-minute status heartbeat for operational monitoring.
+        let five_min_ns = 300_000_000_000u64;
+        if self.now_ns >= self.last_heartbeat_ns + five_min_ns {
+            let positions_count = self.positions.len();
+            let equity = self.portfolio.equity;
+            let daily_pnl = self.portfolio.daily_pnl;
+            let regime = format!("{:?}", self.arbiter.regime);
+            let session_mode = format!("{}", self.session_mgr.mode());
+            let clock_mode = format!("{:?}", self.current_mode);
+            let session = format!("{}", self.current_trading_session);
+            let ticks = self.telemetry.ticks_received.get();
+            let signals = self.telemetry.signals_generated.get();
+            let entries = self.telemetry.orders_submitted.get();
+            eprintln!(
+                "HEARTBEAT: regime={regime} session_mode={session_mode} clock={clock_mode} \
+                 session={session} equity={equity:.2} pnl={daily_pnl:.2} pos={positions_count} \
+                 ticks={ticks} signals={signals} orders={entries}"
+            );
+
+            // Write per-position snapshot to WAL for Google Sheets unrealised P&L
+            if !self.positions.is_empty() {
+                let mut pos_list = Vec::new();
+                let mut total_unrealized = 0.0f64;
+                for (&tid, pos) in &self.positions {
+                    let symbol = self.broker.symbol_for(tid)
+                        .unwrap_or_else(|| format!("T{}", tid.0));
+                    let current_price = self.last_prices.get(&tid).copied()
+                        .unwrap_or(pos.avg_entry);
+                    let unrealized = (current_price - pos.avg_entry) * pos.qty as f64;
+                    total_unrealized += unrealized;
+                    pos_list.push(serde_json::json!({
+                        "ticker_id": tid.0,
+                        "symbol": symbol,
+                        "qty": pos.qty,
+                        "entry_price": (pos.avg_entry * 10000.0).round() / 10000.0,
+                        "current_price": (current_price * 10000.0).round() / 10000.0,
+                        "unrealized_pnl": (unrealized * 100.0).round() / 100.0,
+                        "rung": pos.trailing_rung,
+                        "stop_price": (pos.stop_price * 10000.0).round() / 10000.0,
+                        "highest_high": (pos.highest_high * 10000.0).round() / 10000.0,
+                    }));
+                }
+                self.write_wal(WalPayload::StateSnapshot {
+                    portfolio_json: format!(
+                        "{{\"positions\":{},\"high_water\":{:.2},\"unrealized_pnl\":{:.2}}}",
+                        self.positions.len(),
+                        self.portfolio.high_water_mark,
+                        total_unrealized
+                    ),
+                    equity: self.portfolio.equity,
+                    high_water: self.portfolio.high_water_mark,
+                    hash: String::new(),
+                    open_positions: pos_list,
+                });
+            }
+
+            self.last_heartbeat_ns = self.now_ns;
+        }
+
         // P21: Session manager update.
         let london_secs = self.london_time_secs();
         if let Some(transition) = self.session_mgr.update(london_secs, !self.positions.is_empty(), self.now_ns) {
             eprintln!("SESSION: {:?} → {:?}", transition.from, transition.to);
+        }
+
+        // Phase 2: Market scheduler — update 6-phase global session from UTC clock.
+        {
+            let epoch_secs = self.now_ns / 1_000_000_000;
+            let utc_dt = chrono::DateTime::<chrono::Utc>::from_timestamp(epoch_secs as i64, 0)
+                .unwrap_or_else(|| chrono::Utc::now());
+            let new_session = market_scheduler::get_current_session(utc_dt);
+            if new_session != self.current_trading_session {
+                eprintln!(
+                    "MARKET_SCHEDULER: {} -> {}",
+                    self.current_trading_session, new_session
+                );
+                self.current_trading_session = new_session;
+            }
         }
 
         // P21: Subscription rotation on mode transitions
@@ -1249,19 +2002,14 @@ impl<B: BrokerAdapter> Engine<B> {
                 self.last_session_mode, current_mode
             );
 
-            // P21: Carry manager — freeze/unfreeze stops at session boundaries
+            // Carry manager — freeze/unfreeze stops at session boundaries
             match (self.last_session_mode, current_mode) {
-                // ModeB → Dark: freeze stops (entering overnight carry)
-                (SessionMode::ModeB, SessionMode::Dark) |
-                // ModeB → Carry: freeze stops
-                (SessionMode::ModeB, SessionMode::Carry) |
-                // Auction → Dark: freeze stops
-                (SessionMode::Auction, SessionMode::Dark) |
-                // Auction → Carry: freeze stops
-                (SessionMode::Auction, SessionMode::Carry) => {
+                // Active → Dark/Carry: freeze stops (entering maintenance/overnight)
+                (_, SessionMode::Dark) | (_, SessionMode::Carry)
+                    if !matches!(self.last_session_mode, SessionMode::Dark | SessionMode::Carry) =>
+                {
                     let frozen = self.carry_manager.freeze_all_stops(self.now_ns);
                     if frozen > 0 {
-                        // Collect tickers first to avoid borrow conflict
                         let tickers: Vec<TickerId> = self.positions.keys().copied().collect();
                         for tid in tickers {
                             if self.carry_manager.is_carried(&tid)
@@ -1271,15 +2019,15 @@ impl<B: BrokerAdapter> Engine<B> {
                         }
                     }
                 }
-                // Dark → ModeA: unfreeze stops (returning to Asian session)
+                // Dark/Carry → Active: unfreeze stops
+                (SessionMode::Dark, SessionMode::Active) |
+                (SessionMode::Carry, SessionMode::Active) |
                 (SessionMode::Dark, SessionMode::ModeA) |
-                // Carry → ModeB: unfreeze stops (returning to European session)
+                (SessionMode::Carry, SessionMode::ModeA) |
                 (SessionMode::Carry, SessionMode::ModeB) |
-                // Carry → ModeA: unfreeze stops (returning to Asian session)
-                (SessionMode::Carry, SessionMode::ModeA) => {
+                (SessionMode::Carry, SessionMode::ModeC) => {
                     let unfrozen = self.carry_manager.unfreeze_all_stops();
                     if unfrozen > 0 {
-                        // Collect tickers first to avoid borrow conflict
                         let tickers: Vec<TickerId> = self.positions.keys().copied().collect();
                         for tid in tickers {
                             if !self.carry_manager.is_carried(&tid)
@@ -1322,8 +2070,280 @@ impl<B: BrokerAdapter> Engine<B> {
         // P5-C: Log-Thompson sampler — compute allocation ranking (for telemetry).
         let _top_tickers = self.thompson_sampler.select_top_k(5);
 
+        // Hot-reload watchlist if ticker_selector has updated it.
+        self.maybe_reload_watchlist();
+
+        // 15-minute periodic watchlist rotation (dynamic subscription refresh).
+        // Ouroboros ticker_selector updates active_watchlist.json every 15 min with
+        // the best-ranked tickers across ALL 6 markets. We re-read and rotate to match.
+        // IBKR paper limit: 100 simultaneous market data lines (the max).
+        const ROTATION_INTERVAL_NS: u64 = 15 * 60 * 1_000_000_000; // 15 minutes
+        if self.now_ns >= self.last_watchlist_rotation_ns + ROTATION_INTERVAL_NS {
+            let mode = self.session_mgr.mode();
+            if matches!(mode, SessionMode::Active
+                | SessionMode::ModeA | SessionMode::ModeB
+                | SessionMode::ModeBPlus | SessionMode::ModeC) {
+                eprintln!("WATCHLIST_ROTATE: 15-min periodic refresh triggered (mode={})", mode);
+                self.rotate_subscriptions_from_watchlist();
+            }
+        }
+
         self.last_reconcile_ns = self.now_ns;
         Ok(result)
+    }
+
+    /// Hot-reload watchlist file if the ticker selector has updated it.
+    /// Checks the unified watchlist only.
+    /// Only ADDS new tickers — never removes (positions may be open).
+    fn maybe_reload_watchlist(&mut self) {
+        let watchlist_files = [
+            "config/active_watchlist.json",
+        ];
+
+        for wl_path_str in &watchlist_files {
+            let path = std::path::Path::new(wl_path_str);
+            let current_mtime = match std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+            {
+                Ok(t) => t,
+                Err(_) => continue, // File doesn't exist yet — skip
+            };
+
+            let last_mtime = self.watchlist_mtimes.get(*wl_path_str).copied().unwrap_or(0);
+            if current_mtime <= last_mtime {
+                continue; // No change
+            }
+
+            let tickers = match crate::config_loader::EngineConfig::load_universe_from_watchlist(path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("WATCHLIST_RELOAD: failed to parse {}: {}", wl_path_str, e);
+                    continue;
+                }
+            };
+
+            let before_count = self.universe.intern.len();
+            for raw in &tickers {
+                let tid = self.universe.register(&raw.symbol, UniverseClass::Vanguard);
+                self.bar_history.entry(tid).or_insert_with(|| BarHistory::new(300));
+                self.thompson_sampler.register(tid);
+            }
+            let added = self.universe.intern.len() - before_count;
+
+            self.watchlist_mtimes.insert(wl_path_str.to_string(), current_mtime);
+            if added > 0 {
+                eprintln!(
+                    "WATCHLIST_RELOAD: {} → added {} new tickers (total: {})",
+                    wl_path_str, added, self.universe.intern.len()
+                );
+            }
+        }
+    }
+
+    /// Load top N ticker symbols from a watchlist JSON file.
+    /// Returns (symbols, exchange_hints, currency_hints) for dynamic contract registration.
+    /// Falls back to empty vec if file doesn't exist or parse fails.
+    fn load_watchlist_tickers(path: &str, max_count: usize) -> Vec<(String, String, String)> {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("WATCHLIST_LOAD: failed to parse {}: {}", path, e);
+                return Vec::new();
+            }
+        };
+        let vanguard = match parsed.get("vanguard").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None => return Vec::new(),
+        };
+        let mut result = Vec::new();
+        for entry in vanguard.iter().take(max_count) {
+            let symbol = entry.get("symbol").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            if symbol.is_empty() { continue; }
+            let exchange = entry.get("exchange").and_then(|s| s.as_str()).unwrap_or("SMART").to_string();
+            // P21-FX: Infer currency from symbol suffix when not specified in watchlist JSON.
+            // .L = GBP (LSE), .DE/.AS/.PA/.BR/.LS/.MI = EUR, default = USD (US equities).
+            let default_currency = if symbol.ends_with(".L") {
+                "GBP"
+            } else if symbol.ends_with(".DE") || symbol.ends_with(".AS") || symbol.ends_with(".PA")
+                   || symbol.ends_with(".BR") || symbol.ends_with(".LS") || symbol.ends_with(".MI") {
+                "EUR"
+            } else {
+                "USD"
+            };
+            let currency = entry.get("currency").and_then(|s| s.as_str()).unwrap_or(default_currency).to_string();
+            // Map watchlist exchange names to our internal exchange codes
+            let ticker_type = entry.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let is_leveraged = ticker_type == "leveraged_etp" || ticker_type == "inverse_etp"
+                || entry.get("leveraged").and_then(|v| v.as_bool()).unwrap_or(false);
+            let exchange = match exchange.as_str() {
+                "LSE" => {
+                    if symbol.ends_with(".L") && is_leveraged {
+                        "LSEETF".to_string()
+                    } else {
+                        "LSE".to_string()
+                    }
+                }
+                "NASDAQ" | "NYSE" | "AMEX" => "SMART".to_string(),
+                other => other.to_string(),
+            };
+            result.push((symbol, exchange, currency));
+        }
+        result
+    }
+
+    /// Get the watchlist file — always unified across all 6 markets.
+    /// Ouroboros generates a single ranked watchlist every 15 minutes,
+    /// with LSE leveraged ETPs boosted to the top.
+    fn watchlist_for_mode(_mode: SessionMode) -> &'static str {
+        "config/active_watchlist.json"
+    }
+
+    /// Rotate subscriptions from the unified watchlist.
+    /// Called on mode transitions and every 15 minutes during ACTIVE mode.
+    /// Reads a single active_watchlist.json covering ALL 6 markets.
+    /// IBKR paper trading max: 100 simultaneous market data lines.
+    /// LSE leveraged/inverse ETPs are ALWAYS in the first 12 slots.
+    fn rotate_subscriptions_from_watchlist(&mut self) {
+        let mode = self.session_mgr.mode();
+        if matches!(mode, SessionMode::Dark | SessionMode::Carry) {
+            return; // No rotation in non-trading modes
+        }
+
+        // IBKR paper: 100 simultaneous market data lines (the hard max).
+        // We use all 100 slots — Ouroboros ranks the best 100 across all open markets.
+        let max_tickers: usize = 100;
+
+        let primary_path = Self::watchlist_for_mode(mode);
+        let mut watchlist_tickers = Self::load_watchlist_tickers(primary_path, max_tickers);
+
+        // If watchlist is empty, fall back to static market_config (all markets combined)
+        if watchlist_tickers.is_empty() {
+            eprintln!("WATCHLIST_ROTATE: {} empty/missing, using static fallback", primary_path);
+            // Combine all static tickers: ISA core + TSE + HKEX + XETRA + Euronext + US
+            let mut static_tickers = Vec::new();
+            static_tickers.extend_from_slice(&self.market_config.lse_12);
+            static_tickers.extend_from_slice(&self.market_config.tse_sample);
+            static_tickers.extend_from_slice(&self.market_config.hkex_sample);
+            static_tickers.extend_from_slice(&self.market_config.xetra_sample);
+            static_tickers.extend_from_slice(&self.market_config.euronext_sample);
+            static_tickers.extend_from_slice(&self.market_config.us_equities);
+            static_tickers.truncate(max_tickers);
+            let new_ticker_ids: Vec<TickerId> = static_tickers
+                .iter()
+                .map(|&sym| self.universe.intern.intern(sym))
+                .collect();
+            self.execute_subscription_rotation(&new_ticker_ids, mode);
+            return;
+        }
+
+        // Only prepend ISA core leveraged ETPs when LSE is actually open (08:00-16:30 London).
+        // When LSE is closed, all 100 IBKR slots go to exchanges that are actually trading.
+        let london_secs = self.london_time_secs();
+        let lse_open = crate::clock::Clock::is_lse_open(london_secs);
+        if lse_open {
+            let isa_core: Vec<(String, String, String)> = self.market_config.lse_12.iter()
+                .map(|&s| (s.to_string(), "LSEETF".to_string(), "GBP".to_string()))
+                .collect();
+            let existing_symbols: std::collections::HashSet<String> =
+                watchlist_tickers.iter().map(|(s, _, _)| s.clone()).collect();
+            let mut prepend = Vec::new();
+            for core in isa_core {
+                if !existing_symbols.contains(&core.0) {
+                    prepend.push(core);
+                }
+            }
+            // Insert ISA core at front, then remaining ranked tickers
+            prepend.extend(watchlist_tickers);
+            watchlist_tickers = prepend;
+        }
+
+        // Truncate to IBKR max (100 lines)
+        watchlist_tickers.truncate(max_tickers);
+
+        // P21-FX: Filter out exchanges where we have NO market data subscription.
+        // User's IBKR subscriptions: LSE, Euronext, XETRA, HKEX, TSE, KRX, US, IDEALPRO.
+        // Missing: ASX (Australia), SGX (Singapore).
+        let unsupported_exchanges = ["ASX", "SGX"];
+        let watchlist_tickers: Vec<_> = watchlist_tickers.into_iter()
+            .filter(|(symbol, exchange, _)| {
+                if unsupported_exchanges.contains(&exchange.as_str()) {
+                    eprintln!("WATCHLIST_FILTER: skipping {} (no {} market data subscription)", symbol, exchange);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        // Register new tickers in universe + broker
+        let mut new_ticker_ids = Vec::new();
+        let mut dynamic_registered = 0u32;
+        for (symbol, exchange, currency) in &watchlist_tickers {
+            let tid = self.universe.register(symbol, crate::universe::UniverseClass::Vanguard);
+            self.bar_history.entry(tid).or_insert_with(|| BarHistory::new(300));
+            self.thompson_sampler.register(tid);
+
+            // P21-FX: Cache the currency for this ticker (used in process_tick FX conversion)
+            self.ticker_currencies.insert(tid, currency.clone());
+
+            // Dynamically register contract if broker doesn't know about it
+            if !self.broker.has_contract(&tid) {
+                if self.broker.register_dynamic_contract(tid, symbol, exchange, currency) {
+                    dynamic_registered += 1;
+                }
+            }
+            new_ticker_ids.push(tid);
+        }
+
+        if dynamic_registered > 0 {
+            eprintln!(
+                "WATCHLIST_ROTATE: registered {} new dynamic contracts",
+                dynamic_registered
+            );
+        }
+
+        eprintln!(
+            "WATCHLIST_ROTATE: {} mode=ACTIVE tickers={}/{} (from {})",
+            if self.last_watchlist_rotation_ns == 0 { "INITIAL" } else { "REFRESH" },
+            new_ticker_ids.len(), max_tickers, primary_path
+        );
+
+        self.execute_subscription_rotation(&new_ticker_ids, mode);
+        self.last_watchlist_rotation_ns = self.now_ns;
+    }
+
+    /// Execute the actual subscription rotation (unsub old, sub new).
+    fn execute_subscription_rotation(&mut self, new_ticker_ids: &[TickerId], mode: SessionMode) {
+        let currently_subscribed = self.subscription_manager.active_ticker_ids();
+
+        // Calculate which tickers to unsubscribe
+        let to_unsubscribe: Vec<TickerId> = currently_subscribed
+            .iter()
+            .filter(|tid| !new_ticker_ids.contains(tid))
+            .copied()
+            .collect();
+
+        if !to_unsubscribe.is_empty() {
+            let unsub_count = self.broker.unsubscribe_l1_batch(&to_unsubscribe);
+            eprintln!("SUBSCRIBE: unsubscribed {} L1 feeds", unsub_count);
+        }
+
+        // Update subscription manager
+        let activated = self.subscription_manager.rotate_tickers(new_ticker_ids.to_vec(), self.now_ns);
+
+        // Subscribe to new tickers
+        if !activated.is_empty() {
+            let sub_count = self.broker.subscribe_l1_batch(&activated);
+            eprintln!(
+                "SUBSCRIBE: {} active, {} L1 feeds for {}",
+                activated.len(), sub_count, mode
+            );
+        }
     }
 
     /// P4-B: Verify hardening invariants. Escalate to REDUCE on failure.
@@ -1350,6 +2370,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 self.panic_guard.panic_count()
             );
             self.arbiter.regime = RiskRegime::Halt;
+            self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
             self.telemetry.regime_escalations.inc();
         }
 
@@ -1366,18 +2387,30 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // P4-B: Watchdog expiry check (no ticks for >120s → HALT)
+        // FIX: Only escalate to HALT when a market session is open. During Closed
+        // sessions no ticks are expected, so the watchdog should reset silently.
         if self.tick_watchdog.is_expired(self.now_ns) {
-            eprintln!(
-                "HARDENING: TICK WATCHDOG EXPIRED — no ticks for >120s ({} expirations), escalating to HALT",
-                self.tick_watchdog.expirations()
-            );
-            self.arbiter.regime = RiskRegime::Halt;
-            self.telemetry.regime_escalations.inc();
-            self.write_wal(WalPayload::RiskStateChange {
-                from: "any".to_string(),
-                to: "Halt".to_string(),
-                trigger: "tick_watchdog_expired".to_string(),
-            });
+            if self.current_trading_session == TradingSession::Closed {
+                // Market closed — no ticks expected. Feed the watchdog to prevent
+                // spurious expirations and avoid permanent HALT during off-hours.
+                self.tick_watchdog.feed(self.now_ns);
+                eprintln!(
+                    "TICK_WATCHDOG: market closed (session=Closed) — resetting watchdog, no escalation"
+                );
+            } else {
+                eprintln!(
+                    "HARDENING: TICK WATCHDOG EXPIRED — no ticks for >120s ({} expirations), escalating to HALT",
+                    self.tick_watchdog.expirations()
+                );
+                self.arbiter.regime = RiskRegime::Halt;
+                self.halt_from_watchdog = true;
+                self.telemetry.regime_escalations.inc();
+                self.write_wal(WalPayload::RiskStateChange {
+                    from: "any".to_string(),
+                    to: "Halt".to_string(),
+                    trigger: "tick_watchdog_expired".to_string(),
+                });
+            }
         }
     }
 
@@ -1482,6 +2515,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 // Connectivity lost (H43) → immediate HALT
                 eprintln!("IBKR ERROR 1100: {message} → HALT");
                 self.arbiter.regime = RiskRegime::Halt;
+                self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
                 self.write_wal(WalPayload::RiskStateChange {
                     from: "any".to_string(),
                     to: "Halt".to_string(),
@@ -1489,9 +2523,31 @@ impl<B: BrokerAdapter> Engine<B> {
                 });
             }
             1102 => {
-                // Reconnected (H44) → reconcile before NORMAL
-                eprintln!("IBKR ERROR 1102: {message} → reconcile");
+                // Reconnected (H44) → reconcile then auto-clear Halt if safe
+                eprintln!("IBKR ERROR 1102: {message} → reconcile + resubscribe");
                 let _ = self.reconcile();
+                // FIX: Re-subscribe to all market data after reconnect.
+                // IBKR drops all subscriptions on disconnect (Error 1100).
+                // Without resubscribing, engine receives zero ticks after reconnect.
+                // Note: secdef farms should already be ready since this is a reconnect
+                // (farms persist across client reconnections), so no delay needed here.
+                let resub_count = self.broker.resubscribe_all();
+                eprintln!("IBKR 1102: resubscribed to {resub_count} market data streams");
+                // P21-AUTO: Clear Halt from broker disconnect — broker is back
+                if self.arbiter.regime == RiskRegime::Halt
+                    && !self.broker_health.should_halt(self.now_ns)
+                    && !self.liquidation_defense.should_halt()
+                    && !self.panic_guard.has_panicked()
+                {
+                    eprintln!("REGIME_RECOVERY: Halt → Normal (broker reconnected, reconcile clean)");
+                    self.arbiter.regime = RiskRegime::Normal;
+                    self.halt_from_watchdog = false;
+                    self.write_wal(WalPayload::RiskStateChange {
+                        from: "Halt".to_string(),
+                        to: "Normal".to_string(),
+                        trigger: "broker_reconnected_1102".to_string(),
+                    });
+                }
             }
             321 => {
                 // Pacing violation (H46) → 5s backoff
@@ -1540,7 +2596,14 @@ impl<B: BrokerAdapter> Engine<B> {
                     self.broker_health.record_fill_success(self.now_ns);
                     // P18: Record WAL event in compressor.
                     self.wal_compressor.record_event();
-                    let stop = initial_stop_price(*price, 0.05);
+                    // AUDIT-FIX: Use ATR-based stop (1.5× ATR), fallback to 5%
+                    let atr_val = self.bar_history.get(ticker_id).map(|h| h.atr(14)).unwrap_or(0.0);
+                    let stop_pct = if atr_val > 0.0 && *price > 0.0 {
+                        (1.5 * atr_val / *price).clamp(0.01, 0.10)
+                    } else {
+                        0.05
+                    };
+                    let stop = initial_stop_price(*price, stop_pct);
                     let pos = PositionState {
                         entry_timestamp_ns: self.now_ns,
                         avg_entry: *price,
@@ -1555,6 +2618,8 @@ impl<B: BrokerAdapter> Engine<B> {
                         state: OrderState::ExitRegistered,
                         origin_order_id: order_id.clone(),
                         is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);
@@ -1623,16 +2688,41 @@ impl<B: BrokerAdapter> Engine<B> {
         let checksum = crc32fast::hash(hash.as_bytes());
         eprintln!("STATE_HASH: {hash} → crc32={checksum:#010x}");
 
-        // Write state hash as WAL event (H85)
+        // Build per-position snapshot for Google Sheets Open_Positions + per-ticker unrealised P&L
+        let mut open_positions_json = Vec::new();
+        let mut total_unrealized_pnl = 0.0f64;
+        for (&tid, pos) in &self.positions {
+            let symbol = self.broker.symbol_for(tid)
+                .unwrap_or_else(|| format!("T{}", tid.0));
+            let current_price = self.last_prices.get(&tid).copied().unwrap_or(pos.avg_entry);
+            let unrealized = (current_price - pos.avg_entry) * pos.qty as f64;
+            total_unrealized_pnl += unrealized;
+            open_positions_json.push(serde_json::json!({
+                "ticker_id": tid.0,
+                "symbol": symbol,
+                "qty": pos.qty,
+                "entry_price": (pos.avg_entry * 10000.0).round() / 10000.0,
+                "current_price": (current_price * 10000.0).round() / 10000.0,
+                "unrealized_pnl": (unrealized * 100.0).round() / 100.0,
+                "rung": pos.trailing_rung,
+                "stop_price": (pos.stop_price * 10000.0).round() / 10000.0,
+                "highest_high": (pos.highest_high * 10000.0).round() / 10000.0,
+                "exchange": "",
+            }));
+        }
+
+        // Write state hash as WAL event (H85) — now includes per-position data + unrealised P&L
         self.write_wal(WalPayload::StateSnapshot {
             portfolio_json: format!(
-                "{{\"positions\":{},\"high_water\":{:.2}}}",
+                "{{\"positions\":{},\"high_water\":{:.2},\"unrealized_pnl\":{:.2}}}",
                 self.positions.len(),
-                self.portfolio.high_water_mark
+                self.portfolio.high_water_mark,
+                total_unrealized_pnl
             ),
             equity: self.portfolio.equity,
             high_water: self.portfolio.high_water_mark,
             hash: format!("{checksum:#010x}"),
+            open_positions: open_positions_json,
         });
 
         self.last_state_hash_ns = self.now_ns;
@@ -1676,9 +2766,13 @@ impl<B: BrokerAdapter> Engine<B> {
 
         for (tid, qty) in &position_tickers {
             let order_id = uuid::Uuid::now_v7().to_string();
-            eprintln!("ENGINE: Flattening {:?} ({} shares)", tid, qty);
-            // Use limit price of 0.01 as market-sell fallback (IBKR MTL)
-            let _ = self.broker.submit_order(&order_id, *tid, OrderSide::Sell, *qty, 0.01);
+            eprintln!("ENGINE: Flattening {:?} ({} shares) {}", tid, qty,
+                if self.simulation_mode { "[SIMULATED]" } else { "[LIVE]" });
+            if !self.simulation_mode {
+                // Only submit real orders in live mode
+                let _ = self.broker.submit_order(&order_id, *tid, OrderSide::Sell, *qty, 0.01);
+            }
+            // In simulation mode, positions are just removed from self.positions
         }
 
         // Step 3: Write SystemShutdown WAL event
@@ -1695,139 +2789,19 @@ impl<B: BrokerAdapter> Engine<B> {
     }
 
     /// P21: Apply subscription rotation for a mode transition.
-    /// Rotates tickers in subscription_manager based on the new session mode.
-    /// Also manages CarryManager freeze/unfreeze.
+    /// Unified architecture: Active mode subscribes to 100 tickers across all markets.
+    /// Dark mode suspends all subscriptions.
     fn apply_mode_subscription_rotation(&mut self, new_mode: SessionMode) {
         match new_mode {
-            SessionMode::ModeA => {
-                eprintln!("SUBSCRIBE: Mode transition → Mode A (Asian markets: TSE/HKEX/ASX)");
-
-                // Get all tickers currently subscribed (for unsubscribe)
-                let currently_subscribed = self.subscription_manager.active_ticker_ids();
-
-                // Get new ticker set
-                let ticker_symbols = self.market_config.mode_a_tickers();
-                let new_ticker_ids: Vec<TickerId> = ticker_symbols
-                    .iter()
-                    .map(|&sym| self.universe.intern.intern(sym))
-                    .collect();
-
-                // Calculate which tickers to unsubscribe
-                let to_unsubscribe: Vec<TickerId> = currently_subscribed
-                    .iter()
-                    .filter(|tid| !new_ticker_ids.contains(tid))
-                    .copied()
-                    .collect();
-
-                if !to_unsubscribe.is_empty() {
-                    eprintln!(
-                        "SUBSCRIBE: unsubscribing {} tickers from Mode B",
-                        to_unsubscribe.len()
-                    );
-                    let unsub_count = self.broker.unsubscribe_l1_batch(&to_unsubscribe);
-                    eprintln!(
-                        "SUBSCRIBE: unsubscribed {} L1 feeds (count: {})",
-                        unsub_count, to_unsubscribe.len()
-                    );
-                }
-
-                // Update subscription manager
-                let activated = self.subscription_manager.rotate_tickers(new_ticker_ids.clone(), self.now_ns);
-                eprintln!(
-                    "SUBSCRIBE: Mode A active with {} tickers (TSE={}, HKEX={}, ASX={})",
-                    activated.len(),
-                    self.market_config.tse_sample.len(),
-                    self.market_config.hkex_sample.len(),
-                    self.market_config.asx_sample.len()
-                );
-
-                // Subscribe to new tickers
-                if !activated.is_empty() {
-                    eprintln!(
-                        "SUBSCRIBE: subscribing {} Asian tickers to L1",
-                        activated.len()
-                    );
-                    let sub_count = self.broker.subscribe_l1_batch(&activated);
-                    eprintln!(
-                        "SUBSCRIBE: subscribed {} L1 feeds (total now: {})",
-                        sub_count,
-                        self.broker.l1_subscription_count()
-                    );
-                }
-
-                // Freeze stops at Asian mode entry
-                self.carry_manager.freeze_all_stops(self.now_ns);
-                eprintln!("MODE_A: Frozen all carries for overnight");
-            }
-            SessionMode::ModeB => {
-                eprintln!("SUBSCRIBE: Mode transition → Mode B (European + LSE markets)");
-
-                // Get all tickers currently subscribed (for unsubscribe)
-                let currently_subscribed = self.subscription_manager.active_ticker_ids();
-
-                // Get new ticker set
-                let ticker_symbols = self.market_config.mode_b_tickers();
-                let new_ticker_ids: Vec<TickerId> = ticker_symbols
-                    .iter()
-                    .map(|&sym| self.universe.intern.intern(sym))
-                    .collect();
-
-                // Calculate which tickers to unsubscribe
-                let to_unsubscribe: Vec<TickerId> = currently_subscribed
-                    .iter()
-                    .filter(|tid| !new_ticker_ids.contains(tid))
-                    .copied()
-                    .collect();
-
-                if !to_unsubscribe.is_empty() {
-                    eprintln!(
-                        "SUBSCRIBE: unsubscribing {} tickers from Mode A",
-                        to_unsubscribe.len()
-                    );
-                    let unsub_count = self.broker.unsubscribe_l1_batch(&to_unsubscribe);
-                    eprintln!(
-                        "SUBSCRIBE: unsubscribed {} L1 feeds (count: {})",
-                        unsub_count, to_unsubscribe.len()
-                    );
-                }
-
-                // Update subscription manager
-                let activated = self.subscription_manager.rotate_tickers(new_ticker_ids.clone(), self.now_ns);
-                eprintln!(
-                    "SUBSCRIBE: Mode B active with {} tickers (LSE={}, XETRA={}, Euronext={})",
-                    activated.len(),
-                    self.market_config.lse_12.len(),
-                    self.market_config.xetra_sample.len(),
-                    self.market_config.euronext_sample.len()
-                );
-
-                // Subscribe to new tickers
-                if !activated.is_empty() {
-                    eprintln!(
-                        "SUBSCRIBE: subscribing {} European tickers to L1",
-                        activated.len()
-                    );
-                    let sub_count = self.broker.subscribe_l1_batch(&activated);
-                    eprintln!(
-                        "SUBSCRIBE: subscribed {} L1 feeds (total now: {})",
-                        sub_count,
-                        self.broker.l1_subscription_count()
-                    );
-                }
-
-                // Unfreeze stops when entering Mode B
+            SessionMode::Active | SessionMode::ModeA | SessionMode::ModeB
+            | SessionMode::ModeBPlus | SessionMode::ModeC | SessionMode::Auction => {
+                eprintln!("SUBSCRIBE: Mode transition → ACTIVE (all 6 markets, 100 tickers, 15-min refresh)");
+                self.rotate_subscriptions_from_watchlist();
+                // Unfreeze any carry stops when entering active trading
                 self.carry_manager.unfreeze_all_stops();
-                eprintln!("MODE_B: Unfrozen carries for European session");
-            }
-            SessionMode::ModeBPlus => {
-                eprintln!("SUBSCRIBE: Mode transition → ModeBPlus (14:30-16:30 UTC US overlap)");
-                // ModeBPlus adds US tickers to existing LSE/Euronext subscriptions
-                // Full implementation in Phase 25 when US markets integrated
-                // For now: keep current subscriptions and log the mode
-                eprintln!("MODE_B_PLUS: US overlap active (80 LSE + 20 US lines)");
             }
             SessionMode::Dark => {
-                eprintln!("SUBSCRIBE: Mode transition → Dark (suspend all trading)");
+                eprintln!("SUBSCRIBE: Mode transition → Dark (21:00-23:00 London — suspend all)");
 
                 // Get all tickers currently subscribed
                 let currently_subscribed = self.subscription_manager.active_ticker_ids();
@@ -1848,14 +2822,10 @@ impl<B: BrokerAdapter> Engine<B> {
                 let activated = self.subscription_manager.rotate_tickers(vec![], self.now_ns);
                 eprintln!("SUBSCRIBE: Dark mode — all subscriptions suspended ({})", activated.len());
             }
-            SessionMode::Auction | SessionMode::Carry => {
-                // Auction and Carry modes don't change subscriptions
-                // Auction: brief period, keep current subscriptions
-                // Carry: overnight management, already frozen
-                eprintln!(
-                    "MODE: {} — keeping current subscriptions",
-                    new_mode
-                );
+            SessionMode::Carry => {
+                // Carry: positions held during Dark hours, keep monitoring those specific tickers
+                self.carry_manager.freeze_all_stops(self.now_ns);
+                eprintln!("MODE: CARRY — frozen stops, keeping position tickers subscribed");
             }
         }
     }

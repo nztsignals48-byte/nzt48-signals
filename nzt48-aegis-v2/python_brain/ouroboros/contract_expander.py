@@ -1,0 +1,540 @@
+"""Contract Expander — Autonomously grows contracts.toml from scored universe.
+
+Runs after ticker_selector.py (every 15 min) and:
+  1. Loads the scored watchlist (active_watchlist.json — all tiers)
+  2. Loads the master universe (isa_universe_master.json — 36K+ tickers)
+  3. Loads current contracts.toml
+  4. Finds high-scoring tickers that LACK contract definitions
+  5. Validates them via yfinance (must have recent price data)
+  6. Appends new contract entries to contracts.toml
+  7. Sends SIGHUP to the Rust engine so it hot-reloads the new contracts
+
+The goal: the system autonomously discovers, validates, and registers new
+tradeable instruments without human intervention. The ticker selector
+discovers potential tickers from the 36K+ universe; this module bridges
+the gap by creating IBKR contract definitions for the best ones.
+
+Usage: python3 -m python_brain.ouroboros.contract_expander
+
+Quarantine rules:
+  - Only appends to contracts.toml (never overwrites/deletes existing entries)
+  - Validates via yfinance before adding (no blind insertions)
+  - Caps additions per run (MAX_NEW_PER_RUN) to prevent runaway growth
+  - Logs every addition for audit trail
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    import yfinance as yf
+except ImportError:
+    print("ERROR: yfinance not installed", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore
+    except ImportError:
+        tomllib = None  # type: ignore
+
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = Path(os.environ.get("AEGIS_ROOT", Path(__file__).resolve().parents[2]))
+CONFIG_DIR = Path(os.environ.get("AEGIS_CONFIG_DIR", _PROJECT_ROOT / "config"))
+DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
+MASTER_FILE = CONFIG_DIR / "isa_universe_master.json"
+WATCHLIST_FILE = CONFIG_DIR / "active_watchlist.json"
+CONTRACTS_FILE = CONFIG_DIR / "contracts.toml"
+REPORTS_DIR = DATA_DIR / "ouroboros_reports"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [Contract-Expander] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("contract_expander")
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+# Max new contracts to add per run (prevent runaway growth)
+MAX_NEW_PER_RUN = 20
+# Max total contracts in contracts.toml (IBKR paper limits ~100 concurrent subs
+# but we register more and let the engine cap subscriptions)
+MAX_TOTAL_CONTRACTS = 500
+# Minimum composite score to consider a ticker for contract expansion
+MIN_SCORE_THRESHOLD = 0.3
+# yfinance batch size
+YF_BATCH_SIZE = 20
+
+# ---------------------------------------------------------------------------
+# Exchange mapping: yfinance suffix → contracts.toml exchange + currency
+# ---------------------------------------------------------------------------
+YF_SUFFIX_TO_CONTRACT = {
+    ".L":  ("LSEETF", "GBP"),
+    ".T":  ("TSE",    "JPY"),
+    ".HK": ("HKEX",   "HKD"),
+    ".KS": ("KRX",    "KRW"),
+    ".KQ": ("KRX",    "KRW"),
+    ".DE": ("XETRA",  "EUR"),
+    ".PA": ("EURONEXT", "EUR"),
+    ".AS": ("EURONEXT", "EUR"),
+    ".SI": ("SGX",    "SGD"),
+    ".AX": ("ASX",    "AUD"),
+}
+
+# US exchanges (no suffix) — map internal exchange name → contracts.toml exchange
+US_EXCHANGE_MAP = {
+    "NYSE": "SMART",
+    "NASDAQ": "SMART",
+    "AMEX": "SMART",
+}
+
+
+def _yf_to_contract_symbol(yf_symbol: str) -> str:
+    """Convert yfinance symbol to contracts.toml symbol format.
+
+    LSE keeps .L suffix. All others strip the suffix.
+    """
+    if yf_symbol.endswith(".L"):
+        return yf_symbol
+    for suffix in YF_SUFFIX_TO_CONTRACT:
+        if suffix == ".L":
+            continue
+        if yf_symbol.endswith(suffix):
+            return yf_symbol[:-len(suffix)]
+    return yf_symbol
+
+
+def _yf_to_exchange_currency(yf_symbol: str, exchange: str = "") -> Tuple[str, str]:
+    """Determine contracts.toml exchange and currency from yfinance symbol."""
+    for suffix, (exch, cur) in YF_SUFFIX_TO_CONTRACT.items():
+        if yf_symbol.endswith(suffix):
+            return exch, cur
+    # US stock (no suffix)
+    if exchange in US_EXCHANGE_MAP:
+        return US_EXCHANGE_MAP[exchange], "USD"
+    return "SMART", "USD"
+
+
+def _detect_leverage(ticker: Dict[str, Any]) -> int:
+    """Detect leverage factor from ticker metadata."""
+    lev = ticker.get("leverage_factor", 1)
+    if lev and lev > 1:
+        return int(lev)
+    # Try to detect from symbol name
+    sym = ticker.get("symbol", "")
+    name = ticker.get("name", "").upper()
+    if sym.endswith(".L"):
+        base = sym.replace(".L", "")
+        if len(base) >= 2 and base[0].isdigit():
+            return int(base[0])
+    if "3X" in name or "TRIPLE" in name:
+        return 3
+    if "5X" in name:
+        return 5
+    if "2X" in name or "DOUBLE" in name:
+        return 2
+    return 1
+
+
+# ---------------------------------------------------------------------------
+# Load existing contracts
+# ---------------------------------------------------------------------------
+
+def load_existing_contracts() -> Set[str]:
+    """Load all contract symbols from contracts.toml."""
+    if not CONTRACTS_FILE.exists():
+        return set()
+    try:
+        if tomllib is None:
+            symbols = set()
+            with open(CONTRACTS_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("symbol"):
+                        parts = line.split("=", 1)
+                        if len(parts) == 2:
+                            sym = parts[1].strip().strip('"').strip("'")
+                            if sym:
+                                symbols.add(sym)
+            return symbols
+        with open(CONTRACTS_FILE, "rb") as f:
+            data = tomllib.load(f)
+        return {c["symbol"] for c in data.get("contracts", []) if c.get("symbol")}
+    except Exception as e:
+        log.warning("Failed to load contracts.toml: %s", e)
+        return set()
+
+
+def count_existing_contracts() -> int:
+    """Count total contracts in contracts.toml."""
+    return len(load_existing_contracts())
+
+
+# ---------------------------------------------------------------------------
+# Load candidates from watchlist + master universe
+# ---------------------------------------------------------------------------
+
+def load_candidates() -> List[Dict[str, Any]]:
+    """Load scored tickers from watchlist that don't have contract definitions.
+
+    Pulls from ALL tiers (vanguard + warm + apex) of active_watchlist.json.
+    Also checks master universe for high-value tickers.
+    Returns candidates sorted by composite_score descending.
+    """
+    existing = load_existing_contracts()
+    candidates = []
+    seen_symbols = set()
+
+    # Source 1: active_watchlist.json (pre-scored, highest quality)
+    if WATCHLIST_FILE.exists():
+        try:
+            with open(WATCHLIST_FILE) as f:
+                watchlist = json.load(f)
+
+            for tier_key in ("vanguard", "warm", "apex"):
+                tier_list = watchlist.get(tier_key, [])
+                for t in tier_list:
+                    sym = t.get("symbol", "")
+                    if not sym:
+                        continue
+                    contract_sym = _yf_to_contract_symbol(sym)
+                    if contract_sym in existing:
+                        continue
+                    if sym in seen_symbols:
+                        continue
+                    seen_symbols.add(sym)
+                    score = t.get("composite_score", 0)
+                    if score >= MIN_SCORE_THRESHOLD:
+                        candidates.append({
+                            "symbol": sym,
+                            "contract_symbol": contract_sym,
+                            "composite_score": score,
+                            "exchange": t.get("exchange", ""),
+                            "name": t.get("name", ""),
+                            "sector": t.get("sector", "Unknown"),
+                            "leverage_factor": t.get("leverage_factor", 1),
+                            "source": f"watchlist_{tier_key}",
+                        })
+        except Exception as e:
+            log.warning("Failed to load watchlist: %s", e)
+
+    # Source 2: master universe (broader coverage, may find tickers not yet scored)
+    if MASTER_FILE.exists():
+        try:
+            with open(MASTER_FILE) as f:
+                master = json.load(f)
+
+            for t in master.get("tickers", []):
+                sym = t.get("symbol", "")
+                if not sym or t.get("delisted"):
+                    continue
+                contract_sym = _yf_to_contract_symbol(sym)
+                if contract_sym in existing or sym in seen_symbols:
+                    continue
+                # Only include validated tickers with good metadata
+                if not t.get("validated"):
+                    continue
+                seen_symbols.add(sym)
+                # Assign a base score for master universe tickers
+                vol = t.get("avg_daily_volume", 0)
+                lev = t.get("leverage_factor", 1) or 1
+                # Simple scoring: leverage * log(volume)
+                import math
+                score = 0.1 + (0.3 if lev > 1 else 0) + min(0.3, math.log10(max(vol, 1)) / 10)
+                if score >= MIN_SCORE_THRESHOLD:
+                    candidates.append({
+                        "symbol": sym,
+                        "contract_symbol": contract_sym,
+                        "composite_score": score,
+                        "exchange": t.get("exchange", ""),
+                        "name": t.get("name", ""),
+                        "sector": t.get("sector", "Unknown"),
+                        "leverage_factor": lev,
+                        "source": "master_universe",
+                    })
+        except Exception as e:
+            log.warning("Failed to load master universe: %s", e)
+
+    # Sort by score descending
+    candidates.sort(key=lambda c: c["composite_score"], reverse=True)
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Validate candidates via yfinance
+# ---------------------------------------------------------------------------
+
+def validate_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Validate candidates have recent price data via yfinance.
+
+    Returns only those with valid price data.
+    """
+    if not candidates:
+        return []
+
+    validated = []
+    symbols = [c["symbol"] for c in candidates]
+
+    for i in range(0, len(symbols), YF_BATCH_SIZE):
+        batch_syms = symbols[i:i + YF_BATCH_SIZE]
+        batch_str = " ".join(batch_syms)
+
+        try:
+            data = yf.download(
+                batch_str,
+                period="5d",
+                interval="1d",
+                progress=False,
+                threads=True,
+                ignore_tz=True,
+            )
+
+            if data.empty:
+                continue
+
+            for sym in batch_syms:
+                try:
+                    if len(batch_syms) == 1:
+                        has_data = not data["Close"].dropna().empty
+                    else:
+                        has_data = (
+                            sym in data["Close"].columns
+                            and not data["Close"][sym].dropna().empty
+                        )
+
+                    if has_data:
+                        # Find the candidate dict for this symbol
+                        cand = next((c for c in candidates if c["symbol"] == sym), None)
+                        if cand:
+                            validated.append(cand)
+                except (KeyError, TypeError):
+                    continue
+
+        except Exception as e:
+            log.warning("yfinance batch validation failed: %s", e)
+
+        time.sleep(0.3)
+
+    return validated
+
+
+# ---------------------------------------------------------------------------
+# Append new contracts to contracts.toml
+# ---------------------------------------------------------------------------
+
+def append_contracts(new_contracts: List[Dict[str, Any]]) -> int:
+    """Append new contract entries to contracts.toml.
+
+    Returns the number of contracts successfully appended.
+    """
+    if not new_contracts:
+        return 0
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        "",
+        f"# ═══════════════════════════════════════════════════════════════════════════",
+        f"# AUTO-EXPANDED by contract_expander.py on {today}",
+        f"# {len(new_contracts)} new contracts discovered from scored universe",
+        f"# ═══════════════════════════════════════════════════════════════════════════",
+        "",
+    ]
+
+    for c in new_contracts:
+        sym = c["contract_symbol"]
+        exch, cur = _yf_to_exchange_currency(c["symbol"], c.get("exchange", ""))
+        lev = _detect_leverage(c)
+        sector = c.get("sector", "Unknown")
+
+        lines.append("[[contracts]]")
+        lines.append(f'symbol = "{sym}"')
+        lines.append("con_id = 0")
+        lines.append(f'exchange = "{exch}"')
+        lines.append('sec_type = "STK"')
+        lines.append(f'currency = "{cur}"')
+        lines.append(f"leverage = {lev}")
+        lines.append(f'sector = "{sector}"')
+        lines.append('inverse_of = ""')
+        lines.append("")
+
+    try:
+        with open(CONTRACTS_FILE, "a") as f:
+            f.write("\n".join(lines))
+        log.info("Appended %d new contracts to contracts.toml", len(new_contracts))
+        return len(new_contracts)
+    except Exception as e:
+        log.error("Failed to append to contracts.toml: %s", e)
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Signal engine to hot-reload contracts
+# ---------------------------------------------------------------------------
+
+def signal_engine_reload() -> bool:
+    """Send SIGHUP to the Rust engine process to trigger contract hot-reload.
+
+    Inside Docker, the engine is PID 1 (or close to it).
+    We find it by looking for the 'aegis' binary.
+    """
+    try:
+        # Find engine PID (the Rust binary)
+        result = subprocess.run(
+            ["pgrep", "-f", "aegis"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = result.stdout.strip().split("\n")
+        pids = [p.strip() for p in pids if p.strip()]
+
+        if not pids:
+            log.warning("Could not find engine process to signal")
+            return False
+
+        for pid in pids:
+            try:
+                os.kill(int(pid), signal.SIGHUP)
+                log.info("Sent SIGHUP to engine PID %s", pid)
+                return True
+            except (OSError, ValueError) as e:
+                log.warning("Failed to signal PID %s: %s", pid, e)
+
+        return False
+    except Exception as e:
+        log.warning("Engine signal failed: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Main expansion logic
+# ---------------------------------------------------------------------------
+
+def run_expansion() -> int:
+    """Execute one round of contract expansion.
+
+    Returns the number of new contracts added.
+    """
+    start = time.monotonic()
+    log.info("=" * 60)
+    log.info("Contract Expander — %s", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+    log.info("=" * 60)
+
+    # Check current contract count
+    current_count = count_existing_contracts()
+    if current_count >= MAX_TOTAL_CONTRACTS:
+        log.info("contracts.toml already at %d/%d max — skipping expansion",
+                 current_count, MAX_TOTAL_CONTRACTS)
+        return 0
+
+    room = MAX_TOTAL_CONTRACTS - current_count
+    batch_limit = min(MAX_NEW_PER_RUN, room)
+    log.info("Current contracts: %d | Room for %d more (batch limit: %d)",
+             current_count, room, batch_limit)
+
+    # Step 1: Find candidates
+    candidates = load_candidates()
+    log.info("Step 1: Found %d candidate tickers without contract definitions", len(candidates))
+
+    if not candidates:
+        log.info("No expansion candidates found. Universe fully covered.")
+        elapsed = time.monotonic() - start
+        log.info("Completed in %.1fs", elapsed)
+        return 0
+
+    # Step 2: Take top N candidates
+    top_candidates = candidates[:batch_limit * 2]  # Fetch extra in case some fail validation
+    log.info("Step 2: Validating top %d candidates via yfinance...", len(top_candidates))
+
+    # Step 3: Validate via yfinance
+    validated = validate_candidates(top_candidates)
+    log.info("Step 3: %d candidates validated (have recent price data)", len(validated))
+
+    if not validated:
+        log.info("No candidates passed validation.")
+        elapsed = time.monotonic() - start
+        log.info("Completed in %.1fs", elapsed)
+        return 0
+
+    # Step 4: Cap to batch limit
+    to_add = validated[:batch_limit]
+    log.info("Step 4: Adding %d new contracts (of %d validated)", len(to_add), len(validated))
+
+    for c in to_add:
+        log.info("  + %s (%s) score=%.3f source=%s",
+                 c["contract_symbol"], c.get("exchange", "?"),
+                 c["composite_score"], c["source"])
+
+    # Step 5: Append to contracts.toml
+    added = append_contracts(to_add)
+
+    # Step 6: Signal engine to hot-reload
+    if added > 0:
+        log.info("Step 6: Signaling engine to hot-reload contracts...")
+        signaled = signal_engine_reload()
+        if not signaled:
+            log.warning("Engine signal failed — new contracts will load on next restart")
+
+    # Step 7: Save expansion report
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORTS_DIR / f"contract_expansion_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M')}.json"
+    report = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "candidates_found": len(candidates),
+        "validated": len(validated),
+        "added": added,
+        "new_total": current_count + added,
+        "contracts": [
+            {
+                "symbol": c["contract_symbol"],
+                "yf_symbol": c["symbol"],
+                "score": c["composite_score"],
+                "exchange": c.get("exchange", ""),
+                "source": c["source"],
+            }
+            for c in to_add[:added]
+        ],
+    }
+    try:
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=2)
+    except Exception:
+        pass
+
+    elapsed = time.monotonic() - start
+    log.info("=" * 60)
+    log.info("Contract Expander complete in %.1fs", elapsed)
+    log.info("  Added: %d | New total: %d/%d", added, current_count + added, MAX_TOTAL_CONTRACTS)
+    log.info("=" * 60)
+
+    return added
+
+
+def main():
+    try:
+        added = run_expansion()
+        sys.exit(0 if added >= 0 else 1)
+    except KeyboardInterrupt:
+        log.info("Interrupted")
+        sys.exit(130)
+    except Exception as e:
+        log.error("Contract expansion failed: %s", e, exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

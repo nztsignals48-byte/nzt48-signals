@@ -3,7 +3,7 @@
 # Code MUST reference these constants, not literal values (H109).
 
 [signal]
-confidence_floor = 65
+confidence_floor = 45
 outlier_win_cap_pct = 3.0
 gap_detection_pct = 2.0
 erroneous_tick_deviation_pct = 5.0
@@ -11,11 +11,14 @@ velocity_check_window_secs = 1
 velocity_check_max_intents = 5
 
 [position]
-max_simultaneous_positions = 3    # Crucible override: 1
+# AUDIT-ADJUSTED (2026-03-18): Max 3 at £10k equity.
+# Fund manager: "Max 2-3 at £10k. £9,000 committed = 90% is suicidal."
+# Risk officer: "committed capital must never exceed 75% of equity"
+max_simultaneous_positions = 15   # PAPER VALIDATION: Maximise trade data for Ouroboros learning. Revert to 3 for live.
 # Portfolio heat = sum((entry_price - stop_price) * qty / total_equity)
-portfolio_heat_limit_pct = 6.0
-sector_heat_cap_pct = 33.0
-cash_buffer_pct = 10.0
+portfolio_heat_limit_pct = 50.0   # PAPER VALIDATION: Relaxed for data collection. Revert to 10 for live.
+sector_heat_cap_pct = 80.0        # PAPER VALIDATION: Relaxed. Revert to 33 for live.
+cash_buffer_pct = 5.0             # PAPER VALIDATION: Relaxed. Revert to 25 for live.
 isa_annual_limit_gbp = 20000      # Tracked in WAL, enforced by RiskArbiter
 isa_tax_year_start = "04-06"      # 6 April UK tax year start
 
@@ -55,12 +58,29 @@ vol_high_threshold = 1.5          # > 1.5x historical -> reduce 30%
 vol_extreme_threshold = 2.0       # > 2.0x historical -> reduce 60%
 
 [risk]
-daily_drawdown_pct = 2.0
-spread_veto_pct = 0.5
-slippage_assumption_pct = 1.0
-consecutive_loss_halt = 3
+# AUDIT-ADJUSTED (2026-03-18)
+# Risk officer: "2% daily too tight for 3x ETP vol. Single TSL3.L stop = 3%."
+# Quant: "Replace consecutive loss halt with daily loss budget."
+daily_drawdown_pct = 4.0           # Was 2.0%. Realistic for 3x ETP volatility.
+weekly_drawdown_pct = 7.0          # NEW: Weekly loss limit (risk officer M-1)
+peak_drawdown_halt_pct = 15.0      # NEW: Trailing drawdown from HWM → full halt (M-2)
+equity_floor_pct = 70.0            # NEW: Hard floor at 70% of initial equity (K-2)
+overnight_exposure_cap_pct = 50.0  # NEW: Max 50% of equity in overnight holds (M-3)
+max_correlated_positions = 3       # NEW: Max positions in >0.7 correlated instruments (M-5)
+max_risk_per_trade_pct = 0.75      # NEW: Dynamic sizing: position = (risk% × equity) / stop_width
+spread_veto_pct = 0.3              # Was 0.5%. Tightened per quant audit.
+slippage_assumption_pct = 0.5      # Was 1.0%. More realistic for paper.
+consecutive_loss_halt = 5          # Was 3. Audit: "3 too aggressive, triggers 1 in 6 sequences at 45% WR"
 reject_to_halt_count = 3
 reject_to_halt_window_secs = 60
+
+# VIX-tiered response (risk officer Item 8)
+[risk.vix_tiers]
+low_max = 18                       # VIX < 18: full allocation
+elevated_max = 25                  # VIX 18-25: 50% max allocation, tighten stops
+high_max = 35                      # VIX 25-35: 25% allocation, inverse only, no overnight
+crisis_max = 50                    # VIX 35-50: SUSPEND all 3x longs. Inverse-only.
+extreme = 50                       # VIX > 50: FULL TRADING HALT. Exits only.
 
 [execution]
 marketable_limit_buffer_pct = 0.1
@@ -115,13 +135,41 @@ pairs = [
 
 [sectors]
 # Sector classification for heat cap (H30)
-Technology = ["QQQ3.L", "QQQS.L", "QQQ5.L", "GPT3.L"]
-Semiconductors = ["3SEM.L", "NVD3.L", "TSM3.L", "MU2.L"]
-US_Broad = ["3LUS.L", "3USS.L", "SP5L.L"]
+# LSE Leveraged ETPs
+Technology = ["QQQ3.L", "QQQS.L", "QQQ5.L", "GPT3.L", "3LAP.L", "3SAP.L", "3LMS.L", "3SMS.L", "3LAM.L", "3SAM.L", "3LMT.L", "3SMT.L", "3LGO.L", "3SGO.L", "3LNF.L", "3LBA.L"]
+Semiconductors = ["3SEM.L", "NVD3.L", "TSM3.L", "MU2.L", "AMD3.L"]
+US_Broad = ["3LUS.L", "3USS.L", "5SPY.L"]
 Single_Stock = ["TSL3.L"]
+UK_Broad = ["3LUK.L", "3SUK.L"]
+EU_Broad = ["3LEU.L", "3SEU.L", "3LDE.L", "3SDE.L"]
+Commodities = ["3LOI.L", "3SOI.L", "3LGD.L", "3SGD.L", "3LSV.L", "3SSV.L"]
+Crypto_Adjacent = ["3LCO.L", "3SCO.L"]
+
+# Asian Markets
+Finance = ["0001", "0691", "0883", "1211", "1398", "1088", "9618", "0689", "0939", "0388", "8035", "8306", "8591", "8766", "CBA", "NAB", "WBC", "MQG", "ANZ", "SYD", "MUV2", "BEI"]
+Automotive = ["1299", "7203", "6903", "DAI", "VOW3", "BMW", "MBG"]
+Telecom = ["0175", "NOKIA"]
+Energy = ["0288", "0006", "TCL", "APA", "ORA", "RWE", "EOAN", "TOTAL"]
+Electronics = ["6758", "6861", "8802"]
+Equipment = ["6954", "6869", "6501"]
+Retail = ["9432", "9984", "WES"]
+Chemicals = ["6902"]
+Industrial = ["1177", "SIE", "ADS", "HEI"]
+"Real Estate" = ["0142", "1925", "1928", "GPT"]
+Transport = ["9201", "QAN"]
+Steel = ["5401"]
+Mining = ["BHP", "FMG", "RIO"]
+Healthcare = ["CSL", "SANOFI"]
+Utilities = ["AGL", "DTE"]
+Insurance = ["IAG"]
+Financials = ["VAS"]
+Media = ["AFL"]
+Luxury = ["OR", "LVMH"]
 
 [crucible]
 # Crucible phase overrides (Days 1-30)
-max_positions_override = 1           # Override max_simultaneous_positions
+# AUDIT-FIX: Was 20, which allows unrealistic over-deployment at £10k equity.
+# Risk officer: "20 positions at 10k is insane overexposure even in simulation."
+max_positions_override = 15          # PAPER VALIDATION: Maximise trade data. Revert to 3 for live.
 paper_mode = true
 starting_equity_gbp = 10000

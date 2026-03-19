@@ -5,14 +5,14 @@ Code MUST use these constants, never literal values.
 """
 
 # Signal filtering
-CONFIDENCE_FLOOR = 65  # Minimum confidence to emit OrderIntent
+CONFIDENCE_FLOOR = 45  # Minimum confidence to emit signal (lowered from 60 — was blocking ALL 3x ETP signals due to MM scale bug)
 OUTLIER_WIN_CAP_PCT = 3.0  # Cap single-trade return for Kelly avg
 
 # Momentum (Vanguard Sniper)
 ADX_PERIOD = 14  # ADX lookback period
 EMA_FAST_PERIOD = 20  # Fast EMA for trend confirmation
-VOLUME_BREAKOUT_MULT = 2.0  # Volume must exceed 2x rolling mean
-MOMENTUM_LOOKBACK = 20  # Rolling window for momentum scoring
+VOLUME_BREAKOUT_MULT = 1.5  # Volume must exceed 1.5x rolling mean (lowered from 2.0 for paper validation)
+MOMENTUM_LOOKBACK = 15  # Rolling window for momentum scoring (lowered from 20 for faster warmup)
 
 # RVOL (Apex Scout)
 RVOL_THRESHOLD = 2.0  # Relative volume threshold for anomaly

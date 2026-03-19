@@ -22,56 +22,58 @@ pub const EOD_PHASE1_SECS: u32 = 15 * 3600 + 55 * 60; // T-35
 pub const EOD_PHASE2_SECS: u32 = 16 * 3600 + 15 * 60; // T-15
 pub const EOD_PHASE3_SECS: u32 = 16 * 3600 + 25 * 60; // T-5
 
-/// Phase 11: 5-mode trading clock.
-/// Each mode has different subscription, signal, and execution rules.
+/// Unified 2-mode trading clock.
+/// Active = 23:00-21:00 London (22 hours across all 6 markets).
+/// Dark = 21:00-23:00 London (maintenance window).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TradingMode {
-    /// LSE Pre-open: 07:00-08:00 London. Pre-market data, no entries.
+    /// Active: 23:00-21:00 London. Full trading across all 6 markets.
+    /// Sub-modes (ModeA/B/B+/C) are kept for legacy compatibility but all allow entries/exits.
     ModeA,
-    /// LSE Regular: 08:00-16:30 London. Full trading.
     ModeB,
-    /// LSE Extended: 16:30-17:00 London. Exit-only, no new entries.
     ModeBPlus,
-    /// LSE Post-close: 17:00-20:00 London. Reporting and analytics only.
     ModeC,
-    /// Dark: 20:00-07:00 London. Ouroboros nightly runs. No market access.
+    /// Dark: 21:00-23:00 London. Maintenance window.
     Dark,
 }
 
 impl TradingMode {
     /// Determine the current trading mode from London seconds-from-midnight.
+    /// Unified: Active from 23:00-21:00 (22 hours), Dark from 21:00-23:00.
+    /// Returns sub-mode labels for telemetry/logging but all Active sub-modes
+    /// have identical permissions (entries, exits, subscriptions all allowed).
     pub fn from_london_secs(time_secs: u32) -> Self {
-        const MODE_A_START: u32 = 7 * 3600;         // 07:00
-        const MODE_B_START: u32 = 8 * 3600;          // 08:00
-        const MODE_B_PLUS_START: u32 = 16 * 3600 + 30 * 60; // 16:30
-        const MODE_C_START: u32 = 17 * 3600;          // 17:00
-        const DARK_START: u32 = 20 * 3600;            // 20:00
+        const ACTIVE_START: u32 = 23 * 3600;  // 23:00 London
+        const DARK_START: u32 = 21 * 3600;    // 21:00 London
 
-        match time_secs {
-            t if !(MODE_A_START..DARK_START).contains(&t) => TradingMode::Dark,
-            t if t >= MODE_C_START => TradingMode::ModeC,
-            t if t >= MODE_B_PLUS_START => TradingMode::ModeBPlus,
-            t if t >= MODE_B_START => TradingMode::ModeB,
-            _ => TradingMode::ModeA,
+        // Active hours: 23:00-23:59 and 00:00-21:00 (wraps midnight)
+        if time_secs >= ACTIVE_START || time_secs < DARK_START {
+            // Return sub-mode for telemetry (all have identical permissions)
+            match time_secs {
+                t if t >= ACTIVE_START || t < 8 * 3600 => TradingMode::ModeA,
+                t if t < 14 * 3600 + 30 * 60 => TradingMode::ModeB,
+                t if t < 16 * 3600 + 35 * 60 => TradingMode::ModeBPlus,
+                _ => TradingMode::ModeC,
+            }
+        } else {
+            TradingMode::Dark
         }
     }
 
     /// Can new entries be submitted in this mode?
+    /// All non-Dark modes allow entries (unified 22-hour trading).
     pub fn allows_entries(&self) -> bool {
-        matches!(self, TradingMode::ModeB)
+        !matches!(self, TradingMode::Dark)
     }
 
     /// Can exits be executed in this mode?
     pub fn allows_exits(&self) -> bool {
-        matches!(self, TradingMode::ModeB | TradingMode::ModeBPlus)
+        !matches!(self, TradingMode::Dark)
     }
 
     /// Should market data subscriptions be active?
     pub fn requires_market_data(&self) -> bool {
-        matches!(
-            self,
-            TradingMode::ModeA | TradingMode::ModeB | TradingMode::ModeBPlus
-        )
+        !matches!(self, TradingMode::Dark)
     }
 }
 
@@ -185,32 +187,34 @@ impl Clock {
     /// Check if a Unix epoch timestamp falls within BST (British Summer Time).
     /// BST starts: last Sunday of March at 01:00 UTC.
     /// BST ends: last Sunday of October at 01:00 UTC.
-    /// Hardcoded for 2025-2028 (update annually or when extending beyond 2028).
+    /// Hardcoded for 2025-2032 (extend before 2033).
     fn is_bst_from_epoch(epoch_secs: u64) -> bool {
-        // BST transition Unix timestamps (all at 01:00 UTC on the transition day):
-        // 2025 starts Jan 1 00:00 UTC = 1735689600
-        // 2029 starts Jan 1 00:00 UTC = 1861920000
+        // BST transition Unix timestamps (all at 01:00 UTC on the transition day).
         const YEAR_2025_START: u64 = 1_735_689_600;
-        const YEAR_2029_START: u64 = 1_861_920_000;
+        const YEAR_2033_START: u64 = 1_988_150_400;
 
-        const BST_RANGES: [(u64, u64); 4] = [
+        const BST_RANGES: [(u64, u64); 8] = [
             (1_743_296_400, 1_761_440_400), // 2025: Mar 30 01:00 UTC → Oct 26 01:00 UTC
             (1_774_746_000, 1_792_890_000), // 2026: Mar 29 01:00 UTC → Oct 25 01:00 UTC
             (1_806_195_600, 1_824_944_400), // 2027: Mar 28 01:00 UTC → Oct 31 01:00 UTC
             (1_837_645_200, 1_856_394_000), // 2028: Mar 26 01:00 UTC → Oct 29 01:00 UTC
+            (1_869_094_800, 1_887_843_600), // 2029: Mar 25 01:00 UTC → Oct 28 01:00 UTC
+            (1_901_149_200, 1_919_293_200), // 2030: Mar 31 01:00 UTC → Oct 27 01:00 UTC
+            (1_932_598_800, 1_950_742_800), // 2031: Mar 30 01:00 UTC → Oct 26 01:00 UTC
+            (1_964_048_400, 1_982_797_200), // 2032: Mar 28 01:00 UTC → Oct 31 01:00 UTC
         ];
 
-        // For dates within 2025-2028, use exact transition timestamps
-        if (YEAR_2025_START..YEAR_2029_START).contains(&epoch_secs) {
+        // For dates within 2025-2032, use exact transition timestamps
+        if (YEAR_2025_START..YEAR_2033_START).contains(&epoch_secs) {
             for &(start, end) in &BST_RANGES {
                 if epoch_secs >= start && epoch_secs < end {
                     return true;
                 }
             }
-            return false; // Within 2025-2028 but not in any BST range
+            return false;
         }
 
-        // Fallback for dates outside 2025-2028: use day-of-year approximation
+        // Fallback for dates outside 2025-2032: use day-of-year approximation (±3 days)
         let day_of_year = ((epoch_secs / 86400) % 365) as u32;
         (84..301).contains(&day_of_year)
     }
@@ -334,51 +338,50 @@ mod tests {
     // ── Phase 11: TradingMode tests ──
     #[test]
     fn test_trading_mode_transitions() {
-        // Dark: 20:00-07:00
-        assert_eq!(TradingMode::from_london_secs(0), TradingMode::Dark);
-        assert_eq!(TradingMode::from_london_secs(3 * 3600), TradingMode::Dark);
-        assert_eq!(TradingMode::from_london_secs(6 * 3600 + 59 * 60), TradingMode::Dark);
-
-        // ModeA: 07:00-08:00
-        assert_eq!(TradingMode::from_london_secs(7 * 3600), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_london_secs(7 * 3600 + 30 * 60), TradingMode::ModeA);
+        // Unified: Active from 23:00-21:00, Dark from 21:00-23:00
+        // ModeA sub-mode: 23:00-08:00 (Asian + pre-market)
+        assert_eq!(TradingMode::from_london_secs(23 * 3600), TradingMode::ModeA);
+        assert_eq!(TradingMode::from_london_secs(0), TradingMode::ModeA);
+        assert_eq!(TradingMode::from_london_secs(3 * 3600), TradingMode::ModeA);
         assert_eq!(TradingMode::from_london_secs(7 * 3600 + 59 * 60), TradingMode::ModeA);
 
-        // ModeB: 08:00-16:30
+        // ModeB sub-mode: 08:00-14:30 (European)
         assert_eq!(TradingMode::from_london_secs(8 * 3600), TradingMode::ModeB);
         assert_eq!(TradingMode::from_london_secs(12 * 3600), TradingMode::ModeB);
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 29 * 60), TradingMode::ModeB);
+        assert_eq!(TradingMode::from_london_secs(14 * 3600 + 29 * 60), TradingMode::ModeB);
 
-        // ModeBPlus: 16:30-17:00
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 30 * 60), TradingMode::ModeBPlus);
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 45 * 60), TradingMode::ModeBPlus);
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 59 * 60), TradingMode::ModeBPlus);
+        // ModeBPlus sub-mode: 14:30-16:35 (US overlap)
+        assert_eq!(TradingMode::from_london_secs(14 * 3600 + 30 * 60), TradingMode::ModeBPlus);
+        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 34 * 60), TradingMode::ModeBPlus);
 
-        // ModeC: 17:00-20:00
-        assert_eq!(TradingMode::from_london_secs(17 * 3600), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_london_secs(19 * 3600), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_london_secs(19 * 3600 + 59 * 60), TradingMode::ModeC);
+        // ModeC sub-mode: 16:35-21:00 (US-only)
+        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 35 * 60), TradingMode::ModeC);
+        assert_eq!(TradingMode::from_london_secs(18 * 3600), TradingMode::ModeC);
+        assert_eq!(TradingMode::from_london_secs(20 * 3600 + 59 * 60), TradingMode::ModeC);
 
-        // Dark again: 20:00+
-        assert_eq!(TradingMode::from_london_secs(20 * 3600), TradingMode::Dark);
-        assert_eq!(TradingMode::from_london_secs(23 * 3600), TradingMode::Dark);
+        // Dark: 21:00-23:00 (maintenance window)
+        assert_eq!(TradingMode::from_london_secs(21 * 3600), TradingMode::Dark);
+        assert_eq!(TradingMode::from_london_secs(22 * 3600), TradingMode::Dark);
+        assert_eq!(TradingMode::from_london_secs(22 * 3600 + 59 * 60), TradingMode::Dark);
     }
 
     #[test]
     fn test_trading_mode_entry_rules() {
-        assert!(!TradingMode::ModeA.allows_entries());
+        // All non-Dark modes allow entries (unified 22-hour trading)
+        assert!(TradingMode::ModeA.allows_entries());
         assert!(TradingMode::ModeB.allows_entries());
-        assert!(!TradingMode::ModeBPlus.allows_entries());
-        assert!(!TradingMode::ModeC.allows_entries());
+        assert!(TradingMode::ModeBPlus.allows_entries());
+        assert!(TradingMode::ModeC.allows_entries());
         assert!(!TradingMode::Dark.allows_entries());
     }
 
     #[test]
     fn test_trading_mode_exit_rules() {
-        assert!(!TradingMode::ModeA.allows_exits());
+        // All non-Dark modes allow exits
+        assert!(TradingMode::ModeA.allows_exits());
         assert!(TradingMode::ModeB.allows_exits());
         assert!(TradingMode::ModeBPlus.allows_exits());
-        assert!(!TradingMode::ModeC.allows_exits());
+        assert!(TradingMode::ModeC.allows_exits());
         assert!(!TradingMode::Dark.allows_exits());
     }
 
@@ -387,7 +390,7 @@ mod tests {
         assert!(TradingMode::ModeA.requires_market_data());
         assert!(TradingMode::ModeB.requires_market_data());
         assert!(TradingMode::ModeBPlus.requires_market_data());
-        assert!(!TradingMode::ModeC.requires_market_data());
+        assert!(TradingMode::ModeC.requires_market_data());
         assert!(!TradingMode::Dark.requires_market_data());
     }
 }

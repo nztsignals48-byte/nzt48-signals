@@ -114,6 +114,14 @@ pub struct PositionState {
     /// P21: Whether position is in carry state (stops frozen, no Chandelier evaluation)
     #[pyo3(get)]
     pub is_carried: bool,
+    /// Maximum Adverse Excursion: worst unrealized P&L (most negative) during position lifetime.
+    /// Used for stop optimization — how far against us did the trade go?
+    #[pyo3(get)]
+    pub mae: f64,
+    /// Maximum Favorable Excursion: best unrealized P&L (most positive) during position lifetime.
+    /// Used for target optimization — how much profit was available before exit?
+    #[pyo3(get)]
+    pub mfe: f64,
 }
 
 #[pymethods]
@@ -142,6 +150,8 @@ impl PositionState {
             state: OrderState::Filled,
             origin_order_id,
             is_carried: false,
+            mae: 0.0,
+            mfe: 0.0,
         }
     }
 }
@@ -255,6 +265,8 @@ mod tests {
             state: OrderState::Filled,
             origin_order_id: "test-id".to_string(),
             is_carried: false,
+                mae: 0.0,
+                mfe: 0.0,
         };
         assert!(pos.highest_high >= pos.avg_entry);
         assert_eq!(pos.trailing_rung, 0);

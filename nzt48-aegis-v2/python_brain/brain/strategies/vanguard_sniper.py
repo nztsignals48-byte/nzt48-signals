@@ -166,17 +166,35 @@ def evaluate(ticks, log_fn=None):
         log_returns, VOL_TARGET_ANNUAL_PCT, VOL_ROLLING_WINDOW, TRADING_DAYS_PER_YEAR
     )
 
-    # Momentum score: weighted combination
+    # Momentum score: graduated combination (not binary)
+    # Graduated ADX: stronger trends score higher
     momentum_score = 0.0
-    if current_adx > ADX_PERIOD:  # ADX > period threshold = trending
+    if current_adx >= 25.0:
         momentum_score += 40.0
+    elif current_adx >= 15.0:
+        momentum_score += 30.0
+    elif current_adx >= 10.0:
+        momentum_score += 20.0
+    elif current_adx >= 7.0:
+        momentum_score += 15.0
+
+    # EMA trend confirmation (binary)
     if price_above_ema:
         momentum_score += 30.0
-    if volume_breakout:
-        momentum_score += 30.0
 
-    # Scale confidence by momentum score
-    confidence = momentum_score * mm_scale
+    # Graduated volume breakout
+    if rvol >= VOLUME_BREAKOUT_MULT:
+        momentum_score += 30.0
+    elif rvol >= 1.5:
+        momentum_score += 20.0
+    elif rvol >= 1.2:
+        momentum_score += 10.0
+
+    # Confidence = raw momentum score (NOT scaled by Moreira-Muir).
+    # Moreira-Muir vol scaling affects position SIZE via Kelly, not signal quality.
+    # Previous bug: mm_scale ≈ 0.21 for 3x ETPs crushed confidence below floor,
+    # killing 100% of signals. Vol-drag is already handled by 12-factor Kelly.
+    confidence = momentum_score
 
     # Confidence floor (from config, H109)
     if confidence < CONFIDENCE_FLOOR:
@@ -184,8 +202,8 @@ def evaluate(ticks, log_fn=None):
             log_fn(LOG_LEVEL_DEBUG, f"vanguard: confidence {confidence:.1f} < floor")
         return None
 
-    # Kelly fraction: simple preliminary sizing (full 13-factor in Phase 6C)
-    kelly = min(confidence / 1000.0, 0.20)  # Preliminary, capped at H57
+    # Kelly fraction: preliminary sizing with Moreira-Muir applied to SIZE, not confidence.
+    kelly = min((confidence / 1000.0) * mm_scale, 0.20)  # Vol-scaled, capped at H57
 
     features = {
         "adx": float(current_adx),

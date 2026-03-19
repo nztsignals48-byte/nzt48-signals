@@ -106,6 +106,13 @@ pub trait BrokerAdapter {
     /// Client ID for IBKR session isolation (H41).
     fn client_id(&self) -> u32;
 
+    /// Re-subscribe to all market data streams (bars + mktdata).
+    /// Called after broker reconnection (Error 1102) to restore data feeds.
+    /// Default: no-op for brokers that don't support subscriptions.
+    fn resubscribe_all(&mut self) -> u32 {
+        0
+    }
+
     /// P21: Subscribe to L1 bid/ask for a set of tickers (mode rotation).
     fn subscribe_l1_batch(&mut self, ticker_ids: &[TickerId]) -> u32 {
         // Default: no-op for brokers that don't support subscriptions
@@ -123,6 +130,42 @@ pub trait BrokerAdapter {
     /// P21: Get current count of active L1 subscriptions (telemetry).
     fn l1_subscription_count(&self) -> u32 {
         0
+    }
+
+    /// P21: Check if a ticker has a registered contract in the broker.
+    fn has_contract(&self, _ticker_id: &TickerId) -> bool {
+        false
+    }
+
+    /// P21: Dynamically register a contract from watchlist metadata.
+    /// Returns true if newly registered, false if already exists.
+    fn register_dynamic_contract(
+        &mut self,
+        _ticker_id: TickerId,
+        _symbol: &str,
+        _exchange: &str,
+        _currency: &str,
+    ) -> bool {
+        false
+    }
+
+    /// P21-FX: Get the trading currency for a ticker (ISO 4217 code).
+    /// Used by the engine to convert native-currency prices to GBP.
+    /// Default: "GBP" (no conversion needed for LSE-only brokers).
+    fn currency_for_ticker(&self, _ticker_id: &TickerId) -> &str {
+        "GBP"
+    }
+
+    /// P21-FX: Get the exchange for a ticker.
+    /// Used by the engine for ISA gate checks with correct exchange MIC.
+    fn exchange_for_ticker(&self, _ticker_id: &TickerId) -> &str {
+        "XLON"
+    }
+
+    /// Get the human-readable symbol for a ticker ID.
+    /// Used for logging and simulated trade reporting.
+    fn symbol_for(&self, _ticker_id: TickerId) -> Option<String> {
+        None
     }
 }
 
