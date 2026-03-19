@@ -871,7 +871,7 @@ def process_tick(msg):
     # so they are preferred over raw US equities (NVD3.L preferred over NVDA etc.)
     LSE_LEVERAGED_TICKERS = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}  # First 12 ticker IDs = LSE ETPs
     lse_symbols = {"QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "3SEM.L",
-                   "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "SP5L.L"}
+                   "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "5SPY.L"}
     symbol = ticker_symbols.get(ticker_id, "")
     is_lse_leveraged = ticker_id in LSE_LEVERAGED_TICKERS or symbol in lse_symbols
 

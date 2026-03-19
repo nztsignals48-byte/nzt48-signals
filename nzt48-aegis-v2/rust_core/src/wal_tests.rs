@@ -26,12 +26,7 @@ mod tests {
             entry_rvol: 0.0,
             entry_hurst: 0.0,
             entry_adx: 0.0,
-                        spread_pct: 0.0,
-                        vwap_distance_pct: 0.0,
-                        volume_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        entry_price: 0.0,        }
+                        }
     }
 
     fn make_fill(order_id: &str, ticker_id: u32, qty: u32, price: f64) -> WalPayload {

@@ -55,24 +55,6 @@ pub enum WalPayload {
         /// ADX at entry (Phase H: indicator context for Ouroboros learning).
         #[serde(default)]
         entry_adx: f64,
-        /// Bid-ask spread at entry in percent. For execution cost analysis.
-        #[serde(default)]
-        spread_pct: f64,
-        /// Price distance from VWAP at entry in percent. For extension detection.
-        #[serde(default)]
-        vwap_distance_pct: f64,
-        /// Volume trend slope at entry. Positive = rising volume = real flow.
-        #[serde(default)]
-        volume_slope: f64,
-        /// Leverage factor of the instrument (3, 5, etc). For leverage-aware analysis.
-        #[serde(default)]
-        leverage: u8,
-        /// Trading session mode at entry (e.g. "ModeB", "ModeBPlus"). For session analysis.
-        #[serde(default)]
-        session_mode: String,
-        /// Entry price in native currency.
-        #[serde(default)]
-        entry_price: f64,
     },
     BrokerAck {
         order_id: String,
@@ -135,29 +117,6 @@ pub enum WalPayload {
         #[serde(default)]
         entry_adx: f64,
         /// Spread at entry in percent.
-        #[serde(default)]
-        entry_spread_pct: f64,
-        /// Spread at exit in percent.
-        #[serde(default)]
-        exit_spread_pct: f64,
-        /// VWAP distance at entry in percent.
-        #[serde(default)]
-        entry_vwap_pct: f64,
-        /// Volume slope at entry (positive = rising).
-        #[serde(default)]
-        entry_vol_slope: f64,
-        /// Leverage factor (3, 5, etc).
-        #[serde(default)]
-        leverage: u8,
-        /// Session mode at entry (ModeA, ModeB, ModeBPlus, ModeC).
-        #[serde(default)]
-        session_mode: String,
-        /// Hold duration in seconds (convenience field, also computable from timestamps).
-        #[serde(default)]
-        hold_secs: u64,
-        /// Exit reason (Chandelier, EOD, Halt, Signal, TimeStop).
-        #[serde(default)]
-        exit_reason: String,
         /// Maximum Adverse Excursion: worst unrealized P&L during position lifetime.
         #[serde(default)]
         mae: f64,

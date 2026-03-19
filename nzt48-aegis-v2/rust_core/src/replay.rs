@@ -180,24 +180,12 @@ impl ReplayEngine {
                     highest_rung: 0,
                     strategy: String::new(),
                     exchange: String::new(),
-                    entry_price: 0.0,
                     exit_price: 0.0,
                     entry_rvol: 0.0,
                     entry_hurst: 0.0,
                     entry_adx: 0.0,
-                        spread_pct: 0.0,
-                        vwap_distance_pct: 0.0,
-                        volume_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        entry_spread_pct: 0.0,
-                        exit_spread_pct: 0.0,
-                        entry_vwap_pct: 0.0,
-                        entry_vol_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        hold_secs: 0,
-                        exit_reason: String::new(),                        entry_price: 0.0,                    mae: 0.0,
+                    entry_price: 0.0,
+                    mae: 0.0,
                     mfe: 0.0,
                 });
                 self.portfolio.remove_position(tid);
@@ -265,12 +253,7 @@ impl ReplayEngine {
             entry_rvol: 0.0,
             entry_hurst: 0.0,
             entry_adx: 0.0,
-                        spread_pct: 0.0,
-                        vwap_distance_pct: 0.0,
-                        volume_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        entry_price: 0.0,        });
+                        });
 
         // 7. Submit + fill
         let qty = (decision.adjusted_size / routed_tick.ask).max(1.0) as u32;
@@ -328,15 +311,8 @@ impl ReplayEngine {
                         state: OrderState::ExitRegistered,
                         origin_order_id: order_id.clone(),
                         is_carried: false,
-                        entry_spread_pct: 0.0,
-                        exit_spread_pct: 0.0,
-                        entry_vwap_pct: 0.0,
-                        entry_vol_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        hold_secs: 0,
-                        exit_reason: String::new(),                mae: 0.0,
-                mfe: 0.0,
+                        mae: 0.0,
+                        mfe: 0.0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

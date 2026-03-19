@@ -76,7 +76,7 @@ pub mod live_readiness;
 pub mod predictive_scoring;
 pub mod session_manager;
 pub mod state_checkpoint;
-pub mod strategy_config;
+// pub mod strategy_config; // REMOVED — unused module, nothing references it
 pub mod wal_actor;
 pub mod wal_compressor;
 pub mod wal_replay;

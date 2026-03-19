@@ -40,7 +40,7 @@ use crate::latency_profiler::{LatencyProfiler, PipelineStage};
 use crate::student_t_kalman::StudentTKalmanFilter;
 use crate::log_thompson_sampler::LogThompsonSampler;
 use crate::python_bridge::BrainSignal;
-use crate::regime_detector::{RegimeDetector, RegimeDecision};
+use crate::regime_detector::RegimeDetector;
 // Dead code removed: EarlyRunnerDetector (never instantiated, VanguardSniper handles all entries)
 use crate::position_sizer::KellyCalculator;
 use crate::market_scheduler::{self, TradingSession};
@@ -411,10 +411,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub thompson_sampler: LogThompsonSampler,
     /// Phase 1C: Regime detector (jump-diffusion + Hurst).
     pub regime_detector: RegimeDetector,
-    /// Phase 1C: Last regime decision per ticker (for logging / gating).
-    pub last_regime_decision: HashMap<TickerId, RegimeDecision>,
-    /// Phase 1C: Per-ticker Early Runner detectors (stateful — needs RVOL history).
-    // Dead code removed: early_runner_detectors (never populated, VanguardSniper handles all)
+    // last_regime_decision REMOVED — was written but never read (dead field)
+    // early_runner_detectors REMOVED — never populated, VanguardSniper handles all entries
     /// Phase 1C: Kelly calculator for Rust-side sizing (fractional 0.25).
     pub kelly_calculator: KellyCalculator,
     /// Phase 2: Current market scheduler session (6-phase global clock).
@@ -548,7 +546,7 @@ impl<B: BrokerAdapter> Engine<B> {
             kalman_filters: HashMap::new(),
             thompson_sampler: LogThompsonSampler::new(),
             regime_detector: RegimeDetector::new(),
-            last_regime_decision: HashMap::new(),
+            // last_regime_decision removed (dead field)
             // early_runner_detectors removed (dead code)
             kelly_calculator: KellyCalculator::new(),
             current_trading_session: TradingSession::Closed,
@@ -1071,12 +1069,6 @@ impl<B: BrokerAdapter> Engine<B> {
                         entry_rvol: 0.0,
                         entry_hurst: 0.0,
                         entry_adx: 0.0,
-                        spread_pct: 0.0,
-                        vwap_distance_pct: 0.0,
-                        volume_slope: 0.0,
-                        leverage: 0,
-                        session_mode: String::new(),
-                        entry_price: 0.0,
                     });
                     self.tracked_orders.push(exit_order_id.clone());
 
@@ -1144,20 +1136,6 @@ impl<B: BrokerAdapter> Engine<B> {
                         entry_rvol: e_rvol,
                         entry_hurst: e_hurst,
                         entry_adx: e_adx,
-                        entry_spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
-                            (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
-                        } else { 0.0 },
-                        exit_spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
-                            (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
-                        } else { 0.0 },
-                        entry_vwap_pct: 0.0,
-                        entry_vol_slope: 0.0,
-                        leverage: self.leverage_map.get(&tid).copied().unwrap_or(1) as u8,
-                        session_mode: format!("{:?}", self.current_trading_session),
-                        hold_secs: if entry_time > 0 && self.now_ns > entry_time {
-                            (self.now_ns - entry_time) / 1_000_000_000
-                        } else { 0 },
-                        exit_reason: reason_str.clone(),
                         mae: pos_mae,
                         mfe: pos_mfe,
                     });
@@ -1584,14 +1562,6 @@ impl<B: BrokerAdapter> Engine<B> {
             entry_rvol: sig.rvol,
             entry_hurst: sig.hurst,
             entry_adx: sig.adx,
-            spread_pct: if tick.bid > 0.0 && tick.ask > 0.0 {
-                (tick.ask - tick.bid) / ((tick.ask + tick.bid) / 2.0) * 100.0
-            } else { 0.0 },
-            vwap_distance_pct: 0.0,
-            volume_slope: 0.0,
-            leverage: self.leverage_map.get(&tid).copied().unwrap_or(1) as u8,
-            session_mode: format!("{:?}", self.current_trading_session),
-            entry_price: tick.ask,
         });
         self.tracked_orders.push(order_id.clone());
 
