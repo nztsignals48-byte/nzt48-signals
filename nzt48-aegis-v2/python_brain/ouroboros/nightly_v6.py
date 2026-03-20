@@ -442,15 +442,21 @@ def optimize_parameters(metrics: DailyMetrics, *, mem=None) -> Dict[str, Any]:
             recs["adjustments"].append(f"Memory lesson: {lesson.get('reason', 'unknown')}")
 
         # Per-regime learning: build regime_scales from cumulative stats
+        # Q-068 FIX: Require minimum 50 trades per regime for statistical significance.
+        # Below 50 trades, regime scale is locked at 1.0 (neutral).
+        MIN_REGIME_TRADES = 50
         regime_stats = getattr(mem, 'regime_stats', {})
         regime_scales = {}
         for regime_name, rstats in regime_stats.items():
             rtrades = rstats.get('total_trades', 0)
-            if rtrades >= 5:
+            if rtrades >= MIN_REGIME_TRADES:
                 rwr = rstats.get('win_rate', 0.5)
                 # Scale: 0.5 at 20% WR → 1.0 at 50% WR → 1.5 at 80% WR
                 scale = 0.5 + (rwr - 0.2) * (1.0 / 0.6)
                 regime_scales[regime_name] = max(0.4, min(1.5, scale))
+            elif rtrades >= 5:
+                # Insufficient data: log but use neutral scale
+                regime_scales[regime_name] = 1.0
                 recs["adjustments"].append(
                     f"Regime '{regime_name}' scale={scale:.2f} (WR={rwr:.0%} over {rtrades} trades)"
                 )

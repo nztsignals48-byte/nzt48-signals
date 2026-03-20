@@ -639,18 +639,19 @@ def generate_dynamic_weights_toml(
         lines.append(f"{tier} = {frac:.6f}")
 
     # Phase E: Bounded adaptive confidence floor
-    # Starts at 45 (paper validation). Tightens to 55 after 50+ trades if WR > 50%.
-    # Loosens to 35 if WR < 30% (more exploration needed).
-    # Bounded: [30, 70] — never too loose (noise) or too tight (zero signals).
-    adaptive_floor = 45  # default
+    # Q-073 FIX: Dynamic floor must NEVER go below static config minimum (65).
+    # This prevents Ouroboros from loosening entry quality below operator's safety setting.
+    # Hard floor: max(STATIC_MINIMUM, computed_value). Range: [65, 80].
+    STATIC_CONFIDENCE_FLOOR = 65  # Matches config.toml [signal].confidence_floor
+    adaptive_floor = STATIC_CONFIDENCE_FLOOR  # default = static minimum
     if bayesian["trade_count"] >= 50:
         if bayesian["win_rate"] > 0.55:
-            adaptive_floor = 55  # high WR → be selective
+            adaptive_floor = 70  # high WR → be more selective
         elif bayesian["win_rate"] > 0.45:
-            adaptive_floor = 50  # decent WR → moderate
+            adaptive_floor = 65  # decent WR → maintain floor
         elif bayesian["win_rate"] < 0.30:
-            adaptive_floor = 35  # low WR → explore more setups
-    adaptive_floor = max(30, min(70, adaptive_floor))
+            adaptive_floor = 65  # low WR → keep floor (don't loosen)
+    adaptive_floor = max(STATIC_CONFIDENCE_FLOOR, min(80, adaptive_floor))
 
     lines += [
         f"",
