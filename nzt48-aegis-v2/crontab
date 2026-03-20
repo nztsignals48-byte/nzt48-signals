@@ -1,3 +1,9 @@
+# RT2: Bridge Health Monitor — every 15 min Mon-Fri during market hours (Telegram alert if unhealthy)
+*/15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.bridge_health >> /var/log/bridge_health.log 2>&1
+
+# N10c: Log Rotation — 04:45 UTC daily (before nightly learning, keeps 7 days)
+45 4 * * * cd /app && python3 -m python_brain.ouroboros.log_rotate >> /var/log/log_rotate.log 2>&1
+
 # Ouroboros v6.0 Nightly Learning Loop — 23:50 ET = 04:50 UTC (EST) Mon-Fri
 # MUST run during DARK window (21:00-23:00 London = 21:00-23:00 UTC GMT / 22:00-00:00 BST)
 50 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.nightly_v6 >> /var/log/ouroboros.log 2>&1
