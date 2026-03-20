@@ -48,6 +48,11 @@
 | PR-38 | Anomaly baseline library | 30-day rolling mean/std, z-score anomaly detection, 7 metrics | research_store.py |
 | PR-39 | Operator incident review pack | Auto-generated on bad days, root cause analysis, remediation | research_store.py |
 | PR-40 | All new modules wired into nightly | Steps 5.8, 5.9, 5.10 integrated, non-fatal wrappers | nightly_v6.py |
+| PR-41 | Bridge recycled on SIGHUP (N5c) | python_bridge=None on SIGHUP → RM-5 respawn picks up fresh config | main.rs:528-533 |
+| PR-42 | Live config overlay works (N8a) | load_live() merges config.live.toml onto base, 3 tests pass | config_loader.rs:load_live |
+| PR-43 | Live startup assertions (N8b) | max_pos≤5, heat≤20%, buffer≥15% enforced at startup | main.rs:119-130 |
+| PR-44 | N8a pre-flight in paper mode | config.live.toml parse validated even when IS_LIVE=false | main.rs:101-104, EC2 log confirmed |
+| PR-45 | 678 Rust unit tests pass | cargo test: 678 pass, 1 pre-existing failure (snapshot_partial_replay) | cargo test output |
 
 ## LIKELY (Strong Evidence, Not Fully Tested)
 

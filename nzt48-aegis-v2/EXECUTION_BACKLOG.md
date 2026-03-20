@@ -50,15 +50,20 @@
 | N7o | Operator incident review pack | 0.5 | ✅ BUILT | research_store.py (NEW) |
 | N7p | Nightly wiring (Steps 5.8, 5.9, 5.10) | 0.5 | ✅ BUILT | nightly_v6.py |
 
-## P0 — BUILD NEXT
+## P0 — BUILT v7.1 SESSION (Pending Deploy)
 
-| ID | Item | Days | Depends | Owner |
-|----|------|------|---------|-------|
-| N5b | Bar history persistence (Redis) | 1 | — | Bridge |
-| N5c | Bridge SIGHUP hot-reload | 1 | — | Bridge |
-| N8a | config.live.toml overlay implementation | 1 | — | Engine |
-| N8b | Paper param reduction (3 pos, 10% heat) | 0.5 | N8a | Config |
-| N8c | GBP/USD FX tracking in PnL | 1 | — | Engine |
+| ID | Item | Days | Status | File |
+|----|------|------|--------|------|
+| N5c | Bridge SIGHUP hot-reload (kill/respawn) | 0.5 | ✅ DEPLOYED | main.rs:528-533 |
+| N8a | config.live.toml overlay implementation | 1 | ✅ DEPLOYED | config_loader.rs (load_live + 6 overlay structs) |
+| N8b | Live param startup assertions + 3 tests | 0.5 | ✅ DEPLOYED | main.rs:119-130, config_loader.rs (3 new tests) |
+
+## P0 — DEFERRED (No ROI During Paper)
+
+| ID | Item | Days | Depends | Reason |
+|----|------|------|---------|--------|
+| N5b | Bar history persistence (Redis) | 3+ | — | 16-min warmup is fine, no value during paper |
+| N8c | GBP/USD FX tracking in PnL | 1 | — | All positions are LSE/GBP, activates when US routing enabled |
 
 ## P1 — BUILD NEXT (Following Sprint)
 
@@ -118,7 +123,12 @@
 - Verification: cargo check PASS, cargo test 675/676 PASS, all py_compile PASS
 - 15/15 HIGH-ROI mandatory items now BUILT or PARTIALLY BUILT
 
-**Remaining for deployment:**
-- `git commit && git push && rsync && docker compose build && docker compose up -d`
-- Verify bridge.py changes work with Rust engine (structural score, blacklist)
-- Verify nightly_v6.py imports in Docker (trade_taxonomy, missed-winner analysis)
+**Built v7.1 session (2026-03-20):**
+- 3 items built + deployed (N5c, N8a, N8b)
+- 2 Rust files modified (main.rs, config_loader.rs) — +218 lines
+- 3 new tests (live config parsing, overlay application, safety assertions)
+- cargo test: 678 pass, 1 pre-existing failure
+- N8a pre-flight log confirmed: `N8a LIVE OVERLAY: max_pos=3, heat=10.0%, sector=33.0%, buffer=25.0%`
+- 2 items deferred (N5b, N8c) — no value during paper phase
+
+**All v6.0 + v7.0 + v7.1 DEPLOYED to EC2 (commit 525592f)**
