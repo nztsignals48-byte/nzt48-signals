@@ -41,6 +41,14 @@
 | N7f | Missed-winner analysis (Step 5.7 nightly) | 1 | ✅ BUILT | nightly_v6.py |
 | N7g | Ticker promotion/demotion/kill scoreboard | 1 | ✅ BUILT | nightly_v6.py |
 | N7h | Backfill foundation script | 2 | ✅ BUILT | backfill_foundation.py (NEW) |
+| N7i | Macro event backfill layer (113 events/year) | 1 | ✅ BUILT | macro_event_layer.py (NEW) |
+| N7j | Friction-adjusted expectancy tracking | 1 | ✅ BUILT | analytics_pack.py (NEW) |
+| N7k | Session/exchange/leverage comparison tables | 0.5 | ✅ BUILT | analytics_pack.py (NEW) |
+| N7l | Feature completeness scorecard | 0.5 | ✅ BUILT | analytics_pack.py (NEW) |
+| N7m | Research context store for Claude | 1 | ✅ BUILT | research_store.py (NEW) |
+| N7n | Anomaly baseline library (30-day rolling) | 0.5 | ✅ BUILT | research_store.py (NEW) |
+| N7o | Operator incident review pack | 0.5 | ✅ BUILT | research_store.py (NEW) |
+| N7p | Nightly wiring (Steps 5.8, 5.9, 5.10) | 0.5 | ✅ BUILT | nightly_v6.py |
 
 ## P0 — BUILD NEXT
 
@@ -103,11 +111,12 @@
 - 2 Rust type files modified (types/wal.rs, types/enums.rs)
 
 **Built v7.0 session (2026-03-20):**
-- 8 items built (N7a-N7h)
-- 1 new file created (backfill_foundation.py)
-- 4 existing files modified (engine.rs, python_bridge.rs, main.rs, bridge.py, config_writer.py, nightly_v6.py)
-- Unified master plan written (AEGIS_MASTER_IMPLEMENTATION_PLAN_v7.md)
+- 16 items built (N7a-N7p)
+- 4 new files created (backfill_foundation.py, macro_event_layer.py, analytics_pack.py, research_store.py)
+- 6 existing files modified (engine.rs, python_bridge.rs, main.rs, bridge.py, config_writer.py, nightly_v6.py)
+- Unified master plan v7.0, release candidate v7.0, updated backlog + proof register
 - Verification: cargo check PASS, cargo test 675/676 PASS, all py_compile PASS
+- 15/15 HIGH-ROI mandatory items now BUILT or PARTIALLY BUILT
 
 **Remaining for deployment:**
 - `git commit && git push && rsync && docker compose build && docker compose up -d`

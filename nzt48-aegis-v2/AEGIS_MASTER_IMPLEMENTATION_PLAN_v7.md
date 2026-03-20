@@ -203,6 +203,14 @@ Market Data (IBKR) → Tick Router → [Hot: Vanguard/Apex split]
 | N7d | Missed-winner analysis (Step 5.7 in nightly) | nightly_v6.py | BUILT |
 | N7e | Ticker promotion/demotion/kill scoreboard | nightly_v6.py | BUILT |
 | N7f | Backfill foundation script | backfill_foundation.py (NEW) | BUILT |
+| N7g | Macro event backfill layer (113 events/year) | macro_event_layer.py (NEW) | BUILT |
+| N7h | Friction-adjusted expectancy tracking | analytics_pack.py (NEW) | BUILT |
+| N7i | Session/exchange/leverage comparison tables | analytics_pack.py (NEW) | BUILT |
+| N7j | Feature completeness scorecard | analytics_pack.py (NEW) | BUILT |
+| N7k | Research context store for Claude | research_store.py (NEW) | BUILT |
+| N7l | Anomaly baseline library (30-day rolling) | research_store.py (NEW) | BUILT |
+| N7m | Operator incident review pack | research_store.py (NEW) | BUILT |
+| N7n | Nightly wiring (Steps 5.8, 5.9, 5.10) | nightly_v6.py | BUILT |
 
 ---
 
@@ -573,6 +581,9 @@ git push origin feat/tier-system-enhancements-full
   Step 5.5: Indicator intelligence (Phase H analysis)
   Step 5.6: Gate veto aggregation (from gate_vetoes.ndjson)
   Step 5.7: Missed-winner analysis (from SignalRejected WAL events) [NEW v7.0]
+  Step 5.8: Analytics pack (friction expectancy, comparison tables, data quality) [NEW v7.0+]
+  Step 5.9: Macro event context (classify trades against economic calendar) [NEW v7.0+]
+  Step 5.10: Research store + anomaly baselines + incident review [NEW v7.0+]
   Step 6:   Daily report generation (text + JSON sidecar)
   Step 7:   Battle plan generation
 

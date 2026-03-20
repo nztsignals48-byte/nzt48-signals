@@ -1618,6 +1618,89 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Missed-winner analysis failed (non-fatal): %s", e)
 
+    # Step 5.8: Analytics Pack — friction-adjusted expectancy, comparison tables, data quality
+    try:
+        from python_brain.ouroboros.analytics_pack import run_analytics_pack
+        raw_trades = [asdict(t) for t in trades]
+        analytics = run_analytics_pack(raw_trades, list(PRIMARY_TICKERS))
+        recommendations["analytics_pack"] = analytics
+        log.info(
+            "Analytics pack: overall net expectancy=%.4f, friction ratio=%.1f%%, data quality=%.0f%%",
+            analytics.get("friction_expectancy", {}).get("overall_net_expectancy", 0),
+            analytics.get("friction_expectancy", {}).get("friction_ratio", 0) * 100,
+            analytics.get("data_quality_scorecard", {}).get("avg_completeness", 0),
+        )
+    except Exception as e:
+        log.warning("Analytics pack failed (non-fatal): %s", e)
+
+    # Step 5.9: Macro event context — classify today's trades against economic calendar
+    try:
+        from python_brain.ouroboros.macro_event_layer import EventCalendar
+        cal = EventCalendar()
+        cal.load_cache()
+        macro_contexts = []
+        for t in trades:
+            ctx = cal.classify_trade_macro_context(t.entry_time_ns, t.exit_time_ns)
+            macro_contexts.append({"ticker": t.ticker, "pnl": t.pnl, **ctx})
+        macro_victims = [m for m in macro_contexts if m["macro_classification"] == "macro_victim"]
+        recommendations["macro_context"] = {
+            "total_trades": len(macro_contexts),
+            "clean": sum(1 for m in macro_contexts if m["macro_classification"] == "clean"),
+            "macro_proximate": sum(1 for m in macro_contexts if m["macro_classification"] == "macro_proximate"),
+            "macro_victim": len(macro_victims),
+            "macro_victim_pnl": sum(m["pnl"] for m in macro_victims),
+        }
+        log.info("Macro context: %d clean, %d proximate, %d victims",
+                 recommendations["macro_context"]["clean"],
+                 recommendations["macro_context"]["macro_proximate"],
+                 recommendations["macro_context"]["macro_victim"])
+    except Exception as e:
+        log.warning("Macro event analysis failed (non-fatal): %s", e)
+
+    # Step 5.10: Research store + anomaly baselines + incident review
+    try:
+        from python_brain.ouroboros.research_store import (
+            ResearchContextStore, AnomalyBaselineLibrary, generate_incident_pack
+        )
+        # Update research context
+        rcs = ResearchContextStore()
+        rcs.load()
+        scoreboard_data = recommendations.get("ticker_scoreboard", {})
+        mw_data = recommendations.get("missed_winner_stats", {})
+        rcs.add_daily_context(today, asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {
+            "total_trades": metrics.total_trades, "win_rate": metrics.win_rate,
+            "profit_factor": metrics.profit_factor, "total_pnl": metrics.total_pnl,
+            "avg_rung": metrics.avg_rung,
+        }, recommendations, scoreboard_data, mw_data)
+        rcs.save()
+
+        # Update anomaly baselines + check
+        abl = AnomalyBaselineLibrary()
+        abl.load()
+        today_metrics_dict = {
+            "win_rate": metrics.win_rate, "total_pnl": metrics.total_pnl,
+            "profit_factor": metrics.profit_factor, "total_trades": metrics.total_trades,
+            "avg_spread": sum(t.spread_at_entry_pct for t in trades) / max(len(trades), 1),
+            "avg_rung": metrics.avg_rung,
+            "total_commission": sum(t.total_commission for t in trades),
+        }
+        abl.update_baselines(today, today_metrics_dict)
+        anomalies = abl.check_anomalies(today_metrics_dict)
+        abl.save()
+        recommendations["anomalies"] = [a.to_dict() for a in anomalies]
+        if anomalies:
+            log.warning("ANOMALIES DETECTED: %s", ", ".join(f"{a.metric}(z={a.z_score:.1f})" for a in anomalies))
+
+        # Generate incident pack if bad day
+        if metrics.total_pnl < 0 or any(a.severity == "critical" for a in anomalies):
+            raw_trades = [asdict(t) for t in trades]
+            incident = generate_incident_pack(today, raw_trades,
+                                              today_metrics_dict, anomalies, mw_data)
+            log.warning("INCIDENT PACK generated: %s severity — %s",
+                        incident.get("severity", "unknown"), incident.get("summary", ""))
+    except Exception as e:
+        log.warning("Research store/anomaly analysis failed (non-fatal): %s", e)
+
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)
 

@@ -40,6 +40,14 @@
 | PR-30 | Ticker scoreboard computed nightly | 5-component composite score, PROMOTE/HOLD/DEMOTE/KILL | nightly_v6.py |
 | PR-31 | Backfill foundation script exists | Synthetic PositionClosed from yfinance 5-min OHLCV | backfill_foundation.py |
 | PR-32 | 676 Rust unit tests pass | cargo test --lib: 675 pass, 1 pre-existing failure | cargo test output |
+| PR-33 | Macro event calendar layer | 113 events/year, static 2026 calendar, classify_trade_macro_context() | macro_event_layer.py |
+| PR-34 | Friction-adjusted expectancy tracking | Per-ticker/session/exchange/leverage net expectancy after costs | analytics_pack.py |
+| PR-35 | Session/exchange/leverage comparison tables | 4-dimension comparison with WR, PnL, MAE, MFE, friction | analytics_pack.py |
+| PR-36 | Feature completeness scorecard | 5-component 0-100 score per ticker, worst_tickers flagging | analytics_pack.py |
+| PR-37 | Research context store for Claude | 7-day structured context with trending tickers, concerns, drift | research_store.py |
+| PR-38 | Anomaly baseline library | 30-day rolling mean/std, z-score anomaly detection, 7 metrics | research_store.py |
+| PR-39 | Operator incident review pack | Auto-generated on bad days, root cause analysis, remediation | research_store.py |
+| PR-40 | All new modules wired into nightly | Steps 5.8, 5.9, 5.10 integrated, non-fatal wrappers | nightly_v6.py |
 
 ## LIKELY (Strong Evidence, Not Fully Tested)
 
