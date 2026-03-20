@@ -78,13 +78,31 @@ fn main() {
         .unwrap_or(4003); // gnzsnz/ib-gateway paper API proxy port
 
     // Load configuration
+    // N8a: In paper mode, load base config.toml only. In live mode, overlay config.live.toml.
+    // Even in paper mode, validate that config.live.toml parses correctly (early error detection).
     eprintln!("Loading config from {:?}...", config_dir);
-    let config = match EngineConfig::load(&config_dir) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("FATAL: Config load failed: {e}");
-            std::process::exit(1);
+    let config = if IS_LIVE {
+        match EngineConfig::load_live(&config_dir) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("FATAL: Live config load failed: {e}");
+                std::process::exit(1);
+            }
         }
+    } else {
+        // Paper mode: load base config only
+        let cfg = match EngineConfig::load(&config_dir) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("FATAL: Config load failed: {e}");
+                std::process::exit(1);
+            }
+        };
+        // N8a pre-flight: validate config.live.toml parses (catch errors before live deployment)
+        if let Err(e) = EngineConfig::load_live(&config_dir) {
+            eprintln!("WARNING [N8a]: config.live.toml overlay failed to parse: {e} (paper mode, non-fatal)");
+        }
+        cfg
     };
     eprintln!(
         "Config: {} tickers, {} contracts, paper_mode={}",
@@ -92,6 +110,27 @@ fn main() {
         config.contracts.len(),
         config.crucible.paper_mode,
     );
+
+    // N8b: Live mode startup assertions — refuse to trade if params are unsafe
+    if IS_LIVE {
+        let r = &config.risk;
+        if r.max_positions > 5 {
+            eprintln!("FATAL [N8b]: max_positions={} exceeds live limit of 5", r.max_positions);
+            std::process::exit(1);
+        }
+        if r.portfolio_heat_limit_pct > 20.0 {
+            eprintln!("FATAL [N8b]: portfolio_heat={:.1}% exceeds live limit of 20%", r.portfolio_heat_limit_pct);
+            std::process::exit(1);
+        }
+        if r.cash_buffer_pct < 15.0 {
+            eprintln!("FATAL [N8b]: cash_buffer={:.1}% below live minimum of 15%", r.cash_buffer_pct);
+            std::process::exit(1);
+        }
+        eprintln!(
+            "N8b LIVE ASSERTIONS PASS: max_pos={}, heat={:.1}%, buffer={:.1}%",
+            r.max_positions, r.portfolio_heat_limit_pct, r.cash_buffer_pct,
+        );
+    }
 
     // Load Ouroboros artifacts (safe fallback to defaults)
     let mut dw = ouroboros_loader::load_dynamic_weights(&config_dir);
@@ -524,6 +563,14 @@ fn main() {
                 dw = new_dw;
             } else {
                 eprintln!("HOT-RELOAD: dynamic_weights unchanged (no update needed)");
+            }
+
+            // N5c: Kill and respawn Python bridge so it picks up fresh config
+            // (bridge caches dynamic_weights.toml at startup — no hot-reload in Python)
+            if python_bridge.is_some() {
+                eprintln!("HOT-RELOAD [N5c]: recycling Python bridge to pick up new config...");
+                python_bridge = None; // Drop triggers shutdown() + process kill
+                // RM-5 respawn logic (line ~548) will restart it on next loop iteration
             }
         }
 

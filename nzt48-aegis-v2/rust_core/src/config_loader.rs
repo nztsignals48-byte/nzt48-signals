@@ -192,6 +192,58 @@ pub struct CrucibleConfig {
     pub starting_equity_gbp: f64,
 }
 
+// ── N8a: Live config overlay structs (all fields optional) ──
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawConfigLive {
+    #[serde(default)]
+    position: Option<RawPositionLive>,
+    #[serde(default)]
+    trading: Option<RawTradingLive>,
+    #[serde(default)]
+    signal: Option<RawSignalLive>,
+    #[serde(default)]
+    chandelier: Option<RawChandelierLive>,
+    #[serde(default)]
+    kelly: Option<RawKellyLive>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawPositionLive {
+    max_simultaneous_positions: Option<u32>,
+    portfolio_heat_limit_pct: Option<f64>,
+    sector_heat_cap_pct: Option<f64>,
+    cash_buffer_pct: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawTradingLive {
+    daily_trade_limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawSignalLive {
+    confidence_floor: Option<f64>,
+    min_edge_bps: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawChandelierLive {
+    base_atr_mult: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawKellyLive {
+    clamp_max: Option<f64>,
+    clamp_min: Option<f64>,
+}
+
 // ── Universe + Contracts ──
 
 #[derive(Debug, Deserialize)]
@@ -302,7 +354,59 @@ impl EngineConfig {
         })
     }
 
+    /// N8a: Load config with live overlay applied. When IS_LIVE=true, config.live.toml
+    /// values override the base config.toml values for production-safe parameters.
+    pub fn load_live(config_dir: &Path) -> Result<Self, ConfigError> {
+        let mut cfg = Self::load(config_dir)?;
+        let live_path = config_dir.join("config.live.toml");
+        let live = Self::load_live_toml(&live_path)?;
+
+        // Apply position overrides
+        if let Some(pos) = live.position {
+            if let Some(v) = pos.max_simultaneous_positions {
+                cfg.risk.max_positions = v;
+                cfg.crucible.max_positions_override = v;
+            }
+            if let Some(v) = pos.portfolio_heat_limit_pct { cfg.risk.portfolio_heat_limit_pct = v; }
+            if let Some(v) = pos.sector_heat_cap_pct { cfg.risk.sector_heat_cap_pct = v; }
+            if let Some(v) = pos.cash_buffer_pct { cfg.risk.cash_buffer_pct = v; }
+        }
+
+        // Apply trading overrides
+        if let Some(trading) = live.trading {
+            if let Some(v) = trading.daily_trade_limit { cfg.risk.daily_trade_limit = v; }
+        }
+
+        // Apply signal overrides
+        if let Some(signal) = live.signal {
+            if let Some(v) = signal.confidence_floor { cfg.risk.confidence_floor = v; }
+            if let Some(v) = signal.min_edge_bps {
+                cfg.risk.min_gross_edge_pct = v as f64 / 100.0; // bps → pct
+            }
+        }
+
+        // Apply kelly overrides (stored in slippage_pct field for now — N8a wires to risk)
+        // Note: Kelly params are in dynamic_weights.toml, not config.toml.
+        // config.live.toml kelly section is for documentation/assertion only.
+
+        eprintln!(
+            "N8a LIVE OVERLAY: max_pos={}, heat={:.1}%, sector={:.1}%, buffer={:.1}%, trades/day={}",
+            cfg.risk.max_positions,
+            cfg.risk.portfolio_heat_limit_pct,
+            cfg.risk.sector_heat_cap_pct,
+            cfg.risk.cash_buffer_pct,
+            cfg.risk.daily_trade_limit,
+        );
+
+        Ok(cfg)
+    }
+
     fn load_config_toml(path: &Path) -> Result<RawConfig, ConfigError> {
+        let content = std::fs::read_to_string(path)?;
+        toml::from_str(&content).map_err(|e| ConfigError::Parse(format!("{path:?}: {e}")))
+    }
+
+    fn load_live_toml(path: &Path) -> Result<RawConfigLive, ConfigError> {
         let content = std::fs::read_to_string(path)?;
         toml::from_str(&content).map_err(|e| ConfigError::Parse(format!("{path:?}: {e}")))
     }
@@ -522,5 +626,67 @@ mod tests {
         assert_eq!(cfg.ibkr.rate_limit_msgs_per_sec, 50);
         assert_eq!(cfg.ibkr.reqmktdata_pacing_ms, 10);
         assert_eq!(cfg.ibkr.max_simultaneous_lines, 100);
+    }
+
+    // ── N8a: Live overlay tests ──
+
+    #[test]
+    fn test_live_config_parses() {
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("parent dir")
+            .join("config");
+        let live_path = config_dir.join("config.live.toml");
+        let live: RawConfigLive = {
+            let content = std::fs::read_to_string(&live_path).expect("read config.live.toml");
+            toml::from_str(&content).expect("parse config.live.toml")
+        };
+        // Verify key sections exist
+        assert!(live.position.is_some(), "config.live.toml must have [position]");
+        let pos = live.position.unwrap();
+        assert_eq!(pos.max_simultaneous_positions, Some(3));
+        assert_eq!(pos.portfolio_heat_limit_pct, Some(10.0));
+        assert_eq!(pos.sector_heat_cap_pct, Some(33.0));
+        assert_eq!(pos.cash_buffer_pct, Some(25.0));
+    }
+
+    #[test]
+    fn test_live_overlay_applies() {
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("parent dir")
+            .join("config");
+        // Base config has paper values
+        let base = EngineConfig::load(&config_dir).expect("load base");
+        assert_eq!(base.risk.max_positions, 15); // Paper: relaxed
+
+        // Live overlay should tighten
+        let live = EngineConfig::load_live(&config_dir).expect("load live");
+        assert_eq!(live.risk.max_positions, 3); // Live: tightened
+        assert_eq!(live.risk.portfolio_heat_limit_pct, 10.0);
+        assert_eq!(live.risk.sector_heat_cap_pct, 33.0);
+        assert_eq!(live.risk.cash_buffer_pct, 25.0);
+    }
+
+    #[test]
+    fn test_n8b_live_config_values_safe() {
+        // N8b: Assert config.live.toml values meet production safety criteria
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("parent dir")
+            .join("config");
+        let cfg = EngineConfig::load_live(&config_dir).expect("load live");
+
+        // Position limits: must be conservative for £10k equity
+        assert!(cfg.risk.max_positions <= 5, "Live: max_positions={} exceeds 5", cfg.risk.max_positions);
+        assert!(cfg.risk.portfolio_heat_limit_pct <= 20.0, "Live: heat={:.1}% exceeds 20%", cfg.risk.portfolio_heat_limit_pct);
+        assert!(cfg.risk.sector_heat_cap_pct <= 50.0, "Live: sector_heat={:.1}% exceeds 50%", cfg.risk.sector_heat_cap_pct);
+        assert!(cfg.risk.cash_buffer_pct >= 15.0, "Live: cash_buffer={:.1}% below 15%", cfg.risk.cash_buffer_pct);
+
+        // Trade limits: must have daily cap
+        assert!(cfg.risk.daily_trade_limit <= 5, "Live: daily_trades={} exceeds 5", cfg.risk.daily_trade_limit);
+
+        // Signal quality: must maintain confidence floor
+        assert!(cfg.risk.confidence_floor >= 60.0, "Live: confidence_floor={:.0} below 60", cfg.risk.confidence_floor);
     }
 }
