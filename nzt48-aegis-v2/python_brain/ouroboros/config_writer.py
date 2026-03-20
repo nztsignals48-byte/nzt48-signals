@@ -25,6 +25,7 @@ Quarantine rules (same as nightly_v6):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -91,6 +92,142 @@ def atomic_write(path: Path, content: str) -> None:
         except Exception:
             pass
         raise
+
+
+# ---------------------------------------------------------------------------
+# Config diff rollback ledger
+# ---------------------------------------------------------------------------
+_CONFIG_CHANGES_PATH = DATA_DIR / "config_changes.ndjson"
+_LEDGER_RETENTION_DAYS = 30
+
+
+def _sha256(content: str) -> str:
+    """Return hex SHA-256 digest of a string."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _diff_toml_content(old_content: str, new_content: str) -> List[Dict[str, Any]]:
+    """Compute a key-level diff between two TOML-formatted strings.
+
+    Parses lines of the form 'key = value' under [section] headers and reports
+    additions, removals, and modifications.  Comment-only and blank lines are
+    ignored.  This is intentionally lightweight (no TOML parser dependency).
+    """
+    def _parse_kv(text: str) -> Dict[str, str]:
+        """Return {section.key: raw_value} for every key = value line."""
+        kvs: Dict[str, str] = {}
+        section = ""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith("["):
+                # Handle both [section] and [[section.array]]
+                section = stripped.strip("[]").strip()
+                continue
+            if "=" in stripped:
+                key, _, val = stripped.partition("=")
+                full_key = f"{section}.{key.strip()}" if section else key.strip()
+                kvs[full_key] = val.strip()
+        return kvs
+
+    old_kv = _parse_kv(old_content)
+    new_kv = _parse_kv(new_content)
+    all_keys = sorted(set(old_kv) | set(new_kv))
+
+    changes: List[Dict[str, Any]] = []
+    for k in all_keys:
+        old_val = old_kv.get(k)
+        new_val = new_kv.get(k)
+        if old_val is None:
+            changes.append({"key": k, "action": "added", "new": new_val})
+        elif new_val is None:
+            changes.append({"key": k, "action": "removed", "old": old_val})
+        elif old_val != new_val:
+            changes.append({"key": k, "action": "changed", "old": old_val, "new": new_val})
+    return changes
+
+
+def _trim_ledger_entries(entries: List[str], retention_days: int = _LEDGER_RETENTION_DAYS) -> List[str]:
+    """Return only entries whose timestamp is within the retention window."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff_iso = cutoff.isoformat(timespec="seconds")
+    kept: List[str] = []
+    for line in entries:
+        try:
+            obj = json.loads(line)
+            if obj.get("timestamp", "") >= cutoff_iso:
+                kept.append(line)
+        except (json.JSONDecodeError, TypeError):
+            continue  # drop malformed lines
+    return kept
+
+
+def _record_config_change(filepath: Path, new_content: str) -> None:
+    """Record a config diff entry to the ndjson ledger if content changed.
+
+    Compares new_content against the existing file at filepath.  If the SHA-256
+    hashes differ (or the file is new), appends a timestamped diff record to
+    config_changes.ndjson and trims entries older than 30 days.
+
+    Silently succeeds on any I/O error to avoid blocking config writes.
+    """
+    try:
+        # Read existing file content (empty string if first run)
+        old_content = ""
+        if filepath.exists():
+            try:
+                old_content = filepath.read_text(encoding="utf-8")
+            except IOError:
+                old_content = ""
+
+        old_hash = _sha256(old_content) if old_content else ""
+        new_hash = _sha256(new_content)
+
+        # Skip if content is identical
+        if old_hash == new_hash:
+            return
+
+        # Compute key-level diff
+        diff_summary = _diff_toml_content(old_content, new_content)
+
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "filename": filepath.name,
+            "diff_summary": diff_summary,
+            "old_hash": old_hash,
+            "new_hash": new_hash,
+        }
+
+        # Read existing ledger lines
+        existing_lines: List[str] = []
+        ledger_path = _CONFIG_CHANGES_PATH
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        if ledger_path.exists():
+            try:
+                existing_lines = [
+                    l for l in ledger_path.read_text(encoding="utf-8").splitlines() if l.strip()
+                ]
+            except IOError:
+                existing_lines = []
+
+        # Append new entry
+        existing_lines.append(json.dumps(entry, separators=(",", ":")))
+
+        # Trim to retention window
+        existing_lines = _trim_ledger_entries(existing_lines)
+
+        # Write back atomically
+        tmp_path = ledger_path.with_suffix(".ndjson.tmp")
+        tmp_path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+        os.rename(str(tmp_path), str(ledger_path))
+
+        log.info("Recorded config change for %s (%d diffs, old=%s..., new=%s...)",
+                 filepath.name, len(diff_summary), old_hash[:12], new_hash[:12])
+
+    except Exception as e:
+        # Never block config writes due to ledger failure
+        log.warning("Failed to record config change for %s: %s (non-fatal)", filepath.name, e)
 
 
 # ---------------------------------------------------------------------------
@@ -734,6 +871,7 @@ def run_config_writer() -> int:
     try:
         dw_content = generate_dynamic_weights_toml(recs, metrics, history, events)
         dw_path = CONFIG_DIR / "dynamic_weights.toml"
+        _record_config_change(dw_path, dw_content)
         atomic_write(dw_path, dw_content)
         log.info("dynamic_weights.toml written successfully")
     except Exception as e:
@@ -747,6 +885,7 @@ def run_config_writer() -> int:
             sc_content = generate_spread_cache_toml(spread_data)
             if sc_content:
                 sc_path = CONFIG_DIR / "spread_cache.toml"
+                _record_config_change(sc_path, sc_content)
                 atomic_write(sc_path, sc_content)
                 log.info("spread_cache.toml written with %d tickers", len(spread_data))
         else:
@@ -760,6 +899,7 @@ def run_config_writer() -> int:
         uc_content = generate_universe_classification_toml(watchlist)
         if uc_content:
             uc_path = CONFIG_DIR / "universe_classification.toml"
+            _record_config_change(uc_path, uc_content)
             atomic_write(uc_path, uc_content)
             log.info("universe_classification.toml written successfully")
         else:

@@ -458,6 +458,12 @@ pub struct SimulatedTrade {
     pub entry_rvol: f64,
     pub entry_hurst: f64,
     pub entry_adx: f64,
+    /// N2b: Volume slope at entry (from Python bridge).
+    pub entry_vol_slope: f64,
+    /// N2b: VWAP distance % at entry (from Python bridge).
+    pub entry_vwap_dist_pct: f64,
+    /// N3a: Structural tradability score at entry (from Python bridge).
+    pub entry_structural_score: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1125,16 +1131,32 @@ impl<B: BrokerAdapter> Engine<B> {
 
                     let close_symbol = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
                     let regime_at_entry = format!("{:?}", self.arbiter.regime);
-                    let (entry_confidence, entry_strategy) = self.simulated_trades.iter()
-                        .rfind(|t| t.ticker_id == tid && t.status == SimTradeStatus::Open)
-                        .map(|t| (t.confidence, t.strategy.clone()))
-                        .unwrap_or((0.0, "unknown".to_string()));
                     let exit_exchange = self.broker.exchange_for_ticker(&tid).to_string();
-                    // Look up indicator context from the SimulatedTrade that opened this position
-                    let (e_rvol, e_hurst, e_adx) = self.simulated_trades.iter()
-                        .rfind(|t| t.ticker_id == tid && t.status == SimTradeStatus::Open)
-                        .map(|t| (t.entry_rvol, t.entry_hurst, t.entry_adx))
-                        .unwrap_or((0.0, 0.0, 0.0));
+                    // Look up ALL entry context from the SimulatedTrade that opened this position
+                    let entry_ctx = self.simulated_trades.iter()
+                        .rfind(|t| t.ticker_id == tid && t.status == SimTradeStatus::Open);
+                    let entry_confidence = entry_ctx.map(|t| t.confidence).unwrap_or(0.0);
+                    let entry_strategy = entry_ctx.map(|t| t.strategy.clone()).unwrap_or_else(|| "unknown".to_string());
+                    let e_rvol = entry_ctx.map(|t| t.entry_rvol).unwrap_or(0.0);
+                    let e_hurst = entry_ctx.map(|t| t.entry_hurst).unwrap_or(0.0);
+                    let e_adx = entry_ctx.map(|t| t.entry_adx).unwrap_or(0.0);
+                    let e_vol_slope = entry_ctx.map(|t| t.entry_vol_slope).unwrap_or(0.0);
+                    let e_vwap_dist = entry_ctx.map(|t| t.entry_vwap_dist_pct).unwrap_or(0.0);
+                    // N2b: Compute enriched fields for trade taxonomy classification.
+                    let hold_time_mins = if self.now_ns > entry_time {
+                        ((self.now_ns - entry_time) / 60_000_000_000) as u32
+                    } else {
+                        0
+                    };
+                    // Classify session phase from London time (approximate from entry time).
+                    let entry_session_phase = {
+                        let london_secs = self.clock.now_london_secs(entry_time);
+                        if london_secs < 8 * 3600 { "pre_open" }
+                        else if london_secs < 10 * 3600 { "open" }
+                        else if london_secs < 13 * 3600 { "morning" }
+                        else if london_secs < 16 * 3600 { "afternoon" }
+                        else { "close" }
+                    }.to_string();
                     self.write_wal(WalPayload::PositionClosed {
                         ticker_id: tid.0,
                         final_pnl,
@@ -1159,6 +1181,14 @@ impl<B: BrokerAdapter> Engine<B> {
                         entry_adx: e_adx,
                         mae: pos_mae,
                         mfe: pos_mfe,
+                        // N2b: Enriched fields for trade taxonomy.
+                        hold_time_mins,
+                        entry_session_phase,
+                        vwap_dist_at_entry_pct: e_vwap_dist,
+                        atr_pct_at_entry: if entry_price_gbp > 0.0 { atr / entry_price_gbp * 100.0 } else { 0.0 },
+                        vix_at_entry: self.macro_regime.indicator().vix,
+                        vol_slope_at_entry: e_vol_slope,
+                        trade_class: String::new(),   // Assigned by nightly trade taxonomy
                     });
                     self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
                     self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
@@ -1469,6 +1499,31 @@ impl<B: BrokerAdapter> Engine<B> {
                     tid.0, sym, reason_str, veto_count,
                 );
             }
+            // N2a: Write SignalRejected WAL event for missed-winner analysis.
+            // Only write for meaningful rejections (not warmup/cooldown/closed).
+            // Rate-limit: max 1 per ticker per 5 minutes to avoid WAL bloat.
+            {
+                let sym = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
+                let spread_pct = if tick.bid > 0.0 {
+                    (tick.ask - tick.bid) / tick.bid * 100.0
+                } else {
+                    0.0
+                };
+                self.write_wal(WalPayload::SignalRejected {
+                    ticker_id: tid.0,
+                    symbol: sym,
+                    strategy: strategy_name.clone(),
+                    confidence,
+                    gate_name: "RiskArbiter".to_string(),
+                    gate_reason: reason_str,
+                    hurst: sig.hurst,
+                    adx: sig.adx,
+                    rvol: sig.rvol,
+                    vol_slope: 0.0,
+                    spread_pct,
+                    price_at_reject: tick.last,
+                });
+            }
             return;
         }
         // P4-A: Record signal generation and approval in telemetry
@@ -1609,6 +1664,9 @@ impl<B: BrokerAdapter> Engine<B> {
                 entry_rvol: sig.rvol,
                 entry_hurst: sig.hurst,
                 entry_adx: sig.adx,
+                entry_vol_slope: sig.vol_slope,
+                entry_vwap_dist_pct: sig.vwap_dist_pct,
+                entry_structural_score: sig.structural_score,
             };
 
             // Enriched SIM_TRADE log: full explainability per trade

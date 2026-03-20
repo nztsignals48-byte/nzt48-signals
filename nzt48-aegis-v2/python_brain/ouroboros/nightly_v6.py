@@ -92,6 +92,19 @@ class TradeRecord:
     rung_achieved: int
     confidence: float
     exchange: str = ""  # AUDIT-FIX: track per-exchange performance
+    # N1a: Cost-aware fields from enriched PositionClosed (N0e + N2b)
+    gross_pnl: float = 0.0
+    total_commission: float = 0.0
+    spread_at_entry_pct: float = 0.0
+    spread_at_exit_pct: float = 0.0
+    mae: float = 0.0
+    mfe: float = 0.0
+    hold_time_mins: int = 0
+    entry_session_phase: str = ""
+    vwap_dist_at_entry_pct: float = 0.0
+    atr_pct_at_entry: float = 0.01
+    qty: int = 1
+    trade_class: str = ""  # Assigned by trade taxonomy classifier
 
 
 @dataclass
@@ -191,6 +204,18 @@ def load_todays_trades(date_str: str) -> List[TradeRecord]:
                             rung_achieved=pc.get("highest_rung", 0),
                             confidence=pc.get("confidence", 0.0),
                             exchange=pc.get("exchange", ""),
+                            # N1a: Cost-aware fields from N0e + N2b enrichment
+                            gross_pnl=pc.get("gross_pnl", 0.0),
+                            total_commission=pc.get("total_commission", 0.0),
+                            spread_at_entry_pct=pc.get("spread_at_entry_pct", 0.0),
+                            spread_at_exit_pct=pc.get("spread_at_exit_pct", 0.0),
+                            mae=pc.get("mae", 0.0),
+                            mfe=pc.get("mfe", 0.0),
+                            hold_time_mins=pc.get("hold_time_mins", 0),
+                            entry_session_phase=pc.get("entry_session_phase", ""),
+                            vwap_dist_at_entry_pct=pc.get("vwap_dist_at_entry_pct", 0.0),
+                            atr_pct_at_entry=pc.get("atr_pct_at_entry", 0.01),
+                            qty=pc.get("qty", 1),
                         ))
         except Exception as e:
             log.warning("Error reading %s: %s", wal_path, e)
@@ -232,12 +257,20 @@ def analyze_trades(trades: List[TradeRecord], date_str: str) -> DailyMetrics:
         n = len(ticker_trades)
         wins = sum(1 for t in ticker_trades if t.pnl > 0)
         total_pnl = sum(t.pnl for t in ticker_trades)
+        ticker_gross_wins = sum(t.pnl for t in ticker_trades if t.pnl > 0)
+        ticker_gross_losses = abs(sum(t.pnl for t in ticker_trades if t.pnl < 0))
+        ticker_pf = ticker_gross_wins / max(ticker_gross_losses, 1e-9)
+        avg_spread = sum(t.spread_at_entry_pct for t in ticker_trades) / n if n > 0 else 0.0
+        avg_gross = sum(abs(t.gross_pnl) for t in ticker_trades) / n if n > 0 else 0.0
         metrics.per_ticker[ticker] = {
             "trades": n,
             "wins": wins,
             "win_rate": wins / n if n > 0 else 0.0,
             "total_pnl": total_pnl,
             "avg_rung": sum(t.rung_achieved for t in ticker_trades) / n,
+            "profit_factor": ticker_pf,
+            "avg_spread_cost": avg_spread,
+            "avg_gross_pnl": avg_gross,
         }
 
     # Per-entry-type metrics
@@ -458,6 +491,26 @@ def optimize_parameters(metrics: DailyMetrics, *, mem=None) -> Dict[str, Any]:
     new_kelly = _clamp_drift(new_kelly, baseline_kelly, MAX_DRIFT_PCT / 100.0)
     new_chandelier = _clamp_drift(new_chandelier, baseline_chandelier, MAX_DRIFT_PCT / 100.0)
 
+    # N1a: Cost-aware learning — tighten Kelly when cost drag is excessive.
+    # If spread victims + noise exits > 40% of trades, reduce Kelly to cut churning.
+    if metrics.total_trades >= 3:
+        # Count cost-impaired trades from per_ticker metrics (proxy until taxonomy is wired)
+        # When taxonomy data is available via trade_class, use that instead.
+        loser_count = metrics.losses
+        if loser_count > 0 and metrics.total_trades > 0:
+            loss_rate = loser_count / metrics.total_trades
+            avg_loss_size = abs(sum(
+                d.get("total_pnl", 0) for d in metrics.per_ticker.values() if d.get("total_pnl", 0) < 0
+            )) / max(loser_count, 1)
+            # If average loss is tiny (< GBP 5), these are likely spread victims / noise exits
+            if avg_loss_size < 5.0 and loss_rate > 0.40:
+                cost_penalty = 0.97  # 3% Kelly reduction per day of high cost drag
+                new_kelly = max(new_kelly * cost_penalty, KELLY_MIN)
+                recs["adjustments"].append(
+                    f"N1a COST PENALTY: Kelly *0.97 -> {new_kelly:.3f} "
+                    f"(avg_loss=GBP {avg_loss_size:.2f} < 5, loss_rate={loss_rate:.0%})"
+                )
+
     recs["kelly_fraction"] = new_kelly
     recs["chandelier_atr_mult"] = new_chandelier
     recs["guardrails"] = {
@@ -578,6 +631,183 @@ def _avg_metric(records: List[Dict[str, Any]], key: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# 4b. Ticker Scoreboard — Promotion / Demotion / Kill
+# ---------------------------------------------------------------------------
+def generate_ticker_scoreboard(
+    metrics: DailyMetrics,
+    mem: Any,
+) -> Dict[str, Any]:
+    """Compute composite health score for each ticker and classify as PROMOTE/HOLD/DEMOTE/KILL.
+
+    Blends persistent memory (all-time, 70%) with today's stats (30%) to produce
+    a 0-100 composite score per ticker. Tickers without cumulative history get
+    a 0.7 penalty multiplier on their score.
+
+    Components (weights sum to 1.0):
+      - Win rate        (0.3): WR% mapped to 0-100
+      - Profit factor   (0.2): PF capped at 3.0 → 100
+      - Avg rung        (0.2): avg_rung / 5 * 100
+      - Sample size     (0.1): min(n_trades / 10, 1) * 100
+      - Spread health   (0.2): 100 - (spread_cost / gross_pnl * 100), floor 0
+
+    Returns dict with: scoreboard, promotes, demotes, kills, holds.
+    """
+    WEIGHTS = {"wr": 0.3, "pf": 0.2, "rung": 0.2, "sample": 0.1, "spread": 0.2}
+    NO_HISTORY_PENALTY = 0.7
+
+    # Gather the full ticker universe: everything in PRIMARY_TICKERS + anything traded today
+    universe = set(PRIMARY_TICKERS)
+    universe.update(metrics.per_ticker.keys())
+    if mem is not None:
+        ts_dict = getattr(mem, "ticker_stats", {})
+        universe.update(ts_dict.keys())
+
+    scoreboard = []
+    promotes, demotes, kills, holds = [], [], [], []
+
+    for symbol in sorted(universe):
+        today = metrics.per_ticker.get(symbol, {})
+        cumul = {}
+        has_history = False
+        if mem is not None:
+            ts_dict = getattr(mem, "ticker_stats", {})
+            cumul = ts_dict.get(symbol, {})
+            if cumul.get("total_trades", 0) > 0:
+                has_history = True
+
+        # --- Blend today (30%) + cumulative (70%) for each raw stat ---
+        def _blend(today_val: float, cumul_val: float, has_cumul: bool) -> float:
+            if has_cumul:
+                return 0.3 * today_val + 0.7 * cumul_val
+            return today_val
+
+        today_wr = today.get("win_rate", 0.0)
+        cumul_wr = cumul.get("win_rate", 0.0)
+        eff_wr = _blend(today_wr, cumul_wr, has_history)
+
+        today_pf = today.get("profit_factor", 0.0)
+        # Derive cumulative PF from cumul stats (wins PnL / losses PnL)
+        cumul_total_pnl = cumul.get("total_pnl", 0.0)
+        cumul_wins_n = cumul.get("wins", 0)
+        cumul_losses_n = cumul.get("losses", 0)
+        cumul_avg_pnl = cumul.get("avg_pnl", 0.0)
+        # Approximate cumulative PF: total_wins_pnl / total_losses_pnl
+        # We don't have separate win/loss PnL in TickerStats, so approximate via WR + avg_pnl
+        # PF ~ (wins * avg_win) / (losses * avg_loss). With only avg_pnl, use WR-based proxy:
+        # If WR > 0 and total_pnl > 0, PF > 1; approximate as total_pnl_positive / total_pnl_negative
+        cumul_pf = 0.0
+        if cumul_total_pnl > 0 and cumul_losses_n > 0:
+            # Rough: positive total means wins outweigh losses; scale PF from WR
+            cumul_pf = min(3.0, 1.0 + (cumul_wr - 0.5) * 4.0) if cumul_wr > 0.5 else cumul_wr * 2.0
+            cumul_pf = max(0.0, cumul_pf)
+        elif cumul_wins_n > 0 and cumul_losses_n == 0:
+            cumul_pf = 3.0  # All winners
+        eff_pf = _blend(today_pf, cumul_pf, has_history)
+
+        today_rung = today.get("avg_rung", 0.0)
+        cumul_rung = cumul.get("avg_rung", 0.0)
+        eff_rung = _blend(today_rung, cumul_rung, has_history)
+
+        today_n = today.get("trades", 0)
+        cumul_n = cumul.get("total_trades", 0)
+        eff_n = today_n + cumul_n  # Total sample size (not blended — additive)
+
+        today_spread = today.get("avg_spread_cost", 0.0)
+        today_gross = today.get("avg_gross_pnl", 0.0)
+
+        # --- Component scores (each 0-100) ---
+        c_wr = max(0.0, min(100.0, eff_wr * 100.0))
+        c_pf = max(0.0, min(100.0, (eff_pf / 3.0) * 100.0))
+        c_rung = max(0.0, min(100.0, (eff_rung / 5.0) * 100.0))
+        c_sample = max(0.0, min(100.0, min(eff_n / 10.0, 1.0) * 100.0))
+
+        # Spread health: 100 - (avg_spread / avg_gross * 100), floor 0
+        # Use today's values only (cumulative doesn't store spread data)
+        if today_gross > 0 and today_spread > 0:
+            spread_ratio_pct = (today_spread / today_gross) * 100.0
+            c_spread = max(0.0, min(100.0, 100.0 - spread_ratio_pct))
+        elif today_n == 0 and has_history:
+            # No trades today, give neutral spread score
+            c_spread = 50.0
+        else:
+            # No spread data — give neutral score if has trades, else 0
+            c_spread = 50.0 if (today_n > 0 or has_history) else 0.0
+
+        # --- Composite score ---
+        composite = (
+            WEIGHTS["wr"] * c_wr
+            + WEIGHTS["pf"] * c_pf
+            + WEIGHTS["rung"] * c_rung
+            + WEIGHTS["sample"] * c_sample
+            + WEIGHTS["spread"] * c_spread
+        )
+
+        # Penalty for no cumulative history
+        if not has_history:
+            composite *= NO_HISTORY_PENALTY
+
+        composite = max(0.0, min(100.0, composite))
+
+        # --- Classification ---
+        if composite >= 70:
+            classification = "PROMOTE"
+            promotes.append(symbol)
+        elif composite >= 40:
+            classification = "HOLD"
+            holds.append(symbol)
+        elif composite >= 20:
+            classification = "DEMOTE"
+            demotes.append(symbol)
+        else:
+            classification = "KILL"
+            kills.append(symbol)
+
+        scoreboard.append({
+            "symbol": symbol,
+            "score": round(composite, 1),
+            "classification": classification,
+            "components": {
+                "wr": round(c_wr, 1),
+                "pf": round(c_pf, 1),
+                "rung": round(c_rung, 1),
+                "sample": round(c_sample, 1),
+                "spread": round(c_spread, 1),
+            },
+        })
+
+    # Sort by score descending
+    scoreboard.sort(key=lambda x: -x["score"])
+
+    # Log formatted table
+    log.info("=" * 72)
+    log.info("TICKER SCOREBOARD — Promotion / Demotion / Kill")
+    log.info("-" * 72)
+    log.info("%-12s %5s  %6s  %5s %5s %5s %5s %5s", "TICKER", "SCORE", "ACTION", "WR", "PF", "RUNG", "SMPL", "SPRD")
+    log.info("-" * 72)
+    for entry in scoreboard:
+        c = entry["components"]
+        log.info(
+            "%-12s %5.1f  %-6s  %5.1f %5.1f %5.1f %5.1f %5.1f",
+            entry["symbol"], entry["score"], entry["classification"],
+            c["wr"], c["pf"], c["rung"], c["sample"], c["spread"],
+        )
+    log.info("-" * 72)
+    log.info("PROMOTE: %s", ", ".join(promotes) if promotes else "(none)")
+    log.info("HOLD:    %s", ", ".join(holds) if holds else "(none)")
+    log.info("DEMOTE:  %s", ", ".join(demotes) if demotes else "(none)")
+    log.info("KILL:    %s", ", ".join(kills) if kills else "(none)")
+    log.info("=" * 72)
+
+    return {
+        "scoreboard": scoreboard,
+        "promotes": promotes,
+        "demotes": demotes,
+        "kills": kills,
+        "holds": holds,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 5. Daily Report
 # ---------------------------------------------------------------------------
 def generate_daily_report(
@@ -622,14 +852,39 @@ def generate_daily_report(
             f"avg_rung={data['avg_rung']:.1f}"
         )
 
-    lines += ["", "3. PER-ENTRY-TYPE PERFORMANCE"]
+    # Scoreboard section (between per-ticker and per-entry-type)
+    sb = recommendations.get("ticker_scoreboard", {})
+    sb_entries = sb.get("scoreboard", [])
+    if sb_entries:
+        lines += ["", "3. TICKER SCOREBOARD (Promote / Demote / Kill)"]
+        lines.append(f"   {'TICKER':12s} {'SCORE':>5s}  {'ACTION':6s}  {'WR':>5s} {'PF':>5s} {'RUNG':>5s} {'SMPL':>5s} {'SPRD':>5s}")
+        lines.append(f"   {'-' * 56}")
+        for entry in sb_entries:
+            c = entry["components"]
+            lines.append(
+                f"   {entry['symbol']:12s} {entry['score']:5.1f}  {entry['classification']:6s}  "
+                f"{c['wr']:5.1f} {c['pf']:5.1f} {c['rung']:5.1f} {c['sample']:5.1f} {c['spread']:5.1f}"
+            )
+        promotes = sb.get("promotes", [])
+        demotes = sb.get("demotes", [])
+        kills = sb.get("kills", [])
+        if promotes:
+            lines.append(f"   PROMOTE: {', '.join(promotes)}")
+        if demotes:
+            lines.append(f"   DEMOTE:  {', '.join(demotes)}")
+        if kills:
+            lines.append(f"   KILL:    {', '.join(kills)}")
+    else:
+        lines += ["", "3. TICKER SCOREBOARD: No data (no trades or memory)"]
+
+    lines += ["", "4. PER-ENTRY-TYPE PERFORMANCE"]
     for etype, data in sorted(metrics.per_entry_type.items()):
         lines.append(
             f"   {etype:10s}  trades={data['trades']:2d}  "
             f"WR={data['win_rate']:.0%}  PnL={data['total_pnl']:+7.2f}"
         )
 
-    lines += ["", "4. PER-SESSION PERFORMANCE"]
+    lines += ["", "5. PER-SESSION PERFORMANCE"]
     for phase, data in metrics.per_session.items():
         lines.append(
             f"   {phase:16s}  trades={data['trades']:2d}  "
@@ -638,13 +893,13 @@ def generate_daily_report(
 
     lines += [
         "",
-        "5. REGIME ACCURACY",
+        "6. REGIME ACCURACY",
         f"   Predictions: {regime_acc.total_predictions}",
         f"   Correct:     {regime_acc.correct}",
         f"   Accuracy:    {regime_acc.accuracy_pct:.1f}%",
     ]
 
-    lines += ["", "6. PARAMETER RECOMMENDATIONS"]
+    lines += ["", "7. PARAMETER RECOMMENDATIONS"]
     for adj in recommendations.get("adjustments", []):
         lines.append(f"   - {adj}")
     if not recommendations.get("adjustments"):
@@ -653,7 +908,7 @@ def generate_daily_report(
     lines.append(f"   Chandelier ATR:     {recommendations.get('chandelier_atr_mult', 'N/A')}")
 
     if decay_signals:
-        lines += ["", "7. ALPHA DECAY WARNINGS"]
+        lines += ["", "8. ALPHA DECAY WARNINGS"]
         for sig in decay_signals:
             lines.append(
                 f"   [{sig.severity.upper()}] {sig.entity}: "
@@ -661,7 +916,7 @@ def generate_daily_report(
                 f"(decay {sig.decay_pct:.1f}%)"
             )
     else:
-        lines += ["", "7. ALPHA DECAY: No decay detected"]
+        lines += ["", "8. ALPHA DECAY: No decay detected"]
 
     lines += ["", f"{'=' * 60}", ""]
 
@@ -761,6 +1016,31 @@ def generate_battle_plan(
                 f"WR={data['win_rate']:.0%}  PnL={data['total_pnl']:+7.2f}"
             )
 
+    # Scoreboard summary
+    sb = recommendations.get("ticker_scoreboard", {})
+    sb_entries = sb.get("scoreboard", [])
+    if sb_entries:
+        lines += ["", "TICKER SCOREBOARD SUMMARY:"]
+        promotes = sb.get("promotes", [])
+        holds = sb.get("holds", [])
+        demotes_list = sb.get("demotes", [])
+        kills_list = sb.get("kills", [])
+        if promotes:
+            lines.append(f"  PROMOTE (score>=70): {', '.join(promotes)}")
+        if holds:
+            lines.append(f"  HOLD    (40-69):     {', '.join(holds)}")
+        if demotes_list:
+            lines.append(f"  DEMOTE  (20-39):     {', '.join(demotes_list)}")
+        if kills_list:
+            lines.append(f"  KILL    (<20):       {', '.join(kills_list)}")
+        # Show top 3 and bottom 3
+        lines.append("")
+        for entry in sb_entries[:3]:
+            lines.append(f"  TOP  {entry['symbol']:12s}  score={entry['score']:5.1f}  {entry['classification']}")
+        for entry in sb_entries[-3:]:
+            if entry not in sb_entries[:3]:
+                lines.append(f"  BOT  {entry['symbol']:12s}  score={entry['score']:5.1f}  {entry['classification']}")
+
     # Recommendations
     if recommendations.get("adjustments"):
         lines += ["", "PARAMETER ADJUSTMENTS:"]
@@ -797,6 +1077,303 @@ def generate_battle_plan(
 
 
 # ---------------------------------------------------------------------------
+# 5.7 Missed-Winner Analysis (N2c)
+# ---------------------------------------------------------------------------
+@dataclass
+class SignalRejection:
+    """A signal that was rejected by a gate, loaded from WAL."""
+    event_id: str
+    event_time_ns: int
+    ticker_id: int
+    symbol: str
+    strategy: str
+    confidence: float
+    gate_name: str
+    gate_reason: str
+    price_at_reject: float
+    hurst: float = 0.0
+    adx: float = 0.0
+    rvol: float = 0.0
+    vol_slope: float = 0.0
+    spread_pct: float = 0.0
+
+
+@dataclass
+class MissedWinner:
+    """A rejected signal that turned out to be a winner."""
+    rejected_event_id: str
+    ticker_id: int
+    symbol: str
+    gate_name: str
+    price_at_reject: float
+    best_price_after: float
+    hypothetical_pnl_pct: float
+    time_to_best_mins: int
+    matching_trade_pnl: float = 0.0
+    entry_price_diff_pct: float = 0.0
+
+
+def _build_wal_candidates(date_str: str) -> List[Path]:
+    """Build the list of WAL files to scan (same pattern as load_todays_trades)."""
+    candidates = [
+        WAL_DIR / "current.ndjson",
+        WAL_DIR / f"{date_str}.ndjson",
+        WAL_DIR / f"wal_{date_str}.ndjson",
+    ]
+    archive_dir = WAL_DIR / "archive"
+    if archive_dir.exists():
+        for f in sorted(archive_dir.glob("*.ndjson")):
+            if f not in candidates:
+                candidates.append(f)
+    return candidates
+
+
+def _load_todays_signal_rejections(date_str: str, wal_candidates: List[Path]) -> List[SignalRejection]:
+    """Load today's SignalRejected events from WAL files."""
+    rejections: List[SignalRejection] = []
+
+    for wal_path in wal_candidates:
+        if not wal_path.exists():
+            continue
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # Filter by date: check event_time_ns falls on today
+                    event_time_ns = event.get("event_time_ns", 0)
+                    if event_time_ns > 0:
+                        try:
+                            event_date = datetime.fromtimestamp(
+                                event_time_ns / 1e9, tz=timezone.utc
+                            ).strftime("%Y-%m-%d")
+                            if event_date != date_str:
+                                continue
+                        except (OSError, ValueError):
+                            continue
+                    else:
+                        continue
+
+                    payload = event.get("payload", {})
+                    if "SignalRejected" not in payload:
+                        continue
+
+                    sr = payload["SignalRejected"]
+                    rejections.append(SignalRejection(
+                        event_id=event.get("event_id", ""),
+                        event_time_ns=event_time_ns,
+                        ticker_id=sr.get("ticker_id", 0),
+                        symbol=sr.get("symbol", f"TID_{sr.get('ticker_id', '?')}"),
+                        strategy=sr.get("strategy", ""),
+                        confidence=sr.get("confidence", 0.0),
+                        gate_name=sr.get("gate_name", "unknown"),
+                        gate_reason=sr.get("gate_reason", ""),
+                        price_at_reject=sr.get("price_at_reject", 0.0),
+                        hurst=sr.get("hurst", 0.0),
+                        adx=sr.get("adx", 0.0),
+                        rvol=sr.get("rvol", 0.0),
+                        vol_slope=sr.get("vol_slope", 0.0),
+                        spread_pct=sr.get("spread_pct", 0.0),
+                    ))
+        except Exception as e:
+            log.warning("Error reading %s for SignalRejected: %s", wal_path, e)
+
+    return rejections
+
+
+def _load_todays_position_closed(date_str: str, wal_candidates: List[Path]) -> List[Dict[str, Any]]:
+    """Load today's PositionClosed events from WAL files as raw dicts with envelope timestamps."""
+    closed: List[Dict[str, Any]] = []
+
+    for wal_path in wal_candidates:
+        if not wal_path.exists():
+            continue
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    event_time_ns = event.get("event_time_ns", 0)
+                    if event_time_ns > 0:
+                        try:
+                            event_date = datetime.fromtimestamp(
+                                event_time_ns / 1e9, tz=timezone.utc
+                            ).strftime("%Y-%m-%d")
+                            if event_date != date_str:
+                                continue
+                        except (OSError, ValueError):
+                            continue
+                    else:
+                        continue
+
+                    payload = event.get("payload", {})
+                    if "PositionClosed" not in payload:
+                        continue
+
+                    pc = payload["PositionClosed"]
+                    pc["_event_time_ns"] = event_time_ns
+                    closed.append(pc)
+        except Exception as e:
+            log.warning("Error reading %s for PositionClosed: %s", wal_path, e)
+
+    return closed
+
+
+def analyze_missed_winners(date_str: str, wal_candidates: List[Path]) -> Dict[str, Any]:
+    """Cross-reference rejected signals with subsequent price movement.
+
+    For each SignalRejected event, check if any PositionClosed on the same
+    ticker profited >1% within 2 hours of the rejection. If the entry price
+    of the profitable trade is within 0.5% of the rejection price, flag it
+    as a missed winner.
+
+    Returns a summary dict for recommendations["missed_winner_stats"].
+    """
+    TWO_HOURS_NS = 2 * 60 * 60 * 1_000_000_000  # 2 hours in nanoseconds
+    MIN_PROFIT_PCT = 1.0  # Minimum profit % to qualify as missed winner
+    MAX_ENTRY_DIFF_PCT = 0.5  # Maximum price difference between reject and entry
+
+    rejections = _load_todays_signal_rejections(date_str, wal_candidates)
+    log.info("Loaded %d SignalRejected events for %s", len(rejections), date_str)
+
+    if not rejections:
+        return {
+            "total_rejected": 0,
+            "total_missed_winners": 0,
+            "missed_winner_rate": 0.0,
+            "worst_gates": [],
+            "total_hypothetical_pnl": 0.0,
+        }
+
+    closed_events = _load_todays_position_closed(date_str, wal_candidates)
+    log.info("Loaded %d PositionClosed events for cross-reference", len(closed_events))
+
+    # Index PositionClosed by ticker_id for fast lookup
+    closed_by_ticker: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for pc in closed_events:
+        tid = pc.get("ticker_id", -1)
+        closed_by_ticker[tid].append(pc)
+
+    missed_winners: List[MissedWinner] = []
+    gate_missed_counts: Dict[str, int] = defaultdict(int)
+
+    for rej in rejections:
+        if rej.price_at_reject <= 0:
+            continue  # Can't analyze without a rejection price
+
+        # Find PositionClosed events on the same ticker AFTER the rejection
+        ticker_closed = closed_by_ticker.get(rej.ticker_id, [])
+        for pc in ticker_closed:
+            pc_entry_time = pc.get("entry_time_ns", 0)
+
+            # Must have been entered AFTER the rejection
+            if pc_entry_time <= rej.event_time_ns:
+                continue
+
+            # Must be within 2 hours of the rejection
+            if pc_entry_time - rej.event_time_ns > TWO_HOURS_NS:
+                continue
+
+            # Must have profited >1%
+            entry_price = pc.get("entry_price", 0.0)
+            final_pnl = pc.get("final_pnl", 0.0)
+            if entry_price <= 0:
+                continue
+
+            pnl_pct = (final_pnl / entry_price) * 100.0
+            if pnl_pct <= MIN_PROFIT_PCT:
+                continue
+
+            # Check if the rejection price was close to the eventual entry
+            entry_diff_pct = abs(rej.price_at_reject - entry_price) / rej.price_at_reject * 100.0
+            if entry_diff_pct > MAX_ENTRY_DIFF_PCT:
+                continue  # Price moved too far; the gate may have been correct to wait
+
+            # Calculate hypothetical P&L: if we'd entered at reject price,
+            # what would the PnL have been? (use the actual exit price as best proxy)
+            exit_price = pc.get("exit_price", 0.0)
+            if exit_price > 0 and rej.price_at_reject > 0:
+                hypo_pnl_pct = ((exit_price - rej.price_at_reject) / rej.price_at_reject) * 100.0
+            else:
+                hypo_pnl_pct = pnl_pct  # Fallback to actual PnL %
+
+            time_to_entry_mins = int((pc_entry_time - rej.event_time_ns) / 1e9 / 60)
+
+            mw = MissedWinner(
+                rejected_event_id=rej.event_id,
+                ticker_id=rej.ticker_id,
+                symbol=rej.symbol,
+                gate_name=rej.gate_name,
+                price_at_reject=rej.price_at_reject,
+                best_price_after=exit_price,
+                hypothetical_pnl_pct=hypo_pnl_pct,
+                time_to_best_mins=time_to_entry_mins,
+                matching_trade_pnl=final_pnl,
+                entry_price_diff_pct=entry_diff_pct,
+            )
+            missed_winners.append(mw)
+            gate_missed_counts[rej.gate_name] += 1
+
+            log.info(
+                "MISSED WINNER: %s rejected by %s at %.4f, "
+                "trade entered %.0fmin later at %.4f, PnL=%.2f%% (hypo=%.2f%%)",
+                rej.symbol, rej.gate_name, rej.price_at_reject,
+                time_to_entry_mins, entry_price, pnl_pct, hypo_pnl_pct,
+            )
+            break  # One match per rejection is sufficient
+
+    # Write missed winners to file
+    mw_path = DATA_DIR / f"missed_winners_{date_str}.ndjson"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(mw_path, "w") as f:
+            for mw in missed_winners:
+                f.write(json.dumps(asdict(mw)) + "\n")
+        log.info("Wrote %d missed winners to %s", len(missed_winners), mw_path)
+    except Exception as e:
+        log.warning("Failed to write missed winners file: %s", e)
+
+    # Build summary
+    total_rejected = len(rejections)
+    total_missed = len(missed_winners)
+    missed_rate = (total_missed / total_rejected * 100.0) if total_rejected > 0 else 0.0
+    total_hypo_pnl = sum(mw.hypothetical_pnl_pct for mw in missed_winners)
+
+    # Sort gates by missed-winner count descending
+    worst_gates = sorted(gate_missed_counts.items(), key=lambda x: -x[1])
+    worst_gates_list = [{"gate": g, "missed_count": c} for g, c in worst_gates]
+
+    summary = {
+        "total_rejected": total_rejected,
+        "total_missed_winners": total_missed,
+        "missed_winner_rate": round(missed_rate, 1),
+        "worst_gates": worst_gates_list,
+        "total_hypothetical_pnl": round(total_hypo_pnl, 2),
+    }
+
+    log.info(
+        "Missed-winner analysis: %d rejected, %d missed winners (%.1f%%), "
+        "hypothetical PnL=%.2f%%, worst gates: %s",
+        total_rejected, total_missed, missed_rate, total_hypo_pnl,
+        ", ".join(f"{g}({c})" for g, c in worst_gates[:5]) or "none",
+    )
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # Main Entry Point
 # ---------------------------------------------------------------------------
 def run_nightly() -> int:
@@ -812,6 +1389,80 @@ def run_nightly() -> int:
         "Trade analysis: %d trades, WR=%.1f%%, PF=%.2f, PnL=GBP %.2f",
         metrics.total_trades, metrics.win_rate * 100, metrics.profit_factor, metrics.total_pnl,
     )
+
+    # Step 1.5: N1a — Cost-aware trade classification (trade taxonomy)
+    # Classify each trade and compute cost-aware metrics for learning.
+    cost_report = {}
+    try:
+        from python_brain.ouroboros.trade_taxonomy import classify_trade, build_class_report
+        for t in trades:
+            trade_dict = {
+                "final_pnl": t.pnl,
+                "gross_pnl": t.gross_pnl,
+                "total_commission": t.total_commission,
+                "spread_at_entry_pct": t.spread_at_entry_pct,
+                "spread_at_exit_pct": t.spread_at_exit_pct,
+                "highest_rung": t.rung_achieved,
+                "mae": t.mae,
+                "mfe": t.mfe,
+                "entry_price": t.entry_price,
+                "exit_price": t.exit_price,
+                "qty": t.qty,
+                "hold_time_mins": t.hold_time_mins,
+                "atr_pct_at_entry": t.atr_pct_at_entry,
+                "entry_session_phase": t.entry_session_phase,
+                "vwap_dist_at_entry_pct": t.vwap_dist_at_entry_pct,
+            }
+            t.trade_class = classify_trade(trade_dict)
+
+        # Build per-class report
+        trade_dicts = [{
+            "final_pnl": t.pnl, "gross_pnl": t.gross_pnl,
+            "total_commission": t.total_commission,
+            "spread_at_entry_pct": t.spread_at_entry_pct,
+            "spread_at_exit_pct": t.spread_at_exit_pct,
+            "highest_rung": t.rung_achieved,
+            "mae": t.mae, "mfe": t.mfe,
+            "entry_price": t.entry_price, "qty": t.qty,
+            "hold_time_mins": t.hold_time_mins,
+            "atr_pct_at_entry": t.atr_pct_at_entry,
+            "entry_session_phase": t.entry_session_phase,
+        } for t in trades]
+        cost_report = build_class_report(trade_dicts)
+
+        # Cost drag metrics
+        total_gross = sum(t.gross_pnl for t in trades)
+        total_commission = sum(t.total_commission for t in trades)
+        total_spread_cost = sum(
+            (t.spread_at_entry_pct + t.spread_at_exit_pct) / 100.0 * t.entry_price * t.qty
+            for t in trades
+        )
+        spread_victims = sum(1 for t in trades if t.trade_class == "spread_victim")
+        noise_exits = sum(1 for t in trades if t.trade_class == "noise_exit")
+
+        if metrics.total_trades > 0:
+            cost_drag_pct = (total_commission + total_spread_cost) / max(abs(total_gross), 1.0) * 100
+            avg_spread_pct = sum(t.spread_at_entry_pct for t in trades) / len(trades)
+        else:
+            cost_drag_pct = 0.0
+            avg_spread_pct = 0.0
+
+        log.info(
+            "Cost analysis: gross=GBP %.2f, commission=GBP %.2f, spread_cost=GBP %.2f, "
+            "drag=%.1f%%, spread_victims=%d, noise_exits=%d, avg_spread=%.2f%%",
+            total_gross, total_commission, total_spread_cost,
+            cost_drag_pct, spread_victims, noise_exits, avg_spread_pct,
+        )
+
+        # Log per-class breakdown
+        for tc_name, tc_stats in sorted(cost_report.items()):
+            log.info(
+                "  Class %-20s: n=%d  WR=%.0f%%  PnL=GBP %+.2f  avg_rung=%.1f",
+                tc_name, tc_stats.count, tc_stats.win_rate * 100,
+                tc_stats.total_pnl, tc_stats.avg_rung,
+            )
+    except Exception as e:
+        log.warning("Trade taxonomy classification failed (non-fatal): %s", e)
 
     # Step 2: Regime accuracy (uses empty dict if no live price data available)
     regime_acc = check_regime_accuracy(trades, {})
@@ -860,6 +1511,20 @@ def run_nightly() -> int:
         log.info("Persistent memory updated: %s", mem.summary_text().split("\n")[2])
     except Exception as e:
         log.warning("Persistent memory update failed (non-fatal): %s", e)
+
+    # Step 4.5: Ticker Scoreboard — Promotion / Demotion / Kill
+    try:
+        scoreboard_result = generate_ticker_scoreboard(metrics, mem)
+        recommendations["ticker_scoreboard"] = scoreboard_result
+        log.info(
+            "Ticker scoreboard: %d promote, %d hold, %d demote, %d kill",
+            len(scoreboard_result["promotes"]),
+            len(scoreboard_result.get("holds", [])),
+            len(scoreboard_result["demotes"]),
+            len(scoreboard_result["kills"]),
+        )
+    except Exception as e:
+        log.warning("Ticker scoreboard generation failed (non-fatal): %s", e)
 
     # Step 5: Alpha decay detection
     decay_signals = detect_alpha_decay(REPORTS_DIR, metrics)
@@ -935,6 +1600,23 @@ def run_nightly() -> int:
             log.info("No gate vetoes file found (no vetoes today)")
     except Exception as e:
         log.warning("Gate veto analysis failed (non-fatal): %s", e)
+
+    # Step 5.7: Missed-Winner Analysis (N2c) — cross-reference rejected signals
+    # with subsequent profitable trades to identify overly-tight gates.
+    try:
+        wal_candidates = _build_wal_candidates(today)
+        mw_stats = analyze_missed_winners(today, wal_candidates)
+        recommendations["missed_winner_stats"] = mw_stats
+        if mw_stats["total_rejected"] > 0:
+            log.info(
+                "Missed-winner summary: %d/%d rejected signals were missed winners (%.1f%%)",
+                mw_stats["total_missed_winners"], mw_stats["total_rejected"],
+                mw_stats["missed_winner_rate"],
+            )
+        else:
+            log.info("Missed-winner analysis: no SignalRejected events today")
+    except Exception as e:
+        log.warning("Missed-winner analysis failed (non-fatal): %s", e)
 
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)

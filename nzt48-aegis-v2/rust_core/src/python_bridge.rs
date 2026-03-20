@@ -35,12 +35,21 @@ pub struct BrainSignal {
     pub hurst: f64,
     #[pyo3(get)]
     pub adx: f64,
+    /// N2b: Volume slope at signal time (from 5-min bar regression).
+    #[pyo3(get)]
+    pub vol_slope: f64,
+    /// N2b: VWAP distance % at signal time. Positive = above VWAP.
+    #[pyo3(get)]
+    pub vwap_dist_pct: f64,
+    /// N3a: Structural Tradability Score (0-100) computed by bridge.py.
+    #[pyo3(get)]
+    pub structural_score: f64,
 }
 
 #[pymethods]
 impl BrainSignal {
     #[new]
-    #[pyo3(signature = (direction, confidence, kelly_fraction, shares, strategy, rvol=0.0, hurst=0.0, adx=0.0))]
+    #[pyo3(signature = (direction, confidence, kelly_fraction, shares, strategy, rvol=0.0, hurst=0.0, adx=0.0, vol_slope=0.0, vwap_dist_pct=0.0, structural_score=0.0))]
     fn new(
         direction: String,
         confidence: f64,
@@ -50,6 +59,9 @@ impl BrainSignal {
         rvol: f64,
         hurst: f64,
         adx: f64,
+        vol_slope: f64,
+        vwap_dist_pct: f64,
+        structural_score: f64,
     ) -> Self {
         Self {
             direction,
@@ -60,6 +72,9 @@ impl BrainSignal {
             rvol,
             hurst,
             adx,
+            vol_slope,
+            vwap_dist_pct,
+            structural_score,
         }
     }
 }
@@ -315,6 +330,9 @@ impl PythonBridge {
             rvol: resp.get("rvol").and_then(|v| v.as_f64()).unwrap_or(0.0),
             hurst: resp.get("hurst").and_then(|v| v.as_f64()).unwrap_or(0.0),
             adx: resp.get("adx").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            vol_slope: resp.get("vol_slope").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            vwap_dist_pct: resp.get("vwap_dist_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            structural_score: resp.get("structural_score").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -395,6 +413,9 @@ impl PythonBridge {
             rvol: resp.get("rvol").and_then(|v| v.as_f64()).unwrap_or(0.0),
             hurst: resp.get("hurst").and_then(|v| v.as_f64()).unwrap_or(0.0),
             adx: resp.get("adx").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            vol_slope: resp.get("vol_slope").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            vwap_dist_pct: resp.get("vwap_dist_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            structural_score: resp.get("structural_score").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -480,6 +501,9 @@ mod tests {
             rvol: 1.5,
             hurst: 0.55,
             adx: 25.0,
+            vol_slope: 0.5,
+            vwap_dist_pct: 0.3,
+            structural_score: 72.0,
         };
         assert_eq!(signal.shares, 50);
         assert_eq!(signal.confidence, 78.5);

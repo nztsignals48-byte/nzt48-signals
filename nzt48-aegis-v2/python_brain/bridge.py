@@ -111,6 +111,45 @@ _adaptive_floor_loaded = False
 _adaptive_confidence_floor = None
 _indicator_gates_loaded = False
 _indicator_gates = []  # list of {"indicator", "direction", "threshold"}
+_ticker_blacklist_loaded = False
+_ticker_blacklist = set()  # Set of symbols to reject signals for
+
+
+def _load_ticker_blacklist():
+    """Load ticker blacklist from dynamic_weights.toml.
+
+    Ouroboros generates this list from persistent_memory: tickers with
+    WR < 30% over 10+ trades are blacklisted. Signals for blacklisted
+    tickers are suppressed before any gate evaluation.
+
+    BUILD NOW item N1c from IMPLEMENTATION_MASTER_PLAN v6.0.
+    """
+    global _ticker_blacklist_loaded, _ticker_blacklist
+    if _ticker_blacklist_loaded:
+        return _ticker_blacklist
+    _ticker_blacklist_loaded = True
+    dw_path = "/app/config/dynamic_weights.toml"
+    if not os.path.exists(dw_path):
+        return _ticker_blacklist
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        with open(dw_path, "rb") as f:
+            data = tomllib.load(f)
+        bl = data.get("ticker_blacklist", {}).get("tickers", [])
+        if bl:
+            _ticker_blacklist = set(bl)
+            sys.stderr.write(
+                "Bridge: loaded ticker blacklist ({} tickers): {}\n".format(
+                    len(bl), ", ".join(bl[:10])
+                )
+            )
+            sys.stderr.flush()
+        return _ticker_blacklist
+    except Exception:
+        return _ticker_blacklist
 
 
 def _load_indicator_gates():
@@ -627,6 +666,24 @@ def process_tick(msg):
     }
 
     # =========================================================================
+    # N1c: Ticker blacklist enforcement (from Ouroboros learning)
+    # Tickers with WR < 30% over 10+ trades are blacklisted in dynamic_weights.toml.
+    # Suppress ALL signals before wasting compute on indicators.
+    # BUILD NOW item N1c from IMPLEMENTATION_MASTER_PLAN v6.0.
+    # =========================================================================
+    blacklist = _load_ticker_blacklist()
+    sym = ticker_symbols.get(ticker_id, "")
+    if sym and sym in blacklist:
+        # Don't log every tick (too noisy) — just first occurrence
+        if not hasattr(process_tick, '_blacklist_logged'):
+            process_tick._blacklist_logged = set()
+        if sym not in process_tick._blacklist_logged:
+            sys.stderr.write(f"BLACKLIST_VETO: {sym} (tid={ticker_id}) suppressed by Ouroboros blacklist\n")
+            sys.stderr.flush()
+            process_tick._blacklist_logged.add(sym)
+        return no_signal_base
+
+    # =========================================================================
     # FIX 2: Raise warm-up to 200 bars (= 16 min of 5-second data = 3+ 5-min bars)
     # Need at least 3 five-minute bars for any meaningful indicator reading.
     # =========================================================================
@@ -664,6 +721,84 @@ def process_tick(msg):
                 _log_gate_veto(ticker_id, "indicator_gate", msg["last"], _ind,
                                "{} {:.2f} > {:.2f} limit".format(ind, val, threshold))
                 return no_signal_base
+
+    # =========================================================================
+    # N3a: Structural Tradability Score (0-100)
+    # Pre-entry quality score assessing market microstructure conditions.
+    # Score < 30 = suppress signal. Score > 70 = confidence boost.
+    # Components: spread quality, regime clarity, volume, MTF alignment, ADX.
+    # BUILD NOW item N3a from IMPLEMENTATION_MASTER_PLAN v6.0.
+    # =========================================================================
+    sts_components = {}
+
+    # Component 1: Spread quality (0-25 pts)
+    # Tighter spread → higher score. Leveraged ETPs have structural wider spreads.
+    _bid = msg.get("bid", 0)
+    _ask = msg.get("ask", 0)
+    if _bid > 0 and _ask > 0:
+        _sprd = (_ask - _bid) / ((_ask + _bid) / 2) * 100
+        # 0% spread = 25pts, 1% = 15pts, 2% = 5pts, >3% = 0pts
+        sts_components["spread"] = max(0, min(25, int(25 - _sprd * 8.3)))
+    else:
+        sts_components["spread"] = 10  # No quote data → middling score
+
+    # Component 2: Regime clarity (0-25 pts)
+    # Clear trending or clear mean-reverting = high clarity.
+    # Random walk = low clarity → low score.
+    if hurst > 0.01:
+        # |H - 0.5| = deviation from random walk. 0.0 = pure random, 0.5 = pure trending/reverting
+        clarity = abs(hurst - 0.5) / 0.5  # 0.0 to 1.0
+        sts_components["regime_clarity"] = min(25, int(clarity * 25))
+    else:
+        sts_components["regime_clarity"] = 0
+
+    # Component 3: Volume quality (0-20 pts)
+    # Rising volume + decent RVOL = good. Flat volume + low RVOL = bad.
+    vol_score = 0
+    if rvol > 1.5:
+        vol_score += 10
+    elif rvol > 1.0:
+        vol_score += 5
+    if vol_slope > 0:
+        vol_score += 10
+    elif vol_slope == 0:
+        vol_score += 3
+    sts_components["volume"] = min(20, vol_score)
+
+    # Component 4: ADX trend strength (0-15 pts)
+    # ADX > 25 = strong trend, ADX > 35 = very strong, ADX < 15 = no trend
+    if adx >= 35:
+        sts_components["adx_strength"] = 15
+    elif adx >= 25:
+        sts_components["adx_strength"] = 10
+    elif adx >= 15:
+        sts_components["adx_strength"] = 5
+    else:
+        sts_components["adx_strength"] = 0
+
+    # Component 5: Data quality (0-15 pts)
+    # More bars = more reliable indicators. >500 bars = full confidence.
+    data_bars = len(ticks)
+    if data_bars >= 500:
+        sts_components["data_quality"] = 15
+    elif data_bars >= 300:
+        sts_components["data_quality"] = 10
+    elif data_bars >= 200:
+        sts_components["data_quality"] = 5
+    else:
+        sts_components["data_quality"] = 2
+
+    structural_score = sum(sts_components.values())
+
+    # Gate: suppress if structural score too low (< 30 = poor microstructure)
+    if structural_score < 30:
+        _log_gate_veto(ticker_id, "structural_tradability", msg["last"],
+                       {**_ind, "structural_score": structural_score, **sts_components},
+                       "STS={}/100 < 30 minimum".format(structural_score))
+        return no_signal_base
+
+    # Add structural score to indicator dict for downstream logging
+    _ind["structural_score"] = structural_score
 
     # =========================================================================
     # FIX 3: Leverage-aware confidence floor (65 for 3x, 80 for 5x)
@@ -826,6 +961,9 @@ def process_tick(msg):
                 "hurst_regime": hurst_regime,
                 "volume_divergence": vol_div,
                 "adx": adx,
+                "vol_slope": vol_slope,
+                "vwap_dist_pct": vwap_dist_raw,
+                "structural_score": structural_score,
             }
 
     # ---- Evaluate Autonomous Orchestrator (S17-S20, all regimes) ----
@@ -861,6 +999,10 @@ def process_tick(msg):
                     "hurst": hurst,
                     "hurst_regime": hurst_regime,
                     "volume_divergence": vol_div,
+                    "adx": adx,
+                    "vol_slope": vol_slope,
+                    "vwap_dist_pct": vwap_dist_raw,
+                    "structural_score": structural_score,
                 }
         except Exception as e:
             # Orchestrator failure must never block VanguardSniper.
@@ -938,6 +1080,18 @@ def process_tick(msg):
         best = orchestrator_signal
 
     if best:
+        # N3a: Structural tradability score confidence adjustment.
+        # Score > 70: boost confidence by (score - 70) / 5 (max +6)
+        # Score 50-70: no adjustment
+        # Score 30-50: penalize confidence by (50 - score) / 5 (max -4)
+        if structural_score > 70:
+            sts_boost = min(6, (structural_score - 70) // 5)
+            best["confidence"] = min(100, best["confidence"] + sts_boost)
+        elif structural_score < 50:
+            sts_penalty = min(4, (50 - structural_score) // 5)
+            best["confidence"] = max(0, best["confidence"] - sts_penalty)
+        best["structural_score"] = structural_score
+
         # Record cooldown timestamp
         _last_signal_tick[ticker_id] = tick_count
         return best

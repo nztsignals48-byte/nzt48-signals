@@ -297,7 +297,11 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
             | WalPayload::NextValidId { .. }
             | WalPayload::QuoteImbalanceInvalidated { .. }
             | WalPayload::SplitAdjustment { .. }
-            | WalPayload::SystemShutdown { .. } => {}
+            | WalPayload::SystemShutdown { .. }
+            // N2a/N2c: Signal analysis events — no state to restore during replay.
+            // These are consumed by nightly analysis (Python), not the engine.
+            | WalPayload::SignalRejected { .. }
+            | WalPayload::MissedWinnerCandidate { .. } => {}
         }
     }
 

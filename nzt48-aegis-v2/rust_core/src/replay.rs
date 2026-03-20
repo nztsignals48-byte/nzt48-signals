@@ -192,6 +192,14 @@ impl ReplayEngine {
                     entry_price: 0.0,
                     mae: 0.0,
                     mfe: 0.0,
+                    // N2b: Enriched fields (defaults for replay mode).
+                    hold_time_mins: 0,
+                    entry_session_phase: String::new(),
+                    vwap_dist_at_entry_pct: 0.0,
+                    atr_pct_at_entry: 0.0,
+                    vix_at_entry: 0.0,
+                    vol_slope_at_entry: 0.0,
+                    trade_class: String::new(),
                 });
                 self.portfolio.remove_position(tid);
                 self.positions.remove(&tid);

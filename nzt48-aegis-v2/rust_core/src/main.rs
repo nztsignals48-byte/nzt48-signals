@@ -49,6 +49,21 @@ fn main() {
         std::process::exit(1);
     }
 
+    // RT1: Validate config.live.toml exists (pre-flight check for future live deployment).
+    // Even in paper mode, assert the file exists so we catch config drift early.
+    // When IS_LIVE is changed to true, this file provides production-safe overrides.
+    {
+        let live_config_path = std::path::Path::new("config/config.live.toml");
+        if !live_config_path.exists() {
+            eprintln!(
+                "WARNING [RT1]: config/config.live.toml missing. \
+                 Live deployment will be blocked until this file exists."
+            );
+        } else {
+            eprintln!("RT1: config.live.toml present OK");
+        }
+    }
+
     // Parse args
     let args: Vec<String> = std::env::args().collect();
     let config_dir = find_arg(&args, "--config-dir")
@@ -767,6 +782,9 @@ fn main() {
                                             rvol: 0.0,
                                             hurst: 0.0,
                                             adx: 0.0,
+                                            vol_slope: 0.0,
+                                            vwap_dist_pct: 0.0,
+                                            structural_score: 0.0,
                                         };
                                         let ticker_id = t.ticker_id;
                                         engine.process_tick_with_signal(t, Some(brain_signal));

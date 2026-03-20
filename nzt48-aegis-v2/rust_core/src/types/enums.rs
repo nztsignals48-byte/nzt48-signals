@@ -440,6 +440,10 @@ pub enum WalEventType {
     OrphanResolved,
     StateSnapshot,
     SystemReady,
+    /// N2a: Signal generated but rejected by a gate (for missed-winner analysis).
+    SignalRejected,
+    /// N2c: Post-hoc missed-winner candidate (written by nightly analysis).
+    MissedWinnerCandidate,
 }
 
 #[cfg(test)]
