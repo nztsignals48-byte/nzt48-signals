@@ -1,6 +1,6 @@
-# AEGIS V2 — PROOF REGISTER v7.0
+# AEGIS V2 — PROOF REGISTER v8.0
 **Updated:** 2026-03-20 | **Standard:** PROVEN / LIKELY / SPECULATIVE / NEEDS TEST
-**Session:** ULTRATHINK v7.0 Unified Implementation Run
+**Session:** ULTRATHINK v8.0 Unified Implementation Run
 
 ---
 
@@ -53,6 +53,8 @@
 | PR-43 | Live startup assertions (N8b) | max_pos≤5, heat≤20%, buffer≥15% enforced at startup | main.rs:119-130 |
 | PR-44 | N8a pre-flight in paper mode | config.live.toml parse validated even when IS_LIVE=false | main.rs:101-104, EC2 log confirmed |
 | PR-45 | 678 Rust unit tests pass | cargo test: 678 pass, 1 pre-existing failure (snapshot_partial_replay) | cargo test output |
+| PR-46 | Q-068 regime scale guard deployed | MIN_REGIME_TRADES=50, neutral scale (1.0) for insufficient data | nightly_v6.py |
+| PR-47 | Q-073 confidence floor guard deployed | STATIC_CONFIDENCE_FLOOR=65 enforced as hard lower bound, range [65,80] | config_writer.py |
 
 ## LIKELY (Strong Evidence, Not Fully Tested)
 

@@ -1,7 +1,7 @@
-# AEGIS V2 — EXECUTION BACKLOG v7.0
+# AEGIS V2 — EXECUTION BACKLOG v8.0
 **Updated:** 2026-03-20 | **Status:** Active
-**Total Items:** 33 | **Build Days:** 33 (~20 parallel)
-**Session:** ULTRATHINK v7.0 Unified Implementation Run
+**Total Items:** 37 | **Build Days:** 35 (~22 parallel)
+**Session:** ULTRATHINK v8.0 Unified Implementation Run
 
 ---
 
@@ -57,6 +57,22 @@
 | N5c | Bridge SIGHUP hot-reload (kill/respawn) | 0.5 | ✅ DEPLOYED | main.rs:528-533 |
 | N8a | config.live.toml overlay implementation | 1 | ✅ DEPLOYED | config_loader.rs (load_live + 6 overlay structs) |
 | N8b | Live param startup assertions + 3 tests | 0.5 | ✅ DEPLOYED | main.rs:119-130, config_loader.rs (3 new tests) |
+
+## P0 — BUILT v8.0 SESSION (QDR Fixes)
+
+| ID | Item | Days | Status | File |
+|----|------|------|--------|------|
+| Q068 | Regime scale guard (MIN_REGIME_TRADES=50) | 0.5 | ✅ DEPLOYED | nightly_v6.py (regime_scales block) |
+| Q073 | Dynamic floor guard (floor >= static 65) | 0.5 | ✅ DEPLOYED | config_writer.py (adaptive_floor block) |
+
+## P0 — QDR HIGH-RISK ITEMS (Scheduled)
+
+| ID | Item | Days | Priority | Status |
+|----|------|------|----------|--------|
+| Q-095 | Cost drag evaluation (full spread+commission audit) | 1 | HIGH | DEFERRED — needs 50+ trades |
+| Q-111 | 3-position validation period (verify N8a limits work) | 0.5 | HIGH | DEFERRED — activates with IS_LIVE=true |
+| Q-051 | Cost model unification (config vs nightly vs bridge) | 1 | HIGH | SCHEDULED P1 |
+| Q-045 | Bridge auto-restart alerting (RT2) | 0.5 | HIGH | SCHEDULED P1 (= RT2) |
 
 ## P0 — DEFERRED (No ROI During Paper)
 
@@ -132,3 +148,12 @@
 - 2 items deferred (N5b, N8c) — no value during paper phase
 
 **All v6.0 + v7.0 + v7.1 DEPLOYED to EC2 (commit 525592f)**
+
+**Built v8.0 session (2026-03-20):**
+- 2 QDR fixes deployed (Q-068 regime scale guard, Q-073 confidence floor guard)
+- 2 existing files modified (nightly_v6.py, config_writer.py) — 16 insertions, 9 deletions
+- 4 QDR HIGH items triaged (2 deferred pending data, 2 scheduled P1)
+- cargo test: 678 pass, 1 pre-existing failure
+- Python py_compile: all pass
+
+**All v6.0 + v7.0 + v7.1 + v8.0 DEPLOYED to EC2 (commit ed6362a)**

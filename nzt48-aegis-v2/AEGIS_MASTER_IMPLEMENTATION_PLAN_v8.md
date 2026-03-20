@@ -1,9 +1,9 @@
-# AEGIS V2 — UNIFIED MASTER IMPLEMENTATION PLAN v7.0
+# AEGIS V2 — UNIFIED MASTER IMPLEMENTATION PLAN v8.0
 # Single Canonical Document: Architecture + Backlog + Evidence + Risk + Governance
-**Generated:** 2026-03-20 | **Version:** 7.0 (Unified Plan — replaces v6.0 + all satellite docs)
+**Generated:** 2026-03-20 | **Version:** 8.0 (Unified Plan — v7.0 + v7.1 + v8.0 sessions merged)
 **Board:** CTO, CRO, CIO, Head of Quant, Head of Execution, Head of SRE, Head of AI Design, Red-Team, Model Risk
 **Evidence standard:** PROVEN / LIKELY / SPECULATIVE / NEEDS TEST with file:line references
-**Codebase:** 30,137 Rust LOC (79 files) + 20,175 Python LOC (51 files) = 50,312 total
+**Codebase:** 30,355 Rust LOC (79 files) + 20,410 Python LOC (57 files) = 50,765 total
 
 ---
 
@@ -32,16 +32,16 @@ AEGIS V2 is an autonomous UK ISA momentum-volatility trading engine. Rust hot pa
 
 | Dimension | Grade | Evidence |
 |-----------|-------|----------|
-| Architecture | A | WAL crash recovery, 31-check risk arbiter, 5-rung Chandelier, 676 unit tests |
+| Architecture | A | WAL crash recovery, 31-check risk arbiter, 5-rung Chandelier, 678 unit tests |
 | Reliability | A- | fsync+CRC32 WAL, orphan reconciliation, circuit breakers, 4-state regime |
-| Risk Management | B+ | Kelly 12-factor, Chandelier, cross-asset macro, daily drawdown halt |
+| Risk Management | A- | Kelly 12-factor, Chandelier, cross-asset macro, daily drawdown halt, config.live.toml overlay + N8b assertions |
 | Signal Generation | C | VanguardSniper works but ZERO backtest, Orchestrator untested |
 | Economics | D+ | 20 trades (79% WR gross), cost drag ~56.7% at 3 trades/day, paper params contaminated |
-| Learning (Ouroboros) | C+ | Nightly loop runs, persistent memory works, but learns gross not net until this session |
-| Data Completeness | C | PositionClosed now enriched (this session), SignalRejected now emitted, missed-winner analysis added |
+| Learning (Ouroboros) | B | Nightly loop runs, cost-aware, regime scale guard (Q-068), confidence floor guard (Q-073) |
+| Data Completeness | B+ | PositionClosed enriched, SignalRejected emitted, missed-winner analysis, macro context, anomaly baselines |
 | Validation | F | Zero backtest, 20-trade sample (95% CI: [55%, 94%]), no Monte Carlo |
-| Governance | B | Ticker scoreboard added (this session), config audit trail added, promotion criteria defined |
-| Deployment | B | Docker, rsync, SIGHUP hot-reload, supercronic scheduling, no external monitoring |
+| Governance | A- | Ticker scoreboard, config audit trail, promotion criteria, live overlay, startup safety assertions |
+| Deployment | B+ | Docker, rsync, SIGHUP hot-reload (bridge recycle), supercronic, live config overlay, no external monitoring |
 
 ### Top 5 Blockers to Live Trading
 1. **VanguardSniper has ZERO backtest** — expected value completely unknown
@@ -50,20 +50,17 @@ AEGIS V2 is an autonomous UK ISA momentum-volatility trading engine. Rust hot pa
 4. **No FX tracking** — USD-denominated ETPs in GBP ISA, 10-15% annual GBP moves untracked
 5. **No Monte Carlo risk-of-ruin** — survival probability unknown
 
-### What Was Built This Session (v7.0)
+### What Was Built (v6.0 → v8.0, 31 items total)
 
-| Item | File(s) Modified | Status |
-|------|-----------------|--------|
-| SignalRejected WAL emission | engine.rs:1481 | BUILT |
-| BrainSignal extended (vol_slope, vwap_dist_pct, structural_score) | python_bridge.rs, main.rs | BUILT |
-| PositionClosed 4 TODO fields wired | engine.rs:1580-1600 | BUILT |
-| bridge.py signal enrichment | bridge.py (VanguardSniper + Orchestrator) | BUILT |
-| Config diff rollback ledger | config_writer.py | BUILT |
-| Missed-winner analysis (Step 5.7) | nightly_v6.py | BUILT |
-| Ticker promotion/demotion scoreboard | nightly_v6.py | BUILT |
-| Backfill foundation script | backfill_foundation.py (NEW) | BUILT |
+**v6.0 Session** (9 items): N0 Survival Stack, trade taxonomy, ticker blacklist, SignalRejected/MissedWinnerCandidate WAL types, PositionClosed enrichment, STS score, UK holidays, config.live.toml file, RT1 check.
 
-**Verification:** cargo check PASS, cargo test 675/676 PASS (1 pre-existing), all Python py_compile PASS.
+**v7.0 Session** (16 items): SignalRejected emission, BrainSignal extension, PositionClosed wiring, bridge enrichment, config diff ledger, missed-winner analysis, ticker scoreboard, backfill foundation, macro event layer, friction-adjusted expectancy, comparison tables, feature scorecard, research store, anomaly baselines, incident review, nightly Steps 5.8-5.10.
+
+**v7.1 Session** (3 items): Bridge SIGHUP hot-reload (N5c), config.live.toml overlay (N8a), live startup assertions (N8b).
+
+**v8.0 Session** (2 items): Q-068 regime scale guard (MIN_REGIME_TRADES=50), Q-073 confidence floor guard (STATIC_CONFIDENCE_FLOOR=65).
+
+**Verification:** cargo check PASS, cargo test 678/679 PASS (1 pre-existing), all Python py_compile PASS. All deployed to EC2 (commit ed6362a).
 
 ---
 
@@ -71,7 +68,7 @@ AEGIS V2 is an autonomous UK ISA momentum-volatility trading engine. Rust hot pa
 
 ### Boot Sequence (8 steps)
 ```
-1. Config load (config.toml + dynamic_weights.toml + spread_cache.toml + universe_classification.toml)
+1. Config load (config.toml + dynamic_weights.toml + spread_cache.toml + universe_classification.toml + config.live.toml overlay if IS_LIVE)
 2. WAL replay → restore portfolio state, open positions, rung levels
 3. Redis connect → restore circuit breaker state, session data
 4. IBKR connect (client_id=101, port 4003) → 15s secdef delay
@@ -212,18 +209,37 @@ Market Data (IBKR) → Tick Router → [Hot: Vanguard/Apex split]
 | N7m | Operator incident review pack | research_store.py (NEW) | BUILT |
 | N7n | Nightly wiring (Steps 5.8, 5.9, 5.10) | nightly_v6.py | BUILT |
 
+### v7.1 Session Build (DEPLOYED, commit 525592f)
+| ID | Item | Files | Status |
+|----|------|-------|--------|
+| N5c | Bridge SIGHUP hot-reload (kill/respawn) | main.rs:528-533 | DEPLOYED |
+| N8a | config.live.toml overlay implementation | config_loader.rs (load_live + 6 overlay structs) | DEPLOYED |
+| N8b | Live param startup assertions (max_pos≤5, heat≤20%, buffer≥15%) | main.rs:119-130, config_loader.rs (3 tests) | DEPLOYED |
+
+### v8.0 Session Build (DEPLOYED, commit ed6362a)
+| ID | Item | Files | Status |
+|----|------|-------|--------|
+| Q068 | Regime scale guard (MIN_REGIME_TRADES=50) | nightly_v6.py | DEPLOYED |
+| Q073 | Confidence floor guard (floor ≥ static 65) | config_writer.py | DEPLOYED |
+
 ---
 
 ## 5. EXECUTION BACKLOG
 
-### P0 — BUILD NEXT (blocking paper validation)
-| ID | Item | Effort | Dependency |
-|----|------|--------|------------|
-| N5b | Bar history persistence (survive restart) | 4h | None |
-| N5c | Bridge SIGHUP hot-reload wiring | 2h | None |
-| N8a | config.live.toml overlay implementation | 4h | None |
-| N8b | Paper → live parameter reduction (3 pos, 10% heat, 25% cash) | 1h | N8a |
-| N8c | GBP/USD FX tracking in PnL | 4h | None |
+### P0 — COMPLETED (v7.1 + v8.0)
+| ID | Item | Effort | Status |
+|----|------|--------|--------|
+| N5c | Bridge SIGHUP hot-reload wiring | 2h | ✅ DEPLOYED (525592f) |
+| N8a | config.live.toml overlay implementation | 4h | ✅ DEPLOYED (525592f) |
+| N8b | Live param startup assertions | 1h | ✅ DEPLOYED (525592f) |
+| Q068 | Regime scale guard (50-trade minimum) | 1h | ✅ DEPLOYED (ed6362a) |
+| Q073 | Confidence floor guard (≥65 enforced) | 1h | ✅ DEPLOYED (ed6362a) |
+
+### P0 — DEFERRED (No ROI During Paper)
+| ID | Item | Effort | Reason |
+|----|------|--------|--------|
+| N5b | Bar history persistence (survive restart) | 4h | 16-min warmup is acceptable |
+| N8c | GBP/USD FX tracking in PnL | 4h | All positions LSE/GBP during paper |
 
 ### P1 — BUILD NEXT (required for go-live decision)
 | ID | Item | Effort | Dependency |
@@ -267,7 +283,7 @@ Market Data (IBKR) → Tick Router → [Hot: Vanguard/Apex split]
 
 ## 6. EVIDENCE REGISTER
 
-### PROVEN (28 items — have test coverage or deployment evidence)
+### PROVEN (47 items — have test coverage or deployment evidence, see PROOF_REGISTER.md for full list)
 | ID | Claim | Evidence |
 |----|-------|---------|
 | PR-01 | WAL crash recovery restores state | wal_tests.rs: 12 tests, idempotent replay |
@@ -295,7 +311,7 @@ Market Data (IBKR) → Tick Router → [Hot: Vanguard/Apex split]
 | PR-23 | Backfill foundation script exists | backfill_foundation.py (v7.0) |
 | PR-24 | BrainSignal carries full indicator context | python_bridge.rs: 11 fields (v7.0) |
 | PR-25 | Gate veto logging to ndjson | bridge.py: gate_vetoes.ndjson |
-| PR-26 | 676 Rust unit tests pass | cargo test --lib (1 pre-existing failure) |
+| PR-26 | 678 Rust unit tests pass | cargo test --lib (1 pre-existing failure) |
 | PR-27 | Supercronic scheduling reliable | crontab: nightly, config_writer, ticker_selector, sessions |
 | PR-28 | Docker deployment atomic | docker compose build + up -d |
 
@@ -345,9 +361,9 @@ Market Data (IBKR) → Tick Router → [Hot: Vanguard/Apex split]
 | RT-1-02 | Microstructure | Paper fills at-mid, live slips 3-5% on 3x ETPs | CRITICAL | OPEN |
 | RT-2-01 | Quant | VanguardSniper ZERO backtest | CRITICAL | PARTIALLY MITIGATED (backfill script) |
 | RT-2-02 | Quant | Kelly drag constants unsourced | CRITICAL | OPEN |
-| RT-3-01 | Fund Mgr | Paper params contaminated (15 pos / 50% heat) | CRITICAL | OPEN (N8b pending) |
+| RT-3-01 | Fund Mgr | Paper params contaminated (15 pos / 50% heat) | CRITICAL | MITIGATED (N8a+N8b: live overlay enforces 3/10%/25%) |
 | RT-3-02 | Fund Mgr | 0.3-0.5% daily unrealistic for retail | CRITICAL | ACKNOWLEDGED (target unchanged) |
-| RT-4-01 | Governance | config.live.toml overlay NOT implemented | CRITICAL | OPEN (N8a pending) |
+| RT-4-01 | Governance | config.live.toml overlay NOT implemented | CRITICAL | MITIGATED (N8a deployed, 3 tests pass) |
 | RT-4-02 | Governance | Polygon API key in git | CRITICAL | OPEN (RT5 pending) |
 | RT-5-01 | Economist | 3x ETP crash: -50% to -90% possible in single day | CRITICAL | OPEN |
 | RT-5-02 | Economist | USD ETPs in GBP ISA, no FX tracking | CRITICAL | OPEN (N8c pending) |
@@ -374,22 +390,27 @@ Key items: Quote imbalance uncalibrated, market impact unmodeled, alpha decay lo
 
 **Deployment:** Docker Compose, rsync to EC2, supercronic scheduling, IS_LIVE=false hardcoded.
 
-### Open (14 questions requiring data)
+### Resolved This Session (3 HIGH items closed)
+
+| ID | Question | Resolution |
+|----|----------|------------|
+| Q-068 | Normal regime scale 1.60 calibrated on n=20 | **FIXED:** MIN_REGIME_TRADES=50, neutral scale (1.0) for insufficient data |
+| Q-073 | Ouroboros can override confidence floor | **FIXED:** STATIC_CONFIDENCE_FLOOR=65 enforced as hard lower bound |
+| Q-089 | config.live.toml code path untested | **FIXED:** N8a overlay + 3 tests + N8b assertions deployed |
+| Q-111 | Paper 15-pos vs live 3-pos mismatch | **FIXED:** N8a+N8b enforce 3 pos/10% heat/25% buffer when IS_LIVE=true |
+
+### Open (10 questions requiring data)
 
 | ID | Question | Risk | Resolution Path |
 |----|----------|------|----------------|
-| Q-045 | No Python bridge restart on crash | HIGH | N: Add watchdog timer |
-| Q-068 | Normal regime scale 1.60 calibrated on n=20 | HIGH | Needs 100+ trades |
-| Q-073 | Ouroboros can override confidence floor | HIGH | Add guardrail in config_writer |
+| Q-045 | No Python bridge restart on crash | HIGH | RT2: Add watchdog timer + alerting |
 | Q-081 | No external health monitoring | MEDIUM | N9b: Health endpoint |
 | Q-083 | No disk space automation | MEDIUM | N9c: Add cleanup cron |
-| Q-089 | config.live.toml code path untested | HIGH | N8a: Implement overlay |
-| Q-095 | 76% annual cost drag at scale | HIGH | Reduce trade frequency |
-| Q-051 | RT cost mismatch 0.3% vs 0.5% | MEDIUM | Measure real spreads |
+| Q-095 | 76% annual cost drag at scale | HIGH | Needs 50+ trades to measure real drag |
+| Q-051 | RT cost mismatch 0.3% vs 0.5% | MEDIUM | Measure real spreads over 50+ trades |
 | Q-097 | ISA compliance gaps | MEDIUM | Review FCA rules |
-| Q-101 | No audit log for position changes | MEDIUM | WAL provides this |
+| Q-101 | No audit log for position changes | MEDIUM | WAL provides this (low priority) |
 | Q-108 | No risk-of-ruin Monte Carlo | HIGH | N6b: Build simulation |
-| Q-111 | Paper 15-pos vs live 3-pos mismatch | HIGH | N8b: Fix paper params |
 | Q-117 | No remote kill switch | HIGH | N9a: Build endpoint |
 | Q-119 | First live day protocol undefined | DEFERRED | Define after gauntlet |
 
@@ -442,7 +463,7 @@ Key items: Quote imbalance uncalibrated, market impact unmodeled, alpha decay lo
 | VanguardSniper backtest | Positive expectancy confirmed | NOT DONE |
 | Monte Carlo survival | > 95% probability of positive equity at 1 year | NOT DONE |
 | FX tracking | GBP/USD PnL attribution active | NOT BUILT |
-| config.live.toml | Validated overlay working | NOT BUILT |
+| config.live.toml | Validated overlay working | ✅ DEPLOYED (N8a + N8b, 3 tests) |
 | Remote kill switch | Operational | NOT BUILT |
 
 ---
@@ -598,4 +619,4 @@ Boot — Engine loads new config → SIGHUP triggers hot-reload
 
 **END OF DOCUMENT**
 
-*This is the single canonical implementation plan for AEGIS V2. All previous documents (IMPLEMENTATION_MASTER_PLAN v6.0, EXECUTION_BACKLOG v6.1, PROOF_REGISTER v6.1, QUESTION_DECISION_REGISTER v6.0, ADVERSARIAL_RED_TEAM v6.0) are superseded by this unified plan. They remain in the repository as historical artifacts.*
+*This is the single canonical implementation plan for AEGIS V2 (v8.0). All previous documents (v6.0, v7.0) are superseded. Satellite files (EXECUTION_BACKLOG.md, PROOF_REGISTER.md, QUESTION_DECISION_REGISTER.md, ADVERSARIAL_RED_TEAM_v6.md, STOP_STATE_HANDOFF_v7.1.md) provide detailed tracking and remain active.*
