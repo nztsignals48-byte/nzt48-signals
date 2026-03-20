@@ -65,6 +65,13 @@
 | Q068 | Regime scale guard (MIN_REGIME_TRADES=50) | 0.5 | ✅ DEPLOYED | nightly_v6.py (regime_scales block) |
 | Q073 | Dynamic floor guard (floor >= static 65) | 0.5 | ✅ DEPLOYED | config_writer.py (adaptive_floor block) |
 
+## P0 — BUILT v9.0 SESSION (SRE + RED-TEAM)
+
+| ID | Item | Days | Status | File |
+|----|------|------|--------|------|
+| N10c | Log rotation policy (7-day, daily 04:45 UTC) | 0.5 | ✅ DEPLOYED | log_rotate.py + crontab |
+| RT2 | Bridge health monitor (15-min Telegram alerts) | 0.5 | ✅ DEPLOYED | bridge_health.py + crontab |
+
 ## P0 — QDR HIGH-RISK ITEMS (Scheduled)
 
 | ID | Item | Days | Priority | Status |
@@ -72,7 +79,7 @@
 | Q-095 | Cost drag evaluation (full spread+commission audit) | 1 | HIGH | DEFERRED — needs 50+ trades |
 | Q-111 | 3-position validation period (verify N8a limits work) | 0.5 | HIGH | DEFERRED — activates with IS_LIVE=true |
 | Q-051 | Cost model unification (config vs nightly vs bridge) | 1 | HIGH | SCHEDULED P1 |
-| Q-045 | Bridge auto-restart alerting (RT2) | 0.5 | HIGH | SCHEDULED P1 (= RT2) |
+| Q-045 | Bridge auto-restart alerting (RT2) | 0.5 | HIGH | ✅ DEPLOYED (c8c7a43) |
 
 ## P0 — DEFERRED (No ROI During Paper)
 
@@ -93,14 +100,13 @@
 | N9b | Monte Carlo risk-of-ruin simulation | 1 | N9a | Quant |
 | N10a | Remote kill switch (SSH + API) | 1 | — | SRE |
 | N10b | External monitoring (health + alerts) | 1 | — | SRE |
-| N10c | Log rotation policy | 0.5 | — | SRE |
 
 ## P2 — RED-TEAM ITEMS
 
 | ID | Item | Days | Depends | Owner | Status |
 |----|------|------|---------|-------|--------|
 | RT1 | config.live.toml + startup assertion | 0.5 | — | Engine | ✅ BUILT |
-| RT2 | Python bridge health alerting | 0.5 | — | Engine | PENDING |
+| RT2 | Python bridge health alerting | 0.5 | — | Engine | ✅ DEPLOYED (c8c7a43) |
 | RT3 | Cost drag daily reporting | 0.5 | N6b | Reports | PENDING |
 
 ## VERIFY LATER (100+ Trades Required)
@@ -157,3 +163,12 @@
 - Python py_compile: all pass
 
 **All v6.0 + v7.0 + v7.1 + v8.0 DEPLOYED to EC2 (commit ed6362a)**
+
+**Built v9.0 session (2026-03-20):**
+- 2 SRE/red-team items deployed (N10c log rotation, RT2 bridge health monitor)
+- 2 new files created (log_rotate.py, bridge_health.py) — 231 lines
+- crontab updated with 2 new cron jobs (daily log rotation, 15-min health check)
+- Python py_compile: all pass
+- Closes Q-045 (bridge alerting) and N10c (log rotation) from P1 backlog
+
+**All v6.0 + v7.0 + v7.1 + v8.0 + v9.0 DEPLOYED to EC2 (commit c8c7a43)**

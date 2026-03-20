@@ -55,6 +55,8 @@
 | PR-45 | 678 Rust unit tests pass | cargo test: 678 pass, 1 pre-existing failure (snapshot_partial_replay) | cargo test output |
 | PR-46 | Q-068 regime scale guard deployed | MIN_REGIME_TRADES=50, neutral scale (1.0) for insufficient data | nightly_v6.py |
 | PR-47 | Q-073 confidence floor guard deployed | STATIC_CONFIDENCE_FLOOR=65 enforced as hard lower bound, range [65,80] | config_writer.py |
+| PR-48 | N10c log rotation deployed | Daily 04:45 UTC, 7-day archive retention, truncates active logs | log_rotate.py + crontab |
+| PR-49 | RT2 bridge health monitor deployed | 15-min health checks during market hours, Telegram alerts with cooldown | bridge_health.py + crontab |
 
 ## LIKELY (Strong Evidence, Not Fully Tested)
 
