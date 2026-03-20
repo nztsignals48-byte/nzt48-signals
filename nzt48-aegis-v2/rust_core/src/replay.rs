@@ -173,6 +173,11 @@ impl ReplayEngine {
                     final_pnl,
                     entry_time_ns: entry_time,
                     exit_time_ns: exit_time,
+                    gross_pnl: 0.0,
+                    total_commission: 0.0,
+                    spread_at_entry_pct: 0.0,
+                    spread_at_exit_pct: 0.0,
+                    daily_trade_number: 0,
                     symbol: close_sym,
                     qty: close_qty,
                     regime_at_entry: String::new(),
@@ -294,6 +299,8 @@ impl ReplayEngine {
                     price: *price,
                     exec_id: exec_id.clone(),
                     commission: *commission,
+                    spread_at_fill_pct: 0.0,
+                    side: "Buy".to_string(),
                 });
                 if *remaining_qty == 0 {
                     let stop = initial_stop_price(*price, 0.05);
@@ -313,6 +320,8 @@ impl ReplayEngine {
                         is_carried: false,
                         mae: 0.0,
                         mfe: 0.0,
+                        spread_at_entry_pct: 0.0,
+                        daily_trade_number: 0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

@@ -69,6 +69,12 @@ pub enum WalPayload {
         price: f64,
         exec_id: String,
         commission: f64,
+        /// N0f: Bid-ask spread % at moment of fill. For cost attribution.
+        #[serde(default)]
+        spread_at_fill_pct: f64,
+        /// N0f: Buy or Sell side. For cost attribution.
+        #[serde(default)]
+        side: String,
     },
     ExitSignal {
         ticker_id: u32,
@@ -77,9 +83,25 @@ pub enum WalPayload {
     },
     PositionClosed {
         ticker_id: u32,
+        /// Net PnL after commission (existing field, renamed semantically).
         final_pnl: f64,
         entry_time_ns: u64,
         exit_time_ns: u64,
+        /// N0e: Gross PnL before commission. gross_pnl - commission = final_pnl.
+        #[serde(default)]
+        gross_pnl: f64,
+        /// N0e: Total commission (entry + exit).
+        #[serde(default)]
+        total_commission: f64,
+        /// N0e: Bid-ask spread % at entry. For L5 Spread Victim detection.
+        #[serde(default)]
+        spread_at_entry_pct: f64,
+        /// N0e: Bid-ask spread % at exit. For cost attribution.
+        #[serde(default)]
+        spread_at_exit_pct: f64,
+        /// N0e: Daily trade number (1st, 2nd, 3rd of the day). For frequency analysis.
+        #[serde(default)]
+        daily_trade_number: u32,
         /// Human-readable symbol (e.g. "QQQ3.L"). Added in schema_version=1.
         #[serde(default)]
         symbol: String,

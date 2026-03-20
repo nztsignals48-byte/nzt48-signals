@@ -27,6 +27,8 @@ mod tests {
             is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
         }
     }
 
@@ -494,10 +496,10 @@ mod tests {
     #[test]
     fn test_infinite_chandelier_as_exit_strategy() {
         let ic = crate::exit_engine::InfiniteChandelier::new();
-        let pos = make_position(100.0, 98.0, 100);
-        // At entry → rung 1, stop = entry - 1x ATR = 98.0
+        let pos = make_position(100.0, 97.0, 100);
+        // At entry → rung 1, stop = entry - 1.5x ATR = 97.0 (AUDIT-FIX: matches base ChandelierStrategy)
         let stop = ic.compute_stop(&pos, 100.0, 2.0);
-        assert!((stop - 98.0).abs() < 0.01, "Rung 1: stop={stop}, expected 98.0");
+        assert!((stop - 97.0).abs() < 0.01, "Rung 1: stop={stop}, expected 97.0");
 
         // At rung 5 (+8%): entry=100, high=108, atr=2
         let mut pos2 = make_position(100.0, 98.0, 100);

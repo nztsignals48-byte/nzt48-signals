@@ -204,6 +204,8 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                 price,
                 exec_id,
                 commission,
+                spread_at_fill_pct: _,
+                side: _,
             } => {
                 // Deduplication by exec_id
                 if fill_exec_ids.contains(exec_id) {
@@ -243,6 +245,8 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                         is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
                     };
                     portfolio.add_position(pos);
                     let pending = portfolio

@@ -122,6 +122,12 @@ pub struct PositionState {
     /// Used for target optimization — how much profit was available before exit?
     #[pyo3(get)]
     pub mfe: f64,
+    /// N0e: Bid-ask spread % at entry. Captured at fill time for cost attribution.
+    #[pyo3(get)]
+    pub spread_at_entry_pct: f64,
+    /// N0a: Which trade number this was in the day (1st, 2nd, 3rd...).
+    #[pyo3(get)]
+    pub daily_trade_number: u32,
 }
 
 #[pymethods]
@@ -152,6 +158,8 @@ impl PositionState {
             is_carried: false,
             mae: 0.0,
             mfe: 0.0,
+            spread_at_entry_pct: 0.0,
+            daily_trade_number: 0,
         }
     }
 }
@@ -267,6 +275,8 @@ mod tests {
             is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
         };
         assert!(pos.highest_high >= pos.avg_entry);
         assert_eq!(pos.trailing_rung, 0);

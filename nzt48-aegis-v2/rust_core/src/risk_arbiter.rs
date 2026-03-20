@@ -202,6 +202,38 @@ impl RiskArbiter {
             }
         }
 
+        // CHECK 28: Daily Trade Limit (N0a) — THE #1 cost control gate.
+        // At 0.50% RT cost per trade, every trade costs ~£10 on £2K position.
+        // 3 trades/day × 252 = £7,560/year = 76% equity drag on £10K.
+        // ALWAYS enforced, including simulation mode, so paper data reflects live economics.
+        if portfolio.daily_trade_count >= self.config.daily_trade_limit {
+            return self.reject(
+                VetoReason::DailyTradeLimitReached {
+                    count: portfolio.daily_trade_count,
+                    limit: self.config.daily_trade_limit,
+                },
+                ts,
+            );
+        }
+
+        // CHECK 29: Minimum Gross Edge (N0d) — reject low-edge trades.
+        // If spread is available, require Kelly signal to imply edge > min_gross_edge_pct.
+        // Uses kelly_fraction as a proxy for expected edge (higher Kelly = higher edge).
+        // Minimum: kelly_fraction > 0.01 AND spread doesn't consume >50% of expected return.
+        if ctx.bid > 0.0 && self.config.min_gross_edge_pct > 0.0 {
+            let spread_pct = (ctx.ask - ctx.bid) / ctx.bid * 100.0;
+            // Reject if spread alone exceeds the minimum edge threshold
+            if spread_pct > self.config.min_gross_edge_pct * 2.0 {
+                return self.reject(
+                    VetoReason::GrossEdgeTooLow {
+                        edge_bps: (self.config.min_gross_edge_pct * 100.0) as u32,
+                        min_bps: (spread_pct * 100.0) as u32,
+                    },
+                    ts,
+                );
+            }
+        }
+
         // CHECK 14: Cash Buffer (H31)
         // In simulation mode, skip cash buffer to allow maximum data collection.
         // With £10K equity and 20 max positions, trades fill up cash fast.

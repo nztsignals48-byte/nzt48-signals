@@ -68,6 +68,9 @@ pub struct PortfolioState {
     cost_basis: HashMap<TickerId, CostBasisEntry>,
     /// WP-6: Dividend withholding tax factor (UK ISA: 0.85).
     pub dividend_withholding_factor: f64,
+    /// N0a: Daily trade count for frequency management.
+    /// Reset in maybe_daily_reset(). Incremented on each approved entry fill.
+    pub daily_trade_count: u32,
 }
 
 impl PortfolioState {
@@ -85,6 +88,7 @@ impl PortfolioState {
             inverse_map: HashMap::new(),
             cost_basis: HashMap::new(),
             dividend_withholding_factor: 0.85,
+            daily_trade_count: 0,
         }
     }
 
@@ -306,6 +310,8 @@ mod tests {
             is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
         }
     }
 

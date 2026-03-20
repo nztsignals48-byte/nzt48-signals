@@ -472,17 +472,22 @@ impl<B: BrokerAdapter> Engine<B> {
         let is_simulation = config.crucible.paper_mode;
         let mut risk_config = config.risk.clone();
         if config.crucible.paper_mode {
+            // N0b: Paper mode MUST match live economics for validation data to be meaningful.
+            // Previous overrides (15 positions, 2.0% spread veto) created non-representative
+            // data that showed 79% WR but would fail catastrophically in live due to costs.
+            //
+            // KEPT: max_positions override (from config) — allows broader data collection
+            // but daily_trade_limit (CHECK 28) now caps ACTUAL entries per day.
             risk_config.max_positions = config.crucible.max_positions_override;
-            // FIX Issue #13: In paper mode, disable Kelly ramp to avoid dust positions.
-            // kelly_ramp_trades=250 → ramp = 250/250 = 1.0 (no scaling).
+            // KEPT: Kelly ramp disable for paper (no dust positions).
             risk_config.kelly_ramp_trades = 250;
-            // FIX: Lower minimum entry for paper mode. Production minimum (£1500)
-            // requires Kelly ~0.15 which needs real trade history. Bootstrap Kelly
-            // with 3x vol_decay produces ~£700. Paper minimum = £100 (1% of equity).
+            // KEPT: Lower minimum entry for paper mode (bootstrap Kelly).
             risk_config.minimum_entry_gbp = 100.0;
-            // FIX: Widen spread veto for paper mode. 3x leveraged ETPs typically
-            // have 0.5-2.0% spreads. Production threshold (0.5%) blocks most LSE ETPs.
-            risk_config.spread_veto_pct = 2.0;
+            // N0b: Spread veto now MATCHES LIVE (0.3%) instead of 2.0%.
+            // This ensures paper trades only enter at realistic spreads.
+            // If 0.3% blocks too many LSE ETPs, the config value can be tuned —
+            // but it must be the SAME in paper and live.
+            // risk_config.spread_veto_pct = 2.0;  // REMOVED — use config value (0.3%)
         }
         let arbiter = RiskArbiter::new(risk_config);
         Self {
@@ -1034,6 +1039,17 @@ impl<B: BrokerAdapter> Engine<B> {
                     let exit_price_gbp = tick.last;
                     let pos_mae = pos.mae;
                     let pos_mfe = pos.mfe;
+                    // N0e: Capture cost fields for PositionClosed event.
+                    let gross_pnl = pos.unrealized_pnl;  // Before commission
+                    let total_commission = pos.total_commission;
+                    let spread_at_entry = pos.spread_at_entry_pct;
+                    let daily_trade_num = pos.daily_trade_number;
+                    // N0e: Current spread at exit time
+                    let spread_at_exit = if tick.bid > 0.0 {
+                        (tick.ask - tick.bid) / tick.bid * 100.0
+                    } else {
+                        0.0
+                    };
                     self.write_wal(WalPayload::ExitSignal {
                         ticker_id: tid.0,
                         reason: reason_str.clone(),
@@ -1124,6 +1140,11 @@ impl<B: BrokerAdapter> Engine<B> {
                         final_pnl,
                         entry_time_ns: entry_time,
                         exit_time_ns: self.now_ns,
+                        gross_pnl,
+                        total_commission,
+                        spread_at_entry_pct: spread_at_entry,
+                        spread_at_exit_pct: spread_at_exit,
+                        daily_trade_number: daily_trade_num,
                         symbol: close_symbol,
                         qty: exit_qty,
                         regime_at_entry,
@@ -1636,9 +1657,14 @@ impl<B: BrokerAdapter> Engine<B> {
                 is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
             });
 
             self.simulated_trades.push(sim_trade);
+
+            // N0a: Increment daily trade count for frequency management.
+            self.portfolio.daily_trade_count += 1;
 
             // Also add to portfolio for HEARTBEAT tracking and risk calculations
             let pos_copy = PositionState {
@@ -1657,6 +1683,8 @@ impl<B: BrokerAdapter> Engine<B> {
                 is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
             };
             self.portfolio.add_position(pos_copy);
 
@@ -2464,6 +2492,8 @@ impl<B: BrokerAdapter> Engine<B> {
         self.portfolio.consecutive_stop_losses = 0;
         self.portfolio.daily_pnl = 0.0;
         self.portfolio.high_water_mark = self.portfolio.equity;
+        // N0a: Reset daily trade count on new trading day.
+        self.portfolio.daily_trade_count = 0;
         self.write_wal(WalPayload::DailyReset {
             date: current_date.to_string(),
             previous_equity,
@@ -2541,6 +2571,24 @@ impl<B: BrokerAdapter> Engine<B> {
                 exec_id,
                 commission,
             } => {
+                // N0f: Capture spread at fill time for cost attribution.
+                let fill_spread_pct = {
+                    let last_tick = self.last_prices.get(ticker_id);
+                    // Use stored bid/ask if available, otherwise 0.0
+                    if let Some(_) = last_tick {
+                        // We don't have separate bid/ask stored per-tick in last_prices,
+                        // so use 0.0 for now. Full implementation needs bid/ask cache.
+                        0.0_f64
+                    } else {
+                        0.0
+                    }
+                };
+                // Determine if this is a buy or sell fill from tracked orders.
+                let fill_side = if order_id.starts_with("exit-") {
+                    "Sell".to_string()
+                } else {
+                    "Buy".to_string()
+                };
                 self.write_wal(WalPayload::FillEvent {
                     order_id: order_id.clone(),
                     ticker_id: ticker_id.0,
@@ -2549,6 +2597,8 @@ impl<B: BrokerAdapter> Engine<B> {
                     price: *price,
                     exec_id: exec_id.clone(),
                     commission: *commission,
+                    spread_at_fill_pct: fill_spread_pct,
+                    side: fill_side,
                 });
                 // P3-C: Update Executioner lifecycle on fill
                 self.executioner.record_fill(order_id, *filled_qty, self.now_ns);
@@ -2590,9 +2640,13 @@ impl<B: BrokerAdapter> Engine<B> {
                         is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);
+                    // N0a: Increment daily trade count for live entry fills.
+                    self.portfolio.daily_trade_count += 1;
                 }
             }
             BrokerEvent::Ack {

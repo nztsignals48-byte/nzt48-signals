@@ -39,6 +39,12 @@ pub struct RiskConfig {
     pub minimum_entry_gbp: f64,
     /// SC-13: Number of validated trades for Kelly ramp calculation.
     pub kelly_ramp_trades: u32,
+    /// N0a: Maximum trades per trading day. THE #1 survival lever.
+    /// At 0.50% RT cost per trade, 3/day = 76% annual equity drag on £10K.
+    pub daily_trade_limit: u32,
+    /// N0d: Minimum gross edge (%) to justify entry after spread costs.
+    /// Rejects trades where expected move < this threshold.
+    pub min_gross_edge_pct: f64,
 }
 
 impl Default for RiskConfig {
@@ -63,6 +69,8 @@ impl Default for RiskConfig {
             isa_annual_limit_gbp: 20_000.0,
             minimum_entry_gbp: 1500.0,
             kelly_ramp_trades: 0,
+            daily_trade_limit: 3,
+            min_gross_edge_pct: 0.15,
         }
     }
 }

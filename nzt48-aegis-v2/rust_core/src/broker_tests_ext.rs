@@ -28,6 +28,8 @@ mod tests {
             is_carried: false,
                 mae: 0.0,
                 mfe: 0.0,
+                spread_at_entry_pct: 0.0,
+                daily_trade_number: 0,
         }
     }
 

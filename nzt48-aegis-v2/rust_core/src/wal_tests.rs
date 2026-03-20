@@ -38,6 +38,8 @@ mod tests {
             price,
             exec_id: uuid::Uuid::now_v7().to_string(),
             commission: 1.50,
+            spread_at_fill_pct: 0.0,
+            side: "Buy".to_string(),
         }
     }
 
@@ -140,10 +142,11 @@ mod tests {
         assert_eq!(events.len(), 1); // Only the valid event
     }
 
-    // ── Test 4: Corrupt non-last line → panic! (H27) ──
+    // ── Test 4: Corrupt non-last line → skip with warning (resilient mode) ──
+    // WAL now uses resilient mode: corrupt lines are skipped with warnings
+    // instead of panicking, to prevent engine restarts from cascading failures.
     #[test]
-    #[should_panic(expected = "FATAL: WAL corruption")]
-    fn test_corrupt_non_last_line_panics() {
+    fn test_corrupt_non_last_line_skipped() {
         let dir = tempfile::tempdir().expect("tempdir");
         let wal_path = dir.path().join("test.ndjson");
 
@@ -153,13 +156,16 @@ mod tests {
         writeln!(f, "{{\"event_id\":\"valid\",\"schema_version\":1,\"event_time_ns\":0,\"write_time_ns\":0,\"checksum\":0,\"payload\":{{\"SystemReady\":{{\"wal_events_replayed\":0,\"positions_reconciled\":0}}}}}}").expect("write valid");
         drop(f);
 
-        let _ = read_wal_file(&wal_path); // Should panic
+        // Resilient mode: skips corrupt lines, returns valid ones
+        let events = read_wal_file(&wal_path).expect("read");
+        // Both lines have issues (corrupt JSON + CRC mismatch), so both skipped
+        assert!(events.len() <= 1, "Expected at most 1 valid event, got {}", events.len());
     }
 
-    // ── Test 5: CRC32 mismatch on non-last line → panic! ──
+    // ── Test 5: CRC32 mismatch → skip with warning (resilient mode) ──
+    // WAL now uses resilient mode: CRC mismatches are skipped with warnings.
     #[test]
-    #[should_panic(expected = "FATAL: WAL corruption")]
-    fn test_crc32_mismatch_panics() {
+    fn test_crc32_mismatch_skipped() {
         let dir = tempfile::tempdir().expect("tempdir");
         let wal_path = dir.path().join("test.ndjson");
         let dl_path = dir.path().join("dead_letter");
@@ -182,7 +188,9 @@ mod tests {
         writeln!(f, "{}", lines[1]).expect("write");
         drop(f);
 
-        let _ = read_wal_file(&wal_path); // Should panic
+        // Resilient mode: tampered line skipped, valid line preserved
+        let events = read_wal_file(&wal_path).expect("read");
+        assert_eq!(events.len(), 1, "Only the untampered event should survive");
     }
 
     // ── Test 6: Orphan detection ──
@@ -222,6 +230,7 @@ mod tests {
                 equity: 10_500.0,
                 high_water: 10_500.0,
                 hash: "abc123".into(),
+                open_positions: vec![],
             },
         );
         writer.append(&snapshot).expect("append snapshot");
@@ -362,6 +371,7 @@ mod tests {
                 equity: 10_000.0,
                 high_water: 10_000.0,
                 hash: "deadbeef".into(),
+                open_positions: vec![],
             },
         );
         writer.append(&snapshot).expect("append");

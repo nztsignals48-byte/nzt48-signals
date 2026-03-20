@@ -160,6 +160,10 @@ pub enum VetoReason {
     DxyRiskOff { change_pct: u32 },
     /// Phase 9: Macro indicator feeds are stale (>5 min)—assume worst-case risk.
     MacroDataStale { age_secs: u64 },
+    /// N0a: Daily trade limit reached — THE #1 cost control.
+    DailyTradeLimitReached { count: u32, limit: u32 },
+    /// N0d: Expected gross edge too low to cover spread + commission.
+    GrossEdgeTooLow { edge_bps: u32, min_bps: u32 },
 }
 
 /// Python-visible wrapper for VetoReason (simplified for FFI).
@@ -333,6 +337,14 @@ impl From<&VetoReason> for PyVetoReason {
             VetoReason::MacroDataStale { age_secs } => Self {
                 name: "MacroDataStale".into(),
                 detail: format!("age={} secs", age_secs),
+            },
+            VetoReason::DailyTradeLimitReached { count, limit } => Self {
+                name: "DailyTradeLimitReached".into(),
+                detail: format!("{count}/{limit}"),
+            },
+            VetoReason::GrossEdgeTooLow { edge_bps, min_bps } => Self {
+                name: "GrossEdgeTooLow".into(),
+                detail: format!("edge={edge_bps}bps, spread={min_bps}bps"),
             },
         }
     }
