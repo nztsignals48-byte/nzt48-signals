@@ -55,10 +55,14 @@ WATCHLIST_FILE = CONFIG_DIR / "active_watchlist.json"
 # Previously hardcoded 12 LSE ETPs. Now loads ALL contracts dynamically.
 def _load_contract_symbols() -> list:
     """Load all contract symbols from contracts.toml dynamically."""
-    import toml as _toml
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
     contracts_path = CONFIG_DIR / "contracts.toml"
     if contracts_path.exists():
-        data = _toml.load(str(contracts_path))
+        with open(contracts_path, "rb") as f:
+            data = tomllib.load(f)
         return [c["symbol"] for c in data.get("contracts", []) if c.get("symbol")]
     return []
 
