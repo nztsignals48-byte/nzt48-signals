@@ -496,11 +496,14 @@ impl<B: BrokerAdapter> Engine<B> {
             // risk_config.spread_veto_pct = 2.0;  // REMOVED — use config value (0.3%)
         }
         let arbiter = RiskArbiter::new(risk_config);
+        // Q-051: Extract cost values before config is moved into Self
+        let round_trip_fee = config.costs.round_trip_fee_pct;
+        let ibkr_commission = config.costs.ibkr_commission_gbp;
         Self {
             broker,
             portfolio: PortfolioState::new(equity),
             arbiter,
-            exit_engine: ExitEngine::with_default_chandelier(),
+            exit_engine: ExitEngine::with_costs(round_trip_fee),
             wal,
             clock,
             config,
@@ -524,7 +527,7 @@ impl<B: BrokerAdapter> Engine<B> {
             hot_scanner: HotScanner::new(30.0, 10), // Score threshold 30, max 10 candidates
             rotation_scanner: RotationScanner::new(0.05, 10), // 5% rotation strength threshold, max 10 candidates
             executioner: Executioner::new(),
-            smart_router: SmartRouter::new(IsaGate::new("2026-04-06")),
+            smart_router: SmartRouter::with_costs(IsaGate::new("2026-04-06"), ibkr_commission),
             subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
             telemetry: Telemetry::new(),
             panic_guard: PanicGuard::new(),
@@ -756,6 +759,12 @@ impl<B: BrokerAdapter> Engine<B> {
             self.arbiter.config.max_positions, self.arbiter.config.confidence_floor,
             self.arbiter.config.cash_buffer_pct, self.arbiter.config.spread_veto_pct,
             self.arbiter.config.minimum_entry_gbp, self.simulation_mode,
+        );
+        eprintln!(
+            "Q-051 COST_CONFIG: round_trip_fee={:.3}%, commission=GBP{:.2}, fx_cost={:.3}%",
+            self.config.costs.round_trip_fee_pct * 100.0,
+            self.config.costs.ibkr_commission_gbp,
+            self.config.costs.fx_conversion_pct * 100.0,
         );
         self.last_reconcile_ns = system_time_ns;
         self.last_state_hash_ns = system_time_ns;

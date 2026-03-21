@@ -90,6 +90,22 @@ high_max = 35                      # VIX 25-35: 25% allocation, inverse only, no
 crisis_max = 50                    # VIX 35-50: SUSPEND all 3x longs. Inverse-only.
 extreme = 50                       # VIX > 50: FULL TRADING HALT. Exits only.
 
+# Q-051: UNIFIED COST MODEL — single source of truth for all cost parameters.
+# ALL cost-related code MUST reference these values, not hardcode numbers.
+# Replaces scattered hardcoded values in exit_engine.rs, smart_router.rs, and Python.
+[costs]
+# Round-trip trading cost as fraction (entry + exit spread + commission amortized).
+# Used by Chandelier Rung 2 breakeven calculation and Kelly sizing.
+round_trip_fee_pct = 0.003           # 0.3% round-trip — conservative for LSE 3x ETPs
+# IBKR tiered commission minimum per trade (GBP).
+ibkr_commission_gbp = 1.70           # IBKR tiered minimum for UK ISA
+# Stamp duty (UK equities only — ETPs are exempt)
+stamp_duty_pct = 0.0                 # 0% for ETPs/ETFs (would be 0.5% for UK equities)
+# Financial Transaction Tax (0 for LSE ETPs)
+ftt_pct = 0.0                        # 0% for UK ISA ETPs
+# FX conversion cost (for USD-denominated LSE ETPs)
+fx_conversion_pct = 0.002            # 0.2% IBKR FX spread estimate
+
 [execution]
 marketable_limit_buffer_pct = 0.1
 tick_size_under_1 = 0.001

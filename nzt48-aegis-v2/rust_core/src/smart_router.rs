@@ -76,7 +76,17 @@ impl SmartRouter {
             fx_table: FxRateTable::new(),
             isa_gate,
             etp_mappings: Vec::new(),
-            ibkr_commission_gbp: 1.70, // IBKR tiered minimum for UK
+            ibkr_commission_gbp: 1.70, // Q-051: fallback; overridden by with_costs()
+        }
+    }
+
+    /// Q-051: Construct with commission from unified cost config.
+    pub fn with_costs(isa_gate: IsaGate, ibkr_commission_gbp: f64) -> Self {
+        Self {
+            fx_table: FxRateTable::new(),
+            isa_gate,
+            etp_mappings: Vec::new(),
+            ibkr_commission_gbp,
         }
     }
 

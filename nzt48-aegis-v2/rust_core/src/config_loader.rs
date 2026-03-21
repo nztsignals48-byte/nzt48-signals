@@ -40,6 +40,9 @@ struct RawConfig {
     kelly: RawKelly,
     timing: RawTiming,
     risk: RawRisk,
+    /// Q-051: Unified cost model section.
+    #[serde(default)]
+    costs: CostsConfig,
     execution: ExecutionConfig,
     channel: RawChannel,
     backpressure: BackpressureConfig,
@@ -122,6 +125,42 @@ struct RawRisk {
 
 fn default_daily_trade_limit() -> u32 { 3 }
 fn default_min_gross_edge_pct() -> f64 { 0.15 }
+
+/// Q-051: Unified cost model — single source of truth for all trading costs.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CostsConfig {
+    /// Round-trip trading cost as fraction (entry + exit spread + commission amortized).
+    #[serde(default = "default_round_trip_fee_pct")]
+    pub round_trip_fee_pct: f64,
+    /// IBKR tiered commission minimum per trade (GBP).
+    #[serde(default = "default_ibkr_commission_gbp")]
+    pub ibkr_commission_gbp: f64,
+    /// Stamp duty fraction (0 for ETPs, 0.005 for UK equities).
+    #[serde(default)]
+    pub stamp_duty_pct: f64,
+    /// Financial Transaction Tax fraction.
+    #[serde(default)]
+    pub ftt_pct: f64,
+    /// FX conversion cost fraction (for USD-denominated LSE ETPs).
+    #[serde(default = "default_fx_conversion_pct")]
+    pub fx_conversion_pct: f64,
+}
+
+fn default_round_trip_fee_pct() -> f64 { 0.003 }
+fn default_ibkr_commission_gbp() -> f64 { 1.70 }
+fn default_fx_conversion_pct() -> f64 { 0.002 }
+
+impl Default for CostsConfig {
+    fn default() -> Self {
+        Self {
+            round_trip_fee_pct: default_round_trip_fee_pct(),
+            ibkr_commission_gbp: default_ibkr_commission_gbp(),
+            stamp_duty_pct: 0.0,
+            ftt_pct: 0.0,
+            fx_conversion_pct: default_fx_conversion_pct(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecutionConfig {
@@ -288,6 +327,8 @@ struct RawHolidays {
 pub struct EngineConfig {
     pub risk: RiskConfig,
     pub execution: ExecutionConfig,
+    /// Q-051: Unified cost model — single source of truth for all trading costs.
+    pub costs: CostsConfig,
     pub backpressure: BackpressureConfig,
     pub reconciliation: ReconciliationConfig,
     pub ibkr: IbkrConfig,
@@ -338,6 +379,7 @@ impl EngineConfig {
         Ok(EngineConfig {
             risk,
             execution: raw.execution,
+            costs: raw.costs,
             backpressure: raw.backpressure,
             reconciliation: raw.reconciliation,
             ibkr: raw.ibkr,

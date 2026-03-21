@@ -1,6 +1,12 @@
 # RT2: Bridge Health Monitor — every 15 min Mon-Fri during market hours (Telegram alert if unhealthy)
 */15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.bridge_health >> /var/log/bridge_health.log 2>&1
 
+# N10b: External Monitor — every 5 min Mon-Fri (deep health check: engine, disk, IBKR, Redis, cron)
+*/5 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.external_monitor --quiet >> /var/log/external_monitor.log 2>&1
+
+# N10b: Daily Health Report — 08:00 UTC Mon-Fri (Telegram summary)
+0 8 * * 1-5 cd /app && python3 -m python_brain.ouroboros.external_monitor --daily >> /var/log/external_monitor.log 2>&1
+
 # N10c: Log Rotation — 04:45 UTC daily (before nightly learning, keeps 7 days)
 45 4 * * * cd /app && python3 -m python_brain.ouroboros.log_rotate >> /var/log/log_rotate.log 2>&1
 
@@ -10,6 +16,15 @@
 
 # Ouroboros Config Writer — 04:51 UTC Mon-Fri (right after nightly_v6, writes dynamic_weights.toml)
 51 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.config_writer >> /var/log/config_writer.log 2>&1
+
+# N4b: Win/Loss Indicator Delta — 04:52 UTC Mon-Fri (after nightly_v6, feeds Win_Loss_Delta tab)
+52 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.win_loss_delta --push-sheets >> /var/log/win_loss_delta.log 2>&1
+
+# N6a: Claude Nightly Review — 04:53 UTC Mon-Fri (after nightly_v6 + config_writer + delta, read-only)
+53 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_review --send-telegram >> /var/log/claude_review.log 2>&1
+
+# N6b: Claude Morning Briefing — 07:45 UTC Mon-Fri (before European session, uses N6a output)
+45 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_briefing --send-telegram >> /var/log/claude_briefing.log 2>&1
 
 # Ouroboros v6.0 Backfill Simulator — 07:00 UTC daily Mon-Fri (pre-market learning)
 0 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.backfill_simulator >> /var/log/ouroboros_backfill.log 2>&1

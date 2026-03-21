@@ -89,18 +89,87 @@ TAB_DEFINITIONS: Dict[str, List[str]] = {
     ],
     # Phase H: Indicator intelligence tabs (populated by nightly indicator_intelligence.py)
     "Indicator_Stats": [
-        "Indicator", "Win_Mean", "Win_Median", "Win_Std",
-        "Loss_Mean", "Loss_Median", "Loss_Std", "Delta_Mean",
+        "Date", "Indicator", "Win_Count", "Win_Mean", "Win_Median", "Win_Std",
+        "Loss_Count", "Loss_Mean", "Loss_Median", "Loss_Std",
     ],
     "Regime_Performance": [
-        "Regime", "Trades", "Wins", "Win_Rate", "Avg_PnL",
+        "Date", "Regime", "Trades", "Wins", "Win_Rate", "Avg_PnL", "Total_PnL",
     ],
     "Session_Performance": [
-        "Session", "Trades", "Wins", "Win_Rate",
+        "Date", "Session", "Trades", "Wins", "Win_Rate", "Avg_PnL",
     ],
     "Learned_Rules": [
-        "Indicator", "Direction", "Threshold", "Win_Rate",
-        "Trades", "Lift_Pct", "Confidence_Score",
+        "Date", "Indicator", "Direction", "Threshold", "Trades",
+        "Win_Rate", "Lift_Pct", "Avg_PnL",
+    ],
+    # ---------------------------------------------------------------------------
+    # N4a: 12 new tabs (21-tab architecture)
+    # ---------------------------------------------------------------------------
+    # Tab 3: Full trade lifecycle with N2b enrichment + N1b taxonomy
+    "Closed_Trades": [
+        "Timestamp", "Symbol", "Entry_Price", "Exit_Price", "Qty",
+        "Gross_PnL", "Commission", "Net_PnL", "Trade_Class",
+        "Highest_Rung", "MAE", "MFE", "Spread_Entry_Pct", "Spread_Exit_Pct",
+        "Hold_Time_Min", "Session_Phase", "VWAP_Dist_Pct", "ATR_Pct",
+        "RVOL", "Hurst", "ADX", "Vol_Slope", "VIX",
+        "Regime", "Confidence", "Strategy", "Daily_Trade_Num",
+    ],
+    # Tab 4: Indicator values on winning trades only
+    "Win_Indicators": [
+        "Timestamp", "Symbol", "Net_PnL", "Confidence", "RVOL", "Hurst",
+        "ADX", "ATR_Pct", "Spread_Pct", "Vol_Slope", "Rung", "Hold_Min",
+    ],
+    # Tab 5: Indicator values on losing trades only
+    "Loss_Indicators": [
+        "Timestamp", "Symbol", "Net_PnL", "Confidence", "RVOL", "Hurst",
+        "ADX", "ATR_Pct", "Spread_Pct", "Vol_Slope", "Rung", "Hold_Min",
+    ],
+    # Tab 6: Win vs Loss indicator comparison (populated by N4b nightly)
+    "Win_Loss_Delta": [
+        "Date", "Indicator", "Win_Mean", "Loss_Mean", "Delta",
+        "Win_P25", "Loss_P25", "Predictive", "Suggested_Gate",
+    ],
+    # Tab 7: Every rejected signal with full gate context
+    "Rejected_Signals": [
+        "Timestamp", "Symbol", "Strategy", "Confidence", "Gate_Name",
+        "Gate_Reason", "Price", "Hurst", "ADX", "RVOL", "Vol_Slope",
+        "Spread_Pct",
+    ],
+    # Tab 8: Rejected signals that would have won (nightly MissedWinnerCandidate)
+    "Missed_Winners": [
+        "Timestamp", "Symbol", "Strategy", "Gate_Name", "Confidence",
+        "Price_At_Reject", "Peak_Price_After", "Hypothetical_PnL_Pct",
+        "Window_Min",
+    ],
+    # Tab 9: MAE/MFE per trade for execution quality analysis
+    "MAE_MFE": [
+        "Timestamp", "Symbol", "MAE", "MFE", "MAE_MFE_Ratio",
+        "MFE_At_Exit_Pct", "Left_On_Table_Pct", "Rung", "Net_PnL",
+        "Trade_Class", "Hold_Min",
+    ],
+    # Tab 13: Spread and cost attribution per trade
+    "Spread_Execution": [
+        "Timestamp", "Symbol", "Spread_Entry_Pct", "Spread_Exit_Pct",
+        "Total_Spread_Cost", "Commission", "Gross_PnL", "Net_PnL",
+        "Cost_Drag_Pct",
+    ],
+    # Tab 14: Per-class trade taxonomy statistics (nightly)
+    "Trade_Classes": [
+        "Date", "Class", "Count", "Wins", "Losses", "Win_Rate",
+        "Total_PnL", "Avg_PnL", "Avg_Hold_Min", "Avg_Rung",
+    ],
+    # Tab 19: Ticker scoreboard promote/hold/demote/kill (nightly)
+    "Ticker_Scoreboard": [
+        "Date", "Symbol", "Score", "Verdict", "Trades", "Win_Rate",
+        "Profit_Factor", "Avg_Rung", "Avg_Spread_Cost",
+    ],
+    # Tab 16: Ouroboros parameter evolution over time (nightly)
+    "Parameter_Evolution": [
+        "Date", "Parameter", "Value", "Previous_Value", "Change_Pct",
+    ],
+    # Tab 21: Configuration diff log (real-time from OuroborosChange + RungAdvanced)
+    "Config_Diff_Log": [
+        "Timestamp", "Event_Type", "Symbol", "Detail", "Old_Value", "New_Value",
     ],
 }
 
@@ -267,155 +336,252 @@ class SheetsClient:
 # Event -> Row mapping
 # ---------------------------------------------------------------------------
 
-def _route_event(event: dict) -> Optional[tuple]:
-    """Map a WAL event to (tab_name, row_data). Returns None if not routable.
+def _route_event(event: dict) -> List[tuple]:
+    """Map a WAL event to list of (tab_name, row_data) tuples.
+
+    N4a: A single event can now produce rows for multiple tabs.
+    E.g. PositionClosed -> Live_Trades + Closed_Trades + MAE_MFE + Spread_Execution + Win/Loss_Indicators.
 
     WAL event schema (from Rust engine):
       event_id, schema_version, event_time_ns, write_time_ns, checksum, payload
     Payload is a single-key dict: {"RoutedOrder": {...}}, {"PositionClosed": {...}}, etc.
     """
+    results: List[tuple] = []
     payload = event.get("payload", {})
     ts = _ns_to_iso(event.get("event_time_ns", 0))
 
     # --- RoutedOrder (entry) -> Live_Trades ---
-    # Engine uses side="Long"/"Short" for entries, side="Sell" for exit orders
     if "RoutedOrder" in payload:
         data = payload["RoutedOrder"]
         side = data.get("side", "")
         if side == "Sell":
-            return None  # Exit orders are captured by PositionClosed
+            return results  # Exit orders captured by PositionClosed
         symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
         row = [
             ts,
             symbol,
-            side,                              # "Long" or "Short"
+            side,
             int(data.get("qty", data.get("approved_size", 0))),
-            "",                                # Entry_Price (not in RoutedOrder)
-            "",                                # Exit_Price (filled on close)
+            "",                                # Entry_Price
+            "",                                # Exit_Price
             "",                                # PnL_GBP
             round(data.get("confidence", 0), 2),
             round(data.get("kelly_fraction", 0), 4),
             data.get("strategy", ""),
-            data.get("currency", "USD"),       # Exchange/currency
+            data.get("currency", "USD"),
             data.get("regime_at_entry", ""),
-            "",                                # Rung (filled on close)
+            "",                                # Rung
             "",                                # Duration_Min
-            "OPEN",                            # Unrealised_PnL (marks as open position)
+            "OPEN",
         ]
-        return ("Live_Trades", row)
+        results.append(("Live_Trades", row))
+        return results
 
-    # --- PositionClosed -> Live_Trades (exit row with full P&L) ---
+    # --- PositionClosed -> Live_Trades + Closed_Trades + MAE_MFE + Spread_Execution + Win/Loss_Indicators ---
     if "PositionClosed" in payload:
         data = payload["PositionClosed"]
         symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
-        # Calculate duration from entry/exit nanosecond timestamps
         entry_ns = data.get("entry_time_ns", 0)
         exit_ns = data.get("exit_time_ns", 0)
-        duration_min = ""
-        if entry_ns and exit_ns and exit_ns > entry_ns:
-            duration_min = round((exit_ns - entry_ns) / 60_000_000_000, 1)
+        hold_min = data.get("hold_time_mins", 0)
+        if not hold_min and entry_ns and exit_ns and exit_ns > entry_ns:
+            hold_min = round((exit_ns - entry_ns) / 60_000_000_000, 1)
         final_pnl = round(data.get("final_pnl", 0), 4)
-        row = [
+        gross_pnl = round(data.get("gross_pnl", final_pnl), 4)
+        commission = round(data.get("total_commission", 0), 4)
+        rung = data.get("highest_rung", 0)
+        mae = round(data.get("mae", 0), 4)
+        mfe = round(data.get("mfe", 0.0001), 4)
+        spread_entry = round(data.get("spread_at_entry_pct", 0), 4)
+        spread_exit = round(data.get("spread_at_exit_pct", 0), 4)
+        confidence = round(data.get("confidence", 0), 2)
+        regime = data.get("regime_at_entry", "")
+        strategy = data.get("strategy", "")
+        session_phase = data.get("entry_session_phase", "")
+        vwap_dist = round(data.get("vwap_dist_at_entry_pct", 0), 4)
+        atr_pct = round(data.get("atr_pct_at_entry", 0), 4)
+        rvol = round(data.get("entry_rvol", 0), 4)
+        hurst = round(data.get("entry_hurst", 0), 4)
+        adx = round(data.get("entry_adx", 0), 4)
+        vol_slope = round(data.get("vol_slope_at_entry", 0), 4)
+        vix = round(data.get("vix_at_entry", 0), 2)
+        entry_price = round(data.get("entry_price", 0), 4)
+        exit_price = round(data.get("exit_price", 0), 4)
+        qty = int(data.get("qty", 0))
+        daily_trade_num = data.get("daily_trade_number", "")
+        trade_class = data.get("trade_class", "")
+
+        # Classify trade if not already classified
+        if not trade_class:
+            try:
+                from python_brain.ouroboros.trade_taxonomy import classify_trade
+                trade_class = classify_trade(data)
+            except ImportError:
+                trade_class = "unclassified"
+
+        # 1. Live_Trades (existing)
+        results.append(("Live_Trades", [
+            ts, symbol, "Exit", qty, entry_price, exit_price, final_pnl,
+            confidence, "", strategy, "", regime, rung, hold_min,
+            f"CLOSED ({final_pnl:+.2f})",
+        ]))
+
+        # 2. Closed_Trades (full enriched lifecycle — N4a)
+        results.append(("Closed_Trades", [
+            ts, symbol, entry_price, exit_price, qty,
+            gross_pnl, commission, final_pnl, trade_class,
+            rung, mae, mfe, spread_entry, spread_exit,
+            hold_min, session_phase, vwap_dist, atr_pct,
+            rvol, hurst, adx, vol_slope, vix,
+            regime, confidence, strategy, daily_trade_num,
+        ]))
+
+        # 3. Win_Indicators or Loss_Indicators (N4a)
+        indicator_row = [
+            ts, symbol, final_pnl, confidence, rvol, hurst,
+            adx, atr_pct, spread_entry, vol_slope, rung, hold_min,
+        ]
+        if final_pnl > 0:
+            results.append(("Win_Indicators", indicator_row))
+        else:
+            results.append(("Loss_Indicators", indicator_row))
+
+        # 4. MAE_MFE (N4a)
+        mfe_abs = abs(mfe) if mfe else 0.0001
+        mae_abs = abs(mae) if mae else 0
+        mae_mfe_ratio = round(mae_abs / mfe_abs, 4) if mfe_abs > 0 else 0
+        # MFE at exit: what % of MFE was captured
+        mfe_at_exit_pct = round(final_pnl / mfe_abs * 100, 1) if mfe_abs > 0 and final_pnl > 0 else 0
+        left_on_table = round(max(0, (mfe_abs - max(final_pnl, 0)) / mfe_abs * 100), 1) if mfe_abs > 0 else 0
+        results.append(("MAE_MFE", [
+            ts, symbol, mae, mfe, mae_mfe_ratio,
+            mfe_at_exit_pct, left_on_table, rung, final_pnl,
+            trade_class, hold_min,
+        ]))
+
+        # 5. Spread_Execution (N4a)
+        position_value = max(entry_price * qty, 1.0)
+        total_spread_cost = round((spread_entry + spread_exit) / 100.0 * position_value, 4)
+        cost_drag_pct = round((commission + total_spread_cost) / max(abs(gross_pnl), 0.01) * 100, 1)
+        results.append(("Spread_Execution", [
+            ts, symbol, spread_entry, spread_exit,
+            total_spread_cost, commission, gross_pnl, final_pnl,
+            cost_drag_pct,
+        ]))
+
+        return results
+
+    # --- SignalRejected -> Rejected_Signals (N4a / N2a) ---
+    if "SignalRejected" in payload:
+        data = payload["SignalRejected"]
+        symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
+        results.append(("Rejected_Signals", [
             ts,
             symbol,
-            "Exit",
-            int(data.get("qty", 0)),
-            "",                                # Entry_Price (not available)
-            "",                                # Exit_Price (not available)
-            final_pnl,
+            data.get("strategy", ""),
             round(data.get("confidence", 0), 2),
-            "",                                # Kelly (from entry)
-            "",                                # Strategy
-            "",                                # Exchange
-            data.get("regime_at_entry", ""),
-            data.get("highest_rung", ""),
-            duration_min,
-            f"CLOSED ({final_pnl:+.2f})",     # Unrealised_PnL: shows final realised on close
-        ]
-        return ("Live_Trades", row)
+            data.get("gate_name", ""),
+            data.get("gate_reason", ""),
+            round(data.get("price_at_reject", 0), 4),
+            round(data.get("hurst", 0), 4),
+            round(data.get("adx", 0), 4),
+            round(data.get("rvol", 0), 4),
+            round(data.get("vol_slope", 0), 4),
+            round(data.get("spread_pct", 0), 4),
+        ]))
+        return results
 
-    # --- RiskStateChange -> System_Health tab (regime info) ---
+    # --- MissedWinnerCandidate -> Missed_Winners (N4a / N2c) ---
+    if "MissedWinnerCandidate" in payload:
+        data = payload["MissedWinnerCandidate"]
+        symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
+        results.append(("Missed_Winners", [
+            ts,
+            symbol,
+            data.get("strategy", ""),
+            data.get("gate_name", ""),
+            round(data.get("confidence", 0), 2),
+            round(data.get("price_at_reject", 0), 4),
+            round(data.get("peak_price_after", 0), 4),
+            round(data.get("hypothetical_pnl_pct", 0), 2),
+            data.get("window_min", ""),
+        ]))
+        return results
+
+    # --- RiskStateChange -> System_Health (existing) + Config_Diff_Log (N4a) ---
     if "RiskStateChange" in payload:
         data = payload["RiskStateChange"]
-        row = [
-            ts,
-            "",                                # Uptime_Hours
-            "",                                # Ticks_Received
-            "",                                # Positions_Open
-            "",                                # Equity_GBP
-            data.get("new_regime", data.get("regime", "")),
-            data.get("trading_mode", ""),
-            "",                                # WAL_Size_MB
-            "",                                # Memory_Usage_Pct
-        ]
-        return ("System_Health", row)
+        old_regime = data.get("old_regime", data.get("previous_regime", ""))
+        new_regime = data.get("new_regime", data.get("regime", ""))
+        results.append(("System_Health", [
+            ts, "", "", "", "", new_regime, data.get("trading_mode", ""), "", "",
+        ]))
+        results.append(("Config_Diff_Log", [
+            ts, "RiskStateChange", "", f"Regime: {old_regime} → {new_regime}",
+            old_regime, new_regime,
+        ]))
+        return results
 
-    # --- StateSnapshot -> System_Health ---
+    # --- StateSnapshot -> System_Health (existing) ---
     if "StateSnapshot" in payload:
         data = payload["StateSnapshot"]
-        # Parse portfolio_json for position count and unrealised P&L
         positions_open = 0
         unrealised_pnl = 0.0
         try:
             pj = json.loads(data.get("portfolio_json", "{}"))
             positions_open = pj.get("positions", 0)
             unrealised_pnl = pj.get("unrealized_pnl", 0.0)
-            # Also try alternative key names
             if unrealised_pnl == 0.0:
                 unrealised_pnl = pj.get("unrealised_pnl", 0.0)
             if unrealised_pnl == 0.0:
-                # Calculate from equity vs starting equity
                 equity = data.get("equity", 0)
-                high_water = pj.get("high_water", 10000.0)
-                starting = 10000.0  # Known starting equity
+                starting = 10000.0
                 if equity > 0:
                     unrealised_pnl = round(equity - starting, 2)
         except (json.JSONDecodeError, TypeError):
             pass
-        health_row = [
-            ts,
-            "",                                # Uptime_Hours
-            "",                                # Ticks_Received
-            positions_open,
+        results.append(("System_Health", [
+            ts, "", "", positions_open,
             round(data.get("equity", 0), 2),
-            round(unrealised_pnl, 2),          # Unrealised_PnL (NEW)
-            "",                                # Risk_Regime
-            "simulation",                      # Trading_Mode
-            "",                                # WAL_Size_MB
-            "",                                # Memory_Usage_Pct
-        ]
-        return ("System_Health", health_row)
+            round(unrealised_pnl, 2), "", "simulation", "", "",
+        ]))
+        return results
 
     # --- SystemReady -> System_Health heartbeat ---
     if "SystemReady" in payload:
         data = payload["SystemReady"]
-        row = [
-            ts,
-            0,                                 # Uptime_Hours (just started)
-            0,                                 # Ticks_Received
-            data.get("positions_reconciled", 0),
-            "",                                # Equity_GBP
-            0,                                 # Unrealised_PnL (NEW)
-            "INIT",
-            "simulation",
-            0,                                 # WAL_Size_MB
-            0,                                 # Memory_Usage_Pct
-        ]
-        return ("System_Health", row)
+        results.append(("System_Health", [
+            ts, 0, 0, data.get("positions_reconciled", 0),
+            "", 0, "INIT", "simulation", 0, 0,
+        ]))
+        return results
 
-    # --- OuroborosChange -> Ouroboros_Changes tab ---
+    # --- OuroborosChange -> Ouroboros_Changes + Config_Diff_Log (N4a) ---
     if "OuroborosChange" in payload:
         data = payload["OuroborosChange"]
-        row = [
-            ts,
-            data.get("parameter", ""),
-            str(data.get("old_value", "")),
-            str(data.get("new_value", "")),
-            data.get("reason", ""),
-        ]
-        return ("Ouroboros_Changes", row)
+        param = data.get("parameter", "")
+        old_val = str(data.get("old_value", ""))
+        new_val = str(data.get("new_value", ""))
+        reason = data.get("reason", "")
+        results.append(("Ouroboros_Changes", [ts, param, old_val, new_val, reason]))
+        results.append(("Config_Diff_Log", [
+            ts, "OuroborosChange", "", f"{param}: {reason}", old_val, new_val,
+        ]))
+        return results
 
-    return None
+    # --- RungAdvanced -> Config_Diff_Log (N4a) ---
+    if "RungAdvanced" in payload:
+        data = payload["RungAdvanced"]
+        symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
+        old_rung = data.get("old_rung", data.get("previous_rung", ""))
+        new_rung = data.get("new_rung", data.get("rung", ""))
+        results.append(("Config_Diff_Log", [
+            ts, "RungAdvanced", symbol, f"Rung {old_rung} → {new_rung}",
+            str(old_rung), str(new_rung),
+        ]))
+        return results
+
+    return results
 
 
 def _route_snapshot_positions(event: dict) -> Optional[List[List[Any]]]:
@@ -649,10 +815,9 @@ class SheetsSyncClient:
                     if self._dedup:
                         self._dedup.mark_seen(h)
 
-                    # Route to tab
-                    result = _route_event(event)
-                    if result:
-                        tab_name, row = result
+                    # Route to tab(s) — N4a: one event can produce multiple rows
+                    routed = _route_event(event)
+                    for tab_name, row in routed:
                         batches.setdefault(tab_name, []).append(row)
 
                     # Check for position snapshot (clear-and-rewrite)
@@ -754,16 +919,18 @@ class SheetsSyncClient:
         if self._dedup:
             self._dedup.mark_seen(h)
 
-        result = _route_event(event)
-        if result:
-            tab_name, row = result
-            return self._sheets.append_rows(tab_name, [row])
+        wrote_any = False
+        routed = _route_event(event)
+        for tab_name, row in routed:
+            if self._sheets.append_rows(tab_name, [row]):
+                wrote_any = True
 
         pos_rows = _route_snapshot_positions(event)
         if pos_rows is not None:
-            return self._sheets.clear_and_write("Open_Positions", pos_rows)
+            if self._sheets.clear_and_write("Open_Positions", pos_rows):
+                wrote_any = True
 
-        return False
+        return wrote_any
 
 
 # ---------------------------------------------------------------------------
@@ -796,9 +963,8 @@ def _drain_queue(redis_url: str) -> int:
                 continue
             dedup.mark_seen(h)
 
-            result = _route_event(event)
-            if result:
-                tab_name, row = result
+            routed = _route_event(event)
+            for tab_name, row in routed:
                 batches.setdefault(tab_name, []).append(row)
 
             pos_rows = _route_snapshot_positions(event)
@@ -854,11 +1020,11 @@ def _replay_wal_file(wal_path: Path, redis_url: str) -> int:
             if dedup.is_seen(h):
                 continue
 
-            result = _route_event(event)
-            if result:
-                tab_name, row = result
-                batches.setdefault(tab_name, []).append(row)
+            routed = _route_event(event)
+            if routed:
                 hashes_to_mark.append(h)
+            for tab_name, row in routed:
+                batches.setdefault(tab_name, []).append(row)
 
             pos_rows = _route_snapshot_positions(event)
             if pos_rows is not None:
@@ -888,6 +1054,141 @@ def _replay_wal_file(wal_path: Path, redis_url: str) -> int:
         dedup.mark_seen(h)
 
     return total
+
+
+# ---------------------------------------------------------------------------
+# N4a: Nightly data push functions (called by nightly_v6.py)
+# ---------------------------------------------------------------------------
+
+def push_nightly_trade_classes(class_report: Dict[str, Any], date_str: str = "") -> bool:
+    """Push trade class statistics to Trade_Classes tab (nightly).
+
+    Args:
+        class_report: Dict from trade_taxonomy.build_class_report(),
+                      keyed by trade_class -> TradeClassStats or dict.
+        date_str: Date string (YYYY-MM-DD). Defaults to today UTC.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+    for tc, stats in sorted(class_report.items()):
+        if hasattr(stats, "count"):
+            # TradeClassStats dataclass
+            rows.append([
+                date_str, tc, stats.count, stats.wins, stats.losses,
+                round(stats.win_rate, 4), round(stats.total_pnl, 4),
+                round(stats.avg_pnl, 4), round(stats.avg_hold_mins, 1),
+                round(stats.avg_rung, 2),
+            ])
+        else:
+            # Dict format
+            rows.append([
+                date_str, tc, stats.get("count", 0), stats.get("wins", 0),
+                stats.get("losses", 0), round(stats.get("win_rate", 0), 4),
+                round(stats.get("total_pnl", 0), 4), round(stats.get("avg_pnl", 0), 4),
+                round(stats.get("avg_hold_mins", 0), 1), round(stats.get("avg_rung", 0), 2),
+            ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Trade_Classes", rows)
+
+
+def push_nightly_ticker_scoreboard(scoreboard: List[Dict[str, Any]], date_str: str = "") -> bool:
+    """Push ticker scoreboard to Ticker_Scoreboard tab (nightly).
+
+    Args:
+        scoreboard: List of dicts with: symbol, score, verdict, trades, win_rate, etc.
+        date_str: Date string. Defaults to today UTC.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+    for entry in scoreboard:
+        rows.append([
+            date_str,
+            entry.get("symbol", ""),
+            round(entry.get("score", 0), 1),
+            entry.get("verdict", ""),
+            entry.get("trades", 0),
+            round(entry.get("win_rate", 0), 4),
+            round(entry.get("profit_factor", 0), 2),
+            round(entry.get("avg_rung", 0), 2),
+            round(entry.get("avg_spread_cost", 0), 4),
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Ticker_Scoreboard", rows)
+
+
+def push_nightly_parameter_evolution(params: List[Dict[str, Any]], date_str: str = "") -> bool:
+    """Push parameter evolution to Parameter_Evolution tab (nightly).
+
+    Args:
+        params: List of dicts with: parameter, value, previous_value, change_pct.
+        date_str: Date string. Defaults to today UTC.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+    for p in params:
+        rows.append([
+            date_str,
+            p.get("parameter", ""),
+            p.get("value", ""),
+            p.get("previous_value", ""),
+            round(p.get("change_pct", 0), 2),
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Parameter_Evolution", rows)
+
+
+def push_indicator_intelligence_to_sheets(intel_result) -> bool:
+    """Push indicator intelligence analysis results to multiple Sheets tabs.
+
+    Args:
+        intel_result: IndicatorIntelligence instance with to_sheets_rows() method.
+    """
+    try:
+        sheet_rows = intel_result.to_sheets_rows()
+    except Exception as e:
+        log.error("Failed to convert indicator intelligence to sheets rows: %s", e)
+        return False
+
+    success = True
+    for tab_name, rows in sheet_rows.items():
+        if rows:
+            if not _push_nightly_rows(tab_name, rows):
+                success = False
+    return success
+
+
+def _push_nightly_rows(tab_name: str, rows: List[List[Any]]) -> bool:
+    """Helper: push rows to a Sheets tab using a fresh SheetsClient.
+
+    Used by nightly push functions. Opens a new connection each time
+    (nightly jobs are infrequent, no need for persistent connection).
+    """
+    sa_path = _find_service_account_path()
+    if sa_path is None:
+        log.warning("Sheets nightly push skipped: no service account found")
+        return False
+
+    try:
+        sheets = SheetsClient(sa_path)
+        ok = sheets.append_rows(tab_name, rows)
+        if ok:
+            log.info("Pushed %d rows to %s", len(rows), tab_name)
+        return ok
+    except Exception as e:
+        log.error("Failed to push nightly data to %s: %s", tab_name, e)
+        return False
 
 
 def main():

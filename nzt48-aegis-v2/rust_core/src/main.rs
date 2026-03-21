@@ -37,6 +37,10 @@ const LOOP_INTERVAL_MS: u64 = 100;
 /// State hash interval in nanoseconds (1 hour).
 const STATE_HASH_INTERVAL_NS: u64 = 3_600_000_000_000;
 
+/// N10a: Kill switch check interval in nanoseconds (1 second).
+/// Checks for /app/data/KILL and /app/data/PAUSE files.
+const KILL_SWITCH_CHECK_NS: u64 = 1_000_000_000;
+
 fn main() {
     eprintln!("╔══════════════════════════════════════════╗");
     eprintln!("║  AEGIS V2 — Paper Engine                 ║");
@@ -461,11 +465,57 @@ fn main() {
     let mut last_regime = engine.arbiter.regime;
     let mut last_reconnect_ns: u64 = 0;
     let reconnect_interval_ns: u64 = 60_000_000_000; // 60s between reconnect attempts
+    let mut last_kill_check_ns: u64 = 0;
+    let mut paused = false;
+
+    // N10a: Data directory for kill switch files
+    let data_dir = std::path::PathBuf::from(
+        std::env::var("AEGIS_DATA_DIR").unwrap_or_else(|_| "/app/data".to_string()),
+    );
+    let kill_file = data_dir.join("KILL");
+    let pause_file = data_dir.join("PAUSE");
 
     while running.load(std::sync::atomic::Ordering::SeqCst) {
         let loop_start = now_ns();
         engine.now_ns = loop_start;
         engine.broker.set_time_ns(loop_start);
+
+        // N10a: Kill switch — check for KILL/PAUSE files (1-second interval)
+        if loop_start - last_kill_check_ns > KILL_SWITCH_CHECK_NS {
+            last_kill_check_ns = loop_start;
+
+            // KILL file: immediate graceful shutdown
+            if kill_file.exists() {
+                eprintln!("N10a KILL SWITCH: /app/data/KILL detected — initiating graceful shutdown");
+                // Remove the file so next boot doesn't immediately kill again
+                let _ = std::fs::remove_file(&kill_file);
+                running.store(false, Ordering::SeqCst);
+                continue;
+            }
+
+            // PAUSE file: freeze signal generation (keep market data flowing)
+            let was_paused = paused;
+            paused = pause_file.exists();
+            if paused && !was_paused {
+                eprintln!("N10a PAUSE: /app/data/PAUSE detected — signal generation frozen (market data continues)");
+            } else if !paused && was_paused {
+                eprintln!("N10a RESUME: /app/data/PAUSE removed — signal generation resumed");
+            }
+        }
+
+        // N10a: When paused, skip signal processing but keep market data flowing
+        if paused {
+            engine.broker.poll_ticks();
+            let _ticks: Vec<MarketTick> = engine.broker.drain_ticks();
+            let _ = engine.broker.heartbeat();
+            let elapsed_ms = (now_ns() - loop_start) / 1_000_000;
+            if elapsed_ms < LOOP_INTERVAL_MS {
+                std::thread::sleep(std::time::Duration::from_millis(
+                    LOOP_INTERVAL_MS - elapsed_ms,
+                ));
+            }
+            continue;
+        }
 
         // Periodic broker reconnection (if not connected at startup)
         if !broker_connected && loop_start - last_reconnect_ns > reconnect_interval_ns {

@@ -21,6 +21,17 @@ python3 -m python_brain.ouroboros.wal_watcher \
     --wal-dir /app/events \
     --config-dir /app/config &
 
+# N10a: Start kill switch Telegram listener (remote control via /kill, /pause, /resume, /status)
+if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+    echo "Starting kill switch listener (Telegram remote control)..."
+    python3 -m python_brain.ouroboros.kill_switch --listen &
+else
+    echo "Kill switch listener skipped (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set)"
+fi
+
+# N10a: Clean up stale KILL/PAUSE files from previous runs
+rm -f /app/data/KILL /app/data/PAUSE
+
 echo "Starting AEGIS V2 engine..."
 exec aegis --config-dir /app/config --wal-dir /app/events \
     --ibkr-host "$IBKR_HOST" --ibkr-port "$IBKR_PORT" "$@"

@@ -176,6 +176,13 @@ impl ExitEngine {
         )
     }
 
+    /// Q-051: Construct with round-trip fee from unified cost config.
+    pub fn with_costs(round_trip_fee_pct: f64) -> Self {
+        let mut strategy = ChandelierStrategy::default();
+        strategy.round_trip_fee_pct = round_trip_fee_pct;
+        Self::new(ExitConfig::default(), Box::new(strategy))
+    }
+
     /// P4-C: Construct ExitEngine with InfiniteChandelier (8 adaptive multipliers).
     pub fn with_infinite_chandelier() -> Self {
         let config = ExitConfig {
