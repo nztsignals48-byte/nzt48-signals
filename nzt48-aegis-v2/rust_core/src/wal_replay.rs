@@ -310,7 +310,9 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
             // N2a/N2c: Signal analysis events — no state to restore during replay.
             // These are consumed by nightly analysis (Python), not the engine.
             | WalPayload::SignalRejected { .. }
-            | WalPayload::MissedWinnerCandidate { .. } => {}
+            | WalPayload::MissedWinnerCandidate { .. }
+            // P2-3.6: Signal funnel events — no state to restore during replay.
+            | WalPayload::SignalGenerated { .. } => {}
         }
     }
 

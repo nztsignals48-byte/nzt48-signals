@@ -1357,6 +1357,14 @@ impl BrokerAdapter for IbkrBroker {
     }
 }
 
+/// P2-3.9: Ensure IBKR connection is cleanly closed when broker is dropped.
+impl Drop for IbkrBroker {
+    fn drop(&mut self) {
+        eprintln!("IbkrBroker: Drop called — disconnecting from IBKR");
+        self.disconnect();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

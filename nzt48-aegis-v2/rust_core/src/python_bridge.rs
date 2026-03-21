@@ -194,6 +194,8 @@ pub struct PythonBridge {
     pub consecutive_errors: u64,
     /// P0-1.2: Consecutive timeout counter for bridge restart decision.
     pub consecutive_timeouts: u32,
+    /// P2-3.5: Consecutive ticks where Python returned 0 signals (crash gap detection).
+    pub consecutive_empty: u32,
 }
 
 impl PythonBridge {
@@ -244,6 +246,7 @@ impl PythonBridge {
             leverage_map: HashMap::new(),
             consecutive_errors: 0,
             consecutive_timeouts: 0,
+            consecutive_empty: 0,
         })
     }
 
@@ -370,9 +373,18 @@ impl PythonBridge {
 
         if resp_type == "signal" {
             self.consecutive_errors = 0;
+            self.consecutive_empty = 0; // P2-3.5: Reset on signal
         }
 
         if resp_type != "signal" {
+            // P2-3.5: Track consecutive empty (no-signal) responses for crash gap detection.
+            self.consecutive_empty += 1;
+            if self.consecutive_empty >= 10 && self.consecutive_empty % 10 == 0 {
+                eprintln!(
+                    "CRITICAL: Python bridge returned 0 signals for {} consecutive ticks — possible crash",
+                    self.consecutive_empty
+                );
+            }
             return None;
         }
 

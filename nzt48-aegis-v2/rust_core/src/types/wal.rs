@@ -315,6 +315,20 @@ pub enum WalPayload {
     KellyRampAdvance {
         count: u64,
     },
+    /// P2-3.6: Every generated signal (including approved ones) for full funnel analysis.
+    SignalGenerated {
+        ticker_id: u32,
+        symbol: String,
+        strategy: String,
+        confidence: f64,
+        direction: String,
+        /// Whether this signal was approved by risk arbiter.
+        #[serde(default)]
+        approved: bool,
+        /// Veto reason if rejected (empty if approved).
+        #[serde(default)]
+        veto_reason: String,
+    },
 }
 
 // Suppress unused warning — WalEventType is part of the data contract

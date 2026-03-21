@@ -8,6 +8,15 @@ use crate::sector_rotation::sector_for_ticker;
 use crate::types::{Direction, RiskDecision, RiskRegime, TickerId, VetoReason};
 use std::collections::HashMap;
 
+/// P2-3.18: Promoted constants for compiler optimization.
+const KELLY_RAMP_TARGET: u32 = 250;
+const VELOCITY_WINDOW_5MIN_NS: u64 = 300_000_000_000;
+const SYSTEM_VELOCITY_MAX: usize = 3;
+const VIX_HIGH_ENTER: f64 = 25.0;
+const VIX_HIGH_EXIT: f64 = 22.0;
+const VIX_EXTREME_ENTER: f64 = 35.0;
+const VIX_EXTREME_EXIT: f64 = 30.0;
+
 /// Context provided by the caller for each evaluation.
 #[derive(Clone, Debug)]
 pub struct EvalContext {
@@ -94,6 +103,8 @@ pub struct RiskArbiter {
     pub kelly_fractions: HashMap<String, f64>,
     /// Simulation mode: relaxes cash buffer & portfolio heat checks for data collection.
     pub simulation_mode: bool,
+    /// P2-3.3: When true AND simulation_mode=true, enforce live risk gates anyway.
+    pub paper_uses_live_gates: bool,
     /// Ouroboros ticker blacklist: symbols with WR < 30% over 10+ trades.
     pub ticker_blacklist: Vec<String>,
     /// P1-2.7: VIX hysteresis state (prevents flip-flop at boundaries).
@@ -112,6 +123,7 @@ impl RiskArbiter {
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
             simulation_mode: false,
+            paper_uses_live_gates: false,
             ticker_blacklist: Vec::new(),
             vix_high: false,
             vix_extreme: false,
@@ -131,6 +143,8 @@ impl RiskArbiter {
         ctx: &EvalContext,
     ) -> RiskDecision {
         let ts = ctx.now_ns;
+        // P2-3.3: Enforce live gates even in paper mode when paper_uses_live_gates=true.
+        let enforce_live_gates = !self.simulation_mode || self.paper_uses_live_gates;
 
         // CHECK 1: ISA Safety — side == Short → HALT + REJECT (P0)
         if intent_side == Direction::Short {
@@ -194,7 +208,7 @@ impl RiskArbiter {
 
         // CHECK 11: Time-of-Day Cutoff — after 15:45 London (H35)
         // In simulation mode, skip time cutoff to collect data across all trading hours.
-        if !self.simulation_mode && ctx.time_secs >= self.config.entry_cutoff_secs {
+        if enforce_live_gates && ctx.time_secs >= self.config.entry_cutoff_secs {
             return self.reject(VetoReason::TooLateInSession, ts);
         }
 
@@ -250,19 +264,19 @@ impl RiskArbiter {
         // CHECK 14: Cash Buffer (H31)
         // In simulation mode, skip cash buffer to allow maximum data collection.
         // With £10K equity and 20 max positions, trades fill up cash fast.
-        if !self.simulation_mode && portfolio.cash_buffer_pct() < self.config.cash_buffer_pct {
+        if enforce_live_gates && portfolio.cash_buffer_pct() < self.config.cash_buffer_pct {
             return self.reject(VetoReason::CashBufferInsufficient, ts);
         }
 
         // CHECK 15: Portfolio Heat
         // In simulation mode, skip portfolio heat cap for broad evidence gathering.
-        if !self.simulation_mode && portfolio.portfolio_heat_pct() >= self.config.portfolio_heat_limit_pct {
+        if enforce_live_gates && portfolio.portfolio_heat_pct() >= self.config.portfolio_heat_limit_pct {
             return self.reject(VetoReason::PortfolioHeatExceeded, ts);
         }
 
         // CHECK 16: Sector Heat (H30)
         // In simulation mode, skip sector heat to allow maximum data collection across all tickers.
-        if !self.simulation_mode
+        if enforce_live_gates
             && portfolio.sector_heat_pct(intent_ticker) >= self.config.sector_heat_cap_pct
         {
             let heat = portfolio.sector_heat_pct(intent_ticker);
@@ -279,14 +293,14 @@ impl RiskArbiter {
         // CHECK 17: ISA Annual Limit
         // In simulation mode, skip ISA limit to allow unlimited data collection.
         // Per UNLIMITED SIMULATION BUDGET directive: sim needs maximum trade variety.
-        if !self.simulation_mode && portfolio.isa_year_invested >= self.config.isa_annual_limit_gbp {
+        if enforce_live_gates && portfolio.isa_year_invested >= self.config.isa_annual_limit_gbp {
             return self.reject(VetoReason::IsaAnnualLimitExceeded, ts);
         }
 
         // CHECK 18: Daily Drawdown — >2% from high-water → FLATTEN (H29)
         // In simulation mode, skip drawdown circuit breaker. Sim uses infinite budget;
         // FLATTEN would halt all data collection for the rest of the session.
-        if !self.simulation_mode && portfolio.daily_drawdown_pct() > self.config.daily_drawdown_pct {
+        if enforce_live_gates && portfolio.daily_drawdown_pct() > self.config.daily_drawdown_pct {
             self.regime = RiskRegime::Flatten;
             return self.reject(VetoReason::DailyDrawdownBreached, ts);
         }
@@ -302,11 +316,10 @@ impl RiskArbiter {
             return self.reject(VetoReason::VelocityCheckTriggered, ts);
         }
 
-        // CHECK 19b: System-wide velocity (P1-2.5) — max 3 entries per 5-minute window across ALL tickers.
-        let system_velocity_window_ns: u64 = 300_000_000_000; // 5 minutes
-        let system_cutoff = ts.saturating_sub(system_velocity_window_ns);
+        // CHECK 19b: System-wide velocity (P1-2.5) — max SYSTEM_VELOCITY_MAX entries per 5-minute window across ALL tickers.
+        let system_cutoff = ts.saturating_sub(VELOCITY_WINDOW_5MIN_NS);
         let system_recent = self.velocity_log.iter().filter(|(_, t)| *t >= system_cutoff).count();
-        if system_recent >= 3 {
+        if system_recent >= SYSTEM_VELOCITY_MAX {
             return self.reject(VetoReason::VelocityCheckTriggered, ts);
         }
 
@@ -389,8 +402,8 @@ impl RiskArbiter {
         }
 
         // All checks passed. Calculate adjusted size.
-        // SC-13: Kelly scaling ramp — max(0.1, min(1.0, trades/250))
-        let kelly_ramp = (self.config.kelly_ramp_trades as f64 / 250.0).clamp(0.1, 1.0);
+        // SC-13: Kelly scaling ramp — max(0.1, min(1.0, trades/KELLY_RAMP_TARGET))
+        let kelly_ramp = (self.config.kelly_ramp_trades as f64 / KELLY_RAMP_TARGET as f64).clamp(0.1, 1.0);
         let ramped_kelly = effective_kelly * kelly_ramp;
         let size = ramped_kelly * portfolio.equity;
         // Ouroboros-calibrated regime scaling (fall back to hardcoded defaults).
@@ -409,8 +422,8 @@ impl RiskArbiter {
         );
 
         // SC-05: Minimum entry size gate.
-        // Suspended during Kelly ramp when validated_trades < 250.
-        if self.config.kelly_ramp_trades >= 250 && adjusted_size < self.config.minimum_entry_gbp {
+        // Suspended during Kelly ramp when validated_trades < KELLY_RAMP_TARGET.
+        if self.config.kelly_ramp_trades >= KELLY_RAMP_TARGET && adjusted_size < self.config.minimum_entry_gbp {
             return self.reject(
                 VetoReason::BelowMinimumEntrySize {
                     size_gbp: adjusted_size as u32,
@@ -459,6 +472,8 @@ impl RiskArbiter {
         }
     }
 
+    #[cold]
+    #[inline(never)]
     fn reject(&self, reason: VetoReason, timestamp_ns: u64) -> RiskDecision {
         RiskDecision {
             decision_timestamp_ns: timestamp_ns,
@@ -484,17 +499,17 @@ impl RiskArbiter {
         let vix = ctx.macro_indicator.vix;
 
         // P1-2.7: VIX hysteresis deadband — prevents flip-flopping at VIX boundaries.
-        // Enter high: VIX >= 25, exit high: VIX < 22 (3-point deadband)
-        // Enter extreme: VIX >= 35, exit extreme: VIX < 30 (5-point deadband)
-        if vix >= 35.0 {
+        // Enter high: VIX >= VIX_HIGH_ENTER, exit high: VIX < VIX_HIGH_EXIT (3-point deadband)
+        // Enter extreme: VIX >= VIX_EXTREME_ENTER, exit extreme: VIX < VIX_EXTREME_EXIT (5-point deadband)
+        if vix >= VIX_EXTREME_ENTER {
             self.vix_extreme = true;
             self.vix_high = true;
-        } else if vix < 30.0 {
+        } else if vix < VIX_EXTREME_EXIT {
             self.vix_extreme = false;
         }
-        if vix >= 25.0 {
+        if vix >= VIX_HIGH_ENTER {
             self.vix_high = true;
-        } else if vix < 22.0 {
+        } else if vix < VIX_HIGH_EXIT {
             self.vix_high = false;
         }
 

@@ -444,6 +444,8 @@ pub enum WalEventType {
     SignalRejected,
     /// N2c: Post-hoc missed-winner candidate (written by nightly analysis).
     MissedWinnerCandidate,
+    /// P2-3.6: Every generated signal for full funnel analysis.
+    SignalGenerated,
 }
 
 #[cfg(test)]

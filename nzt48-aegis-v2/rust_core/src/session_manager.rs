@@ -20,20 +20,26 @@ pub enum SessionMode {
     /// Overnight carry management (positions held during Dark hours).
     Carry,
     // Legacy aliases — kept for backwards compatibility during transition.
-    // All map to Active internally.
-    /// Legacy: Asian session (now maps to Active).
+    // All map to Active internally. Use Dark/Active/Carry instead.
+    /// Legacy: Asian session (now maps to Active). Use `Active` instead.
+    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
     ModeA,
-    /// Legacy: European session (now maps to Active).
+    /// Legacy: European session (now maps to Active). Use `Active` instead.
+    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
     ModeB,
-    /// Legacy: US overlap (now maps to Active).
+    /// Legacy: US overlap (now maps to Active). Use `Active` instead.
+    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
     ModeBPlus,
-    /// Legacy: US-only (now maps to Active).
+    /// Legacy: US-only (now maps to Active). Use `Active` instead.
+    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
     ModeC,
-    /// Legacy: Auction (now maps to Active).
+    /// Legacy: Auction (now maps to Active). Use `Active` instead.
+    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
     Auction,
 }
 
 impl std::fmt::Display for SessionMode {
+    #[allow(deprecated)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionMode::Dark => write!(f, "DARK"),
@@ -143,6 +149,7 @@ impl SessionManager {
     }
 
     /// Whether new entries are allowed in the current mode.
+    #[allow(deprecated)]
     pub fn entries_allowed(&self) -> bool {
         matches!(self.current_mode, SessionMode::Active
             | SessionMode::ModeA | SessionMode::ModeB
@@ -151,6 +158,7 @@ impl SessionManager {
     }
 
     /// Whether scanning is active in the current mode.
+    #[allow(deprecated)]
     pub fn scanning_active(&self) -> bool {
         matches!(self.current_mode, SessionMode::Active
             | SessionMode::ModeA | SessionMode::ModeB

@@ -30,6 +30,7 @@ COPY python_brain/ python_brain/
 COPY ouroboros/ ouroboros/
 
 # Build aegis binary (release) — build from workspace root
+ENV RUSTFLAGS="-C target-cpu=icelake-server"
 RUN cargo build --release --bin aegis 2>&1
 RUN cp target/release/aegis /usr/local/bin/aegis && strip /usr/local/bin/aegis
 

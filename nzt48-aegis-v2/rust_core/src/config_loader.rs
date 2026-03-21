@@ -229,6 +229,10 @@ pub struct CrucibleConfig {
     pub max_positions_override: u32,
     pub paper_mode: bool,
     pub starting_equity_gbp: f64,
+    /// P2-3.3: When true, paper mode uses live risk gates (max_positions=3, heat=10%, etc.)
+    /// instead of relaxed paper limits. Enables realistic validation before going live.
+    #[serde(default)]
+    pub paper_uses_live_gates: bool,
 }
 
 // ── N8a: Live config overlay structs (all fields optional) ──

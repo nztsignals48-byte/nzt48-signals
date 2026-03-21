@@ -6,6 +6,9 @@
 //!
 //! IS_LIVE = false (H20). This binary is for paper trading only.
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -374,6 +377,7 @@ fn main() {
 
     // Propagate simulation mode to risk arbiter (relaxes cash buffer check)
     engine.arbiter.simulation_mode = engine.simulation_mode;
+    engine.arbiter.paper_uses_live_gates = engine.config.crucible.paper_uses_live_gates;
 
     // Apply Ouroboros DynamicWeights to engine subsystems
     engine.exit_engine.strategy_mut().set_trail_atr(dw.chandelier_atr_mult);

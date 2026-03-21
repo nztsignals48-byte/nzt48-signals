@@ -53,6 +53,11 @@ use crate::universe::{RouteResult, Universe, UniverseClass, UniverseConfig};
 use crate::wal_writer::{WalWriter, make_wal_event};
 use std::collections::{HashMap, VecDeque};
 
+/// P2-3.18: Promoted constants for compiler optimization.
+const EXIT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
+const HALT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
+const STALE_TICK_MS: u64 = 500; // 500ms stale threshold
+
 /// Errors from engine operations.
 #[derive(Debug)]
 pub enum EngineError {
@@ -436,6 +441,9 @@ pub struct Engine<B: BrokerAdapter> {
     pub simulation_mode: bool,
     /// Simulated trades log: records all simulated fills for reporting/PDF.
     pub simulated_trades: Vec<SimulatedTrade>,
+    /// P2-3.8: Nanosecond timestamp when broker disconnect was first detected.
+    /// Reset to 0 on reconnect. Used for emergency halt escalation.
+    pub broker_disconnect_ns: u64,
 }
 
 /// A simulated trade record for logging and daily PDF reporting.
@@ -578,6 +586,7 @@ impl<B: BrokerAdapter> Engine<B> {
             ticker_currencies: HashMap::new(),
             simulation_mode: is_simulation,
             simulated_trades: Vec::new(),
+            broker_disconnect_ns: 0,
         }
     }
 
@@ -918,8 +927,7 @@ impl<B: BrokerAdapter> Engine<B> {
         // If ticker was in halt set and we receive a tick, it's resuming.
         // Set 5-minute cooldown to avoid wild price-discovery volatility.
         if self.halted_tickers.remove(&tid) {
-            let halt_cooldown_ns = 5 * 60 * 1_000_000_000u64;
-            self.gap_cooldowns.insert(tid, self.now_ns + halt_cooldown_ns);
+            self.gap_cooldowns.insert(tid, self.now_ns + HALT_COOLDOWN_NS);
             eprintln!("HALT_LIFT: ticker={} resumed trading — 5-min cooldown set", tid.0);
         }
 
@@ -1256,10 +1264,9 @@ impl<B: BrokerAdapter> Engine<B> {
                     self.portfolio.remove_position(tid);
                     self.positions.remove(&tid);
                     // AUDIT-FIX: Post-exit cooldown — prevent immediate re-entry spam.
-                    // After a stop-out, wait 5 minutes before re-entering same ticker.
+                    // After a stop-out, wait EXIT_COOLDOWN_NS before re-entering same ticker.
                     // Reuses gap_cooldowns HashMap (already per-ticker + checked before signal).
-                    let exit_cooldown_ns = 5 * 60 * 1_000_000_000u64; // 5 minutes
-                    self.gap_cooldowns.insert(tid, self.now_ns + exit_cooldown_ns);
+                    self.gap_cooldowns.insert(tid, self.now_ns + EXIT_COOLDOWN_NS);
 
                     if self.simulation_mode {
                         let exit_gbp = tick.bid;
@@ -1344,12 +1351,12 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
-        // P3-C: RotationScanner for sector rotation signal detection during Mode B
-        if matches!(self.current_mode, TradingMode::ModeB) && self.universe.is_apex(tid) {
-            // RotationScanner monitors sector relative strength during European session
-            // Called on 60s snapshots (from apex_candles completion)
-            // This is a placeholder; actual snapshot feeding is in Phase 3
-        }
+        // P3-3.2 AUDIT: RotationScanner — instantiated but NEVER CALLED (dead code).
+        // HotScanner — called in process_apex_tick() but output score discarded (logged only).
+        // RegimeDetector — called at line ~1004, only has_jump used; hurst_regime+confidence unused.
+        // scanner_score — wired from sig.confidence in EvalContext (item 3.4).
+        // TODO(P3+): Wire HotScanner score into scanner_score for Apex tickers.
+        // TODO(P3+): Feed RotationScanner with sector-level snapshots during ModeB.
 
         // P1-2.19: Record data age for telemetry.
         {
@@ -1367,7 +1374,7 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // P0-1.7: Stale tick filter — skip ENTRY signal generation for old ticks.
         // Still updates bar_history + exit tracking (already processed above).
-        // 500ms threshold (not 200ms like HFT) — IBKR delayed data can be inherently stale.
+        // STALE_TICK_MS threshold (not 200ms like HFT) — IBKR delayed data can be inherently stale.
         {
             let tick_age_ms = if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
                 (self.now_ns - tick.recv_timestamp_ns) / 1_000_000
@@ -1376,7 +1383,7 @@ impl<B: BrokerAdapter> Engine<B> {
             } else {
                 0 // No timestamp info = assume fresh
             };
-            if tick_age_ms > 500 {
+            if tick_age_ms > STALE_TICK_MS {
                 // Don't log every stale tick — just count in telemetry
                 self.telemetry.ticks_stale.inc();
                 return;
@@ -1577,6 +1584,8 @@ impl<B: BrokerAdapter> Engine<B> {
             ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
             ticker_locked: ticker_score.map_or(false, |s| s.locked),
             ticker_position_count: self.portfolio.position_count_for(&tid),
+            // P2-3.4: Wire scanner_score from signal confidence (was -1.0 sentinel, silently passing CHECK 26).
+            scanner_score: sig.confidence,
             ..EvalContext::default()
         };
         // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)
@@ -2208,6 +2217,7 @@ impl<B: BrokerAdapter> Engine<B> {
             );
 
             // Carry manager — freeze/unfreeze stops at session boundaries
+            #[allow(deprecated)]
             match (self.last_session_mode, current_mode) {
                 // Active → Dark/Carry: freeze stops (entering maintenance/overnight)
                 (_, SessionMode::Dark) | (_, SessionMode::Carry)
@@ -2285,6 +2295,7 @@ impl<B: BrokerAdapter> Engine<B> {
         const ROTATION_INTERVAL_NS: u64 = 15 * 60 * 1_000_000_000; // 15 minutes
         if self.now_ns >= self.last_watchlist_rotation_ns + ROTATION_INTERVAL_NS {
             let mode = self.session_mgr.mode();
+            #[allow(deprecated)]
             if matches!(mode, SessionMode::Active
                 | SessionMode::ModeA | SessionMode::ModeB
                 | SessionMode::ModeBPlus | SessionMode::ModeC) {
@@ -2973,6 +2984,31 @@ impl<B: BrokerAdapter> Engine<B> {
         }
     }
 
+    /// P2-3.8: Emergency halt on prolonged broker disconnect with open positions.
+    /// If broker is disconnected for >10 seconds AND there are filled positions,
+    /// escalate to HALT regime and cancel all tracked orders.
+    pub fn check_broker_disconnect_halt(&mut self) {
+        if !self.broker.is_connected() && self.portfolio.filled_count() > 0 {
+            if self.broker_disconnect_ns == 0 {
+                self.broker_disconnect_ns = self.now_ns;
+            }
+            let disconnect_secs = (self.now_ns.saturating_sub(self.broker_disconnect_ns)) / 1_000_000_000;
+            if disconnect_secs > 10 && self.arbiter.regime < RiskRegime::Halt {
+                eprintln!(
+                    "BROKER_HALT: Disconnected {}s with {} open positions — escalating to HALT",
+                    disconnect_secs, self.portfolio.filled_count()
+                );
+                self.arbiter.regime = RiskRegime::Halt;
+                // Cancel all tracked orders
+                for oid in &self.tracked_orders.clone() {
+                    let _ = self.broker.cancel_order(oid);
+                }
+            }
+        } else {
+            self.broker_disconnect_ns = 0; // Reset on reconnect
+        }
+    }
+
     /// SC-01: Graceful shutdown sequence.
     /// 1. Cancel all pending orders
     /// 2. Flatten all open positions (market sell)
@@ -3103,6 +3139,7 @@ impl<B: BrokerAdapter> Engine<B> {
     /// P21: Apply subscription rotation for a mode transition.
     /// Unified architecture: Active mode subscribes to 100 tickers across all markets.
     /// Dark mode suspends all subscriptions.
+    #[allow(deprecated)]
     fn apply_mode_subscription_rotation(&mut self, new_mode: SessionMode) {
         match new_mode {
             SessionMode::Active | SessionMode::ModeA | SessionMode::ModeB

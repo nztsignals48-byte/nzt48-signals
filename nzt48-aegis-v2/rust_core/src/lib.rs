@@ -18,6 +18,7 @@ pub mod crucible;
 pub mod cross_asset_macro;
 pub mod cross_timezone;
 pub mod currency;
+#[cfg(feature = "dqn_signal_weighting")]
 pub mod dqn_signal_weighting;
 pub mod engine;
 pub mod asian_session;
@@ -40,6 +41,7 @@ pub mod log_thompson_sampler;
 pub mod market_config;
 pub mod market_scheduler;
 pub mod multiframe_vol;
+#[cfg(feature = "neural_hawkes")]
 pub mod neural_hawkes;
 pub mod overnight_carry;
 pub mod ouroboros_loader;
