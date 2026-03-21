@@ -90,3 +90,13 @@
 
 # IBKR Full Universe Scanner — 22:00 UTC every Sunday (weekly deep scan)
 0 22 * * 0 cd /app && python3 -m python_brain.ouroboros.ibkr_scanner >> /var/log/ibkr_scanner.log 2>&1
+
+# PHASE_8 #6: Ouroboros Monitor — 05:10 UTC Mon-Fri (20 min after nightly, checks TOML health + staleness)
+10 5 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ouroboros_monitor --all --send-telegram >> /var/log/ouroboros_monitor.log 2>&1
+
+# v19-P2-15: Parquet Orphan Cleanup — 04:40 UTC daily (before nightly, prevents disk fill)
+40 4 * * * cd /app && python3 -m python_brain.ouroboros.maintenance --cleanup >> /var/log/maintenance.log 2>&1
+
+# P2-7: Write FTT Registry — 04:52 UTC Mon-Fri (after nightly_v6, before config_writer next day)
+# Only needs to run once; config_fixes writes transaction_tax_registry.toml atomically
+52 4 * * 1 cd /app && python3 -m python_brain.ouroboros.config_fixes --write-ftt >> /var/log/config_fixes.log 2>&1

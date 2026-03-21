@@ -1,11 +1,20 @@
-"""Ouroboros Step 0: Nightly GARCH(1,1) Calibration.
+"""STANDALONE UTILITY — NOT part of nightly Ouroboros pipeline.
 
-Fits GARCH(1,1) to each ticker using the `arch` library.
+GARCH parameters are now computed at engine startup via:
+  - Engine loads 60-day historical data from yfinance (via config_writer)
+  - Rust GarchRegistry fits GARCH(1,1) at boot from garch_params.json
+  - Updates incrementally per tick (no nightly recalc needed)
+  - See: rust_core/src/garch_inference.rs (349 LOC)
+
+This file is kept for manual testing/reference only.
+It is NOT imported by cli.py, nightly_v6.py, or any pipeline module.
+
+To use manually:
+    python3 -m ouroboros.step_0_garch_calibration
+
+Original purpose: Fit GARCH(1,1) to each ticker using the `arch` library.
 Produces garch_params.json consumed by Rust's GarchInference (O(1) per tick).
-
-Runs nightly at 23:50 ET as part of the Ouroboros pipeline.
 Uses yfinance for historical returns (60-day lookback).
-
 RM-1: Prevents Tokio reactor freeze from per-tick MLE optimization.
 """
 
