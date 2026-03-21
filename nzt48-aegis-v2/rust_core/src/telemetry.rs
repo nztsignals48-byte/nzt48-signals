@@ -154,6 +154,8 @@ pub struct Telemetry {
     pub tick_to_trade_latency: LatencyRing,
     pub brain_signal_latency: LatencyRing,
     pub broker_ack_latency: LatencyRing,
+    /// P1-2.19: Data age tracking (tick timestamp -> engine receive time).
+    pub data_age_ring: LatencyRing,
 
     // ── Per-veto-reason counters ──
     pub veto_counts: HashMap<String, Counter>,
@@ -190,6 +192,7 @@ impl Telemetry {
             tick_to_trade_latency: LatencyRing::new(10_000),
             brain_signal_latency: LatencyRing::new(10_000),
             broker_ack_latency: LatencyRing::new(1_000),
+            data_age_ring: LatencyRing::new(10_000),
 
             veto_counts: HashMap::new(),
         }
@@ -209,6 +212,13 @@ impl Telemetry {
         self.veto_counts.get(reason).map_or(0, |c| c.get())
     }
 
+    /// P1-2.14: Fill rate as percentage (orders_filled / orders_submitted).
+    pub fn fill_rate_pct(&self) -> f64 {
+        let submitted = self.orders_submitted.get();
+        if submitted == 0 { return 0.0; }
+        (self.orders_filled.get() as f64 / submitted as f64) * 100.0
+    }
+
     /// Snapshot of all key metrics for logging/reporting.
     pub fn snapshot(&self) -> TelemetrySnapshot {
         self.snapshot_with_mode("UNKNOWN")
@@ -217,6 +227,7 @@ impl Telemetry {
     /// Snapshot with session mode included (P21).
     pub fn snapshot_with_mode(&self, session_mode: &str) -> TelemetrySnapshot {
         let t2t = self.tick_to_trade_latency.percentiles();
+        let data_age = self.data_age_ring.percentiles();
         TelemetrySnapshot {
             ticks_received: self.ticks_received.get(),
             ticks_filtered: self.ticks_filtered.get(),
@@ -225,9 +236,12 @@ impl Telemetry {
             signals_vetoed: self.signals_vetoed.get(),
             orders_submitted: self.orders_submitted.get(),
             orders_filled: self.orders_filled.get(),
+            fill_rate_pct: self.fill_rate_pct(),
             t2t_p50_ms: t2t.p50_ms(),
             t2t_p95_ms: t2t.p95_ms(),
             t2t_p99_ms: t2t.p99_ms(),
+            data_age_p50_ms: data_age.p50_ms(),
+            data_age_p95_ms: data_age.p95_ms(),
             session_mode: session_mode.to_string(),
         }
     }
@@ -273,9 +287,15 @@ pub struct TelemetrySnapshot {
     pub signals_vetoed: u64,
     pub orders_submitted: u64,
     pub orders_filled: u64,
+    /// P1-2.14: Fill rate percentage (orders_filled / orders_submitted * 100).
+    pub fill_rate_pct: f64,
     pub t2t_p50_ms: f64,
     pub t2t_p95_ms: f64,
     pub t2t_p99_ms: f64,
+    /// P1-2.19: Data age P50 in milliseconds (tick timestamp -> engine receive).
+    pub data_age_p50_ms: f64,
+    /// P1-2.19: Data age P95 in milliseconds.
+    pub data_age_p95_ms: f64,
     /// P21: Current session mode (string representation).
     pub session_mode: String,
 }

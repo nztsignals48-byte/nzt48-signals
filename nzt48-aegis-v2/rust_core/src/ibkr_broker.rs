@@ -103,6 +103,49 @@ impl Default for TickAccumulator {
     }
 }
 
+/// P1-2.11: Minimum lot sizes per exchange.
+/// Most western exchanges allow 1-share orders, but Asian exchanges
+/// enforce board-lot minimums that cause rejects if violated.
+fn min_lot_for_exchange(exchange: &str) -> u32 {
+    match exchange {
+        "LSEETF" | "LSE" | "XLON" => 1,
+        "IBIS" | "XETRA" | "XETR" => 1,
+        "SBF" | "EURONEXT" | "XPAR" | "AEB" | "XAMS" => 1,
+        "SMART" | "NYSE" | "NASDAQ" | "AMEX" => 1,
+        "TSEJ" | "TSE" => 100,     // Tokyo: 100-share lots
+        "SEHK" | "HKEX" => 100,    // Hong Kong: board lots vary, 100 is common
+        "SGX" => 100,               // Singapore: 100-share lots
+        "KSE" | "KRX" => 1,        // Korea: 1-share lots (modern)
+        "ASX" => 1,                 // Australia: 1-share lots
+        _ => 1,
+    }
+}
+
+/// P1-2.12: Quantize price to exchange-appropriate tick size.
+/// Prevents order rejects from sub-tick pricing. LSE and TSE use
+/// variable tick tables; most other exchanges use 0.01.
+fn quantize_price(price: f64, exchange: &str) -> f64 {
+    let tick_size = match exchange {
+        "LSEETF" | "LSE" | "XLON" => {
+            // LSE variable tick table (pence/GBX or USD depending on instrument)
+            if price < 0.5 { 0.0001 }
+            else if price < 1.0 { 0.0005 }
+            else if price < 5.0 { 0.001 }
+            else if price < 10.0 { 0.005 }
+            else { 0.01 }
+        }
+        "TSEJ" | "TSE" => {
+            // TSE tick sizes (yen)
+            if price < 3000.0 { 1.0 }
+            else if price < 5000.0 { 5.0 }
+            else if price < 30000.0 { 10.0 }
+            else { 50.0 }
+        }
+        _ => 0.01, // Most exchanges use 0.01
+    };
+    (price / tick_size).round() * tick_size
+}
+
 /// Real IBKR broker adapter via `ibapi` crate.
 pub struct IbkrBroker {
     config: IbkrBrokerConfig,
@@ -146,6 +189,8 @@ pub struct IbkrBroker {
     total_l1_received: u64,
     /// Diagnostic: subscription errors detected (ibapi bug #434 — errors come as ParseInt).
     sub_errors_detected: u32,
+    /// P1-2.18: Last cancel/modify time per order_id (prevent IBKR pacing violations).
+    last_modify_ns: HashMap<String, u64>,
 }
 
 impl IbkrBroker {
@@ -179,6 +224,7 @@ impl IbkrBroker {
             total_bars_received: 0,
             total_l1_received: 0,
             sub_errors_detected: 0,
+            last_modify_ns: HashMap::new(),
         }
     }
 
@@ -1091,6 +1137,18 @@ impl BrokerAdapter for IbkrBroker {
             BrokerError::InvalidOrder(format!("No contract for ticker {}", ticker_id.0))
         })?;
 
+        // P1-2.11: Round up to exchange minimum lot size.
+        let exchange_name = mapping.exchange.as_str();
+        let min_lot = min_lot_for_exchange(exchange_name);
+        let qty = if min_lot > 1 {
+            ((qty as f64 / min_lot as f64).ceil() as u32) * min_lot
+        } else {
+            qty
+        };
+
+        // P1-2.12: Quantize limit price to exchange-appropriate tick size.
+        let limit_price = quantize_price(limit_price, exchange_name);
+
         let contract = Self::build_contract(mapping);
         let order_builder = client.order(&contract);
         let ibkr_order_id = match side {
@@ -1132,6 +1190,20 @@ impl BrokerAdapter for IbkrBroker {
         if !self.connected {
             return Err(BrokerError::NotConnected);
         }
+
+        // P1-2.18: Cancel/replace throttle — 3 seconds between modifications per order.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        if let Some(&last_ns) = self.last_modify_ns.get(order_id) {
+            if now - last_ns < 3_000_000_000 {
+                eprintln!("CANCEL_THROTTLE: Order {} modified <3s ago, deferring cancel", order_id);
+                return Err(BrokerError::PacingViolation);
+            }
+        }
+        self.last_modify_ns.insert(order_id.to_string(), now);
+
         let ibkr_id = *self
             .order_id_map
             .get(order_id)
@@ -1354,5 +1426,101 @@ mod tests {
         assert!(!broker.l1_cache.is_empty());
         broker.disconnect();
         assert!(broker.l1_cache.is_empty());
+    }
+
+    // ── P1-2.11: Min lot size per exchange ──
+    #[test]
+    fn test_min_lot_western_exchanges() {
+        assert_eq!(min_lot_for_exchange("LSEETF"), 1);
+        assert_eq!(min_lot_for_exchange("LSE"), 1);
+        assert_eq!(min_lot_for_exchange("SMART"), 1);
+        assert_eq!(min_lot_for_exchange("IBIS"), 1);
+        assert_eq!(min_lot_for_exchange("EURONEXT"), 1);
+        assert_eq!(min_lot_for_exchange("ASX"), 1);
+        assert_eq!(min_lot_for_exchange("KRX"), 1);
+    }
+
+    #[test]
+    fn test_min_lot_asian_exchanges() {
+        assert_eq!(min_lot_for_exchange("TSEJ"), 100);
+        assert_eq!(min_lot_for_exchange("TSE"), 100);
+        assert_eq!(min_lot_for_exchange("SEHK"), 100);
+        assert_eq!(min_lot_for_exchange("HKEX"), 100);
+        assert_eq!(min_lot_for_exchange("SGX"), 100);
+    }
+
+    #[test]
+    fn test_min_lot_unknown_defaults_to_one() {
+        assert_eq!(min_lot_for_exchange("UNKNOWN"), 1);
+        assert_eq!(min_lot_for_exchange(""), 1);
+    }
+
+    #[test]
+    fn test_lot_rounding() {
+        // Simulate lot rounding for TSE (100-share lots)
+        let min_lot: u32 = 100;
+        let qty: u32 = 50;
+        let rounded = ((qty as f64 / min_lot as f64).ceil() as u32) * min_lot;
+        assert_eq!(rounded, 100); // 50 → rounds up to 100
+
+        let qty: u32 = 150;
+        let rounded = ((qty as f64 / min_lot as f64).ceil() as u32) * min_lot;
+        assert_eq!(rounded, 200); // 150 → rounds up to 200
+
+        let qty: u32 = 200;
+        let rounded = ((qty as f64 / min_lot as f64).ceil() as u32) * min_lot;
+        assert_eq!(rounded, 200); // 200 → stays 200 (exact multiple)
+
+        let qty: u32 = 1;
+        let rounded = ((qty as f64 / min_lot as f64).ceil() as u32) * min_lot;
+        assert_eq!(rounded, 100); // 1 → rounds up to 100
+    }
+
+    // ── P1-2.12: Tick-size quantization ──
+    #[test]
+    fn test_quantize_price_lse() {
+        // LSE: price < 0.5 → tick 0.0001
+        let q = quantize_price(0.1234, "LSE");
+        assert!((q - 0.1234).abs() < 1e-6);
+
+        // LSE: price >= 10.0 → tick 0.01
+        let q = quantize_price(15.123, "LSE");
+        assert!((q - 15.12).abs() < 1e-6);
+
+        // LSE: price 1.0..5.0 → tick 0.001
+        let q = quantize_price(2.5678, "LSE");
+        assert!((q - 2.568).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_quantize_price_tse() {
+        // TSE: price < 3000 → tick 1.0
+        let q = quantize_price(2500.7, "TSE");
+        assert!((q - 2501.0).abs() < 1e-6);
+
+        // TSE: price 5000..30000 → tick 10.0
+        let q = quantize_price(15003.0, "TSE");
+        assert!((q - 15000.0).abs() < 1e-6);
+
+        // TSE: price >= 30000 → tick 50.0
+        let q = quantize_price(35025.0, "TSEJ");
+        assert!((q - 35050.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_quantize_price_default() {
+        // Default: tick 0.01
+        let q = quantize_price(123.456, "SMART");
+        assert!((q - 123.46).abs() < 1e-6);
+
+        let q = quantize_price(10.005, "NYSE");
+        assert!((q - 10.01).abs() < 1e-6);
+    }
+
+    // ── P1-2.18: Cancel throttle ──
+    #[test]
+    fn test_cancel_throttle_map_initialized() {
+        let broker = IbkrBroker::new(IbkrBrokerConfig::default());
+        assert!(broker.last_modify_ns.is_empty());
     }
 }

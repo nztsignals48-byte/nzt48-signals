@@ -26,7 +26,13 @@ mod tests {
             entry_rvol: 0.0,
             entry_hurst: 0.0,
             entry_adx: 0.0,
-                        }
+            rsi: 0.0,
+            vwap_dist_pct: 0.0,
+            atr: 0.0,
+            vol_slope: 0.0,
+            spread_pct: 0.0,
+            mtf_score: 0.0,
+        }
     }
 
     fn make_fill(order_id: &str, ticker_id: u32, qty: u32, price: f64) -> WalPayload {
@@ -264,6 +270,7 @@ mod tests {
             event_time_ns: 1_000,
             write_time_ns: 0,
             checksum: 0,
+            wal_version: "1.1".to_string(),
             payload: make_fill("order-1", 42, 100, 10.50),
         };
         writer.append(&event).expect("append");

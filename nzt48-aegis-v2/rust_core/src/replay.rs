@@ -266,7 +266,13 @@ impl ReplayEngine {
             entry_rvol: 0.0,
             entry_hurst: 0.0,
             entry_adx: 0.0,
-                        });
+            rsi: 0.0,
+            vwap_dist_pct: 0.0,
+            atr: 0.0,
+            vol_slope: 0.0,
+            spread_pct: 0.0,
+            mtf_score: 0.0,
+        });
 
         // 7. Submit + fill
         let qty = (decision.adjusted_size / routed_tick.ask).max(1.0) as u32;

@@ -386,6 +386,9 @@ fn main() {
     // Apply live FX rates from fx_rates.toml (Ouroboros 6-hour refresh)
     engine.fx_table.apply_live_rates(&fx_live.rates, now_ns());
 
+    // P1-2.15: Load economic calendar for macro event blackout windows.
+    engine.economic_calendar = rust_core::config_loader::load_economic_calendar(&config_dir);
+
     eprintln!(
         "DynamicWeights APPLIED: chandelier_atr_mult={:.2}, regime_scales={}, kelly_fractions={}",
         dw.chandelier_atr_mult,
@@ -658,6 +661,13 @@ fn main() {
                 dw = new_dw;
             } else {
                 eprintln!("HOT-RELOAD: dynamic_weights unchanged (no update needed)");
+            }
+
+            // P1-2.1: Hot-reload FX rates from fx_rates.toml (Python cron updates every 6h + sends SIGHUP)
+            let new_fx = ouroboros_loader::load_fx_rates(&config_dir);
+            if !new_fx.rates.is_empty() {
+                engine.fx_table.apply_live_rates(&new_fx.rates, now_ns());
+                eprintln!("HOT-RELOAD: FX rates updated ({} pairs)", new_fx.rates.len());
             }
 
             // N5c: Kill and respawn Python bridge so it picks up fresh config
@@ -977,6 +987,13 @@ fn main() {
         let events = engine.broker.drain_events();
         for ev in &events {
             engine.process_broker_event(ev);
+        }
+
+        // P1-2.16: Drawdown velocity halt — check if equity dropped >2% in 1 hour.
+        {
+            let eq = engine.portfolio.equity;
+            engine.arbiter.record_equity_snapshot(loop_start, eq);
+            engine.arbiter.check_drawdown_velocity(loop_start, eq);
         }
 
         // Periodic reconciliation (every 5 minutes)

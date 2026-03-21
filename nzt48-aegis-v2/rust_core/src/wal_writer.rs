@@ -102,6 +102,7 @@ impl WalWriter {
             event_time_ns: event.event_time_ns,
             write_time_ns,
             checksum,
+            wal_version: event.wal_version.clone(),
             payload: event.payload.clone(),
         };
 
@@ -152,6 +153,7 @@ pub fn make_wal_event(event_time_ns: u64, payload: WalPayload) -> WalEvent {
         event_time_ns,
         write_time_ns: 0, // Set by append()
         checksum: 0,      // Set by append()
+        wal_version: "1.1".to_string(),
         payload,
     }
 }

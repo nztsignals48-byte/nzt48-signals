@@ -28,6 +28,26 @@ pub enum PositionMismatch {
     LocalOnly { ticker_id: TickerId, local_qty: u32 },
 }
 
+/// P1-2.13: Display trait for structured mismatch logging.
+impl std::fmt::Display for PositionMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::QuantityDiff { ticker_id, local_qty, broker_qty } => {
+                write!(f, "QtyDrift ticker={} local={} broker={}", ticker_id.0, local_qty, broker_qty)
+            }
+            Self::CostDiff { ticker_id, local_avg, broker_avg } => {
+                write!(f, "CostDiff ticker={} local={:.4} broker={:.4}", ticker_id.0, local_avg, broker_avg)
+            }
+            Self::BrokerOnly { ticker_id, broker_qty } => {
+                write!(f, "BrokerOnly ticker={} qty={}", ticker_id.0, broker_qty)
+            }
+            Self::LocalOnly { ticker_id, local_qty } => {
+                write!(f, "LocalOnly ticker={} qty={}", ticker_id.0, local_qty)
+            }
+        }
+    }
+}
+
 /// Result of a position reconciliation check.
 #[derive(Debug)]
 pub struct ReconcileResult {

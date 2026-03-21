@@ -732,3 +732,76 @@ mod tests {
         assert!(cfg.risk.confidence_floor >= 60.0, "Live: confidence_floor={:.0} below 60", cfg.risk.confidence_floor);
     }
 }
+
+// ── P1-2.15: Economic Calendar ──
+
+/// Parsed economic calendar event with UTC timestamps.
+#[derive(Clone, Debug)]
+pub struct CalendarEvent {
+    pub name: String,
+    /// Event time as seconds from midnight UTC.
+    pub date: String,
+    pub time_secs: u32,
+    /// Window in minutes before and after event.
+    pub window_mins: u32,
+}
+
+/// Load economic calendar from TOML.
+pub fn load_economic_calendar(config_dir: &Path) -> Vec<CalendarEvent> {
+    let path = config_dir.join("economic_calendar.toml");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("ECON_CALENDAR: No calendar file at {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+
+    #[derive(Deserialize)]
+    struct RawCalendar {
+        window_minutes: Option<u32>,
+        events: Option<Vec<RawEvent>>,
+    }
+    #[derive(Deserialize)]
+    struct RawEvent {
+        name: String,
+        datetime: String,
+    }
+
+    let raw: RawCalendar = match toml::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ECON_CALENDAR: Parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let window = raw.window_minutes.unwrap_or(15);
+    let mut events = Vec::new();
+
+    for ev in raw.events.unwrap_or_default() {
+        // Parse "YYYY-MM-DD HH:MM" → (date, secs_from_midnight)
+        let parts: Vec<&str> = ev.datetime.split(' ').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let date = parts[0].to_string();
+        let time_parts: Vec<&str> = parts[1].split(':').collect();
+        if time_parts.len() != 2 {
+            continue;
+        }
+        let hours: u32 = time_parts[0].parse().unwrap_or(0);
+        let mins: u32 = time_parts[1].parse().unwrap_or(0);
+        let time_secs = hours * 3600 + mins * 60;
+
+        events.push(CalendarEvent {
+            name: ev.name,
+            date,
+            time_secs,
+            window_mins: window,
+        });
+    }
+
+    eprintln!("ECON_CALENDAR: Loaded {} events (window={}min)", events.len(), window);
+    events
+}

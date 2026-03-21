@@ -314,6 +314,10 @@ pub struct Engine<B: BrokerAdapter> {
     pub last_prices: HashMap<TickerId, f64>,
     pub positions: HashMap<TickerId, PositionState>,
     gap_cooldowns: HashMap<TickerId, u64>,
+    /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
+    halted_tickers: std::collections::HashSet<TickerId>,
+    /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.
+    pub economic_calendar: Vec<crate::config_loader::CalendarEvent>,
     pub now_ns: u64,
     pub startup_complete: bool,
     pub last_reconcile_ns: u64,
@@ -513,6 +517,8 @@ impl<B: BrokerAdapter> Engine<B> {
             last_prices: HashMap::new(),
             positions: HashMap::new(),
             gap_cooldowns: HashMap::new(),
+            halted_tickers: std::collections::HashSet::new(),
+            economic_calendar: Vec::new(),
             now_ns: 0,
             startup_complete: false,
             last_reconcile_ns: 0,
@@ -908,6 +914,15 @@ impl<B: BrokerAdapter> Engine<B> {
                 self.gap_cooldowns.insert(tid, self.now_ns + cooldown_ns);
             }
         }
+        // P1-2.17: Post-halt price discovery lagger.
+        // If ticker was in halt set and we receive a tick, it's resuming.
+        // Set 5-minute cooldown to avoid wild price-discovery volatility.
+        if self.halted_tickers.remove(&tid) {
+            let halt_cooldown_ns = 5 * 60 * 1_000_000_000u64;
+            self.gap_cooldowns.insert(tid, self.now_ns + halt_cooldown_ns);
+            eprintln!("HALT_LIFT: ticker={} resumed trading — 5-min cooldown set", tid.0);
+        }
+
         // P3-A: GARCH(1,1) update with log return
         // P5-A: Feed standardized residuals to EVT for tail risk
         let garch_sigma = if let Some(&prev) = self.last_prices.get(&tid)
@@ -1042,6 +1057,12 @@ impl<B: BrokerAdapter> Engine<B> {
                         let _ = wal.append(&evt);
                     }
                 }
+                // P1-2.6: Activate mega-runner when profit exceeds 3 ATR.
+                if atr > 0.0 {
+                    let profit_atr = (tick.last - pos.avg_entry) / atr;
+                    self.exit_engine.strategy_mut().update_mega_runner(profit_atr);
+                }
+
                 pos.unrealized_pnl = (tick.last - pos.avg_entry) * pos.qty as f64;
 
                 // Update MAE/MFE (Maximum Adverse/Favorable Excursion)
@@ -1115,6 +1136,12 @@ impl<B: BrokerAdapter> Engine<B> {
                         entry_rvol: 0.0,
                         entry_hurst: 0.0,
                         entry_adx: 0.0,
+                        rsi: 0.0,
+                        vwap_dist_pct: 0.0,
+                        atr: 0.0,
+                        vol_slope: 0.0,
+                        spread_pct: 0.0,
+                        mtf_score: 0.0,
                     });
                     self.tracked_orders.push(exit_order_id.clone());
 
@@ -1324,6 +1351,20 @@ impl<B: BrokerAdapter> Engine<B> {
             // This is a placeholder; actual snapshot feeding is in Phase 3
         }
 
+        // P1-2.19: Record data age for telemetry.
+        {
+            let data_age_ns = if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
+                self.now_ns - tick.recv_timestamp_ns
+            } else if tick.timestamp_ns > 0 && self.now_ns > tick.timestamp_ns {
+                self.now_ns - tick.timestamp_ns
+            } else {
+                0
+            };
+            if data_age_ns > 0 {
+                self.telemetry.data_age_ring.record(data_age_ns);
+            }
+        }
+
         // P0-1.7: Stale tick filter — skip ENTRY signal generation for old ticks.
         // Still updates bar_history + exit tracking (already processed above).
         // 500ms threshold (not 200ms like HFT) — IBKR delayed data can be inherently stale.
@@ -1416,6 +1457,25 @@ impl<B: BrokerAdapter> Engine<B> {
         // Auction period check: no entries during auctions (ModeB refinement)
         if Clock::is_auction(time_secs) {
             return;
+        }
+
+        // P1-2.15: Economic calendar veto — no entries within 15 min of FOMC/CPI/NFP/BOE.
+        {
+            let utc_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            for ev in &self.economic_calendar {
+                if ev.date == utc_date {
+                    let window_secs = ev.window_mins * 60;
+                    let event_start = ev.time_secs.saturating_sub(window_secs);
+                    let event_end = ev.time_secs + window_secs;
+                    if time_secs >= event_start && time_secs <= event_end {
+                        eprintln!(
+                            "ECON_CALENDAR: Blocking entry — event {} at {}s (window {}min)",
+                            ev.name, ev.time_secs, ev.window_mins,
+                        );
+                        return;
+                    }
+                }
+            }
         }
 
         // P12: Check if ticker is locked by predictive scorer (5 consecutive losses).
@@ -1693,6 +1753,12 @@ impl<B: BrokerAdapter> Engine<B> {
             entry_rvol: sig.rvol,
             entry_hurst: sig.hurst,
             entry_adx: sig.adx,
+            rsi: 0.0,
+            vwap_dist_pct: sig.vwap_dist_pct,
+            atr: 0.0,
+            vol_slope: sig.vol_slope,
+            spread_pct: 0.0,
+            mtf_score: 0.0,
         });
         self.tracked_orders.push(order_id.clone());
 
@@ -1828,6 +1894,20 @@ impl<B: BrokerAdapter> Engine<B> {
                     "ORDER_REJECTED: ticker={} order_id={} qty={} limit={:.4} error={:?}",
                     tid.0, order_id, qty, limit_price, e
                 );
+                self.telemetry.orders_rejected.inc();
+                // P1-2.10: Fire-and-forget Telegram alert for ORDER_REJECTED.
+                let msg = format!(
+                    "⚠️ ORDER_REJECTED: ticker={} qty={} limit={:.4} err={:?}",
+                    tid.0, qty, limit_price, e
+                );
+                let _ = std::process::Command::new("python3")
+                    .args(["-c", &format!(
+                        "from python_brain.ouroboros.telegram_notify import send_alert; send_alert('{}')",
+                        msg.replace('\'', "\\'")
+                    )])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
                 return;
             }
             self.telemetry.orders_submitted.inc();

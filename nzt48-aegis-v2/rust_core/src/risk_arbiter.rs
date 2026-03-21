@@ -4,6 +4,7 @@
 use crate::config::RiskConfig;
 use crate::cross_asset_macro::{CrossAssetMacro, MacroIndicator, MacroRegimeSignal};
 use crate::portfolio::PortfolioState;
+use crate::sector_rotation::sector_for_ticker;
 use crate::types::{Direction, RiskDecision, RiskRegime, TickerId, VetoReason};
 use std::collections::HashMap;
 
@@ -95,6 +96,11 @@ pub struct RiskArbiter {
     pub simulation_mode: bool,
     /// Ouroboros ticker blacklist: symbols with WR < 30% over 10+ trades.
     pub ticker_blacklist: Vec<String>,
+    /// P1-2.7: VIX hysteresis state (prevents flip-flop at boundaries).
+    pub vix_high: bool,
+    pub vix_extreme: bool,
+    /// P1-2.16: Rolling equity snapshots for drawdown velocity (timestamp_ns, equity).
+    equity_snapshots: Vec<(u64, f64)>,
 }
 
 impl RiskArbiter {
@@ -107,6 +113,9 @@ impl RiskArbiter {
             kelly_fractions: HashMap::new(),
             simulation_mode: false,
             ticker_blacklist: Vec::new(),
+            vix_high: false,
+            vix_extreme: false,
+            equity_snapshots: Vec::new(),
         }
     }
 
@@ -257,9 +266,10 @@ impl RiskArbiter {
             && portfolio.sector_heat_pct(intent_ticker) >= self.config.sector_heat_cap_pct
         {
             let heat = portfolio.sector_heat_pct(intent_ticker);
+            let sector = sector_for_ticker(intent_ticker);
             return self.reject(
                 VetoReason::SectorHeatExceeded {
-                    sector: "sector".into(),
+                    sector: format!("{sector:?}"),
                     pct: heat as u32,
                 },
                 ts,
@@ -289,6 +299,14 @@ impl RiskArbiter {
             .filter(|(t, _)| *t == intent_ticker)
             .count();
         if recent >= self.config.velocity_max_intents as usize {
+            return self.reject(VetoReason::VelocityCheckTriggered, ts);
+        }
+
+        // CHECK 19b: System-wide velocity (P1-2.5) — max 3 entries per 5-minute window across ALL tickers.
+        let system_velocity_window_ns: u64 = 300_000_000_000; // 5 minutes
+        let system_cutoff = ts.saturating_sub(system_velocity_window_ns);
+        let system_recent = self.velocity_log.iter().filter(|(_, t)| *t >= system_cutoff).count();
+        if system_recent >= 3 {
             return self.reject(VetoReason::VelocityCheckTriggered, ts);
         }
 
@@ -458,18 +476,41 @@ impl RiskArbiter {
 
     /// CHECK 20: Macro Regime Escalation (Phase 9).
     /// Evaluates macro indicators (VIX, DXY, credit spreads, Fear & Greed) and escalates regime if needed.
+    /// P1-2.7: VIX hysteresis deadband (enter HIGH_VIX at 25, exit at 22; enter EXTREME at 35, exit at 30).
     /// Returns VetoReason if regime escalation triggered, None otherwise.
     fn evaluate_macro_escalation(&mut self, ctx: &EvalContext) -> Option<VetoReason> {
         let macro_eval = CrossAssetMacro::from_indicator(ctx.macro_indicator);
         let macro_signal = macro_eval.evaluate();
+        let vix = ctx.macro_indicator.vix;
+
+        // P1-2.7: VIX hysteresis deadband — prevents flip-flopping at VIX boundaries.
+        // Enter high: VIX >= 25, exit high: VIX < 22 (3-point deadband)
+        // Enter extreme: VIX >= 35, exit extreme: VIX < 30 (5-point deadband)
+        if vix >= 35.0 {
+            self.vix_extreme = true;
+            self.vix_high = true;
+        } else if vix < 30.0 {
+            self.vix_extreme = false;
+        }
+        if vix >= 25.0 {
+            self.vix_high = true;
+        } else if vix < 22.0 {
+            self.vix_high = false;
+        }
 
         // Trigger A: VIX Crisis → FLATTEN (allow exits, block new entries)
-        if macro_signal == MacroRegimeSignal::Crisis {
+        if macro_signal == MacroRegimeSignal::Crisis || self.vix_extreme {
             self.regime = RiskRegime::Flatten;
             return Some(VetoReason::MacroCrisisDetected {
-                vix: (ctx.macro_indicator.vix * 10.0) as u32,
+                vix: (vix * 10.0) as u32,
                 credit_bps: ctx.macro_indicator.credit_spread_bps as u32,
             });
+        }
+
+        // VIX high (with hysteresis) → REDUCE
+        if self.vix_high && self.regime < RiskRegime::Reduce {
+            self.regime = RiskRegime::Reduce;
+            // Don't return veto — REDUCE allows entries at 0.5x size
         }
 
         // Trigger B: Macro Stress + Stale Ticks → HALT (data unreliable)
@@ -493,5 +534,41 @@ impl RiskArbiter {
         }
 
         None
+    }
+
+    /// P1-2.16: Record equity snapshot for drawdown velocity tracking.
+    /// Call this every tick/evaluation cycle with current equity.
+    pub fn record_equity_snapshot(&mut self, now_ns: u64, equity: f64) {
+        // Only record every 60 seconds to avoid excessive memory
+        let interval_ns: u64 = 60_000_000_000;
+        if let Some((last_ts, _)) = self.equity_snapshots.last() {
+            if now_ns < *last_ts + interval_ns {
+                return;
+            }
+        }
+        self.equity_snapshots.push((now_ns, equity));
+        // Prune older than 2 hours
+        let cutoff = now_ns.saturating_sub(7_200_000_000_000);
+        self.equity_snapshots.retain(|(ts, _)| *ts >= cutoff);
+    }
+
+    /// P1-2.16: Check drawdown velocity — if equity dropped >2% in 1 hour → HALT.
+    pub fn check_drawdown_velocity(&mut self, now_ns: u64, current_equity: f64) -> bool {
+        let one_hour_ago = now_ns.saturating_sub(3_600_000_000_000);
+        // Find earliest snapshot >= 1 hour ago
+        if let Some((_, equity_1h_ago)) = self.equity_snapshots.iter().find(|(ts, _)| *ts >= one_hour_ago) {
+            if *equity_1h_ago > 0.0 {
+                let drawdown_pct = ((*equity_1h_ago - current_equity) / *equity_1h_ago) * 100.0;
+                if drawdown_pct > 2.0 {
+                    eprintln!(
+                        "DRAWDOWN_VELOCITY: {:.2}% drawdown in 1 hour (threshold 2%) — escalating to HALT",
+                        drawdown_pct
+                    );
+                    self.regime = RiskRegime::Halt;
+                    return true;
+                }
+            }
+        }
+        false
     }
 }

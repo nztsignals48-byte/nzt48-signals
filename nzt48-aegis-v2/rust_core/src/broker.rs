@@ -13,6 +13,8 @@ pub enum BrokerError {
     NotConnected,
     OrderNotFound(String),
     InvalidOrder(String),
+    /// P1-2.18: Cancel/modify attempted too soon (IBKR pacing violation prevention).
+    PacingViolation,
 }
 
 impl fmt::Display for BrokerError {
@@ -23,6 +25,7 @@ impl fmt::Display for BrokerError {
             BrokerError::NotConnected => write!(f, "Broker not connected"),
             BrokerError::OrderNotFound(id) => write!(f, "Order not found: {id}"),
             BrokerError::InvalidOrder(msg) => write!(f, "Invalid order: {msg}"),
+            BrokerError::PacingViolation => write!(f, "Pacing violation: cancel/modify too soon (P1-2.18)"),
         }
     }
 }

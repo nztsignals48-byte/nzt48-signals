@@ -23,6 +23,8 @@ pub trait ExitStrategy: Send {
     /// P4-C: Update adaptive multipliers (only InfiniteChandelier implements this).
     fn update_multipliers(&mut self, _vol: f64, _time_frac: f64, _momentum: f64,
                           _amihud: f64, _heat: f64, _is_reduce: bool) {}
+    /// P1-2.6: Update mega-runner bonus based on profit in ATR multiples.
+    fn update_mega_runner(&mut self, _profit_atr: f64) {}
 }
 
 /// Chandelier trailing-stop-only strategy — NO partial sells, FULL position rides.
@@ -595,6 +597,10 @@ impl ExitStrategy for InfiniteChandelier {
         self.multipliers.update_liquidity(amihud);
         self.multipliers.update_heat(heat);
         self.multipliers.update_regime(is_reduce);
+    }
+
+    fn update_mega_runner(&mut self, profit_atr: f64) {
+        self.multipliers.update_mega_runner(profit_atr);
     }
 }
 

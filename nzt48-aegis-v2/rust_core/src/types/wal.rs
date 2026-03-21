@@ -9,6 +9,10 @@ use super::enums::WalEventType;
 // WAL TYPES
 // ============================================================================
 
+fn default_wal_version() -> String {
+    "1.1".to_string()
+}
+
 /// Universal WAL event wrapper.
 /// Every line in events/YYYY-MM-DD.ndjson is a serialized WalEvent.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -23,6 +27,9 @@ pub struct WalEvent {
     pub write_time_ns: u64,
     /// CRC32 checksum of the payload JSON (H24)
     pub checksum: u32,
+    /// WAL format version for forward compatibility (P1-2.9).
+    #[serde(default = "default_wal_version")]
+    pub wal_version: String,
     /// The actual event payload
     pub payload: WalPayload,
 }
@@ -55,6 +62,24 @@ pub enum WalPayload {
         /// ADX at entry (Phase H: indicator context for Ouroboros learning).
         #[serde(default)]
         entry_adx: f64,
+        /// RSI at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        rsi: f64,
+        /// VWAP distance % at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        vwap_dist_pct: f64,
+        /// ATR at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        atr: f64,
+        /// Volume slope at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        vol_slope: f64,
+        /// Bid-ask spread % at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        spread_pct: f64,
+        /// Multi-timeframe confirmation score at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
+        #[serde(default)]
+        mtf_score: f64,
     },
     BrokerAck {
         order_id: String,
@@ -310,6 +335,7 @@ mod tests {
             event_time_ns: 1_000_000_000,
             write_time_ns: 1_000_000_100,
             checksum: 0,
+            wal_version: "1.1".to_string(),
             payload: WalPayload::SystemReady {
                 wal_events_replayed: 42,
                 positions_reconciled: 2,

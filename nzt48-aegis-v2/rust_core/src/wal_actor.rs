@@ -207,6 +207,7 @@ impl WalActor {
             event_time_ns: event.event_time_ns,
             write_time_ns,
             checksum,
+            wal_version: event.wal_version.clone(),
             payload: event.payload.clone(),
         };
 

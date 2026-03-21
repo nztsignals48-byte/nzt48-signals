@@ -104,6 +104,11 @@ impl PortfolioState {
         if let Some(pos) = self.positions.remove(&ticker_id) {
             let value = pos.avg_entry * pos.qty as f64 + pos.unrealized_pnl;
             self.cash += value;
+            // P1-2.4: Credit sell proceeds back against ISA invested amount.
+            // Sell proceeds stay inside the ISA wrapper — they reduce gross invested
+            // so the £20K limit tracks NET new external deposits, not internal turnover.
+            let entry_cost = pos.avg_entry * pos.qty as f64;
+            self.isa_year_invested = (self.isa_year_invested - entry_cost).max(0.0);
             Some(pos)
         } else {
             None
