@@ -50,17 +50,31 @@
 */15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
 
 # Session Briefing PDFs + Telegram (at session open)
-# Asian session briefing: 00:55 UTC Mon-Fri (5 min before Asian scan starts)
-55 0 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session asian --send-telegram >> /var/log/session_pdf.log 2>&1
+# DST-aware: cron fires at BOTH possible UTC times (GMT and BST).
+# dst_wrapper checks current DST state and only runs at the correct time.
+#
+# | Session   | London local | GMT (UTC) | BST (UTC) |
+# |-----------|-------------|-----------|-----------|
+# | asian     | 00:55       | 00:55     | 23:55     |
+# | european  | 07:55       | 07:55     | 06:55     |
+# | american  | 14:25       | 14:25     | 13:25     |
+# | us_only   | 16:30       | 16:30     | 15:30     |
 
-# European session briefing: 07:55 UTC Mon-Fri (5 min before European scan)
-55 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session european --send-telegram >> /var/log/session_pdf.log 2>&1
+# Asian session briefing: 00:55 London (fires at 23:55 and 00:55 UTC)
+55 23 * * 0-4 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session asian --send-telegram >> /var/log/session_pdf.log 2>&1
+55 0 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session asian --send-telegram >> /var/log/session_pdf.log 2>&1
 
-# American session briefing: 14:25 UTC Mon-Fri (5 min before US open)
-25 14 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session american --send-telegram >> /var/log/session_pdf.log 2>&1
+# European session briefing: 07:55 London (fires at 06:55 and 07:55 UTC)
+55 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session european --send-telegram >> /var/log/session_pdf.log 2>&1
+55 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session european --send-telegram >> /var/log/session_pdf.log 2>&1
 
-# US-only session briefing: 16:30 UTC Mon-Fri (EU markets closed, US-only remainder)
-30 16 * * 1-5 cd /app && python3 -m python_brain.ouroboros.session_pdf --session us_only --send-telegram >> /var/log/session_pdf.log 2>&1
+# American session briefing: 14:25 London (fires at 13:25 and 14:25 UTC)
+25 13 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session american --send-telegram >> /var/log/session_pdf.log 2>&1
+25 14 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session american --send-telegram >> /var/log/session_pdf.log 2>&1
+
+# US-only session briefing: 16:30 London (fires at 15:30 and 16:30 UTC)
+30 15 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session us_only --send-telegram >> /var/log/session_pdf.log 2>&1
+30 16 * * 1-5 cd /app && python3 -m python_brain.ouroboros.dst_wrapper --session us_only --send-telegram >> /var/log/session_pdf.log 2>&1
 
 # Daily Simulated Trade Report — 21:15 UTC Mon-Fri (just after DARK window starts)
 15 21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.daily_sim_report --send-telegram >> /var/log/sim_report.log 2>&1

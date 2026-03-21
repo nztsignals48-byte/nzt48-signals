@@ -4,7 +4,7 @@ Runs weekly (Sunday 22:00 UTC) inside the Docker container to discover
 ALL available tickers across ISA-eligible exchanges using IBKR's
 contract search and scanner APIs.
 
-Connects to IB Gateway on port 4004 (paper trading) using client_id=102
+Connects to IB Gateway on port 4003 (live trading) using client_id=102
 (V1=100, AEGIS V2 main=101, scanner=102).
 
 Usage: python3 -m python_brain.ouroboros.ibkr_scanner

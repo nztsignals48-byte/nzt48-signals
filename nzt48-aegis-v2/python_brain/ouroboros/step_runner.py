@@ -627,6 +627,10 @@ class StepRunner:
 
 def main() -> int:
     """CLI: python3 -m python_brain.ouroboros.step_runner {step_name} [-- args...]"""
+    # WP-4: Register clean exit handler for log flushing + signal handling
+    from python_brain.ouroboros.exit_handler import register_handler
+    register_handler()
+
     import argparse
 
     parser = argparse.ArgumentParser(

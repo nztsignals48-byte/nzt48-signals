@@ -11,11 +11,27 @@ Architecture:
   - Graceful: never crashes the engine -- all errors logged and swallowed
 
 Spreadsheet: "AEGIS V2 Dashboard" (shared with nztsignals48@gmail.com)
-Tabs: Live_Trades, Daily_Summary, Open_Positions, Ouroboros_Changes, System_Health
+Tabs: 37 total (21 core N4a architecture + 16 pre-existing/complementary)
+
+N4a 21-tab core architecture:
+  Daily_Summary, Open_Positions, Closed_Trades, Win_Loss_Delta,
+  Confidence_History, Regime_State, Kelly_Sizing, Chandelier_Rungs,
+  Gate_Vetoes, Ticker_Scores, Universe_State, Cost_Drag,
+  Backfill_Results, Meta_Label, Thompson_Arms, Session_Stats,
+  Correlation_Matrix, Risk_Dashboard, System_Health, Config_Changelog, Alerts_Log
 
 Usage:
     # Standalone manual sync (process everything in Redis queue now)
     python3 -m python_brain.ouroboros.sheets_sync
+
+    # Push all nightly tabs (run after nightly_v6)
+    python3 -m python_brain.ouroboros.sheets_sync --push-all-tabs
+
+    # Push a specific tab
+    python3 -m python_brain.ouroboros.sheets_sync --push-tab Risk_Dashboard
+
+    # List all 37 tabs with their type
+    python3 -m python_brain.ouroboros.sheets_sync --list-tabs
 
     # Programmatic (background thread started by WAL watcher)
     from python_brain.ouroboros.sheets_sync import SheetsSyncClient
@@ -62,6 +78,13 @@ SA_PATHS = [
     Path("/app/config/sheets_service_account.json"),
     Path("config/sheets_service_account.json"),
 ]
+
+# Project paths for nightly data sources
+_PROJECT_ROOT = Path(os.environ.get("AEGIS_ROOT", Path(__file__).resolve().parents[2]))
+DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
+WAL_DIR = Path(os.environ.get("AEGIS_WAL_DIR", _PROJECT_ROOT / "events"))
+CONFIG_DIR = Path(os.environ.get("AEGIS_CONFIG_DIR", _PROJECT_ROOT / "config"))
+REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 
 # Tab definitions: (name, header_row)
 TAB_DEFINITIONS: Dict[str, List[str]] = {
@@ -170,6 +193,89 @@ TAB_DEFINITIONS: Dict[str, List[str]] = {
     # Tab 21: Configuration diff log (real-time from OuroborosChange + RungAdvanced)
     "Config_Diff_Log": [
         "Timestamp", "Event_Type", "Symbol", "Detail", "Old_Value", "New_Value",
+    ],
+    # ---------------------------------------------------------------------------
+    # N4a: Remaining tabs for 21-tab architecture
+    # ---------------------------------------------------------------------------
+    # Tab: Confidence score history per ticker (nightly from WAL)
+    "Confidence_History": [
+        "Date", "Symbol", "Avg_Confidence", "Min_Confidence", "Max_Confidence",
+        "Trades", "Win_Rate", "Confidence_Bucket",
+    ],
+    # Tab: Current and historical regime states (nightly from WAL + nightly report)
+    "Regime_State": [
+        "Date", "Regime", "Duration_Hours", "Trades_In_Regime", "Win_Rate",
+        "Avg_PnL", "Transition_From", "VIX_Level",
+    ],
+    # Tab: Position sizing history (real-time from RoutedOrder + nightly)
+    "Kelly_Sizing": [
+        "Timestamp", "Symbol", "Kelly_Fraction", "Position_Size_GBP",
+        "Confidence", "Win_Prob", "Regime", "Equity_GBP",
+    ],
+    # Tab: Rung progression per trade (real-time from RungAdvanced WAL events)
+    "Chandelier_Rungs": [
+        "Timestamp", "Symbol", "Old_Rung", "New_Rung", "Price_At_Advance",
+        "Stop_Price", "Highest_High", "ATR",
+    ],
+    # Tab: Signal rejection breakdown (nightly gate_vetoes.ndjson summary)
+    "Gate_Vetoes": [
+        "Date", "Gate_Name", "Rejections", "Would_Have_Won", "Would_Have_Lost",
+        "Missed_PnL", "Top_Ticker", "Recommendation",
+    ],
+    # Tab: Current ticker rankings (nightly from ticker_selector / persistent_memory)
+    "Ticker_Scores": [
+        "Date", "Symbol", "Composite_Score", "Tier", "Win_Rate_30d",
+        "Profit_Factor", "Avg_Spread_Cost", "Status",
+    ],
+    # Tab: Full universe with status (nightly from active_watchlist.json)
+    "Universe_State": [
+        "Date", "Symbol", "Exchange", "Tier", "Leverage", "Currency",
+        "In_Watchlist", "Blacklisted", "Last_Trade_Date",
+    ],
+    # Tab: Cost analysis per trade/ticker (nightly aggregation)
+    "Cost_Drag": [
+        "Date", "Symbol", "Trades", "Gross_PnL", "Total_Commission",
+        "Total_Spread_Cost", "Net_PnL", "Cost_Drag_Pct", "Avg_Spread_Pct",
+    ],
+    # Tab: 7-day backfill simulation results (after backfill_simulator run)
+    "Backfill_Results": [
+        "Date", "Total_Trades", "Win_Rate", "Profit_Factor", "Total_PnL",
+        "Starting_Equity", "Ending_Equity", "Return_Pct", "Best_Ticker",
+        "Worst_Ticker",
+    ],
+    # Tab: Meta-label threshold + accuracy per ticker (nightly from meta_label_optimizer)
+    "Meta_Label": [
+        "Date", "Symbol", "Threshold", "Method", "F1", "Precision",
+        "Recall", "N_Trades", "Win_Rate",
+    ],
+    # Tab: Thompson Sampling arm state per ticker (nightly from universe_filters)
+    "Thompson_Arms": [
+        "Date", "Symbol", "Posterior_Mean", "Posterior_Std", "N_Trades",
+        "Prior_Mean", "Sigma_Sq", "Ranking",
+    ],
+    # Tab: Per-session statistics (nightly aggregation from WAL)
+    "Session_Stats": [
+        "Date", "Session", "Trades", "Wins", "Losses", "Win_Rate",
+        "Total_PnL", "Avg_PnL", "Best_Trade", "Worst_Trade",
+    ],
+    # Tab: Top-N pairwise correlations (nightly from indicator_intelligence)
+    "Correlation_Matrix": [
+        "Date", "Indicator_A", "Indicator_B", "Correlation", "N_Samples",
+        "Interpretation",
+    ],
+    # Tab: Drawdown, VaR, regime, circuit breaker state (nightly)
+    "Risk_Dashboard": [
+        "Date", "Equity_GBP", "Max_Drawdown_Pct", "Current_Drawdown_Pct",
+        "VaR_95_Pct", "Regime", "Circuit_Breaker_State", "Positions_Open",
+        "Daily_Loss_Limit_Remaining",
+    ],
+    # Tab: Config diff rollback ledger (nightly from config_changes.ndjson)
+    "Config_Changelog": [
+        "Timestamp", "Filename", "Num_Changes", "Summary", "Old_Hash", "New_Hash",
+    ],
+    # Tab: All Telegram alerts sent (nightly from alert log)
+    "Alerts_Log": [
+        "Timestamp", "Alert_Type", "Message_Preview", "Recipient", "Status",
     ],
 }
 
@@ -375,6 +481,23 @@ def _route_event(event: dict) -> List[tuple]:
             "OPEN",
         ]
         results.append(("Live_Trades", row))
+
+        # Kelly_Sizing tab (N4a) — capture position sizing at entry
+        kelly_frac = data.get("kelly_fraction", 0)
+        position_size_gbp = data.get("position_size_gbp", data.get("approved_notional", 0))
+        equity_gbp = data.get("equity_at_entry", data.get("equity", 0))
+        win_prob = data.get("win_probability", data.get("confidence", 0))
+        results.append(("Kelly_Sizing", [
+            ts,
+            symbol,
+            round(kelly_frac, 4),
+            round(position_size_gbp, 2),
+            round(data.get("confidence", 0), 2),
+            round(win_prob, 4),
+            data.get("regime_at_entry", data.get("regime", "")),
+            round(equity_gbp, 2),
+        ]))
+
         return results
 
     # --- PositionClosed -> Live_Trades + Closed_Trades + MAE_MFE + Spread_Execution + Win/Loss_Indicators ---
@@ -569,7 +692,7 @@ def _route_event(event: dict) -> List[tuple]:
         ]))
         return results
 
-    # --- RungAdvanced -> Config_Diff_Log (N4a) ---
+    # --- RungAdvanced -> Config_Diff_Log + Chandelier_Rungs (N4a) ---
     if "RungAdvanced" in payload:
         data = payload["RungAdvanced"]
         symbol = data.get("symbol", _resolve_ticker(data.get("ticker_id", 0)))
@@ -578,6 +701,17 @@ def _route_event(event: dict) -> List[tuple]:
         results.append(("Config_Diff_Log", [
             ts, "RungAdvanced", symbol, f"Rung {old_rung} → {new_rung}",
             str(old_rung), str(new_rung),
+        ]))
+        # Chandelier_Rungs tab (N4a)
+        results.append(("Chandelier_Rungs", [
+            ts,
+            symbol,
+            str(old_rung),
+            str(new_rung),
+            round(data.get("price_at_advance", data.get("current_price", 0)), 4),
+            round(data.get("stop_price", data.get("new_stop", 0)), 4),
+            round(data.get("highest_high", 0), 4),
+            round(data.get("atr", 0), 4),
         ]))
         return results
 
@@ -1266,6 +1400,1037 @@ def push_daily_summary(report_dir: Path = None) -> bool:
     return _push_nightly_rows("Daily_Summary", [row])
 
 
+# ---------------------------------------------------------------------------
+# N4a: Nightly push functions for new 21-tab architecture
+# ---------------------------------------------------------------------------
+
+def _load_wal_position_closed_events(days: int = 1) -> List[dict]:
+    """Load PositionClosed events from WAL for the last N days."""
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ns = int(cutoff.timestamp() * 1e9)
+    events = []
+
+    wal_candidates = [WAL_DIR / "current.ndjson"]
+    archive_dir = WAL_DIR / "archive"
+    if archive_dir.exists():
+        for f in sorted(archive_dir.glob("*.ndjson")):
+            wal_candidates.append(f)
+
+    for wal_path in wal_candidates:
+        if not wal_path.exists():
+            continue
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    payload = event.get("payload", {})
+                    if "PositionClosed" in payload:
+                        evt_time = event.get("event_time_ns", 0)
+                        if evt_time >= cutoff_ns:
+                            events.append(payload["PositionClosed"])
+        except Exception as e:
+            log.warning("Error reading WAL %s: %s", wal_path, e)
+    return events
+
+
+def _load_wal_events_by_type(event_type: str, days: int = 1) -> List[dict]:
+    """Load WAL events of a specific type for the last N days."""
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ns = int(cutoff.timestamp() * 1e9)
+    events = []
+
+    wal_candidates = [WAL_DIR / "current.ndjson"]
+    archive_dir = WAL_DIR / "archive"
+    if archive_dir.exists():
+        for f in sorted(archive_dir.glob("*.ndjson")):
+            wal_candidates.append(f)
+
+    for wal_path in wal_candidates:
+        if not wal_path.exists():
+            continue
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    payload = event.get("payload", {})
+                    if event_type in payload:
+                        evt_time = event.get("event_time_ns", 0)
+                        if evt_time >= cutoff_ns:
+                            events.append(payload[event_type])
+        except Exception as e:
+            log.warning("Error reading WAL %s: %s", wal_path, e)
+    return events
+
+
+def push_confidence_history(date_str: str = "") -> bool:
+    """Push per-ticker confidence score history to Confidence_History tab.
+
+    Reads PositionClosed events from today's WAL, groups by ticker,
+    computes confidence stats per ticker, and pushes rows.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    trades = _load_wal_position_closed_events(days=1)
+    if not trades:
+        log.info("No trades for Confidence_History on %s", date_str)
+        return True
+
+    # Group by ticker
+    from collections import defaultdict
+    by_ticker: Dict[str, List[dict]] = defaultdict(list)
+    for t in trades:
+        sym = t.get("symbol", _resolve_ticker(t.get("ticker_id", 0)))
+        by_ticker[sym].append(t)
+
+    rows = []
+    for sym, ticker_trades in sorted(by_ticker.items()):
+        confs = [t.get("confidence", 0) for t in ticker_trades]
+        wins = sum(1 for t in ticker_trades if t.get("final_pnl", 0) > 0)
+        n = len(ticker_trades)
+        avg_conf = sum(confs) / n if n > 0 else 0
+        # Bucket: Low (<0.6), Medium (0.6-0.75), High (>0.75)
+        bucket = "High" if avg_conf > 0.75 else ("Medium" if avg_conf >= 0.6 else "Low")
+        rows.append([
+            date_str, sym,
+            round(avg_conf, 4),
+            round(min(confs) if confs else 0, 4),
+            round(max(confs) if confs else 0, 4),
+            n,
+            round(wins / n if n > 0 else 0, 4),
+            bucket,
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Confidence_History", rows)
+
+
+def push_regime_state(date_str: str = "") -> bool:
+    """Push regime state history to Regime_State tab.
+
+    Reads RiskStateChange events from WAL and nightly report for regime stats.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Try loading from the latest nightly report which has regime performance
+    report_dir = REPORTS_DIR
+    json_files = sorted(report_dir.glob("nightly_v6_*.json"), reverse=True) if report_dir.exists() else []
+    if not json_files:
+        json_files = sorted(report_dir.glob("*_metrics.json"), reverse=True) if report_dir.exists() else []
+
+    rows = []
+    if json_files:
+        try:
+            with open(json_files[0]) as f:
+                data = json.load(f)
+            per_regime = data.get("per_regime", {})
+            vix = data.get("vix_close", data.get("vix_at_close", 0))
+            for regime, stats in sorted(per_regime.items()):
+                trades = stats.get("trades", 0)
+                wins = stats.get("wins", 0)
+                rows.append([
+                    date_str,
+                    regime,
+                    "",  # Duration_Hours (not available from daily report)
+                    trades,
+                    round(wins / trades if trades > 0 else 0, 4),
+                    round(stats.get("total_pnl", stats.get("avg_pnl", 0)), 4),
+                    "",  # Transition_From
+                    round(vix, 2),
+                ])
+        except Exception as e:
+            log.warning("Failed to read regime data from nightly report: %s", e)
+
+    # Fallback: read RiskStateChange events from WAL
+    if not rows:
+        changes = _load_wal_events_by_type("RiskStateChange", days=1)
+        for c in changes:
+            rows.append([
+                date_str,
+                c.get("new_regime", c.get("regime", "")),
+                "",
+                0,
+                0,
+                0,
+                c.get("old_regime", c.get("previous_regime", "")),
+                round(c.get("vix", 0), 2),
+            ])
+
+    if not rows:
+        log.info("No regime state data for %s", date_str)
+        return True
+    return _push_nightly_rows("Regime_State", rows)
+
+
+def push_gate_vetoes(date_str: str = "") -> bool:
+    """Push gate veto summary to Gate_Vetoes tab.
+
+    Reads gate_vetoes.ndjson or archived vetoes and summarizes by gate name.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    gate_vetoes_path = DATA_DIR / "gate_vetoes.ndjson"
+    # Also check archive
+    archive_path = DATA_DIR / "gate_vetoes_archive" / f"gate_vetoes_{date_str}.ndjson"
+
+    vetoes = []
+    for vpath in [gate_vetoes_path, archive_path]:
+        if not vpath.exists():
+            continue
+        try:
+            with open(vpath) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        vetoes.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            log.warning("Error reading gate vetoes %s: %s", vpath, e)
+
+    if not vetoes:
+        log.info("No gate vetoes for %s", date_str)
+        return True
+
+    # Summarize by gate name
+    from collections import defaultdict
+    gate_summary: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"rejections": 0, "won": 0, "lost": 0, "missed_pnl": 0.0, "tickers": defaultdict(int)}
+    )
+    for v in vetoes:
+        gate = v.get("gate_name", v.get("gate", "unknown"))
+        gate_summary[gate]["rejections"] += 1
+        # Check if outcome is tracked (missed winner analysis)
+        hyp_pnl = v.get("hypothetical_pnl_pct", v.get("would_have_pnl", 0))
+        if hyp_pnl > 0:
+            gate_summary[gate]["won"] += 1
+            gate_summary[gate]["missed_pnl"] += hyp_pnl
+        elif hyp_pnl < 0:
+            gate_summary[gate]["lost"] += 1
+        sym = v.get("symbol", v.get("ticker", ""))
+        if sym:
+            gate_summary[gate]["tickers"][sym] += 1
+
+    rows = []
+    for gate, stats in sorted(gate_summary.items()):
+        top_ticker = max(stats["tickers"], key=stats["tickers"].get) if stats["tickers"] else ""
+        # Recommendation based on missed winners
+        total_rej = stats["rejections"]
+        would_won = stats["won"]
+        if total_rej > 0 and would_won / total_rej > 0.5:
+            rec = "LOOSEN"
+        elif would_won == 0 and total_rej > 5:
+            rec = "KEEP"
+        else:
+            rec = "MONITOR"
+        rows.append([
+            date_str, gate, total_rej, would_won, stats["lost"],
+            round(stats["missed_pnl"], 4), top_ticker, rec,
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Gate_Vetoes", rows)
+
+
+def push_ticker_scores(date_str: str = "") -> bool:
+    """Push current ticker rankings to Ticker_Scores tab.
+
+    Reads from system_memory.json (persistent memory) and/or
+    active_watchlist.json for tier/score data.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+
+    # Try persistent memory for per-ticker stats
+    memory_path = DATA_DIR / "system_memory.json"
+    if memory_path.exists():
+        try:
+            with open(memory_path) as f:
+                memory = json.load(f)
+            per_ticker = memory.get("per_ticker", {})
+            for sym, stats in sorted(per_ticker.items()):
+                total_trades = stats.get("total_trades", 0)
+                wins = stats.get("wins", 0)
+                wr = stats.get("win_rate", wins / total_trades if total_trades > 0 else 0)
+                # Compute composite score: WR*40 + PF*30 + (1-spread)*30
+                pf = stats.get("profit_factor", 0)
+                avg_spread = stats.get("avg_spread_cost", stats.get("avg_spread_pct", 0))
+                score = round(wr * 40 + min(pf, 3) / 3 * 30 + max(0, 1 - avg_spread) * 30, 1)
+                status = stats.get("status", "active")
+                rows.append([
+                    date_str, sym, score, "",
+                    round(wr, 4), round(pf, 2),
+                    round(avg_spread, 4), status,
+                ])
+        except Exception as e:
+            log.warning("Failed to read system_memory.json for ticker scores: %s", e)
+
+    # Enrich with tier from active_watchlist.json
+    watchlist_path = CONFIG_DIR / "active_watchlist.json"
+    tier_map: Dict[str, str] = {}
+    if watchlist_path.exists():
+        try:
+            with open(watchlist_path) as f:
+                wl = json.load(f)
+            for entry in wl if isinstance(wl, list) else wl.get("tickers", []):
+                sym = entry.get("symbol", entry.get("ticker", ""))
+                tier = entry.get("tier", "")
+                if sym:
+                    tier_map[sym] = str(tier)
+        except Exception as e:
+            log.warning("Failed to read active_watchlist.json: %s", e)
+
+    # Patch tier into rows
+    for row in rows:
+        sym = row[1]
+        if sym in tier_map:
+            row[3] = tier_map[sym]
+
+    if not rows:
+        # Fall back to just listing PRIMARY_TICKERS with default scores
+        for sym in PRIMARY_TICKERS:
+            tier = tier_map.get(sym, "HOT")
+            rows.append([date_str, sym, 50.0, tier, 0, 0, 0, "active"])
+
+    return _push_nightly_rows("Ticker_Scores", rows)
+
+
+def push_universe_state(date_str: str = "") -> bool:
+    """Push full universe state to Universe_State tab.
+
+    Reads contracts.toml + active_watchlist.json + persistent_memory blacklist.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+
+    # Read contracts.toml for the full universe
+    contracts_path = CONFIG_DIR / "contracts.toml"
+    contracts_data: Dict[str, Dict[str, Any]] = {}
+    if contracts_path.exists():
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore
+            with open(contracts_path, "rb") as f:
+                toml_data = tomllib.load(f)
+            # Contracts are under [[contracts]] array or [contract.*] sections
+            for key, val in toml_data.items():
+                if isinstance(val, dict) and "exchange" in val:
+                    contracts_data[key] = val
+                elif isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict) and "symbol" in item:
+                            contracts_data[item["symbol"]] = item
+        except Exception as e:
+            log.warning("Failed to parse contracts.toml: %s", e)
+
+    # Read watchlist for tier info
+    watchlist_path = CONFIG_DIR / "active_watchlist.json"
+    watchlist_syms: set = set()
+    tier_map: Dict[str, str] = {}
+    if watchlist_path.exists():
+        try:
+            with open(watchlist_path) as f:
+                wl = json.load(f)
+            entries = wl if isinstance(wl, list) else wl.get("tickers", [])
+            for entry in entries:
+                sym = entry.get("symbol", entry.get("ticker", ""))
+                if sym:
+                    watchlist_syms.add(sym)
+                    tier_map[sym] = str(entry.get("tier", ""))
+        except Exception:
+            pass
+
+    # Read blacklist from persistent memory
+    blacklist: set = set()
+    memory_path = DATA_DIR / "system_memory.json"
+    if memory_path.exists():
+        try:
+            with open(memory_path) as f:
+                memory = json.load(f)
+            for sym in memory.get("blacklist", []):
+                blacklist.add(sym)
+        except Exception:
+            pass
+
+    # Build rows: at minimum list primary tickers
+    listed_syms: set = set()
+    for sym in PRIMARY_TICKERS:
+        cd = contracts_data.get(sym, {})
+        rows.append([
+            date_str, sym,
+            cd.get("exchange", "LSEETF"),
+            tier_map.get(sym, "HOT"),
+            cd.get("leverage", 3),
+            cd.get("currency", "USD"),
+            "Yes" if sym in watchlist_syms or not watchlist_syms else "Yes",
+            "Yes" if sym in blacklist else "No",
+            "",  # Last_Trade_Date
+        ])
+        listed_syms.add(sym)
+
+    # Add any watchlist entries not in primary tickers
+    for sym in sorted(watchlist_syms - listed_syms):
+        cd = contracts_data.get(sym, {})
+        rows.append([
+            date_str, sym,
+            cd.get("exchange", ""),
+            tier_map.get(sym, ""),
+            cd.get("leverage", ""),
+            cd.get("currency", ""),
+            "Yes",
+            "Yes" if sym in blacklist else "No",
+            "",
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Universe_State", rows)
+
+
+def push_cost_drag(date_str: str = "") -> bool:
+    """Push per-ticker cost analysis to Cost_Drag tab.
+
+    Aggregates commission and spread costs from today's PositionClosed events.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    trades = _load_wal_position_closed_events(days=1)
+    if not trades:
+        log.info("No trades for Cost_Drag on %s", date_str)
+        return True
+
+    from collections import defaultdict
+    by_ticker: Dict[str, List[dict]] = defaultdict(list)
+    for t in trades:
+        sym = t.get("symbol", _resolve_ticker(t.get("ticker_id", 0)))
+        by_ticker[sym].append(t)
+
+    rows = []
+    for sym, ticker_trades in sorted(by_ticker.items()):
+        n = len(ticker_trades)
+        gross = sum(t.get("gross_pnl", t.get("final_pnl", 0)) for t in ticker_trades)
+        commission = sum(t.get("total_commission", 0) for t in ticker_trades)
+        net = sum(t.get("final_pnl", 0) for t in ticker_trades)
+        total_spread = 0.0
+        avg_spread_sum = 0.0
+        for t in ticker_trades:
+            sp_entry = t.get("spread_at_entry_pct", 0)
+            sp_exit = t.get("spread_at_exit_pct", 0)
+            qty = t.get("qty", 1)
+            ep = t.get("entry_price", 1)
+            pos_val = max(ep * qty, 1.0)
+            total_spread += (sp_entry + sp_exit) / 100.0 * pos_val
+            avg_spread_sum += sp_entry
+        avg_spread = avg_spread_sum / n if n > 0 else 0
+        cost_drag = round((commission + total_spread) / max(abs(gross), 0.01) * 100, 1) if gross else 0
+        rows.append([
+            date_str, sym, n,
+            round(gross, 4), round(commission, 4),
+            round(total_spread, 4), round(net, 4),
+            cost_drag, round(avg_spread, 4),
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Cost_Drag", rows)
+
+
+def push_backfill_results(date_str: str = "") -> bool:
+    """Push latest backfill simulation results to Backfill_Results tab.
+
+    Reads from ouroboros_reports/backfill_sim_*.json.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if not REPORTS_DIR.exists():
+        log.info("No reports dir for backfill results")
+        return True
+
+    json_files = sorted(REPORTS_DIR.glob("backfill_sim_*.json"), reverse=True)
+    if not json_files:
+        log.info("No backfill simulation reports found")
+        return True
+
+    try:
+        with open(json_files[0]) as f:
+            data = json.load(f)
+    except Exception as e:
+        log.warning("Failed to read backfill report: %s", e)
+        return False
+
+    per_ticker = data.get("per_ticker", {})
+    # Find best/worst ticker by total_pnl
+    best_ticker = ""
+    worst_ticker = ""
+    if per_ticker:
+        best_ticker = max(per_ticker, key=lambda k: per_ticker[k].get("total_pnl", 0))
+        worst_ticker = min(per_ticker, key=lambda k: per_ticker[k].get("total_pnl", 0))
+
+    row = [
+        data.get("date", date_str),
+        data.get("total_trades", 0),
+        round(data.get("win_rate", 0), 4),
+        round(data.get("profit_factor", 0), 2),
+        round(data.get("total_pnl_per_share", 0), 4),
+        round(data.get("starting_equity", 10000), 2),
+        round(data.get("ending_equity", 10000), 2),
+        round(data.get("return_pct", 0), 2),
+        best_ticker,
+        worst_ticker,
+    ]
+
+    return _push_nightly_rows("Backfill_Results", [row])
+
+
+def push_meta_label(date_str: str = "") -> bool:
+    """Push meta-label threshold data to Meta_Label tab.
+
+    Reads from ouroboros_reports/meta_label_*.json or config/meta_label_thresholds.toml.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Try JSON sidecar first (richer data)
+    json_files = sorted(REPORTS_DIR.glob("meta_label_*.json"), reverse=True) if REPORTS_DIR.exists() else []
+    if json_files:
+        try:
+            with open(json_files[0]) as f:
+                data = json.load(f)
+            tickers = data.get("tickers", {})
+            rows = []
+            for sym, info in sorted(tickers.items()):
+                rows.append([
+                    data.get("date", date_str),
+                    sym,
+                    round(info.get("threshold", info.get("0", 0.55)), 4),
+                    info.get("method", "default"),
+                    round(info.get("f1", 0), 4),
+                    round(info.get("precision", 0), 4),
+                    round(info.get("recall", 0), 4),
+                    info.get("n_trades", 0),
+                    round(info.get("win_rate", 0), 4),
+                ])
+            if rows:
+                return _push_nightly_rows("Meta_Label", rows)
+        except Exception as e:
+            log.warning("Failed to read meta_label JSON: %s", e)
+
+    log.info("No meta_label data for %s", date_str)
+    return True
+
+
+def push_thompson_arms(date_str: str = "") -> bool:
+    """Push Thompson Sampling arm state to Thompson_Arms tab.
+
+    Runs the Thompson Sampling engine from WAL data and exports arm state.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    try:
+        from python_brain.ouroboros.universe_filters import ThompsonSamplingEngine
+    except ImportError:
+        log.info("Thompson Sampling engine not available")
+        return True
+
+    # Load trades from last 30 days for Thompson
+    trades = _load_wal_position_closed_events(days=30)
+    if not trades:
+        log.info("No trades for Thompson arms")
+        return True
+
+    engine = ThompsonSamplingEngine()
+    for t in trades:
+        sym = t.get("symbol", _resolve_ticker(t.get("ticker_id", 0)))
+        entry_price = t.get("entry_price", 0)
+        exit_price = t.get("exit_price", 0)
+        if entry_price > 0:
+            engine.update_from_trade(sym, entry_price, exit_price)
+
+    import math
+    # Sort by posterior mean descending for ranking
+    sorted_arms = sorted(engine.arms.items(),
+                         key=lambda x: x[1].posterior_mean, reverse=True)
+    rows = []
+    for rank, (sym, arm) in enumerate(sorted_arms, 1):
+        rows.append([
+            date_str, sym,
+            round(arm.posterior_mean, 6),
+            round(math.sqrt(max(1e-10, arm.posterior_variance)), 6),
+            arm.n,
+            round(arm.mu_0, 6),
+            round(arm.sigma_sq, 8),
+            rank,
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Thompson_Arms", rows)
+
+
+def push_session_stats(date_str: str = "") -> bool:
+    """Push per-session (Asian/European/American) statistics to Session_Stats tab.
+
+    Reads PositionClosed events and groups by entry session phase.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    trades = _load_wal_position_closed_events(days=1)
+    if not trades:
+        log.info("No trades for Session_Stats on %s", date_str)
+        return True
+
+    from collections import defaultdict
+    by_session: Dict[str, List[dict]] = defaultdict(list)
+    for t in trades:
+        session = t.get("entry_session_phase", "unknown")
+        if not session:
+            # Classify from entry_time_ns
+            entry_ns = t.get("entry_time_ns", 0)
+            if entry_ns > 0:
+                try:
+                    dt = datetime.fromtimestamp(entry_ns / 1e9, tz=timezone.utc)
+                    hour = dt.hour
+                    if hour < 8:
+                        session = "pre_market"
+                    elif hour < 12:
+                        session = "morning"
+                    elif hour < 14:
+                        session = "us_open"
+                    elif hour < 16:
+                        session = "afternoon"
+                    else:
+                        session = "after_hours"
+                except Exception:
+                    session = "unknown"
+            else:
+                session = "unknown"
+        by_session[session].append(t)
+
+    rows = []
+    for session, session_trades in sorted(by_session.items()):
+        n = len(session_trades)
+        pnls = [t.get("final_pnl", 0) for t in session_trades]
+        wins = sum(1 for p in pnls if p > 0)
+        losses = n - wins
+        total_pnl = sum(pnls)
+        avg_pnl = total_pnl / n if n > 0 else 0
+        best = max(pnls) if pnls else 0
+        worst = min(pnls) if pnls else 0
+        rows.append([
+            date_str, session, n, wins, losses,
+            round(wins / n if n > 0 else 0, 4),
+            round(total_pnl, 4), round(avg_pnl, 4),
+            round(best, 4), round(worst, 4),
+        ])
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Session_Stats", rows)
+
+
+def push_correlation_matrix(date_str: str = "") -> bool:
+    """Push top-N pairwise indicator correlations to Correlation_Matrix tab.
+
+    Reads from indicator_intelligence.json output.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    intel_path = DATA_DIR / "indicator_intelligence.json"
+    if not intel_path.exists():
+        log.info("No indicator_intelligence.json for correlation matrix")
+        return True
+
+    try:
+        with open(intel_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        log.warning("Failed to read indicator_intelligence.json: %s", e)
+        return False
+
+    correlations = data.get("indicator_correlations", {})
+    if not correlations:
+        log.info("No correlations in indicator_intelligence.json")
+        return True
+
+    rows = []
+    seen = set()
+    for ind_a, pairs in sorted(correlations.items()):
+        for ind_b, corr_val in sorted(pairs.items()):
+            pair_key = tuple(sorted([ind_a, ind_b]))
+            if pair_key in seen:
+                continue
+            seen.add(pair_key)
+            # Interpret correlation
+            abs_corr = abs(corr_val)
+            if abs_corr > 0.8:
+                interp = "highly_correlated"
+            elif abs_corr > 0.5:
+                interp = "moderately_correlated"
+            elif abs_corr > 0.3:
+                interp = "weakly_correlated"
+            else:
+                interp = "independent"
+            rows.append([
+                date_str, ind_a, ind_b,
+                round(corr_val, 4), "",  # N_Samples not tracked in current JSON
+                interp,
+            ])
+
+    # Sort by absolute correlation descending, take top 20
+    rows.sort(key=lambda r: abs(r[3]) if isinstance(r[3], (int, float)) else 0, reverse=True)
+    rows = rows[:20]
+
+    if not rows:
+        return True
+    return _push_nightly_rows("Correlation_Matrix", rows)
+
+
+def push_risk_dashboard(date_str: str = "") -> bool:
+    """Push risk dashboard state to Risk_Dashboard tab.
+
+    Reads from nightly report JSON for drawdown, equity, regime, etc.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if not REPORTS_DIR.exists():
+        log.info("No reports dir for risk dashboard")
+        return True
+
+    json_files = sorted(REPORTS_DIR.glob("nightly_v6_*.json"), reverse=True)
+    if not json_files:
+        json_files = sorted(REPORTS_DIR.glob("*_metrics.json"), reverse=True)
+    if not json_files:
+        log.info("No nightly report for risk dashboard")
+        return True
+
+    try:
+        with open(json_files[0]) as f:
+            data = json.load(f)
+    except Exception as e:
+        log.warning("Failed to read nightly report for risk dashboard: %s", e)
+        return False
+
+    equity = data.get("equity_gbp", data.get("ending_equity", data.get("equity", 0)))
+    max_dd = data.get("max_drawdown_pct", 0)
+    current_dd = data.get("current_drawdown_pct", max_dd)
+    var_95 = data.get("var_95_pct", 0)
+    regime = data.get("regime", data.get("current_regime", ""))
+    cb_state = data.get("circuit_breaker_state", "OK")
+    positions = data.get("positions_open", data.get("open_positions", 0))
+    # Daily loss limit: typically 2% of equity
+    daily_limit = data.get("daily_loss_limit_remaining",
+                           round(max(0, equity * 0.02 + data.get("total_pnl_gbp",
+                                     data.get("total_pnl", 0))), 2))
+
+    row = [
+        date_str,
+        round(equity, 2),
+        round(max_dd, 2),
+        round(current_dd, 2),
+        round(var_95, 2),
+        regime,
+        cb_state,
+        positions,
+        round(daily_limit, 2),
+    ]
+
+    return _push_nightly_rows("Risk_Dashboard", [row])
+
+
+def push_config_changelog(date_str: str = "") -> bool:
+    """Push config change ledger to Config_Changelog tab.
+
+    Reads from data/config_changes.ndjson (written by config_writer.py).
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    ledger_path = DATA_DIR / "config_changes.ndjson"
+    if not ledger_path.exists():
+        log.info("No config_changes.ndjson for changelog")
+        return True
+
+    rows = []
+    try:
+        with open(ledger_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # Only include entries from today
+                ts = entry.get("timestamp", "")
+                if not ts.startswith(date_str):
+                    continue
+                diff_summary = entry.get("diff_summary", [])
+                num_changes = len(diff_summary)
+                # Build a short summary
+                if num_changes <= 3:
+                    summary_parts = []
+                    for d in diff_summary:
+                        key = d.get("key", "")
+                        action = d.get("action", "")
+                        summary_parts.append(f"{key}:{action}")
+                    summary = "; ".join(summary_parts)
+                else:
+                    summary = f"{num_changes} changes"
+                rows.append([
+                    ts,
+                    entry.get("filename", ""),
+                    num_changes,
+                    summary[:200],  # Truncate for sheets cell limits
+                    entry.get("old_hash", "")[:12],
+                    entry.get("new_hash", "")[:12],
+                ])
+    except Exception as e:
+        log.warning("Failed to read config_changes.ndjson: %s", e)
+        return False
+
+    if not rows:
+        log.info("No config changes for %s", date_str)
+        return True
+    return _push_nightly_rows("Config_Changelog", rows)
+
+
+def push_alerts_log(date_str: str = "") -> bool:
+    """Push Telegram alerts log to Alerts_Log tab.
+
+    Reads from data/telegram_alerts.ndjson (if it exists) or
+    scans ouroboros log for sent alerts.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    rows = []
+
+    # Try reading telegram alerts log
+    alerts_path = DATA_DIR / "telegram_alerts.ndjson"
+    if alerts_path.exists():
+        try:
+            with open(alerts_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = entry.get("timestamp", "")
+                    if not ts.startswith(date_str):
+                        continue
+                    msg = entry.get("message", "")[:100]  # Preview only
+                    rows.append([
+                        ts,
+                        entry.get("alert_type", "general"),
+                        msg,
+                        entry.get("recipient", ""),
+                        entry.get("status", "sent"),
+                    ])
+        except Exception as e:
+            log.warning("Failed to read telegram_alerts.ndjson: %s", e)
+
+    if not rows:
+        log.info("No alerts for %s", date_str)
+        return True
+    return _push_nightly_rows("Alerts_Log", rows)
+
+
+def push_all_tabs(date_str: str = "", report_dir: Path = None) -> Dict[str, bool]:
+    """Push all 21+ tabs. Returns dict of tab_name -> success.
+
+    Intended to be called after nightly_v6 completes. Pushes both
+    WAL-derived tabs and report-derived tabs.
+    """
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    results: Dict[str, bool] = {}
+
+    # 1. Daily_Summary (from nightly report)
+    log.info("--- Pushing Daily_Summary ---")
+    results["Daily_Summary"] = push_daily_summary(report_dir=report_dir)
+
+    # 2. Confidence_History (from WAL)
+    log.info("--- Pushing Confidence_History ---")
+    results["Confidence_History"] = push_confidence_history(date_str)
+
+    # 3. Regime_State (from report + WAL)
+    log.info("--- Pushing Regime_State ---")
+    results["Regime_State"] = push_regime_state(date_str)
+
+    # 4. Gate_Vetoes (from gate_vetoes.ndjson)
+    log.info("--- Pushing Gate_Vetoes ---")
+    results["Gate_Vetoes"] = push_gate_vetoes(date_str)
+
+    # 5. Ticker_Scores (from persistent memory)
+    log.info("--- Pushing Ticker_Scores ---")
+    results["Ticker_Scores"] = push_ticker_scores(date_str)
+
+    # 6. Universe_State (from contracts + watchlist)
+    log.info("--- Pushing Universe_State ---")
+    results["Universe_State"] = push_universe_state(date_str)
+
+    # 7. Cost_Drag (from WAL)
+    log.info("--- Pushing Cost_Drag ---")
+    results["Cost_Drag"] = push_cost_drag(date_str)
+
+    # 8. Backfill_Results (from backfill sim report)
+    log.info("--- Pushing Backfill_Results ---")
+    results["Backfill_Results"] = push_backfill_results(date_str)
+
+    # 9. Meta_Label (from meta_label optimizer report)
+    log.info("--- Pushing Meta_Label ---")
+    results["Meta_Label"] = push_meta_label(date_str)
+
+    # 10. Thompson_Arms (from WAL via Thompson engine)
+    log.info("--- Pushing Thompson_Arms ---")
+    results["Thompson_Arms"] = push_thompson_arms(date_str)
+
+    # 11. Session_Stats (from WAL)
+    log.info("--- Pushing Session_Stats ---")
+    results["Session_Stats"] = push_session_stats(date_str)
+
+    # 12. Correlation_Matrix (from indicator intelligence)
+    log.info("--- Pushing Correlation_Matrix ---")
+    results["Correlation_Matrix"] = push_correlation_matrix(date_str)
+
+    # 13. Risk_Dashboard (from nightly report)
+    log.info("--- Pushing Risk_Dashboard ---")
+    results["Risk_Dashboard"] = push_risk_dashboard(date_str)
+
+    # 14. Config_Changelog (from config_changes.ndjson)
+    log.info("--- Pushing Config_Changelog ---")
+    results["Config_Changelog"] = push_config_changelog(date_str)
+
+    # 15. Alerts_Log (from telegram alerts log)
+    log.info("--- Pushing Alerts_Log ---")
+    results["Alerts_Log"] = push_alerts_log(date_str)
+
+    # 16-18. Trade_Classes, Ticker_Scoreboard, Parameter_Evolution
+    #   (These are pushed by existing nightly_v6 hooks — skip if called from push_all)
+    # Already handled by nightly_v6 calling push_nightly_trade_classes, etc.
+    for existing_tab in ["Trade_Classes", "Ticker_Scoreboard", "Parameter_Evolution"]:
+        results[existing_tab] = True  # Assumed pushed by nightly_v6
+
+    # 19-22. Real-time tabs (pushed by _route_event, not nightly):
+    #   Live_Trades, Open_Positions, Closed_Trades, Win_Loss_Delta,
+    #   Rejected_Signals, Missed_Winners, MAE_MFE, Spread_Execution,
+    #   Win_Indicators, Loss_Indicators, Chandelier_Rungs, Kelly_Sizing,
+    #   Config_Diff_Log, Ouroboros_Changes, System_Health
+    # These are populated in real-time via Redis queue, not nightly push
+    realtime_tabs = [
+        "Live_Trades", "Open_Positions", "Closed_Trades", "Win_Indicators",
+        "Loss_Indicators", "Win_Loss_Delta", "Rejected_Signals", "Missed_Winners",
+        "MAE_MFE", "Spread_Execution", "Config_Diff_Log", "Ouroboros_Changes",
+        "System_Health", "Chandelier_Rungs", "Kelly_Sizing",
+        "Indicator_Stats", "Regime_Performance", "Session_Performance", "Learned_Rules",
+    ]
+    for rt_tab in realtime_tabs:
+        results[rt_tab] = True  # Real-time tabs — not pushed by nightly
+
+    # Summary
+    pushed = sum(1 for v in results.values() if v)
+    failed = sum(1 for v in results.values() if not v)
+    log.info("push_all_tabs complete: %d OK, %d FAILED", pushed, failed)
+
+    return results
+
+
+def list_all_tabs() -> List[Dict[str, str]]:
+    """List all tabs defined in TAB_DEFINITIONS with their type.
+
+    Returns list of dicts with: name, columns, type (realtime|nightly|hybrid).
+    """
+    # Classify tabs by how they're populated
+    realtime_tabs = {
+        "Live_Trades", "Open_Positions", "Closed_Trades", "Win_Indicators",
+        "Loss_Indicators", "Rejected_Signals", "Missed_Winners", "MAE_MFE",
+        "Spread_Execution", "Config_Diff_Log", "Ouroboros_Changes", "System_Health",
+        "Chandelier_Rungs", "Kelly_Sizing",
+    }
+    nightly_tabs = {
+        "Daily_Summary", "Confidence_History", "Regime_State", "Gate_Vetoes",
+        "Ticker_Scores", "Universe_State", "Cost_Drag", "Backfill_Results",
+        "Meta_Label", "Thompson_Arms", "Session_Stats", "Correlation_Matrix",
+        "Risk_Dashboard", "Config_Changelog", "Alerts_Log",
+        "Trade_Classes", "Ticker_Scoreboard", "Parameter_Evolution",
+        "Indicator_Stats", "Regime_Performance", "Session_Performance",
+        "Learned_Rules", "Win_Loss_Delta",
+    }
+
+    result = []
+    for tab_name, headers in TAB_DEFINITIONS.items():
+        if tab_name in realtime_tabs:
+            tab_type = "realtime"
+        elif tab_name in nightly_tabs:
+            tab_type = "nightly"
+        else:
+            tab_type = "hybrid"
+        result.append({
+            "name": tab_name,
+            "columns": len(headers),
+            "type": tab_type,
+            "headers": ", ".join(headers[:5]) + ("..." if len(headers) > 5 else ""),
+        })
+    return result
+
+
+# Individual tab push dispatch (for --push-tab <name>)
+_TAB_PUSH_DISPATCH: Dict[str, Any] = {
+    "Daily_Summary": lambda d, **kw: push_daily_summary(report_dir=kw.get("report_dir")),
+    "Confidence_History": lambda d, **kw: push_confidence_history(d),
+    "Regime_State": lambda d, **kw: push_regime_state(d),
+    "Gate_Vetoes": lambda d, **kw: push_gate_vetoes(d),
+    "Ticker_Scores": lambda d, **kw: push_ticker_scores(d),
+    "Universe_State": lambda d, **kw: push_universe_state(d),
+    "Cost_Drag": lambda d, **kw: push_cost_drag(d),
+    "Backfill_Results": lambda d, **kw: push_backfill_results(d),
+    "Meta_Label": lambda d, **kw: push_meta_label(d),
+    "Thompson_Arms": lambda d, **kw: push_thompson_arms(d),
+    "Session_Stats": lambda d, **kw: push_session_stats(d),
+    "Correlation_Matrix": lambda d, **kw: push_correlation_matrix(d),
+    "Risk_Dashboard": lambda d, **kw: push_risk_dashboard(d),
+    "Config_Changelog": lambda d, **kw: push_config_changelog(d),
+    "Alerts_Log": lambda d, **kw: push_alerts_log(d),
+}
+
+
 def _push_nightly_rows(tab_name: str, rows: List[List[Any]]) -> bool:
     """Helper: push rows to a Sheets tab using a fresh SheetsClient.
 
@@ -1289,7 +2454,7 @@ def _push_nightly_rows(tab_name: str, rows: List[List[Any]]) -> bool:
 
 
 def main():
-    """CLI entry point: drain Redis queue or replay a WAL file."""
+    """CLI entry point: drain Redis queue, replay WAL, or push tabs."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -1317,8 +2482,77 @@ def main():
         default=None,
         help="Override report directory path (used with --push-daily-summary)",
     )
+    # N4a: 21-tab architecture CLI arguments
+    parser.add_argument(
+        "--push-all-tabs",
+        action="store_true",
+        help="Push all nightly tabs (21-tab architecture). Run after nightly_v6.",
+    )
+    parser.add_argument(
+        "--push-tab",
+        type=str,
+        default=None,
+        metavar="TAB_NAME",
+        help="Push a specific tab by name (e.g. Confidence_History, Risk_Dashboard)",
+    )
+    parser.add_argument(
+        "--list-tabs",
+        action="store_true",
+        help="List all defined tabs and their type (realtime/nightly)",
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Override date (YYYY-MM-DD) for nightly pushes. Defaults to today UTC.",
+    )
     args = parser.parse_args()
 
+    date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # --list-tabs: show all tabs and exit
+    if args.list_tabs:
+        tabs = list_all_tabs()
+        print(f"\nAEGIS V2 Sheets Dashboard -- {len(tabs)} tabs defined\n")
+        print(f"{'#':<4} {'Tab Name':<25} {'Cols':<6} {'Type':<10} {'Headers (preview)'}")
+        print("-" * 90)
+        for i, t in enumerate(tabs, 1):
+            print(f"{i:<4} {t['name']:<25} {t['columns']:<6} {t['type']:<10} {t['headers']}")
+        print(f"\nTotal: {len(tabs)} tabs")
+        return
+
+    # --push-all-tabs: push all nightly tabs
+    if args.push_all_tabs:
+        report_dir = Path(args.report_dir) if args.report_dir else None
+        log.info("Pushing all tabs for date=%s ...", date_str)
+        results = push_all_tabs(date_str=date_str, report_dir=report_dir)
+        ok_count = sum(1 for v in results.values() if v)
+        fail_count = sum(1 for v in results.values() if not v)
+        failed_tabs = [k for k, v in results.items() if not v]
+        log.info("Push all tabs complete: %d OK, %d FAILED", ok_count, fail_count)
+        if failed_tabs:
+            log.error("Failed tabs: %s", ", ".join(failed_tabs))
+            sys.exit(1)
+        return
+
+    # --push-tab <name>: push a single tab
+    if args.push_tab:
+        tab_name = args.push_tab
+        if tab_name not in _TAB_PUSH_DISPATCH:
+            available = ", ".join(sorted(_TAB_PUSH_DISPATCH.keys()))
+            log.error("Unknown tab '%s'. Pushable tabs: %s", tab_name, available)
+            sys.exit(1)
+        report_dir = Path(args.report_dir) if args.report_dir else None
+        log.info("Pushing tab %s for date=%s ...", tab_name, date_str)
+        ok = _TAB_PUSH_DISPATCH[tab_name](date_str, report_dir=report_dir)
+        if ok:
+            log.info("Tab %s pushed successfully", tab_name)
+        else:
+            log.error("Failed to push tab %s", tab_name)
+            sys.exit(1)
+        return
+
+    # --push-daily-summary (legacy)
     if args.push_daily_summary:
         report_dir = Path(args.report_dir) if args.report_dir else None
         ok = push_daily_summary(report_dir=report_dir)

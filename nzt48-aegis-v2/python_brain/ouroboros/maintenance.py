@@ -716,7 +716,257 @@ def cleanup_old_step_logs(max_age_days: int = 14, dry_run: bool = False) -> dict
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# R21-16b: Circuit Breaker Redis Checkpoint
+# ---------------------------------------------------------------------------
+# Persist circuit breaker state to Redis + file so it survives restarts.
+# Reads WAL events (RiskStateChange, PositionClosed, StateSnapshot, DailyReset)
+# to derive current tier, daily loss, max drawdown, and position count.
+#
+# Tier mapping:
+#   GREEN  — daily_loss < 0.5%, no risk state changes
+#   YELLOW — daily_loss 0.5%-1.0% OR RiskStateChange to "Reduce"
+#   ORANGE — daily_loss 1.0%-2.0% OR RiskStateChange to "Halt"
+#   RED    — daily_loss > 2.0% OR RiskStateChange to "Flatten"/"Emergency"
+
+REDIS_URL = os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0")
+CB_REDIS_KEY = "aegis:circuit_breaker:state"
+CB_CHECKPOINT_FILE = DATA_DIR / "circuit_breaker_checkpoint.json"
+EVENTS_DIR_CB = Path(os.environ.get("AEGIS_EVENTS_DIR", os.environ.get("AEGIS_WAL_DIR", "/app/events")))
+
+
+def _get_redis_client():
+    """Create Redis client. Returns None if unavailable."""
+    try:
+        import redis as redis_pkg
+        r = redis_pkg.from_url(REDIS_URL, socket_timeout=5, socket_connect_timeout=5)
+        r.ping()
+        return r
+    except Exception as e:
+        log.warning("R21-16b: Redis unavailable (%s) — file checkpoint only", e)
+        return None
+
+
+def _derive_circuit_breaker_state() -> dict:
+    """Derive current circuit breaker state from today's WAL events.
+
+    Scans WAL for:
+      - StateSnapshot: latest equity + high_water for drawdown calc
+      - RiskStateChange: regime transitions (Normal→Reduce→Halt→Flatten)
+      - PositionClosed: count today's trades + sum P&L for daily loss
+      - DailyReset: start-of-day equity baseline
+
+    Returns dict: {tier, daily_loss_pct, max_drawdown_pct, positions_count, timestamp}
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Scan WAL files
+    wal_candidates = [
+        EVENTS_DIR_CB / "current.ndjson",
+        EVENTS_DIR_CB / f"{today}.ndjson",
+        EVENTS_DIR_CB / f"wal_{today}.ndjson",
+    ]
+    archive_dir = EVENTS_DIR_CB / "archive"
+    if archive_dir.exists():
+        for f in sorted(archive_dir.glob("*.ndjson")):
+            if f not in wal_candidates:
+                wal_candidates.append(f)
+
+    # State accumulators
+    start_equity = 10_000.0  # default
+    latest_equity = 10_000.0
+    high_water = 10_000.0
+    risk_state = "Normal"
+    positions_count = 0
+    daily_pnl = 0.0
+    open_position_ids = set()
+
+    for wal_path in wal_candidates:
+        if not wal_path.exists():
+            continue
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # Filter to today's events only
+                    event_time_ns = event.get("event_time_ns", 0)
+                    if event_time_ns > 0:
+                        try:
+                            event_date = datetime.fromtimestamp(
+                                event_time_ns / 1e9, tz=timezone.utc
+                            ).strftime("%Y-%m-%d")
+                            if event_date != today:
+                                continue
+                        except (OSError, ValueError):
+                            continue
+
+                    payload = event.get("payload", {})
+
+                    # DailyReset: captures start-of-day equity
+                    if "DailyReset" in payload:
+                        dr = payload["DailyReset"]
+                        start_equity = dr.get("new_equity", start_equity)
+                        high_water = max(high_water, start_equity)
+
+                    # StateSnapshot: latest equity snapshot
+                    elif "StateSnapshot" in payload:
+                        ss = payload["StateSnapshot"]
+                        latest_equity = ss.get("equity", latest_equity)
+                        hw = ss.get("high_water", 0.0)
+                        if hw > 0:
+                            high_water = max(high_water, hw)
+                        # Count open positions from snapshot
+                        open_pos = ss.get("open_positions", [])
+                        if isinstance(open_pos, list):
+                            positions_count = len(open_pos)
+
+                    # RiskStateChange: track regime transitions
+                    elif "RiskStateChange" in payload:
+                        rsc = payload["RiskStateChange"]
+                        risk_state = rsc.get("to", risk_state)
+
+                    # PositionClosed: accumulate daily P&L
+                    elif "PositionClosed" in payload:
+                        pc = payload["PositionClosed"]
+                        daily_pnl += pc.get("final_pnl", 0.0)
+
+                    # RoutedOrder: track open positions (entry)
+                    elif "RoutedOrder" in payload:
+                        ro = payload["RoutedOrder"]
+                        oid = ro.get("order_id", "")
+                        if oid:
+                            open_position_ids.add(oid)
+
+        except Exception as e:
+            log.warning("R21-16b: Error reading %s: %s", wal_path, e)
+
+    # Compute metrics
+    daily_loss_pct = 0.0
+    if start_equity > 0:
+        daily_loss_pct = max(0.0, -daily_pnl / start_equity * 100.0)
+
+    max_drawdown_pct = 0.0
+    if high_water > 0:
+        max_drawdown_pct = max(0.0, (high_water - latest_equity) / high_water * 100.0)
+
+    # Derive tier from risk_state + daily loss
+    risk_lower = risk_state.lower()
+    if "flatten" in risk_lower or "emergency" in risk_lower or daily_loss_pct > 2.0:
+        tier = "RED"
+    elif "halt" in risk_lower or daily_loss_pct > 1.0:
+        tier = "ORANGE"
+    elif "reduce" in risk_lower or daily_loss_pct > 0.5:
+        tier = "YELLOW"
+    else:
+        tier = "GREEN"
+
+    return {
+        "tier": tier,
+        "daily_loss_pct": round(daily_loss_pct, 4),
+        "max_drawdown_pct": round(max_drawdown_pct, 4),
+        "positions_count": positions_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "risk_state": risk_state,
+        "daily_pnl": round(daily_pnl, 2),
+        "start_equity": round(start_equity, 2),
+        "latest_equity": round(latest_equity, 2),
+    }
+
+
+def checkpoint_circuit_breaker() -> dict:
+    """R21-16b: Checkpoint circuit breaker state to Redis + file.
+
+    1. Derives current state from WAL events
+    2. Saves to Redis key aegis:circuit_breaker:state (JSON)
+    3. Saves to data/circuit_breaker_checkpoint.json (atomic write)
+
+    Returns the state dict.
+    """
+    state = _derive_circuit_breaker_state()
+
+    # Save to Redis
+    r = _get_redis_client()
+    if r is not None:
+        try:
+            r.set(CB_REDIS_KEY, json.dumps(state), ex=86400)  # 24h TTL
+            log.info("R21-16b: Saved to Redis key %s (tier=%s)", CB_REDIS_KEY, state["tier"])
+        except Exception as e:
+            log.warning("R21-16b: Redis save failed: %s", e)
+
+    # Save to file (atomic write: tmp + rename)
+    try:
+        CB_CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = CB_CHECKPOINT_FILE.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(state, indent=2) + "\n")
+        tmp_path.rename(CB_CHECKPOINT_FILE)
+        log.info("R21-16b: Saved to %s (tier=%s)", CB_CHECKPOINT_FILE, state["tier"])
+    except Exception as e:
+        log.warning("R21-16b: File save failed: %s", e)
+
+    # Log summary
+    log.info(
+        "R21-16b: Circuit breaker — tier=%s, daily_loss=%.2f%%, max_dd=%.2f%%, "
+        "positions=%d, risk_state=%s",
+        state["tier"], state["daily_loss_pct"], state["max_drawdown_pct"],
+        state["positions_count"], state["risk_state"],
+    )
+
+    return state
+
+
+def restore_circuit_breaker() -> dict:
+    """R21-16b: Restore circuit breaker state on boot.
+
+    Priority: Redis first, then file fallback.
+    Returns the state dict, or a default GREEN state if nothing found.
+    """
+    default_state = {
+        "tier": "GREEN",
+        "daily_loss_pct": 0.0,
+        "max_drawdown_pct": 0.0,
+        "positions_count": 0,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "risk_state": "Normal",
+        "restored_from": "default",
+    }
+
+    # Try Redis first
+    r = _get_redis_client()
+    if r is not None:
+        try:
+            raw = r.get(CB_REDIS_KEY)
+            if raw:
+                state = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+                state["restored_from"] = "redis"
+                log.info("R21-16b: Restored from Redis (tier=%s, ts=%s)",
+                         state.get("tier"), state.get("timestamp"))
+                return state
+        except Exception as e:
+            log.warning("R21-16b: Redis restore failed: %s", e)
+
+    # Try file fallback
+    if CB_CHECKPOINT_FILE.exists():
+        try:
+            state = json.loads(CB_CHECKPOINT_FILE.read_text())
+            state["restored_from"] = "file"
+            log.info("R21-16b: Restored from file (tier=%s, ts=%s)",
+                     state.get("tier"), state.get("timestamp"))
+            return state
+        except (json.JSONDecodeError, KeyError) as e:
+            log.warning("R21-16b: File restore failed: %s", e)
+
+    log.info("R21-16b: No checkpoint found — using default GREEN state")
+    return default_state
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (updated with --checkpoint-circuit-breaker)
 # ---------------------------------------------------------------------------
 def main():
     import argparse
@@ -727,6 +977,10 @@ def main():
     parser.add_argument("--bst-check", action="store_true", help="ISS-020: Check BST status")
     parser.add_argument("--mem-check", action="store_true", help="SC-19: Check system memory")
     parser.add_argument("--step-health", action="store_true", help="SC-19: Check step runner health")
+    parser.add_argument("--checkpoint-circuit-breaker", action="store_true",
+                        help="R21-16b: Checkpoint circuit breaker state to Redis + file")
+    parser.add_argument("--restore-circuit-breaker", action="store_true",
+                        help="R21-16b: Restore circuit breaker state from Redis/file")
     parser.add_argument("--all", action="store_true", help="Run all maintenance tasks")
     args = parser.parse_args()
 
@@ -806,6 +1060,26 @@ def main():
                       f"{dur_str:<10s} {rss_str:<8s} {h['age_hours']:<8.1f}")
                 if h.get('skip_reason'):
                     print(f"  >> {h['skip_reason']}")
+
+    if args.checkpoint_circuit_breaker or args.all:
+        state = checkpoint_circuit_breaker()
+        print(f"\n=== R21-16b: Circuit Breaker Checkpoint ===")
+        print(f"Tier:          {state['tier']}")
+        print(f"Daily loss:    {state['daily_loss_pct']:.2f}%")
+        print(f"Max drawdown:  {state['max_drawdown_pct']:.2f}%")
+        print(f"Positions:     {state['positions_count']}")
+        print(f"Risk state:    {state.get('risk_state', 'N/A')}")
+        print(f"Timestamp:     {state['timestamp']}")
+
+    if args.restore_circuit_breaker:
+        state = restore_circuit_breaker()
+        print(f"\n=== R21-16b: Circuit Breaker Restore ===")
+        print(f"Tier:          {state['tier']}")
+        print(f"Daily loss:    {state['daily_loss_pct']:.2f}%")
+        print(f"Max drawdown:  {state['max_drawdown_pct']:.2f}%")
+        print(f"Positions:     {state['positions_count']}")
+        print(f"Restored from: {state.get('restored_from', 'N/A')}")
+        print(f"Timestamp:     {state['timestamp']}")
 
 
 if __name__ == "__main__":

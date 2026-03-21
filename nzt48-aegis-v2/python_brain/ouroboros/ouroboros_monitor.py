@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -41,10 +42,118 @@ log = logging.getLogger("ouroboros_monitor")
 
 
 # ---------------------------------------------------------------------------
+# GAP-4b: TOML Dead-Letter & Auto-Recovery
+# ---------------------------------------------------------------------------
+
+# Minimal safe defaults for each known TOML config file.
+# Used to replace corrupt files so the engine can start with sane values.
+SAFE_DEFAULTS = {
+    "dynamic_weights.toml": (
+        "# Auto-generated safe defaults (corrupt file moved to dead_letter)\n"
+        "[signal]\n"
+        "confidence_floor = 65\n"
+        "\n"
+        "[kelly_fractions]\n"
+        "tier1 = 0.020000\n"
+        "tier2 = 0.015000\n"
+        "tier3 = 0.010000\n"
+    ),
+    "universe_classification.toml": (
+        "# Auto-generated safe defaults (corrupt file moved to dead_letter)\n"
+        "[meta]\n"
+        "generated_at = \"safe_defaults\"\n"
+    ),
+    "spread_cache.toml": (
+        "# Auto-generated safe defaults (corrupt file moved to dead_letter)\n"
+        "[meta]\n"
+        "generated_at = \"safe_defaults\"\n"
+    ),
+}
+
+
+def handle_corrupt_toml(
+    filepath: Path,
+    config_dir: Path = CONFIG_DIR,
+    send_alert: bool = True,
+) -> dict:
+    """Move a corrupt TOML to dead_letter/ and write safe defaults in its place.
+
+    Returns dict with action details for logging/alerting.
+    """
+    fname = filepath.name
+    dead_letter_dir = config_dir / "dead_letter"
+    dead_letter_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dead_name = f"{filepath.stem}_{ts}{filepath.suffix}"
+    dead_path = dead_letter_dir / dead_name
+
+    result = {
+        "action": "handle_corrupt_toml",
+        "file": fname,
+        "dead_letter_path": str(dead_path),
+        "safe_defaults_written": False,
+        "alert_sent": False,
+    }
+
+    # Move corrupt file to dead_letter/
+    try:
+        if filepath.exists():
+            shutil.move(str(filepath), str(dead_path))
+            log.critical(
+                "TOML CORRUPTION: %s moved to dead_letter/%s",
+                fname,
+                dead_name,
+            )
+        else:
+            log.critical("TOML MISSING: %s (cannot move, writing defaults)", fname)
+    except Exception as e:
+        log.error("Failed to move %s to dead_letter: %s", fname, e)
+
+    # Write safe defaults
+    safe_content = SAFE_DEFAULTS.get(fname)
+    if safe_content:
+        try:
+            filepath.write_text(safe_content)
+            result["safe_defaults_written"] = True
+            log.critical(
+                "TOML RECOVERY: Wrote safe defaults for %s", fname
+            )
+        except Exception as e:
+            log.error("Failed to write safe defaults for %s: %s", fname, e)
+    else:
+        # Unknown TOML file -- write a minimal valid stub
+        try:
+            filepath.write_text(
+                f"# Auto-generated safe defaults (unknown file: {fname})\n"
+                f"[meta]\n"
+                f'generated_at = "safe_defaults"\n'
+            )
+            result["safe_defaults_written"] = True
+            log.critical("TOML RECOVERY: Wrote generic defaults for %s", fname)
+        except Exception as e:
+            log.error("Failed to write generic defaults for %s: %s", fname, e)
+
+    # Send Telegram alert
+    if send_alert:
+        msg = (
+            "[CRIT] <b>TOML Auto-Recovery</b>\n\n"
+            f"File: <code>{fname}</code>\n"
+            f"Action: Moved corrupt file to <code>dead_letter/{dead_name}</code>\n"
+            f"Recovery: Safe defaults written = {result['safe_defaults_written']}\n"
+            f"Time: {ts}\n\n"
+            "Manual review recommended."
+        )
+        result["alert_sent"] = send_telegram_alert(msg)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Monitoring Checks
 # ---------------------------------------------------------------------------
 
-def check_toml_health(config_dir: Path = CONFIG_DIR) -> dict:
+def check_toml_health(config_dir: Path = CONFIG_DIR, auto_fix: bool = False) -> dict:
     """Check all TOML config files for validity and freshness."""
     results = {
         "check": "toml_health",
@@ -81,6 +190,9 @@ def check_toml_health(config_dir: Path = CONFIG_DIR) -> dict:
             if not content.strip():
                 results["alerts"].append(f"EMPTY: {fname}")
                 results["status"] = "critical"
+                if auto_fix:
+                    recovery = handle_corrupt_toml(fpath, config_dir)
+                    results["alerts"].append(f"AUTO-FIX: {fname} -> dead_letter, defaults={recovery['safe_defaults_written']}")
                 continue
 
             # Basic TOML validation
@@ -96,9 +208,15 @@ def check_toml_health(config_dir: Path = CONFIG_DIR) -> dict:
             else:
                 results["alerts"].append(f"CORRUPT: {fname}")
                 results["status"] = "critical"
+                if auto_fix:
+                    recovery = handle_corrupt_toml(fpath, config_dir)
+                    results["alerts"].append(f"AUTO-FIX: {fname} -> dead_letter, defaults={recovery['safe_defaults_written']}")
         except Exception as e:
             results["alerts"].append(f"READ_ERROR: {fname}: {e}")
             results["status"] = "critical"
+            if auto_fix:
+                recovery = handle_corrupt_toml(fpath, config_dir)
+                results["alerts"].append(f"AUTO-FIX: {fname} -> dead_letter, defaults={recovery['safe_defaults_written']}")
             continue
 
         # Check staleness
@@ -186,10 +304,10 @@ def check_log_health() -> dict:
     return results
 
 
-def run_all_checks() -> dict:
+def run_all_checks(auto_fix: bool = False) -> dict:
     """Run all monitoring checks and return combined results."""
     checks = [
-        check_toml_health(),
+        check_toml_health(auto_fix=auto_fix),
         check_nightly_execution(),
         check_log_health(),
     ]
@@ -247,16 +365,18 @@ def main():
     parser.add_argument("--check-logs", action="store_true", help="Check log health")
     parser.add_argument("--send-telegram", action="store_true", help="Send alerts via Telegram")
     parser.add_argument("--all", action="store_true", help="Run all checks")
+    parser.add_argument("--auto-fix", action="store_true",
+                        help="Automatically recover corrupt TOML files (move to dead_letter, write safe defaults)")
     args = parser.parse_args()
 
     if args.check_toml:
-        result = check_toml_health()
+        result = check_toml_health(auto_fix=args.auto_fix)
     elif args.check_staleness:
         result = check_nightly_execution()
     elif args.check_logs:
         result = check_log_health()
     else:
-        result = run_all_checks()
+        result = run_all_checks(auto_fix=args.auto_fix)
 
     # Print results
     print(json.dumps(result, indent=2, default=str))

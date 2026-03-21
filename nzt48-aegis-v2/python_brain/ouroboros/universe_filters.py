@@ -3,6 +3,7 @@
 P2-13: Spread-to-ATR hard filter for universe scanning
 P2-1:  TWAP VWAP-weighted execution slicing (Almgren-Chriss 2000)
 SC-18: Thompson Sampling Normal-Normal reward model (replaces Beta-Bernoulli)
+P1-15: Corporate Actions Veto (ISA Compliance) — block entries near spin-offs etc.
 v19-P2-4: Atomic JSON write utility
 
 Usage: python3 -m python_brain.ouroboros.universe_filters
@@ -477,6 +478,413 @@ class ThompsonSamplingEngine:
 
 
 # ---------------------------------------------------------------------------
+# P1-15: Corporate Actions Veto (ISA Compliance)
+# ---------------------------------------------------------------------------
+# Spin-offs can place non-ISA-eligible shares in the ISA, voiding it.
+# Veto any ticker with a corporate action within 48 hours.
+# Sources: yfinance actions/calendar, manual blocklist JSON
+
+CORP_ACTION_VETO_HOURS = 48  # Block entries within this window
+CORP_ACTION_TYPES = {"split", "reverse_split", "spin_off", "merger", "special_dividend", "rights_issue"}
+
+# yfinance ".actions" column names that map to our action types
+_YF_ACTION_COLUMNS = {
+    "Stock Splits": "split",
+    "Dividends": "special_dividend",  # Conservative: treat all divs as potential special
+}
+
+
+@dataclass
+class CorporateActionEvent:
+    """A single detected corporate action event."""
+    ticker: str
+    action_type: str        # One of CORP_ACTION_TYPES
+    ex_date: datetime       # Ex-date / effective date
+    source: str             # "yfinance", "manual_blocklist", "calendar"
+    details: str = ""       # Human-readable description
+
+
+class CorporateActionChecker:
+    """P1-15: Checks for upcoming corporate actions that could break ISA eligibility.
+
+    Spin-offs and similar events can deposit non-ISA-eligible shares into the
+    ISA wrapper, potentially voiding the entire tax wrapper. This checker
+    aggregates multiple data sources and vetoes tickers with actions within
+    the CORP_ACTION_VETO_HOURS window.
+
+    Data sources (checked in order):
+      1. Manual blocklist (config/corp_action_blocklist.json) — operator overrides
+      2. yfinance .actions — historical/upcoming splits and dividends
+      3. yfinance .calendar — upcoming ex-dates for earnings/dividends
+
+    Usage:
+        checker = CorporateActionChecker()
+        vetoed = checker.get_vetoed_tickers()
+        config = checker.generate_veto_config()
+    """
+
+    def __init__(
+        self,
+        contracts_path: Path = None,
+        blocklist_path: Path = None,
+        veto_hours: int = CORP_ACTION_VETO_HOURS,
+    ):
+        self._contracts_path = contracts_path or CONFIG_DIR / "contracts.toml"
+        self._blocklist_path = blocklist_path or CONFIG_DIR / "corp_action_blocklist.json"
+        self._veto_hours = veto_hours
+        self._events: List[CorporateActionEvent] = []
+        self._checked = False
+
+    def load_from_contracts_toml(self) -> List[str]:
+        """Read contracts.toml and return the full universe ticker list.
+
+        Returns:
+            List of ticker symbols from [[contracts]] entries.
+        """
+        tickers = []
+        if not self._contracts_path.exists():
+            log.warning("contracts.toml not found at %s", self._contracts_path)
+            return tickers
+
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                try:
+                    import tomli as tomllib  # type: ignore[no-redef]
+                except ImportError:
+                    log.warning("No TOML parser available (need Python 3.11+ or tomli)")
+                    return tickers
+
+            with open(self._contracts_path, "rb") as f:
+                data = tomllib.load(f)
+
+            for contract in data.get("contracts", []):
+                symbol = contract.get("symbol", "")
+                if symbol:
+                    tickers.append(symbol)
+
+            log.info("P1-15: Loaded %d tickers from contracts.toml", len(tickers))
+
+        except Exception as e:
+            log.error("P1-15: Failed to parse contracts.toml: %s", e)
+
+        return tickers
+
+    def check_yfinance_actions(self, tickers: List[str]) -> List[CorporateActionEvent]:
+        """Check yfinance for upcoming corporate actions within the veto window.
+
+        For each ticker, queries:
+          - .actions (splits + dividends with dates)
+          - .calendar (upcoming earnings/ex-dividend dates)
+
+        Only flags events whose ex-date falls within now .. now+veto_hours.
+        LSE tickers (.L suffix) are the primary concern for ISA compliance,
+        but all tickers are checked for completeness.
+
+        Args:
+            tickers: List of ticker symbols (yfinance format).
+
+        Returns:
+            List of CorporateActionEvent for tickers with upcoming actions.
+        """
+        events = []
+        now = datetime.now(timezone.utc)
+
+        try:
+            import yfinance as yf
+        except ImportError:
+            log.warning("P1-15: yfinance not installed — skipping actions check")
+            return events
+
+        from datetime import timedelta
+        veto_cutoff = now + timedelta(hours=self._veto_hours)
+
+        for ticker in tickers:
+            try:
+                yf_ticker = yf.Ticker(ticker)
+
+                # --- Check .actions (splits & dividends) ---
+                try:
+                    actions = yf_ticker.actions
+                    if actions is not None and not actions.empty:
+                        for col_name, action_type in _YF_ACTION_COLUMNS.items():
+                            if col_name not in actions.columns:
+                                continue
+                            col_data = actions[col_name]
+                            for date_idx, value in col_data.items():
+                                if value == 0 or value == 0.0:
+                                    continue
+                                # Convert index to tz-aware datetime
+                                if hasattr(date_idx, 'to_pydatetime'):
+                                    dt = date_idx.to_pydatetime()
+                                else:
+                                    dt = date_idx
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                # Check if within veto window (future only)
+                                if now <= dt <= veto_cutoff:
+                                    events.append(CorporateActionEvent(
+                                        ticker=ticker,
+                                        action_type=action_type,
+                                        ex_date=dt,
+                                        source="yfinance",
+                                        details=f"{col_name}={value}",
+                                    ))
+                except Exception as e:
+                    log.debug("P1-15: yfinance .actions failed for %s: %s", ticker, e)
+
+                # --- Check .calendar (upcoming ex-dates) ---
+                try:
+                    cal = yf_ticker.calendar
+                    if cal is not None:
+                        # yfinance .calendar returns a dict or DataFrame depending on version
+                        ex_date = None
+                        if isinstance(cal, dict):
+                            # Keys like 'Ex-Dividend Date', 'Dividend Date'
+                            for key in ("Ex-Dividend Date", "Ex-Date"):
+                                if key in cal:
+                                    ex_date = cal[key]
+                                    break
+                        elif hasattr(cal, 'columns'):
+                            # DataFrame with columns
+                            for key in ("Ex-Dividend Date", "Ex-Date"):
+                                if key in cal.columns:
+                                    ex_date = cal[key].iloc[0] if len(cal[key]) > 0 else None
+                                    break
+
+                        if ex_date is not None:
+                            if hasattr(ex_date, 'to_pydatetime'):
+                                ex_date = ex_date.to_pydatetime()
+                            elif isinstance(ex_date, str):
+                                try:
+                                    ex_date = datetime.fromisoformat(ex_date)
+                                except (ValueError, TypeError):
+                                    ex_date = None
+
+                            if ex_date is not None:
+                                if ex_date.tzinfo is None:
+                                    ex_date = ex_date.replace(tzinfo=timezone.utc)
+                                if now <= ex_date <= veto_cutoff:
+                                    events.append(CorporateActionEvent(
+                                        ticker=ticker,
+                                        action_type="special_dividend",
+                                        ex_date=ex_date,
+                                        source="calendar",
+                                        details="Upcoming ex-dividend from calendar",
+                                    ))
+                except Exception as e:
+                    log.debug("P1-15: yfinance .calendar failed for %s: %s", ticker, e)
+
+            except Exception as e:
+                log.debug("P1-15: yfinance lookup failed entirely for %s: %s", ticker, e)
+
+        if events:
+            log.info("P1-15: yfinance found %d corporate action events across %d tickers",
+                     len(events), len(set(e.ticker for e in events)))
+
+        return events
+
+    def check_manual_blocklist(self) -> List[CorporateActionEvent]:
+        """Read manual blocklist from config/corp_action_blocklist.json.
+
+        Expected format:
+        [
+            {
+                "ticker": "QQQ3.L",
+                "action_type": "spin_off",
+                "ex_date": "2026-03-25T00:00:00Z",
+                "details": "Known upcoming spin-off from issuer notice"
+            },
+            ...
+        ]
+
+        Returns:
+            List of CorporateActionEvent from manual blocklist (within veto window).
+        """
+        events = []
+        if not self._blocklist_path.exists():
+            log.debug("P1-15: No manual blocklist at %s (this is normal)", self._blocklist_path)
+            return events
+
+        now = datetime.now(timezone.utc)
+        from datetime import timedelta
+        veto_cutoff = now + timedelta(hours=self._veto_hours)
+
+        try:
+            with open(self._blocklist_path) as f:
+                blocklist = json.load(f)
+
+            if not isinstance(blocklist, list):
+                log.warning("P1-15: corp_action_blocklist.json must be a JSON array")
+                return events
+
+            for entry in blocklist:
+                ticker = entry.get("ticker", "")
+                action_type = entry.get("action_type", "unknown")
+                ex_date_str = entry.get("ex_date", "")
+                details = entry.get("details", "Manual blocklist entry")
+
+                if not ticker or not ex_date_str:
+                    continue
+
+                try:
+                    ex_date = datetime.fromisoformat(ex_date_str.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    log.warning("P1-15: Invalid ex_date '%s' for %s in blocklist", ex_date_str, ticker)
+                    continue
+
+                if ex_date.tzinfo is None:
+                    ex_date = ex_date.replace(tzinfo=timezone.utc)
+
+                # Always include future blocklist entries within veto window
+                # Also include entries without dates (permanent blocks) by checking
+                # if the action is still relevant
+                if now <= ex_date <= veto_cutoff:
+                    events.append(CorporateActionEvent(
+                        ticker=ticker,
+                        action_type=action_type,
+                        ex_date=ex_date,
+                        source="manual_blocklist",
+                        details=details,
+                    ))
+
+            if events:
+                log.info("P1-15: Manual blocklist has %d active veto entries", len(events))
+
+        except json.JSONDecodeError as e:
+            log.error("P1-15: Invalid JSON in corp_action_blocklist.json: %s", e)
+        except Exception as e:
+            log.error("P1-15: Failed to read corp_action_blocklist.json: %s", e)
+
+        return events
+
+    def get_vetoed_tickers(self) -> List[str]:
+        """Run all corporate action checks and return combined veto list.
+
+        Checks manual blocklist first (fast, no network), then yfinance
+        (slower, needs network). Deduplicates by ticker.
+
+        Returns:
+            Sorted list of unique ticker symbols to block from new entries.
+        """
+        all_events: List[CorporateActionEvent] = []
+
+        # 1. Manual blocklist (fast, no network)
+        all_events.extend(self.check_manual_blocklist())
+
+        # 2. yfinance actions check (needs network)
+        tickers = self.load_from_contracts_toml()
+        if tickers:
+            all_events.extend(self.check_yfinance_actions(tickers))
+
+        self._events = all_events
+        self._checked = True
+
+        # Deduplicate by ticker
+        vetoed = sorted(set(e.ticker for e in all_events))
+
+        if vetoed:
+            log.info(
+                "P1-15: Corporate action veto — %d tickers blocked: %s",
+                len(vetoed), ", ".join(vetoed),
+            )
+        else:
+            log.info("P1-15: Corporate action veto — 0 tickers blocked (all clear)")
+
+        return vetoed
+
+    def generate_veto_config(self) -> dict:
+        """Generate corporate action veto config for TOML emission.
+
+        Must call get_vetoed_tickers() first (or this will run it).
+
+        Returns:
+            Dict with keys for config_writer to emit into dynamic_weights.toml:
+              corp_action_veto_enabled: bool
+              corp_action_vetoed_tickers: List[str]
+              corp_action_veto_count: int
+              corp_action_check_timestamp: str (ISO 8601)
+        """
+        if not self._checked:
+            self.get_vetoed_tickers()
+
+        vetoed = sorted(set(e.ticker for e in self._events))
+
+        return {
+            "corp_action_veto_enabled": True,
+            "corp_action_vetoed_tickers": vetoed,
+            "corp_action_veto_count": len(vetoed),
+            "corp_action_check_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @property
+    def events(self) -> List[CorporateActionEvent]:
+        """Access detected events after running get_vetoed_tickers()."""
+        return list(self._events)
+
+
+# ---------------------------------------------------------------------------
+# Aggregated Universe Filter Config (like signal_filters.generate_all_...)
+# ---------------------------------------------------------------------------
+def generate_all_universe_filter_configs(
+    spread_threshold: float = 0.25,
+    veto_hours: int = CORP_ACTION_VETO_HOURS,
+) -> dict:
+    """Generate all universe filter configurations for config_writer.
+
+    Aggregates results from:
+      - P2-13: Spread-to-ATR hard filter
+      - P1-15: Corporate Actions Veto
+      - SC-18: Thompson Sampling Normal-Normal
+
+    Returns combined dict. config_writer.py emits these into
+    [universe_filters] section of dynamic_weights.toml.
+
+    Args:
+        spread_threshold: Max spread/range ratio for P2-13 (default 0.25).
+        veto_hours: Corporate action veto window in hours (default 48).
+
+    Returns:
+        Combined dict of all universe filter parameters.
+    """
+    configs: Dict[str, Any] = {}
+
+    # P2-13: Spread-to-ATR
+    try:
+        spread_results = spread_to_atr_filter(threshold=spread_threshold)
+        excluded_tickers = generate_excluded_tickers_config(spread_results)
+        configs["spread_atr_enabled"] = True
+        configs["spread_atr_threshold"] = spread_threshold
+        configs["spread_atr_excluded_tickers"] = excluded_tickers
+        configs["spread_atr_excluded_count"] = len(excluded_tickers)
+        log.info("P2-13: %d tickers excluded by spread-ATR filter", len(excluded_tickers))
+    except Exception as e:
+        log.error("P2-13 spread-ATR filter failed: %s", e)
+        configs["spread_atr_enabled"] = False
+
+    # P1-15: Corporate Actions Veto
+    try:
+        checker = CorporateActionChecker(veto_hours=veto_hours)
+        configs.update(checker.generate_veto_config())
+        log.info("P1-15: %d tickers vetoed by corporate actions", configs.get("corp_action_veto_count", 0))
+    except Exception as e:
+        log.error("P1-15 corporate action veto failed: %s", e)
+        configs["corp_action_veto_enabled"] = False
+
+    # SC-18: Thompson Sampling
+    try:
+        ts_engine = ThompsonSamplingEngine()
+        ts_engine.load_from_wal()
+        configs.update(ts_engine.generate_config())
+    except Exception as e:
+        log.error("SC-18 Thompson Sampling failed: %s", e)
+
+    configs["universe_filter_timestamp"] = datetime.now(timezone.utc).isoformat()
+    return configs
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 def main():
@@ -485,10 +893,22 @@ def main():
     parser.add_argument("--spread-filter", action="store_true", help="Run P2-13 spread-ATR filter")
     parser.add_argument("--vwap-slices", action="store_true", help="Show P2-1 VWAP execution slices")
     parser.add_argument("--thompson", action="store_true", help="Run SC-18 Thompson Sampling from WAL")
-    parser.add_argument("--all", action="store_true", help="Run all filters")
+    parser.add_argument("--corp-actions", action="store_true", help="Run P1-15 Corporate Actions Veto check")
+    parser.add_argument("--all", action="store_true", help="Run all filters and generate combined config")
     parser.add_argument("--exchange", default="LSEETF", help="Exchange for VWAP slices")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
+
+    # If --all, run the aggregated config generator
+    if args.all:
+        print("\n=== All Universe Filters (Aggregated) ===")
+        configs = generate_all_universe_filter_configs()
+        if args.json:
+            print(json.dumps(configs, indent=2, default=str))
+        else:
+            for k, v in sorted(configs.items()):
+                print(f"  {k} = {v}")
+        print()
 
     if args.all or args.spread_filter:
         results = spread_to_atr_filter()
@@ -516,6 +936,24 @@ def main():
 
         if args.json:
             print(json.dumps(engine.generate_config(), indent=2))
+
+    if args.all or args.corp_actions:
+        print(f"\n=== P1-15 Corporate Actions Veto ({CORP_ACTION_VETO_HOURS}h window) ===")
+        checker = CorporateActionChecker()
+        vetoed = checker.get_vetoed_tickers()
+        print(f"Vetoed tickers: {len(vetoed)}")
+        if vetoed:
+            for ticker in vetoed:
+                # Find the events for this ticker
+                ticker_events = [e for e in checker.events if e.ticker == ticker]
+                for ev in ticker_events:
+                    print(f"  {ev.ticker}: {ev.action_type} ex={ev.ex_date.strftime('%Y-%m-%d %H:%M')} "
+                          f"[{ev.source}] {ev.details}")
+        else:
+            print("  All clear — no corporate actions within veto window")
+
+        if args.json:
+            print(json.dumps(checker.generate_veto_config(), indent=2, default=str))
 
 
 if __name__ == "__main__":

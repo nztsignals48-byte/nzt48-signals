@@ -1,0 +1,42 @@
+# Build artifacts
+target/
+*.so
+*.dylib
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.production
+.env.local
+
+# Data (runtime generated)
+data/
+events/
+logs/
+*.log
+
+# Config with secrets
+config/sheets_service_account.json
+config/*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# Docker
+docker-compose.override.yml
