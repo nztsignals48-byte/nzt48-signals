@@ -8,6 +8,12 @@
 # Usage:
 #   docker compose up -d
 #   docker compose logs -f aegis-v2
+#
+# PORT ASSIGNMENTS (ISS-005):
+#   4003 = IB Gateway API (live trading mode, gnzsnz convention)
+#   4001 = IB Gateway internal (not exposed to host)
+#   6379 = Redis (internal Docker network only, password: nzt48redis)
+#   8000 = Engine health/API endpoint (internal)
 
 services:
   aegis-v2:
@@ -30,6 +36,8 @@ services:
       - IBKR_PORT=4003
       - REDIS_URL=redis://:nzt48redis@aegis-redis:6379/0
       - IS_LIVE=false
+      # SC-13: Prevent Polars from starving Tokio async reactor (2 vCPU EC2)
+      - POLARS_MAX_THREADS=1
     volumes:
       - ./config:/app/config
       - aegis-events:/app/events

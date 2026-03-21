@@ -621,6 +621,123 @@ def score_ticker_static(ticker_info: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def load_backfill_scores(report_dir: Path = None) -> Dict[str, Dict[str, float]]:
+    """Load per-ticker backfill simulation scores from most recent report.
+
+    Searches for backfill_sim_YYYY-MM-DD.json within the last 3 days.
+
+    Returns:
+        {ticker: {"win_rate": float, "profit_factor": float, "pnl_per_share": float}}
+        Empty dict if no recent backfill available.
+    """
+    if report_dir is None:
+        report_dir = REPORTS_DIR
+
+    if not report_dir.exists():
+        log.info("Backfill scores: report dir not found (%s)", report_dir)
+        return {}
+
+    # Find most recent backfill JSON within last 3 days
+    now = datetime.now(timezone.utc)
+    for days_ago in range(4):
+        date_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        candidate = report_dir / f"backfill_sim_{date_str}.json"
+        if candidate.exists():
+            break
+    else:
+        log.info("Backfill scores: no backfill_sim JSON found within last 3 days in %s", report_dir)
+        return {}
+
+    try:
+        with open(candidate) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        log.warning("Backfill scores: failed to read %s: %s", candidate, e)
+        return {}
+
+    per_ticker_raw = data.get("per_ticker", {})
+    if not per_ticker_raw:
+        log.info("Backfill scores: no per_ticker data in %s", candidate)
+        return {}
+
+    # Global profit factor as fallback
+    global_pf = data.get("profit_factor", 0)
+
+    result: Dict[str, Dict[str, float]] = {}
+    for ticker, stats in per_ticker_raw.items():
+        trades = stats.get("trades", 0)
+        wins = stats.get("wins", 0)
+        total_pnl = stats.get("total_pnl", stats.get("pnl_per_share", 0))
+
+        win_rate = stats.get("win_rate", wins / max(trades, 1))
+        pnl_per_share = stats.get("pnl_per_share", total_pnl / max(trades, 1))
+        # Use per-ticker profit_factor if present, else global
+        profit_factor = stats.get("profit_factor", global_pf)
+
+        result[ticker] = {
+            "win_rate": float(win_rate),
+            "profit_factor": float(profit_factor),
+            "pnl_per_share": float(pnl_per_share),
+        }
+
+    log.info("Backfill scores: loaded %d tickers from %s", len(result), candidate.name)
+    return result
+
+
+def apply_backfill_adjustment(
+    scores: Dict[str, float],
+    backfill: Dict[str, Dict[str, float]],
+) -> Dict[str, float]:
+    """Adjust ticker composite scores based on backfill simulation results.
+
+    For each ticker present in both scores and backfill:
+      - backfill win_rate > 0.60: boost score by +10%
+      - backfill win_rate < 0.35: penalize score by -15%
+      - backfill pnl_per_share < 0:  penalize score by -10%
+    Adjustments stack multiplicatively. Final scores clamped to [0.0, 1.0].
+
+    Args:
+        scores: {ticker: composite_score}
+        backfill: output from load_backfill_scores()
+
+    Returns:
+        Updated scores dict (same dict, mutated in place and returned).
+    """
+    if not backfill:
+        return scores
+
+    adjusted_count = 0
+    for ticker, score in scores.items():
+        if ticker not in backfill:
+            continue
+
+        bf = backfill[ticker]
+        original = score
+        multiplier = 1.0
+
+        if bf["win_rate"] > 0.60:
+            multiplier *= 1.10  # +10% boost
+        elif bf["win_rate"] < 0.35:
+            multiplier *= 0.85  # -15% penalty
+
+        if bf["pnl_per_share"] < 0:
+            multiplier *= 0.90  # -10% penalty
+
+        if multiplier != 1.0:
+            new_score = max(0.0, min(1.0, score * multiplier))
+            scores[ticker] = new_score
+            adjusted_count += 1
+            log.debug(
+                "Backfill adjustment: %s %.4f -> %.4f (wr=%.2f pnl/sh=%.4f mult=%.2f)",
+                ticker, original, new_score,
+                bf["win_rate"], bf["pnl_per_share"], multiplier,
+            )
+
+    if adjusted_count:
+        log.info("Backfill adjustments applied to %d/%d tickers", adjusted_count, len(scores))
+    return scores
+
+
 def rank_and_score(scored_tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Normalize metrics to 0-1 and compute composite score for price-scored tickers."""
     # Separate price-scored from static-scored
@@ -1337,6 +1454,20 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
     log.info("Step 7: Ranking %d total scored tickers...", len(scored))
     if scored:
         scored = rank_and_score(scored)
+
+    # Step 7b: Apply backfill simulation adjustments (daily runs only, not 15-min refresh)
+    if session is None and scored:
+        backfill_data = load_backfill_scores()
+        if backfill_data:
+            score_map = {t["symbol"]: t["composite_score"] for t in scored}
+            score_map = apply_backfill_adjustment(score_map, backfill_data)
+            for t in scored:
+                t["composite_score"] = score_map.get(t["symbol"], t["composite_score"])
+            # Re-sort after adjustments
+            scored.sort(key=lambda t: -t["composite_score"])
+            log.info("Step 7b: Backfill adjustments applied, re-sorted %d tickers", len(scored))
+        else:
+            log.info("Step 7b: No backfill data available, skipping adjustments")
 
     watchlist = generate_watchlist(scored, lse_is_open=lse_is_open)
 

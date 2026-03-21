@@ -3,8 +3,9 @@
 ISS-017:  Persistent memory read-back (close learning feedback loop)
 v19-P2-15: Parquet orphan cleanup (prevent disk fill from intermediate files)
 ISS-020:  BST/DST awareness helper for crontab scheduling
+SC-19:    System memory check + step health monitor
 
-Usage: python3 -m python_brain.ouroboros.maintenance [--cleanup|--read-memory|--bst-check]
+Usage: python3 -m python_brain.ouroboros.maintenance [--cleanup|--read-memory|--bst-check|--mem-check|--step-health]
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import glob
 import json
 import logging
 import os
+import platform
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -282,15 +285,448 @@ def compute_session_times_utc() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# ISS-012: WAL Archive Cleanup
+# ---------------------------------------------------------------------------
+# WAL archive files accumulate in /app/events/archive/ after engine restarts.
+# Clean up files older than max_age_days to prevent disk fill.
+
+EVENTS_DIR = Path(os.environ.get("AEGIS_EVENTS_DIR", "/app/events"))
+
+
+def cleanup_old_wal_archives(
+    max_age_days: int = 30,
+    dry_run: bool = False,
+) -> dict:
+    """Delete WAL archive files older than max_age_days from /app/events/archive/.
+
+    Args:
+        max_age_days: Delete archives older than this (default: 30 days)
+        dry_run: If True, report but don't delete
+
+    Returns:
+        dict with count and bytes freed
+    """
+    archive_dir = EVENTS_DIR / "archive"
+    results = {
+        "files_found": 0,
+        "files_deleted": 0,
+        "bytes_freed": 0,
+        "errors": [],
+        "dry_run": dry_run,
+    }
+
+    if not archive_dir.exists():
+        log.info("ISS-012: WAL archive dir %s does not exist, skipping", archive_dir)
+        return results
+
+    now = time.time()
+    max_age_sec = max_age_days * 86400
+
+    for fpath in archive_dir.glob("*.ndjson"):
+        try:
+            age = now - fpath.stat().st_mtime
+            if age > max_age_sec:
+                results["files_found"] += 1
+                size = fpath.stat().st_size
+
+                if dry_run:
+                    log.info("Would delete WAL archive: %s (%.1fKB, %.0fd old)",
+                             fpath.name, size / 1024, age / 86400)
+                else:
+                    fpath.unlink()
+                    results["files_deleted"] += 1
+                    results["bytes_freed"] += size
+                    log.info("Deleted WAL archive: %s (%.1fKB, %.0fd old)",
+                             fpath.name, size / 1024, age / 86400)
+        except OSError as e:
+            results["errors"].append(f"{fpath}: {e}")
+
+    if results["files_deleted"] > 0:
+        log.info("ISS-012: Cleaned %d WAL archives, freed %.1fMB",
+                 results["files_deleted"], results["bytes_freed"] / 1024 / 1024)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# ISS-012: Report Cleanup
+# ---------------------------------------------------------------------------
+# Ouroboros report files accumulate in data/ouroboros_reports/.
+# Clean up files older than max_age_days to prevent disk fill.
+
+REPORTS_DIR = DATA_DIR / "ouroboros_reports"
+
+
+def cleanup_old_reports(
+    max_age_days: int = 30,
+    dry_run: bool = False,
+) -> dict:
+    """Delete report files older than max_age_days from data/ouroboros_reports/.
+
+    Args:
+        max_age_days: Delete reports older than this (default: 30 days)
+        dry_run: If True, report but don't delete
+
+    Returns:
+        dict with count and bytes freed
+    """
+    results = {
+        "files_found": 0,
+        "files_deleted": 0,
+        "bytes_freed": 0,
+        "errors": [],
+        "dry_run": dry_run,
+    }
+
+    if not REPORTS_DIR.exists():
+        log.info("ISS-012: Reports dir %s does not exist, skipping", REPORTS_DIR)
+        return results
+
+    now = time.time()
+    max_age_sec = max_age_days * 86400
+
+    # Clean all file types: .json, .html, .pdf, .txt, etc.
+    for fpath in REPORTS_DIR.iterdir():
+        if not fpath.is_file():
+            continue
+        try:
+            age = now - fpath.stat().st_mtime
+            if age > max_age_sec:
+                results["files_found"] += 1
+                size = fpath.stat().st_size
+
+                if dry_run:
+                    log.info("Would delete report: %s (%.1fKB, %.0fd old)",
+                             fpath.name, size / 1024, age / 86400)
+                else:
+                    fpath.unlink()
+                    results["files_deleted"] += 1
+                    results["bytes_freed"] += size
+                    log.info("Deleted report: %s (%.1fKB, %.0fd old)",
+                             fpath.name, size / 1024, age / 86400)
+        except OSError as e:
+            results["errors"].append(f"{fpath}: {e}")
+
+    if results["files_deleted"] > 0:
+        log.info("ISS-012: Cleaned %d reports, freed %.1fMB",
+                 results["files_deleted"], results["bytes_freed"] / 1024 / 1024)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# SC-19: System Memory Check
+# ---------------------------------------------------------------------------
+# Provides system-wide memory stats for OOM prevention and monitoring.
+# Platform-aware: Linux (/proc/meminfo) preferred, psutil fallback, macOS vm_stat.
+
+STEP_LOG_DIR = DATA_DIR / "step_logs"
+
+
+def check_system_memory() -> dict:
+    """Read system memory information.
+
+    Returns dict with:
+        total_mb: Total physical RAM in MB
+        available_mb: Available memory in MB (can be used without swapping)
+        used_pct: Percentage of memory in use
+        swap_used_mb: Swap space currently used in MB
+        source: How memory was read (procfs, psutil, vm_stat)
+        warning: Optional warning string if memory is low
+    """
+    result = {
+        "total_mb": 0.0,
+        "available_mb": 0.0,
+        "used_pct": 0.0,
+        "swap_used_mb": 0.0,
+        "source": "unknown",
+        "warning": "",
+    }
+
+    # ----- Try /proc/meminfo (Linux, fast, no dependencies) -----
+    meminfo_path = Path("/proc/meminfo")
+    if meminfo_path.exists():
+        try:
+            text = meminfo_path.read_text()
+            fields = {}
+            for line in text.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    key = parts[0].rstrip(":")
+                    val_kb = int(parts[1])
+                    fields[key] = val_kb
+
+            total_kb = fields.get("MemTotal", 0)
+            available_kb = fields.get("MemAvailable", 0)
+            swap_total_kb = fields.get("SwapTotal", 0)
+            swap_free_kb = fields.get("SwapFree", 0)
+
+            result["total_mb"] = total_kb / 1024
+            result["available_mb"] = available_kb / 1024
+            if total_kb > 0:
+                result["used_pct"] = round(((total_kb - available_kb) / total_kb) * 100, 1)
+            result["swap_used_mb"] = (swap_total_kb - swap_free_kb) / 1024
+            result["source"] = "procfs"
+
+            log.info("SC-19: Memory — %.0f MB total, %.0f MB available (%.1f%% used), "
+                     "%.0f MB swap used [procfs]",
+                     result["total_mb"], result["available_mb"],
+                     result["used_pct"], result["swap_used_mb"])
+
+            # Warn thresholds
+            if result["available_mb"] < 512:
+                result["warning"] = f"LOW MEMORY: {result['available_mb']:.0f} MB available (< 512 MB)"
+                log.warning("SC-19: %s", result["warning"])
+
+            return result
+        except (OSError, ValueError, KeyError) as e:
+            log.debug("SC-19: /proc/meminfo parse failed: %s", e)
+
+    # ----- Fallback: psutil (works on macOS + Linux) -----
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        sw = psutil.swap_memory()
+        result["total_mb"] = vm.total / (1024 * 1024)
+        result["available_mb"] = vm.available / (1024 * 1024)
+        result["used_pct"] = round(vm.percent, 1)
+        result["swap_used_mb"] = sw.used / (1024 * 1024)
+        result["source"] = "psutil"
+
+        log.info("SC-19: Memory — %.0f MB total, %.0f MB available (%.1f%% used), "
+                 "%.0f MB swap used [psutil]",
+                 result["total_mb"], result["available_mb"],
+                 result["used_pct"], result["swap_used_mb"])
+
+        if result["available_mb"] < 512:
+            result["warning"] = f"LOW MEMORY: {result['available_mb']:.0f} MB available (< 512 MB)"
+            log.warning("SC-19: %s", result["warning"])
+
+        return result
+    except ImportError:
+        log.debug("SC-19: psutil not available")
+    except Exception as e:
+        log.debug("SC-19: psutil failed: %s", e)
+
+    # ----- Last resort on macOS: vm_stat + sysctl -----
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.check_output(["vm_stat"], text=True, timeout=5)
+            page_size = 16384  # default on Apple Silicon
+            for line in out.splitlines():
+                if "page size of" in line:
+                    page_size = int(line.split()[-2])
+                    break
+
+            fields = {}
+            for line in out.splitlines()[1:]:
+                if ":" in line:
+                    key, val = line.split(":", 1)
+                    val = val.strip().rstrip(".")
+                    try:
+                        fields[key.strip()] = int(val)
+                    except ValueError:
+                        continue
+
+            free_pages = fields.get("Pages free", 0)
+            inactive_pages = fields.get("Pages inactive", 0)
+            speculative_pages = fields.get("Pages speculative", 0)
+            available_pages = free_pages + inactive_pages + speculative_pages
+
+            sysctl_out = subprocess.check_output(
+                ["sysctl", "-n", "hw.memsize"], text=True, timeout=5
+            ).strip()
+            total_bytes = int(sysctl_out)
+
+            result["total_mb"] = total_bytes / (1024 * 1024)
+            result["available_mb"] = (available_pages * page_size) / (1024 * 1024)
+            if total_bytes > 0:
+                result["used_pct"] = round(
+                    (1 - (available_pages * page_size / total_bytes)) * 100, 1
+                )
+            result["swap_used_mb"] = 0.0  # vm_stat doesn't easily give swap
+            result["source"] = "vm_stat"
+
+            log.info("SC-19: Memory — %.0f MB total, %.0f MB available (%.1f%% used) [vm_stat]",
+                     result["total_mb"], result["available_mb"], result["used_pct"])
+            return result
+        except Exception as e:
+            log.debug("SC-19: vm_stat fallback failed: %s", e)
+
+    log.warning("SC-19: Could not determine system memory")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# SC-19: Step Health Check
+# ---------------------------------------------------------------------------
+# Reads step_logs/ directory to report on last run of each step.
+
+def check_step_health() -> List[dict]:
+    """Read step_logs directory and return health status for each step.
+
+    Returns list of dicts, each with:
+        step: step name
+        last_run_utc: ISO timestamp of last run
+        duration_sec: how long it took
+        exit_code: 0 = success, negative = special (skip/OOM/timeout)
+        peak_rss_mb: peak memory usage
+        skipped: whether the run was skipped
+        skip_reason: why it was skipped (if applicable)
+        age_hours: hours since last run
+        status: "ok", "failed", "skipped", "stale", "never_run"
+    """
+    results = []
+
+    if not STEP_LOG_DIR.exists():
+        log.info("SC-19: Step log dir %s does not exist (no steps run yet?)", STEP_LOG_DIR)
+        return results
+
+    # Group log files by step name, keep only the most recent per step
+    latest_by_step: Dict[str, Path] = {}
+    for log_file in STEP_LOG_DIR.glob("*.json"):
+        # Filename format: {step_name}_{YYYYMMDD_HHMMSS}.json
+        name = log_file.stem
+        # Find the step name by removing the date suffix
+        # step_name can contain underscores, so we split from the right
+        # Date pattern: _YYYYMMDD_HHMMSS (16 chars including leading underscore)
+        if len(name) > 16 and name[-15:].replace("_", "").isdigit():
+            step_name = name[:-16]  # Remove _YYYYMMDD_HHMMSS
+        else:
+            # Fallback: try to read the file and get step name from JSON
+            step_name = name
+
+        if step_name not in latest_by_step or log_file.stat().st_mtime > latest_by_step[step_name].stat().st_mtime:
+            latest_by_step[step_name] = log_file
+
+    now = time.time()
+
+    for step_name, log_file in sorted(latest_by_step.items()):
+        try:
+            data = json.loads(log_file.read_text())
+
+            age_sec = now - log_file.stat().st_mtime
+            age_hours = age_sec / 3600
+
+            exit_code = data.get("exit_code", -99)
+            skipped = data.get("skipped", False)
+
+            # Determine status
+            if skipped:
+                status = "skipped"
+            elif exit_code == 0:
+                if age_hours > 48:
+                    status = "stale"  # Haven't run in 2+ days
+                else:
+                    status = "ok"
+            elif exit_code == -9:
+                status = "oom_killed"
+            elif exit_code == -3:
+                status = "timeout"
+            else:
+                status = "failed"
+
+            results.append({
+                "step": data.get("step", step_name),
+                "last_run_utc": data.get("timestamp_utc", ""),
+                "duration_sec": data.get("duration_sec", 0),
+                "exit_code": exit_code,
+                "peak_rss_mb": data.get("peak_rss_mb", 0),
+                "skipped": skipped,
+                "skip_reason": data.get("skip_reason", ""),
+                "age_hours": round(age_hours, 1),
+                "status": status,
+                "log_file": str(log_file),
+            })
+
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            log.warning("SC-19: Failed to read step log %s: %s", log_file, e)
+            results.append({
+                "step": step_name,
+                "last_run_utc": "",
+                "duration_sec": 0,
+                "exit_code": -99,
+                "peak_rss_mb": 0,
+                "skipped": False,
+                "skip_reason": f"Log parse error: {e}",
+                "age_hours": 0,
+                "status": "error",
+                "log_file": str(log_file),
+            })
+
+    # Log summary
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    fail_count = sum(1 for r in results if r["status"] in ("failed", "oom_killed", "timeout"))
+    skip_count = sum(1 for r in results if r["status"] == "skipped")
+    stale_count = sum(1 for r in results if r["status"] == "stale")
+
+    log.info("SC-19: Step health — %d ok, %d failed, %d skipped, %d stale (of %d total)",
+             ok_count, fail_count, skip_count, stale_count, len(results))
+
+    return results
+
+
+def cleanup_old_step_logs(max_age_days: int = 14, dry_run: bool = False) -> dict:
+    """Delete step log files older than max_age_days.
+
+    Args:
+        max_age_days: Delete logs older than this (default: 14 days)
+        dry_run: If True, report but don't delete
+
+    Returns:
+        dict with count and bytes freed
+    """
+    results = {
+        "files_found": 0,
+        "files_deleted": 0,
+        "bytes_freed": 0,
+        "errors": [],
+        "dry_run": dry_run,
+    }
+
+    if not STEP_LOG_DIR.exists():
+        return results
+
+    now = time.time()
+    max_age_sec = max_age_days * 86400
+
+    for fpath in STEP_LOG_DIR.glob("*.json"):
+        try:
+            age = now - fpath.stat().st_mtime
+            if age > max_age_sec:
+                results["files_found"] += 1
+                size = fpath.stat().st_size
+
+                if dry_run:
+                    log.info("Would delete step log: %s (%.1fKB, %.0fd old)",
+                             fpath.name, size / 1024, age / 86400)
+                else:
+                    fpath.unlink()
+                    results["files_deleted"] += 1
+                    results["bytes_freed"] += size
+                    log.info("Deleted step log: %s (%.1fKB)", fpath.name, size / 1024)
+        except OSError as e:
+            results["errors"].append(f"{fpath}: {e}")
+
+    if results["files_deleted"] > 0:
+        log.info("SC-19: Cleaned %d step logs, freed %.1fKB",
+                 results["files_deleted"], results["bytes_freed"] / 1024)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Maintenance utilities")
     parser.add_argument("--read-memory", action="store_true", help="ISS-017: Read persistent memory")
-    parser.add_argument("--cleanup", action="store_true", help="v19-P2-15: Clean Parquet orphans")
-    parser.add_argument("--cleanup-dry-run", action="store_true", help="v19-P2-15: Dry run cleanup")
+    parser.add_argument("--cleanup", action="store_true", help="v19-P2-15+ISS-012: Clean Parquet orphans, WAL archives, old reports, and step logs")
+    parser.add_argument("--cleanup-dry-run", action="store_true", help="v19-P2-15+ISS-012: Dry run cleanup")
     parser.add_argument("--bst-check", action="store_true", help="ISS-020: Check BST status")
+    parser.add_argument("--mem-check", action="store_true", help="SC-19: Check system memory")
+    parser.add_argument("--step-health", action="store_true", help="SC-19: Check step runner health")
     parser.add_argument("--all", action="store_true", help="Run all maintenance tasks")
     args = parser.parse_args()
 
@@ -304,16 +740,32 @@ def main():
             for k, v in memory['parameter_hints'].items():
                 print(f"  Hint: {k} = {v}")
 
-    if args.cleanup or args.all:
-        result = cleanup_parquet_orphans()
-        print(f"\n=== v19-P2-15: Parquet Cleanup ===")
+    if args.cleanup or args.cleanup_dry_run or args.all:
+        dry_run = args.cleanup_dry_run and not args.cleanup and not args.all
+
+        # v19-P2-15: Parquet orphan cleanup
+        result = cleanup_parquet_orphans(dry_run=dry_run)
+        print(f"\n=== v19-P2-15: Parquet Cleanup {'(DRY RUN) ' if dry_run else ''}===")
         print(f"Found: {result['files_found']}, Deleted: {result['files_deleted']}, "
               f"Freed: {result['bytes_freed']/1024:.1f}KB")
 
-    if args.cleanup_dry_run:
-        result = cleanup_parquet_orphans(dry_run=True)
-        print(f"\n=== v19-P2-15: Parquet Cleanup (DRY RUN) ===")
-        print(f"Would delete: {result['files_found']} files")
+        # ISS-012: WAL archive cleanup
+        wal_result = cleanup_old_wal_archives(dry_run=dry_run)
+        print(f"\n=== ISS-012: WAL Archive Cleanup {'(DRY RUN) ' if dry_run else ''}===")
+        print(f"Found: {wal_result['files_found']}, Deleted: {wal_result['files_deleted']}, "
+              f"Freed: {wal_result['bytes_freed']/1024:.1f}KB")
+
+        # ISS-012: Report cleanup
+        rpt_result = cleanup_old_reports(dry_run=dry_run)
+        print(f"\n=== ISS-012: Report Cleanup {'(DRY RUN) ' if dry_run else ''}===")
+        print(f"Found: {rpt_result['files_found']}, Deleted: {rpt_result['files_deleted']}, "
+              f"Freed: {rpt_result['bytes_freed']/1024:.1f}KB")
+
+        # SC-19: Step log cleanup
+        step_result = cleanup_old_step_logs(dry_run=dry_run)
+        print(f"\n=== SC-19: Step Log Cleanup {'(DRY RUN) ' if dry_run else ''}===")
+        print(f"Found: {step_result['files_found']}, Deleted: {step_result['files_deleted']}, "
+              f"Freed: {step_result['bytes_freed']/1024:.1f}KB")
 
     if args.bst_check or args.all:
         bst = is_bst()
@@ -325,6 +777,35 @@ def main():
         print(f"LSE: {sessions['lse']['open_utc']} - {sessions['lse']['close_utc']} UTC")
         print(f"Nightly Ouroboros: {sessions['nightly_ouroboros_utc']} UTC")
         print(f"Dark window: {sessions['dark_window']['start_utc']} - {sessions['dark_window']['end_utc']} UTC")
+
+    if args.mem_check or args.all:
+        mem = check_system_memory()
+        print(f"\n=== SC-19: System Memory ===")
+        print(f"Total:     {mem['total_mb']:,.0f} MB")
+        print(f"Available: {mem['available_mb']:,.0f} MB")
+        print(f"Used:      {mem['used_pct']:.1f}%")
+        print(f"Swap used: {mem['swap_used_mb']:,.0f} MB")
+        print(f"Source:    {mem['source']}")
+        if mem['warning']:
+            print(f"WARNING:   {mem['warning']}")
+
+    if args.step_health or args.all:
+        health = check_step_health()
+        print(f"\n=== SC-19: Step Health ({len(health)} steps) ===")
+        if not health:
+            print("No step logs found (step_runner has not been used yet)")
+        else:
+            # Header
+            print(f"{'Step':<28s} {'Status':<12s} {'Exit':<6s} {'Duration':<10s} "
+                  f"{'RSS MB':<8s} {'Age (h)':<8s}")
+            print("-" * 80)
+            for h in health:
+                dur_str = f"{h['duration_sec']:.1f}s"
+                rss_str = f"{h['peak_rss_mb']:.0f}" if h['peak_rss_mb'] > 0 else "-"
+                print(f"{h['step']:<28s} {h['status']:<12s} {h['exit_code']:<6d} "
+                      f"{dur_str:<10s} {rss_str:<8s} {h['age_hours']:<8.1f}")
+                if h.get('skip_reason'):
+                    print(f"  >> {h['skip_reason']}")
 
 
 if __name__ == "__main__":

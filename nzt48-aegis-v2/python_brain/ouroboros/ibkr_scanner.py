@@ -47,6 +47,12 @@ IB_HOST = os.environ.get("IB_HOST", "ib-gateway")  # Docker service name
 IB_PORT = int(os.environ.get("IB_PORT", "4003"))    # gnzsnz paper API proxy port
 IB_CLIENT_ID = 102  # Dedicated scanner client_id
 
+# P0-5: IBKR rate limiting — 50 msg/s hard limit, use 40/s to be safe
+IBKR_BATCH_SIZE = 50          # Max contracts per batch
+IBKR_BATCH_SLEEP_SEC = 10     # Sleep between batches
+IBKR_MAX_SCAN_MINUTES = 60    # Abort if scan takes longer than this
+IBKR_REQ_SLEEP_SEC = 0.025    # 25ms between individual requests (40/s)
+
 # Exchanges to scan via IBKR
 IBKR_EXCHANGES = {
     "LSE": {"exchange": "LSE", "sec_type": "STK", "currency": "GBP"},
@@ -98,6 +104,23 @@ def connect_ibkr() -> Optional[Any]:
     except Exception as e:
         log.error("Failed to connect to IB Gateway: %s", e)
         return None
+
+
+def _rate_limited_sleep(request_count: int, start_time: float) -> None:
+    """Enforce IBKR rate limits: sleep between batches, abort if too long."""
+    # Check total time limit
+    elapsed_min = (time.monotonic() - start_time) / 60
+    if elapsed_min > IBKR_MAX_SCAN_MINUTES:
+        raise TimeoutError(f"IBKR scan exceeded {IBKR_MAX_SCAN_MINUTES} min limit")
+
+    # Sleep between individual requests
+    time.sleep(IBKR_REQ_SLEEP_SEC)
+
+    # Extra sleep at batch boundaries
+    if request_count > 0 and request_count % IBKR_BATCH_SIZE == 0:
+        log.info("  Rate limit: %d requests done, sleeping %ds at batch boundary",
+                 request_count, IBKR_BATCH_SLEEP_SEC)
+        time.sleep(IBKR_BATCH_SLEEP_SEC)
 
 
 def _connect_ibapi() -> Optional[Any]:
@@ -221,7 +244,7 @@ def scan_exchange_ib_insync(ib: Any, exchange_name: str, config: Dict[str, str])
                             "subcategory": getattr(cd, "subcategory", ""),
                         })
                 log.info("  %s: +%d from %s scan", exchange_name, len(data2), scan_code)
-                time.sleep(1)  # Rate limit between scans
+                time.sleep(IBKR_BATCH_SLEEP_SEC // 2)  # Rate limit between scans
             except Exception as e:
                 log.debug("  %s %s scan failed: %s", exchange_name, scan_code, e)
 
@@ -386,15 +409,22 @@ def run_ibkr_scan() -> int:
     all_results: List[Dict[str, Any]] = []
     is_ib_insync = hasattr(ib, 'reqScannerData')
 
+    scan_start = time.monotonic()
+    request_count = 0
+
     for exchange_name, config in IBKR_EXCHANGES.items():
         log.info("Scanning %s...", exchange_name)
         try:
+            _rate_limited_sleep(request_count, scan_start)
             if is_ib_insync:
                 results = scan_exchange_ib_insync(ib, exchange_name, config)
             else:
                 results = scan_exchange_ibapi(ib, exchange_name, config)
             all_results.extend(results)
-            time.sleep(2)  # Rate limit between exchanges
+            request_count += 1 + len(results) // 100  # Account for multi-scan requests
+        except TimeoutError as e:
+            log.warning("Aborting scan: %s", e)
+            break
         except Exception as e:
             log.warning("Exchange %s scan failed: %s", exchange_name, e)
 

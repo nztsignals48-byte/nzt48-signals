@@ -733,11 +733,15 @@ class SheetsSyncClient:
         client.stop()
     """
 
+    _REDIS_URL_DEFAULT = "redis://:nzt48redis@aegis-redis:6379/0"
+
     def __init__(
         self,
-        redis_url: str = "redis://:nzt48redis@aegis-redis:6379/0",
+        redis_url: str = None,
         poll_interval: float = POLL_INTERVAL_SEC,
     ):
+        if redis_url is None:
+            redis_url = os.environ.get("REDIS_URL", self._REDIS_URL_DEFAULT)
         self._redis_url = redis_url
         self._poll_interval = poll_interval
         self._thread: Optional[threading.Thread] = None
@@ -1169,6 +1173,99 @@ def push_indicator_intelligence_to_sheets(intel_result) -> bool:
     return success
 
 
+def push_daily_summary(report_dir: Path = None) -> bool:
+    """Push daily summary row to Daily_Summary tab from nightly report JSON.
+
+    Reads the most recent nightly report JSON from the ouroboros_reports directory
+    and pushes a summary row to the Daily_Summary tab via push_nightly_rows().
+
+    Args:
+        report_dir: Path to ouroboros_reports directory. Defaults to /app/data/ouroboros_reports.
+
+    Returns:
+        True if row was pushed successfully.
+    """
+    if report_dir is None:
+        report_dir = Path(os.environ.get(
+            "AEGIS_DATA_DIR",
+            Path(__file__).resolve().parents[2] / "data",
+        )) / "ouroboros_reports"
+
+    if not report_dir.exists():
+        log.error("Report directory not found: %s", report_dir)
+        return False
+
+    # Find most recent nightly JSON: try nightly_v6_*.json first, then *_metrics.json
+    json_files = sorted(report_dir.glob("nightly_v6_*.json"), reverse=True)
+    if not json_files:
+        json_files = sorted(report_dir.glob("*_metrics.json"), reverse=True)
+    if not json_files:
+        log.error("No nightly report JSON found in %s", report_dir)
+        return False
+
+    report_path = json_files[0]
+    log.info("Reading nightly report: %s", report_path)
+
+    try:
+        with open(report_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        log.error("Failed to read nightly report %s: %s", report_path, e)
+        return False
+
+    # Extract fields with graceful fallbacks
+    date_str = data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    total_trades = data.get("total_trades", 0)
+    wins = data.get("wins", 0)
+    losses = data.get("losses", 0)
+    trades_entered = total_trades  # Approximation: total trades = entered
+    trades_exited = wins + losses if (wins + losses) > 0 else total_trades
+    win_rate_pct = round(data.get("win_rate", 0) * 100, 1)
+    total_pnl = round(data.get("total_pnl_gbp", data.get("total_pnl", 0)), 2)
+    equity = round(data.get("equity_gbp", data.get("ending_equity", 0)), 2)
+    max_drawdown = round(data.get("max_drawdown_pct", 0), 2)
+    sharpe = round(data.get("sharpe_30d", data.get("sharpe_rolling", 0)), 2)
+
+    # Best/worst trade formatting
+    best_ticker = data.get("best_trade_ticker", "")
+    best_pnl = data.get("best_trade_pnl", 0)
+    worst_ticker = data.get("worst_trade_ticker", "")
+    worst_pnl = data.get("worst_trade_pnl", 0)
+
+    if best_ticker:
+        best_trade = f"{best_ticker} ({best_pnl:+.2f})"
+    elif best_pnl:
+        best_trade = f"{best_pnl:+.2f}"
+    else:
+        best_trade = "N/A"
+
+    if worst_ticker:
+        worst_trade = f"{worst_ticker} ({worst_pnl:+.2f})"
+    elif worst_pnl:
+        worst_trade = f"{worst_pnl:+.2f}"
+    else:
+        worst_trade = "N/A"
+
+    # Daily_Summary headers: Date, Trades_Entered, Trades_Exited, Win_Rate_Pct,
+    #   Total_PnL_GBP, Equity_GBP, Max_Drawdown_Pct, Sharpe_Rolling, Best_Trade, Worst_Trade
+    row = [
+        date_str,
+        trades_entered,
+        trades_exited,
+        win_rate_pct,
+        total_pnl,
+        equity,
+        max_drawdown,
+        sharpe,
+        best_trade,
+        worst_trade,
+    ]
+
+    log.info("Pushing Daily_Summary row: date=%s trades=%d wr=%.1f%% pnl=%.2f",
+             date_str, total_trades, win_rate_pct, total_pnl)
+    return _push_nightly_rows("Daily_Summary", [row])
+
+
 def _push_nightly_rows(tab_name: str, rows: List[List[Any]]) -> bool:
     """Helper: push rows to a Sheets tab using a fresh SheetsClient.
 
@@ -1209,9 +1306,28 @@ def main():
         default=None,
         help="Replay a WAL NDJSON file directly to Sheets (bypasses Redis queue)",
     )
+    parser.add_argument(
+        "--push-daily-summary",
+        action="store_true",
+        help="Push daily summary row from latest nightly report to Daily_Summary tab",
+    )
+    parser.add_argument(
+        "--report-dir",
+        type=str,
+        default=None,
+        help="Override report directory path (used with --push-daily-summary)",
+    )
     args = parser.parse_args()
 
-    if args.replay:
+    if args.push_daily_summary:
+        report_dir = Path(args.report_dir) if args.report_dir else None
+        ok = push_daily_summary(report_dir=report_dir)
+        if ok:
+            log.info("Daily summary pushed successfully")
+        else:
+            log.error("Failed to push daily summary")
+            sys.exit(1)
+    elif args.replay:
         wal_path = Path(args.replay)
         if not wal_path.exists():
             log.error("WAL file not found: %s", wal_path)
