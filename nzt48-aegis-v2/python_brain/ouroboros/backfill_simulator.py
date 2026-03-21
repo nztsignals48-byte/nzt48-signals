@@ -19,6 +19,7 @@ import logging
 import math
 import os
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -548,6 +549,151 @@ def generate_simulation_report(
 
 
 # ---------------------------------------------------------------------------
+# Feedback export for nightly learning loop (ISS-018)
+# ---------------------------------------------------------------------------
+FEEDBACK_FILE = DATA_DIR / "backfill_feedback.json"
+
+
+def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
+    """Export backfill simulation results as structured feedback for the nightly loop.
+
+    Writes a JSON summary to data/backfill_feedback.json using atomic write
+    (tempfile + os.rename) to prevent partial reads. The nightly_v6 loop reads
+    this file to incorporate backfill insights into parameter recommendations.
+
+    QUARANTINE: This function is READ-ONLY to WAL, config, and live trading
+    state. It only writes to its own feedback file.
+
+    Args:
+        all_trades: List of SimTrade results from the backfill simulation.
+
+    Returns:
+        True if feedback file was written successfully, False otherwise.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    total = len(all_trades)
+
+    if total == 0:
+        log.warning("No simulated trades to export as feedback")
+        return False
+
+    # --- Core metrics ---
+    wins = [t for t in all_trades if t.pnl > 0]
+    losses = [t for t in all_trades if t.pnl <= 0]
+    win_rate = len(wins) / total
+    avg_return = sum(t.pnl_pct for t in all_trades) / total
+
+    # --- Per-entry-type performance for strategy confidence delta ---
+    by_type: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        by_type[t.entry_type].append(t)
+
+    strategy_confidence_delta: Dict[str, float] = {}
+    for entry_type, trades in by_type.items():
+        n = len(trades)
+        if n < 3:
+            # Insufficient data — no adjustment
+            strategy_confidence_delta[entry_type] = 0.0
+            continue
+        type_wr = sum(1 for t in trades if t.pnl > 0) / n
+        type_avg_pnl_pct = sum(t.pnl_pct for t in trades) / n
+
+        # Confidence delta: scale from -5 to +5 based on win rate and avg return.
+        # Neutral at 50% WR / 0% avg return. Clamped to [-5, +5].
+        wr_component = (type_wr - 0.5) * 6.0   # -3 to +3 range
+        pnl_component = max(-2.0, min(2.0, type_avg_pnl_pct * 2.0))  # -2 to +2 range
+        delta = max(-5.0, min(5.0, round(wr_component + pnl_component, 1)))
+        strategy_confidence_delta[entry_type] = delta
+
+    # --- Per-ticker performance for recommended parameter changes ---
+    by_ticker: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        by_ticker[t.ticker].append(t)
+
+    recommended_parameter_changes: List[Dict[str, Any]] = []
+    for ticker, trades in by_ticker.items():
+        n = len(trades)
+        if n < 3:
+            continue
+        ticker_wr = sum(1 for t in trades if t.pnl > 0) / n
+        ticker_avg_rung = sum(t.rung_achieved for t in trades) / n
+        ticker_avg_pnl = sum(t.pnl_pct for t in trades) / n
+
+        # Suggest chandelier tightening if avg rung is high (profits being left)
+        if ticker_avg_rung > 3.0 and ticker_wr > 0.5:
+            recommended_parameter_changes.append({
+                "ticker": ticker,
+                "parameter": "chandelier_atr_mult",
+                "direction": "tighten",
+                "reason": f"Avg rung {ticker_avg_rung:.1f} > 3.0 with WR {ticker_wr:.0%} — capture profits earlier",
+                "magnitude": round(min(0.3, (ticker_avg_rung - 3.0) * 0.1), 2),
+            })
+
+        # Suggest widening if avg rung is low and losses are from early stops
+        if ticker_avg_rung < 1.0 and ticker_wr < 0.4:
+            recommended_parameter_changes.append({
+                "ticker": ticker,
+                "parameter": "chandelier_atr_mult",
+                "direction": "widen",
+                "reason": f"Avg rung {ticker_avg_rung:.1f} < 1.0 with WR {ticker_wr:.0%} — let trades breathe",
+                "magnitude": round(min(0.3, (1.0 - ticker_avg_rung) * 0.15), 2),
+            })
+
+        # Suggest entry type filter if a type has very poor performance
+        for entry_type in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+            type_trades = [t for t in trades if t.entry_type == entry_type]
+            if len(type_trades) >= 3:
+                type_wr = sum(1 for t in type_trades if t.pnl > 0) / len(type_trades)
+                if type_wr < 0.2:
+                    recommended_parameter_changes.append({
+                        "ticker": ticker,
+                        "parameter": "entry_filter",
+                        "direction": "disable",
+                        "reason": f"{entry_type} on {ticker}: WR {type_wr:.0%} over {len(type_trades)} sim trades",
+                        "magnitude": 0,
+                    })
+
+    # --- Build feedback payload ---
+    feedback = {
+        "backfill_date": today,
+        "simulated_trades_count": total,
+        "simulated_win_rate": round(win_rate, 4),
+        "simulated_avg_return": round(avg_return, 4),
+        "strategy_confidence_delta": strategy_confidence_delta,
+        "recommended_parameter_changes": recommended_parameter_changes,
+    }
+
+    # --- Atomic write: tempfile + os.rename ---
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(DATA_DIR), suffix=".tmp", prefix="backfill_feedback_"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(feedback, f, indent=2)
+            os.rename(tmp_path, str(FEEDBACK_FILE))
+        except Exception:
+            # Clean up temp file on failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        log.info(
+            "Backfill feedback exported: %s (trades=%d wr=%.1f%% avg_ret=%.2f%% deltas=%d recs=%d)",
+            FEEDBACK_FILE, total, win_rate * 100, avg_return,
+            len(strategy_confidence_delta), len(recommended_parameter_changes),
+        )
+        return True
+
+    except Exception as e:
+        log.error("Failed to export backfill feedback: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def run_backfill() -> int:
@@ -576,6 +722,9 @@ def run_backfill() -> int:
     # Generate report
     report = generate_simulation_report(all_trades, elapsed)
     print(report)
+
+    # Export feedback for nightly learning loop (ISS-018)
+    export_backfill_feedback(all_trades)
 
     return 0
 

@@ -38,6 +38,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
+from python_brain.ouroboros.cost_model import costs as _cost_model
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -499,6 +500,8 @@ def optimize_parameters(metrics: DailyMetrics, *, mem=None) -> Dict[str, Any]:
 
     # N1a: Cost-aware learning — tighten Kelly when cost drag is excessive.
     # If spread victims + noise exits > 40% of trades, reduce Kelly to cut churning.
+    # Q-051: cost victim threshold derived from CostModel (1.5x round-trip commission).
+    _cost_victim_threshold = _cost_model.ibkr_commission_gbp * 2 * 1.5  # ~5.10 GBP
     if metrics.total_trades >= 3:
         # Count cost-impaired trades from per_ticker metrics (proxy until taxonomy is wired)
         # When taxonomy data is available via trade_class, use that instead.
@@ -508,13 +511,13 @@ def optimize_parameters(metrics: DailyMetrics, *, mem=None) -> Dict[str, Any]:
             avg_loss_size = abs(sum(
                 d.get("total_pnl", 0) for d in metrics.per_ticker.values() if d.get("total_pnl", 0) < 0
             )) / max(loser_count, 1)
-            # If average loss is tiny (< GBP 5), these are likely spread victims / noise exits
-            if avg_loss_size < 5.0 and loss_rate > 0.40:
+            # If average loss is tiny (< cost_victim_threshold), likely spread victims / noise exits
+            if avg_loss_size < _cost_victim_threshold and loss_rate > 0.40:
                 cost_penalty = 0.97  # 3% Kelly reduction per day of high cost drag
                 new_kelly = max(new_kelly * cost_penalty, KELLY_MIN)
                 recs["adjustments"].append(
                     f"N1a COST PENALTY: Kelly *0.97 -> {new_kelly:.3f} "
-                    f"(avg_loss=GBP {avg_loss_size:.2f} < 5, loss_rate={loss_rate:.0%})"
+                    f"(avg_loss=GBP {avg_loss_size:.2f} < {_cost_victim_threshold:.1f}, loss_rate={loss_rate:.0%})"
                 )
 
     recs["kelly_fraction"] = new_kelly
@@ -557,6 +560,67 @@ def _load_current_params() -> Dict[str, Any]:
         "baseline_kelly": 0.20,
         "baseline_chandelier": 3.0,
     }
+
+
+BACKFILL_FEEDBACK_FILE = DATA_DIR / "backfill_feedback.json"
+BACKFILL_FEEDBACK_MAX_AGE_HOURS = 36  # Stale after 36 hours
+
+
+def _load_backfill_feedback() -> Dict[str, Any]:
+    """Load backfill simulator feedback from data/backfill_feedback.json.
+
+    Returns the feedback dict if the file exists and is fresh (written within
+    the last 36 hours). Returns an empty dict if the file is missing, stale,
+    or corrupted.
+
+    QUARANTINE: This function only reads data. It never writes to WAL, config,
+    or live trading state.
+
+    Returns:
+        Dict with keys: backfill_date, simulated_trades_count, simulated_win_rate,
+        simulated_avg_return, strategy_confidence_delta, recommended_parameter_changes.
+        Empty dict if unavailable or stale.
+    """
+    if not BACKFILL_FEEDBACK_FILE.exists():
+        log.info("Backfill feedback file not found: %s", BACKFILL_FEEDBACK_FILE)
+        return {}
+
+    try:
+        # Check staleness via file mtime
+        mtime = BACKFILL_FEEDBACK_FILE.stat().st_mtime
+        age_hours = (time.time() - mtime) / 3600.0
+        if age_hours > BACKFILL_FEEDBACK_MAX_AGE_HOURS:
+            log.info(
+                "Backfill feedback is stale (%.1f hours old, max %d). Ignoring.",
+                age_hours, BACKFILL_FEEDBACK_MAX_AGE_HOURS,
+            )
+            return {}
+
+        with open(BACKFILL_FEEDBACK_FILE) as f:
+            data = json.load(f)
+
+        # Basic schema validation
+        required_keys = {"backfill_date", "simulated_trades_count", "simulated_win_rate"}
+        if not required_keys.issubset(data.keys()):
+            log.warning(
+                "Backfill feedback missing required keys: %s",
+                required_keys - data.keys(),
+            )
+            return {}
+
+        log.info(
+            "Backfill feedback loaded: date=%s trades=%d wr=%.1f%% avg_ret=%.2f%% (%.1fh old)",
+            data.get("backfill_date", "?"),
+            data.get("simulated_trades_count", 0),
+            data.get("simulated_win_rate", 0) * 100,
+            data.get("simulated_avg_return", 0),
+            age_hours,
+        )
+        return data
+
+    except (json.JSONDecodeError, IOError, OSError) as e:
+        log.warning("Failed to load backfill feedback: %s", e)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1488,6 +1552,49 @@ def run_nightly() -> int:
 
     # Step 3: Parameter optimization (now uses cumulative memory + today's metrics)
     recommendations = optimize_parameters(metrics, mem=mem)
+
+    # Step 3.5: Incorporate backfill simulator feedback (ISS-018)
+    # The backfill simulator runs daily at 07:00 UTC and writes feedback to
+    # data/backfill_feedback.json. We load it here and attach it to
+    # recommendations so downstream consumers (config_writer, battle_plan)
+    # can use simulated performance data to validate or adjust parameters.
+    try:
+        backfill_fb = _load_backfill_feedback()
+        if backfill_fb:
+            recommendations["backfill_feedback"] = backfill_fb
+
+            # Log strategy confidence deltas from backfill simulation
+            deltas = backfill_fb.get("strategy_confidence_delta", {})
+            if deltas:
+                delta_strs = [f"{k}={v:+.1f}" for k, v in deltas.items() if v != 0]
+                if delta_strs:
+                    log.info("Backfill confidence deltas: %s", ", ".join(delta_strs))
+                    recommendations["adjustments"].append(
+                        f"Backfill sim ({backfill_fb.get('simulated_trades_count', 0)} trades, "
+                        f"WR={backfill_fb.get('simulated_win_rate', 0):.0%}): "
+                        + ", ".join(delta_strs)
+                    )
+
+            # Log recommended parameter changes from backfill
+            param_recs = backfill_fb.get("recommended_parameter_changes", [])
+            if param_recs:
+                log.info("Backfill parameter recommendations: %d suggestions", len(param_recs))
+                for rec in param_recs[:5]:  # Log top 5
+                    log.info("  %s %s %s: %s",
+                             rec.get("ticker", "?"), rec.get("parameter", "?"),
+                             rec.get("direction", "?"), rec.get("reason", ""))
+
+            # TODO (ISS-018 Phase 2): Use strategy_confidence_delta to adjust
+            # per-entry-type confidence floors in indicator_gates. For now we
+            # only attach the data to recommendations for visibility in the
+            # battle plan and config_writer. Actual parameter modification
+            # requires validation gate: backfill WR must exceed live WR by
+            # at least 5pp before any confidence adjustment is applied.
+        else:
+            log.info("No backfill feedback available for this nightly run")
+    except Exception as e:
+        log.warning("Backfill feedback integration failed (non-fatal): %s", e)
+
     RECS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(RECS_FILE, "w") as f:
         json.dump(recommendations, f, indent=2)

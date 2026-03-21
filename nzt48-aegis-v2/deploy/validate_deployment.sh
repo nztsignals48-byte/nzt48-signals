@@ -185,7 +185,7 @@ fi
 echo ""
 
 ################################################################################
-# Check 7: Redis connectivity (replaces old PostgreSQL check)
+# Check 7: Redis state store connectivity
 ################################################################################
 log_info "Check 7: Redis state store..."
 

@@ -1234,10 +1234,14 @@ sector = "Energy"
 inverse_of = ""
 
 
-# KRX (Korea Exchange) — REMOVED 2026-03-19
+# ═══════════════════════════════════════════════════════════════════════════
+# KRX (Korea Exchange) — BROKEN / REMOVED 2026-03-19 (ISS-013)
 # Korean stocks not available on this IBKR account via KSE exchange.
-# Account-level restriction. 39 contracts removed to save subscription slots.
+# Account-level restriction — 39 contracts removed to save subscription slots.
 # Samsung available as SMSN on LSEIOB1 if needed.
+# DO NOT re-add KRX contracts without first verifying account permissions.
+# ═══════════════════════════════════════════════════════════════════════════
+
 # ═══════════════════════════════════════════════════════════════════════════
 # XETRA (Frankfurt) — 15 most liquid DAX stocks
 # IBKR exchange: IBIS | Currency: EUR | Symbol: ticker

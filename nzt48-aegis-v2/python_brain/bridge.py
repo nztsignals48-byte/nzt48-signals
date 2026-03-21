@@ -39,6 +39,7 @@ from brain.indicators.hurst import estimate_hurst, classify_regime
 from brain.vwap import VWAPBar, VWAPCalculator
 from brain.rsi_ibs import calculate_rsi, calculate_ibs, calculate_sma
 from brain.gap_detector import calculate_gap_pct
+from python_brain.ouroboros.cost_model import costs as _cost_model
 
 MAX_BARS = 500
 
@@ -1034,13 +1035,15 @@ def process_tick(msg):
     # These filters run AFTER signal generation but BEFORE emission.
     # They suppress low-quality contexts that produce immediate stop-outs.
 
-    # G1: Spread quality gate — reject if bid/ask spread > 0.5% (too expensive)
+    # G1: Spread quality gate — reject if bid/ask spread too wide (Q-051: uses CostModel)
     bid = msg.get("bid", 0)
     ask = msg.get("ask", 0)
     if bid > 0 and ask > 0:
         spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
-        # Leverage-aware spread limits: LSE ETPs have wider structural spreads
-        spread_limit = 2.0 if leverage >= 3 else 0.5  # 2% for leveraged, 0.5% for unleveraged
+        # Leverage-aware spread limits derived from CostModel.spread_veto_pct
+        # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
+        _base_spread_gate = _cost_model.spread_veto_pct * 100  # 0.3% -> 0.3
+        spread_limit = _base_spread_gate * 6.67 if leverage >= 3 else _base_spread_gate * 1.67
         if spread_pct > spread_limit:
             _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
                            {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},

@@ -94,9 +94,9 @@ TAB_DEFINITIONS: Dict[str, List[str]] = {
         "Rung", "Duration_Min", "Unrealised_PnL",
     ],
     "Daily_Summary": [
-        "Date", "Trades_Entered", "Trades_Exited", "Win_Rate_Pct", "Total_PnL_GBP",
-        "Equity_GBP", "Max_Drawdown_Pct", "Sharpe_Rolling", "Best_Trade",
-        "Worst_Trade",
+        "Date", "Total_Signals", "Total_Trades", "Trades_Closed", "Win_Rate_Pct",
+        "Total_PnL_GBP", "Avg_Confidence", "Regime_State", "Config_Version",
+        "Alerts_Count",
     ],
     "Open_Positions": [
         "Symbol", "Qty", "Entry_Price", "Current_Price", "Unrealized_PnL",
@@ -1307,96 +1307,108 @@ def push_indicator_intelligence_to_sheets(intel_result) -> bool:
     return success
 
 
-def push_daily_summary(report_dir: Path = None) -> bool:
-    """Push daily summary row to Daily_Summary tab from nightly report JSON.
+def push_daily_summary(report_dir: Path = None, date_str: str = "") -> bool:
+    """Push daily summary row to Daily_Summary tab by aggregating WAL events.
 
-    Reads the most recent nightly report JSON from the ouroboros_reports directory
-    and pushes a summary row to the Daily_Summary tab via push_nightly_rows().
+    Aggregates data from multiple sources into a single summary row per day:
+      - Total signals: count of SignalRejected + RoutedOrder WAL events
+      - Total trades taken: RoutedOrder count
+      - Trades closed: PositionClosed count
+      - Win rate: wins / closes * 100
+      - Total PnL: sum of PositionClosed pnl fields
+      - Average confidence: mean confidence from RoutedOrder signals
+      - Regime state: latest from hmm_regime_state.json
+      - Config version: mtime of dynamic_weights.toml
+      - Alerts count: from ouroboros_monitor results
 
     Args:
-        report_dir: Path to ouroboros_reports directory. Defaults to /app/data/ouroboros_reports.
+        report_dir: Path to ouroboros_reports directory (unused, kept for API compat).
+        date_str: Date string (YYYY-MM-DD). Defaults to today UTC.
 
     Returns:
         True if row was pushed successfully.
     """
-    if report_dir is None:
-        report_dir = Path(os.environ.get(
-            "AEGIS_DATA_DIR",
-            Path(__file__).resolve().parents[2] / "data",
-        )) / "ouroboros_reports"
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    if not report_dir.exists():
-        log.error("Report directory not found: %s", report_dir)
-        return False
+    # --- 1. Count WAL events by type ---
+    signal_rejected_events = _load_wal_events_by_type("SignalRejected", days=1)
+    routed_order_events = _load_wal_events_by_type("RoutedOrder", days=1)
+    position_closed_events = _load_wal_position_closed_events(days=1)
 
-    # Find most recent nightly JSON: try nightly_v6_*.json first, then *_metrics.json
-    json_files = sorted(report_dir.glob("nightly_v6_*.json"), reverse=True)
-    if not json_files:
-        json_files = sorted(report_dir.glob("*_metrics.json"), reverse=True)
-    if not json_files:
-        log.error("No nightly report JSON found in %s", report_dir)
-        return False
+    total_signals = len(signal_rejected_events) + len(routed_order_events)
+    total_trades = len(routed_order_events)
+    trades_closed = len(position_closed_events)
 
-    report_path = json_files[0]
-    log.info("Reading nightly report: %s", report_path)
+    # --- 2. Win rate and PnL from PositionClosed ---
+    wins = sum(1 for pc in position_closed_events if pc.get("final_pnl", 0.0) > 0)
+    win_rate_pct = round((wins / trades_closed * 100) if trades_closed > 0 else 0.0, 1)
+    total_pnl = round(sum(pc.get("final_pnl", 0.0) for pc in position_closed_events), 2)
 
+    # --- 3. Average confidence from RoutedOrder ---
+    confidences = [ro.get("confidence", 0.0) for ro in routed_order_events if ro.get("confidence")]
+    avg_confidence = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
+
+    # --- 4. Regime state from hmm_regime_state.json ---
+    regime_state = "unknown"
+    regime_path = DATA_DIR / "hmm_regime_state.json"
     try:
-        with open(report_path) as f:
-            data = json.load(f)
+        if regime_path.exists():
+            with open(regime_path) as f:
+                regime_data = json.load(f)
+            regime_state = regime_data.get("regime", regime_data.get("state", "unknown"))
     except (json.JSONDecodeError, IOError) as e:
-        log.error("Failed to read nightly report %s: %s", report_path, e)
-        return False
+        log.warning("Failed to read regime state from %s: %s", regime_path, e)
 
-    # Extract fields with graceful fallbacks
-    date_str = data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-    total_trades = data.get("total_trades", 0)
-    wins = data.get("wins", 0)
-    losses = data.get("losses", 0)
-    trades_entered = total_trades  # Approximation: total trades = entered
-    trades_exited = wins + losses if (wins + losses) > 0 else total_trades
-    win_rate_pct = round(data.get("win_rate", 0) * 100, 1)
-    total_pnl = round(data.get("total_pnl_gbp", data.get("total_pnl", 0)), 2)
-    equity = round(data.get("equity_gbp", data.get("ending_equity", 0)), 2)
-    max_drawdown = round(data.get("max_drawdown_pct", 0), 2)
-    sharpe = round(data.get("sharpe_30d", data.get("sharpe_rolling", 0)), 2)
+    # --- 5. Config version from dynamic_weights.toml mtime ---
+    config_version = "N/A"
+    weights_path = CONFIG_DIR / "dynamic_weights.toml"
+    try:
+        if weights_path.exists():
+            mtime = weights_path.stat().st_mtime
+            config_version = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+    except OSError as e:
+        log.warning("Failed to stat dynamic_weights.toml: %s", e)
 
-    # Best/worst trade formatting
-    best_ticker = data.get("best_trade_ticker", "")
-    best_pnl = data.get("best_trade_pnl", 0)
-    worst_ticker = data.get("worst_trade_ticker", "")
-    worst_pnl = data.get("worst_trade_pnl", 0)
+    # --- 6. Alerts count from ouroboros_monitor results ---
+    alerts_count = 0
+    alerts_path = DATA_DIR / "ouroboros_monitor_results.json"
+    try:
+        if alerts_path.exists():
+            with open(alerts_path) as f:
+                alerts_data = json.load(f)
+            # Count alerts from monitor result (list of alert dicts or count field)
+            if isinstance(alerts_data, list):
+                alerts_count = len(alerts_data)
+            elif isinstance(alerts_data, dict):
+                alerts_count = alerts_data.get("alerts_count", len(alerts_data.get("alerts", [])))
+    except (json.JSONDecodeError, IOError) as e:
+        log.warning("Failed to read alerts from %s: %s", alerts_path, e)
 
-    if best_ticker:
-        best_trade = f"{best_ticker} ({best_pnl:+.2f})"
-    elif best_pnl:
-        best_trade = f"{best_pnl:+.2f}"
-    else:
-        best_trade = "N/A"
-
-    if worst_ticker:
-        worst_trade = f"{worst_ticker} ({worst_pnl:+.2f})"
-    elif worst_pnl:
-        worst_trade = f"{worst_pnl:+.2f}"
-    else:
-        worst_trade = "N/A"
-
-    # Daily_Summary headers: Date, Trades_Entered, Trades_Exited, Win_Rate_Pct,
-    #   Total_PnL_GBP, Equity_GBP, Max_Drawdown_Pct, Sharpe_Rolling, Best_Trade, Worst_Trade
+    # --- Build row matching Daily_Summary header ---
+    # Headers: Date, Total_Signals, Total_Trades, Trades_Closed, Win_Rate_Pct,
+    #          Total_PnL_GBP, Avg_Confidence, Regime_State, Config_Version, Alerts_Count
     row = [
         date_str,
-        trades_entered,
-        trades_exited,
+        total_signals,
+        total_trades,
+        trades_closed,
         win_rate_pct,
         total_pnl,
-        equity,
-        max_drawdown,
-        sharpe,
-        best_trade,
-        worst_trade,
+        avg_confidence,
+        regime_state,
+        config_version,
+        alerts_count,
     ]
 
-    log.info("Pushing Daily_Summary row: date=%s trades=%d wr=%.1f%% pnl=%.2f",
-             date_str, total_trades, win_rate_pct, total_pnl)
+    log.info(
+        "Pushing Daily_Summary row: date=%s signals=%d trades=%d closed=%d "
+        "wr=%.1f%% pnl=%.2f conf=%.1f regime=%s alerts=%d",
+        date_str, total_signals, total_trades, trades_closed,
+        win_rate_pct, total_pnl, avg_confidence, regime_state, alerts_count,
+    )
     return _push_nightly_rows("Daily_Summary", [row])
 
 
@@ -2282,9 +2294,9 @@ def push_all_tabs(date_str: str = "", report_dir: Path = None) -> Dict[str, bool
 
     results: Dict[str, bool] = {}
 
-    # 1. Daily_Summary (from nightly report)
+    # 1. Daily_Summary (aggregated from WAL events + data files)
     log.info("--- Pushing Daily_Summary ---")
-    results["Daily_Summary"] = push_daily_summary(report_dir=report_dir)
+    results["Daily_Summary"] = push_daily_summary(report_dir=report_dir, date_str=date_str)
 
     # 2. Confidence_History (from WAL)
     log.info("--- Pushing Confidence_History ---")
@@ -2413,7 +2425,7 @@ def list_all_tabs() -> List[Dict[str, str]]:
 
 # Individual tab push dispatch (for --push-tab <name>)
 _TAB_PUSH_DISPATCH: Dict[str, Any] = {
-    "Daily_Summary": lambda d, **kw: push_daily_summary(report_dir=kw.get("report_dir")),
+    "Daily_Summary": lambda d, **kw: push_daily_summary(report_dir=kw.get("report_dir"), date_str=d),
     "Confidence_History": lambda d, **kw: push_confidence_history(d),
     "Regime_State": lambda d, **kw: push_regime_state(d),
     "Gate_Vetoes": lambda d, **kw: push_gate_vetoes(d),
