@@ -51,10 +51,14 @@ pub struct EvalContext {
 }
 
 impl Default for EvalContext {
+    /// SENTINEL DEFAULTS: dangerous placeholder values that force callers to set real values.
+    /// garch_sigma=-1.0 triggers CHECK 25 (GARCH), scanner_score=-1.0 won't trigger CHECK 26,
+    /// kelly_fraction_raw=0.0 won't trigger CHECK 27, last_tick_age_secs=999 triggers CHECK 7 (HALT).
+    /// If you use `..EvalContext::default()` and forget a field, the risk arbiter will REJECT.
     fn default() -> Self {
         Self {
             time_secs: 10 * 3600,
-            last_tick_age_secs: 1,
+            last_tick_age_secs: 999, // SENTINEL: triggers CHECK 7 (>120s = HALT) if not overridden
             bid: 10.0,
             ask: 10.02,
             broker_connected: true,
@@ -62,10 +66,10 @@ impl Default for EvalContext {
             now_ns: 1_000_000_000,
             volatilities: HashMap::new(),
             ticker_halted: false,
-            garch_sigma: 0.30,
+            garch_sigma: -1.0,      // SENTINEL: triggers CHECK 25 (negative > threshold impossible, but safe)
             leverage_factor: 1,
-            scanner_score: 50.0,
-            kelly_fraction_raw: 0.08,
+            scanner_score: -1.0,     // SENTINEL: CHECK 26 requires >0 && <30, so -1 passes (safe: no false positives)
+            kelly_fraction_raw: 0.0, // SENTINEL: CHECK 27 requires >0 && <0.005, so 0.0 passes (safe)
             macro_indicator: MacroIndicator::default(), // Phase 9: neutral macro defaults
             macro_stale_threshold_ns: 300_000_000_000,  // 300 seconds
             ticker_ic: 0.0,

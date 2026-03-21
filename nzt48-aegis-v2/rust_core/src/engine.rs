@@ -132,7 +132,7 @@ impl ApexCandle {
 }
 
 /// Rolling bar history per ticker for ATR calculation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BarHistory {
     pub highs: VecDeque<f64>,
     pub lows: VecDeque<f64>,
@@ -485,8 +485,10 @@ impl<B: BrokerAdapter> Engine<B> {
             // KEPT: max_positions override (from config) — allows broader data collection
             // but daily_trade_limit (CHECK 28) now caps ACTUAL entries per day.
             risk_config.max_positions = config.crucible.max_positions_override;
-            // KEPT: Kelly ramp disable for paper (no dust positions).
-            risk_config.kelly_ramp_trades = 250;
+            // P0-1.4: Kelly ramp now INCREMENTED on each fill (paper + live).
+            // Starts at 0, grows to 250. Half-Kelly applied until 250 trades validated.
+            // Previously hardcoded to 250 which bypassed the ramp entirely.
+            // risk_config.kelly_ramp_trades = 250;  // REMOVED — ramp must be earned
             // KEPT: Lower minimum entry for paper mode (bootstrap Kelly).
             risk_config.minimum_entry_gbp = 100.0;
             // N0b: Spread veto now MATCHES LIVE (0.3%) instead of 2.0%.
@@ -623,6 +625,16 @@ impl<B: BrokerAdapter> Engine<B> {
             self.portfolio.filled_count(),
         );
 
+        // P0-1.4: Restore Kelly ramp counter from WAL.
+        if replay_result.kelly_ramp_count > 0 {
+            self.arbiter.config.kelly_ramp_trades = replay_result.kelly_ramp_count as u32;
+            let ramp_pct = ((replay_result.kelly_ramp_count as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32;
+            eprintln!(
+                "STARTUP: Kelly ramp restored from WAL: {} trades ({}% Kelly)",
+                replay_result.kelly_ramp_count, ramp_pct,
+            );
+        }
+
         // FIX 2026-03-11: Restore risk regime from WAL (prevents Halt bypass on restart).
         if let Some(ref regime_str) = replay_result.restored_regime {
             let restored = match regime_str.as_str() {
@@ -733,6 +745,9 @@ impl<B: BrokerAdapter> Engine<B> {
             );
         }
         let tickers_registered = self.config.tickers.len();
+
+        // P0-1.8: Restore bar_history from disk (overwrites empty histories with saved bars).
+        self.restore_bar_history();
 
         // FIX 5: Mark FX rates as fresh at startup (hardcoded defaults are close enough
         // for paper trading). Prevents stale warning every reconcile cycle.
@@ -1309,6 +1324,24 @@ impl<B: BrokerAdapter> Engine<B> {
             // This is a placeholder; actual snapshot feeding is in Phase 3
         }
 
+        // P0-1.7: Stale tick filter — skip ENTRY signal generation for old ticks.
+        // Still updates bar_history + exit tracking (already processed above).
+        // 500ms threshold (not 200ms like HFT) — IBKR delayed data can be inherently stale.
+        {
+            let tick_age_ms = if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
+                (self.now_ns - tick.recv_timestamp_ns) / 1_000_000
+            } else if tick.timestamp_ns > 0 && self.now_ns > tick.timestamp_ns {
+                (self.now_ns - tick.timestamp_ns) / 1_000_000
+            } else {
+                0 // No timestamp info = assume fresh
+            };
+            if tick_age_ms > 500 {
+                // Don't log every stale tick — just count in telemetry
+                self.telemetry.ticks_stale.inc();
+                return;
+            }
+        }
+
         // Skip signal generation if position exists or in cooldown
         if self.positions.contains_key(&tid) {
             return;
@@ -1455,13 +1488,22 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // Risk arbiter evaluation with real time and spread
         let ticker_score = self.predictive_scorer.score(tid);
+        // P0-1.10: Compute REAL tick age from receive timestamp (not hardcoded sentinel)
+        let tick_age_secs = if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
+            (self.now_ns - tick.recv_timestamp_ns) / 1_000_000_000
+        } else if tick.timestamp_ns > 0 && self.now_ns > tick.timestamp_ns {
+            // Fallback: use tick's own timestamp if recv_timestamp not available
+            (self.now_ns - tick.timestamp_ns) / 1_000_000_000
+        } else {
+            0 // Fresh tick (no timestamp info available = assume live)
+        };
+        // P0-1.6 + P0-1.10: Get leverage factor from contract config for GARCH scaling
+        let leverage_factor = self.config.contracts.get(tid.0 as usize)
+            .map(|c| c.leverage as u32)
+            .unwrap_or(1);
         let ctx = EvalContext {
             time_secs,
-            last_tick_age_secs: if tick.recv_timestamp_ns > 0 && self.now_ns > tick.recv_timestamp_ns {
-                (self.now_ns - tick.recv_timestamp_ns) / 1_000_000_000
-            } else {
-                1 // Fallback: assume fresh if no timestamp
-            },
+            last_tick_age_secs: tick_age_secs,
             bid: tick.bid,
             ask: tick.ask,
             broker_connected: self.broker.is_connected(),
@@ -1469,6 +1511,8 @@ impl<B: BrokerAdapter> Engine<B> {
             now_ns: self.now_ns,
             kelly_fraction_raw: kelly_fraction,
             garch_sigma,
+            leverage_factor,
+            ticker_halted: false, // TODO(2.17): wire post-halt detection when circuit breaker tracking added
             ticker_ic: ticker_score.map_or(0.0, |s| s.ic),
             ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
             ticker_locked: ticker_score.map_or(false, |s| s.locked),
@@ -1567,6 +1611,8 @@ impl<B: BrokerAdapter> Engine<B> {
         }
         // P6-B: Exchange profile — validate tick rounding via exchange registry.
         let ticker_exchange = self.broker.exchange_for_ticker(&tid);
+        // P0-1.6: Debug log exchange MIC resolution for ISA gate diagnostics.
+        eprintln!("ISA_GATE_DEBUG: ticker={} broker_exchange={} → resolving MIC", tid.0, ticker_exchange);
         let exchange_mic = match ticker_exchange {
             "LSEETF" | "LSE" => "XLON",
             "TSEJ" | "TSE" => "XTKS",
@@ -1729,6 +1775,20 @@ impl<B: BrokerAdapter> Engine<B> {
             });
 
             self.simulated_trades.push(sim_trade);
+
+            // P0-1.4: Increment Kelly ramp counter on each fill (paper + live).
+            // This is THE validation counter — positions scale from 10% to 100% Kelly over 250 fills.
+            self.arbiter.config.kelly_ramp_trades += 1;
+            self.write_wal(WalPayload::KellyRampAdvance {
+                count: self.arbiter.config.kelly_ramp_trades as u64,
+            });
+            if self.arbiter.config.kelly_ramp_trades % 25 == 0 || self.arbiter.config.kelly_ramp_trades <= 5 {
+                let ramp_pct = ((self.arbiter.config.kelly_ramp_trades as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32;
+                eprintln!(
+                    "KELLY_RAMP: trade #{} → sizing at {}% Kelly",
+                    self.arbiter.config.kelly_ramp_trades, ramp_pct,
+                );
+            }
 
             // N0a: Increment daily trade count for frequency management.
             self.portfolio.daily_trade_count += 1;
@@ -2872,11 +2932,92 @@ impl<B: BrokerAdapter> Engine<B> {
             pending_fills_waited_secs: 0, // Actual wait happens in main.rs
         });
 
+        // P0-1.8: Persist bar_history to disk for crash recovery.
+        self.save_bar_history();
+
         self.startup_complete = false;
         eprintln!(
             "ENGINE: Shutdown complete. Flattened {} positions.",
             positions_flattened
         );
+    }
+
+    /// P0-1.8: Save bar_history to JSON file for crash recovery.
+    /// Written on shutdown, restored on startup. 1-hour TTL (file timestamp check).
+    pub fn save_bar_history(&self) {
+        let path = std::path::Path::new("/app/data/bar_history.json");
+        // Serialize as HashMap<String, BarHistory> (TickerId → string key for JSON compat)
+        let serializable: std::collections::HashMap<String, &BarHistory> = self
+            .bar_history
+            .iter()
+            .map(|(tid, bh)| (tid.0.to_string(), bh))
+            .collect();
+        match serde_json::to_string(&serializable) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(path, json.as_bytes()) {
+                    eprintln!("WARNING: Failed to save bar_history: {e}");
+                } else {
+                    eprintln!("BAR_HISTORY: Saved {} tickers to {}", serializable.len(), path.display());
+                }
+            }
+            Err(e) => eprintln!("WARNING: Failed to serialize bar_history: {e}"),
+        }
+    }
+
+    /// P0-1.8: Restore bar_history from JSON file (if fresh — <1h old).
+    pub fn restore_bar_history(&mut self) {
+        let path = std::path::Path::new("/app/data/bar_history.json");
+        if !path.exists() {
+            eprintln!("BAR_HISTORY: No saved file found, starting fresh");
+            return;
+        }
+        // Check file age — 1 hour TTL
+        match std::fs::metadata(path) {
+            Ok(meta) => {
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(age) = std::time::SystemTime::now().duration_since(modified) {
+                        if age.as_secs() > 3600 {
+                            eprintln!(
+                                "BAR_HISTORY: File is {}s old (>3600s TTL), ignoring stale data",
+                                age.as_secs()
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("BAR_HISTORY: Cannot stat file: {e}");
+                return;
+            }
+        }
+        // Read and deserialize
+        match std::fs::read_to_string(path) {
+            Ok(json) => {
+                match serde_json::from_str::<std::collections::HashMap<String, BarHistory>>(&json) {
+                    Ok(loaded) => {
+                        let mut restored = 0u32;
+                        for (key, bh) in loaded {
+                            if let Ok(tid_u32) = key.parse::<u32>() {
+                                let tid = TickerId(tid_u32);
+                                let bar_count = bh.closes.len();
+                                self.bar_history.insert(tid, bh);
+                                restored += 1;
+                                if bar_count > 0 {
+                                    eprintln!(
+                                        "BAR_HISTORY: Restored ticker {} with {} bars",
+                                        tid_u32, bar_count
+                                    );
+                                }
+                            }
+                        }
+                        eprintln!("BAR_HISTORY: Restored {} tickers from disk", restored);
+                    }
+                    Err(e) => eprintln!("BAR_HISTORY: Failed to deserialize: {e}"),
+                }
+            }
+            Err(e) => eprintln!("BAR_HISTORY: Failed to read file: {e}"),
+        }
     }
 
     /// P21: Apply subscription rotation for a mode transition.

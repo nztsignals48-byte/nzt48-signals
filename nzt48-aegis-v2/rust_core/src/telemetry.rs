@@ -125,6 +125,8 @@ pub struct Telemetry {
     pub ticks_routed_vanguard: Counter,
     pub ticks_routed_apex: Counter,
     pub ticks_dropped: Counter,
+    /// P0-1.7: Ticks rejected by stale tick filter (>500ms old).
+    pub ticks_stale: Counter,
 
     // ── Signal pipeline ──
     pub signals_generated: Counter,
@@ -165,6 +167,7 @@ impl Telemetry {
             ticks_routed_vanguard: Counter::new(),
             ticks_routed_apex: Counter::new(),
             ticks_dropped: Counter::new(),
+            ticks_stale: Counter::new(),
 
             signals_generated: Counter::new(),
             signals_approved: Counter::new(),

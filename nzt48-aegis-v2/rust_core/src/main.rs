@@ -517,7 +517,17 @@ fn main() {
             continue;
         }
 
-        // Periodic broker reconnection (if not connected at startup)
+        // P0-1.5: Broker reconnection with full state recovery.
+        // Checks both initial connect failure AND mid-session disconnects.
+        let actually_connected = engine.broker.is_connected();
+        if !actually_connected && broker_connected {
+            // Broker was connected but dropped — log critical + start reconnect cycle
+            eprintln!(
+                "CRITICAL: Broker connection LOST (had {} open positions) — entering reconnect cycle",
+                engine.portfolio.filled_count(),
+            );
+            broker_connected = false;
+        }
         if !broker_connected && loop_start - last_reconnect_ns > reconnect_interval_ns {
             last_reconnect_ns = loop_start;
             match engine.broker.connect() {
@@ -528,8 +538,43 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(15));
                     let sub_count = engine.broker.subscribe_all();
                     eprintln!("BROKER RECONNECTED: subscribed to {sub_count} bar streams");
+
+                    // P0-1.5: Post-reconnect position reconciliation.
+                    // If we have open positions, we MUST verify they still exist at the broker.
+                    if engine.portfolio.filled_count() > 0 {
+                        eprintln!("BROKER RECONNECT: Reconciling {} open positions...", engine.portfolio.filled_count());
+                        match engine.broker.request_positions() {
+                            Ok(broker_positions) => {
+                                let recon = rust_core::reconciler::reconcile_positions(
+                                    &engine.portfolio, &broker_positions
+                                );
+                                if !recon.is_clean {
+                                    eprintln!(
+                                        "CRITICAL: Post-reconnect reconciliation found {} mismatches! Escalating to FLATTEN.",
+                                        recon.mismatches.len(),
+                                    );
+                                    for m in &recon.mismatches {
+                                        eprintln!("  MISMATCH: {m:?}");
+                                    }
+                                    engine.arbiter.regime = RiskRegime::Flatten;
+                                } else {
+                                    eprintln!("BROKER RECONNECT: Reconciliation clean ({} positions verified)", recon.matches);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("CRITICAL: Post-reconnect position request failed: {e} — positions may be stale");
+                            }
+                        }
+                    }
                 }
-                Err(_) => {} // Silent — will retry next interval
+                Err(e) => {
+                    // Log every 5th failure to avoid spam
+                    static RECONNECT_FAILS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    let count = RECONNECT_FAILS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if count <= 3 || count % 5 == 0 {
+                        eprintln!("BROKER RECONNECT: attempt #{count} failed: {e}");
+                    }
+                }
             }
         }
 

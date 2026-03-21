@@ -285,6 +285,11 @@ pub enum WalPayload {
         /// Time from rejection to best price (minutes).
         time_to_best_mins: u32,
     },
+    /// P0-1.4: Kelly ramp counter persistence across restarts.
+    /// Written on each simulated/live fill. WAL replay restores highest count.
+    KellyRampAdvance {
+        count: u64,
+    },
 }
 
 // Suppress unused warning — WalEventType is part of the data contract

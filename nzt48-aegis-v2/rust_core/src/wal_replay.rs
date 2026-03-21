@@ -22,6 +22,8 @@ pub struct ReplayResult {
     pub restored_regime: Option<String>,
     /// Trigger that caused the last RiskStateChange (e.g. "tick_watchdog_expired").
     pub restored_regime_trigger: Option<String>,
+    /// P0-1.4: Kelly ramp trade count restored from WAL (highest seen KellyRampAdvance).
+    pub kelly_ramp_count: u64,
 }
 
 /// Verify a single WAL line's CRC32 integrity.
@@ -151,6 +153,7 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
     let mut state_hash: Option<String> = None;
     let mut restored_regime: Option<String> = None;
     let mut restored_regime_trigger: Option<String> = None;
+    let mut kelly_ramp_count: u64 = 0;
 
     // Track pending fills per order for VWAP
     let mut fill_tracker: HashMap<String, (f64, u32)> = HashMap::new(); // (sum_price*qty, total_qty)
@@ -291,6 +294,12 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                 // Uses rung_restore map (position may not exist yet during replay ordering).
                 rung_restore.insert(TickerId(*ticker_id), (*new_rung, *stop_price, *highest_high));
             }
+            // P0-1.4: Restore Kelly ramp counter from WAL (take highest count seen).
+            WalPayload::KellyRampAdvance { count } => {
+                if *count > kelly_ramp_count {
+                    kelly_ramp_count = *count;
+                }
+            }
             WalPayload::OrphanResolved { .. }
             | WalPayload::ExitSignal { .. }
             | WalPayload::SystemReady { .. }
@@ -346,6 +355,14 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
         .filter(|id| !resolved_orders.contains(id))
         .collect();
 
+    if kelly_ramp_count > 0 {
+        eprintln!(
+            "WAL_REPLAY: Restored Kelly ramp count = {} ({}% Kelly)",
+            kelly_ramp_count,
+            ((kelly_ramp_count as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32,
+        );
+    }
+
     ReplayResult {
         events_replayed,
         orphaned_orders: orphaned,
@@ -353,6 +370,7 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
         state_hash,
         restored_regime,
         restored_regime_trigger,
+        kelly_ramp_count,
     }
 }
 

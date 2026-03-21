@@ -133,7 +133,13 @@ impl FxRateTable {
         if from == Currency::GBP {
             return amount;
         }
-        let rate = self.rates_to_gbp.get(&from).copied().unwrap_or(1.0);
+        let rate = self.rates_to_gbp.get(&from).copied().unwrap_or_else(|| {
+            eprintln!(
+                "CRITICAL: FX to_gbp unknown currency {:?}, using 1.0 fallback — portfolio valuation may be WRONG",
+                from
+            );
+            1.0
+        });
         amount * rate
     }
 
@@ -142,7 +148,13 @@ impl FxRateTable {
         if to == Currency::GBP {
             return gbp_amount;
         }
-        let rate = self.rates_to_gbp.get(&to).copied().unwrap_or(1.0);
+        let rate = self.rates_to_gbp.get(&to).copied().unwrap_or_else(|| {
+            eprintln!(
+                "CRITICAL: FX from_gbp unknown currency {:?}, using 1.0 fallback — sizing may be WRONG",
+                to
+            );
+            1.0
+        });
         if rate > 0.0 {
             gbp_amount / rate
         } else {
@@ -195,7 +207,13 @@ impl FxRateTable {
 
     /// Get GBP rate for a currency.
     pub fn rate(&self, currency: Currency) -> f64 {
-        self.rates_to_gbp.get(&currency).copied().unwrap_or(1.0)
+        self.rates_to_gbp.get(&currency).copied().unwrap_or_else(|| {
+            eprintln!(
+                "CRITICAL: FX rate() unknown currency {:?}, using 1.0 fallback",
+                currency
+            );
+            1.0
+        })
     }
 
     /// FX conversion cost for a position size in GBP.

@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use pyo3::prelude::*;
 
@@ -175,21 +177,28 @@ impl Default for TickContext {
     }
 }
 
+/// P0-1.2: Read timeout in seconds for Python bridge responses.
+/// 5 seconds allows for yfinance I/O + GIL contention in Python.
+const BRIDGE_READ_TIMEOUT_SECS: u64 = 5;
+
 /// Subprocess-based Python Bridge.
 pub struct PythonBridge {
     #[allow(dead_code)]
     child: Child,
     stdin: std::process::ChildStdin,
-    reader: BufReader<std::process::ChildStdout>,
-    response_buf: String,
+    /// P0-1.2: Reader thread sends lines via channel for timeout support.
+    line_rx: mpsc::Receiver<String>,
     /// Leverage factor per ticker (from contracts config).
     pub leverage_map: HashMap<TickerId, u32>,
     /// Consecutive error responses from Python (strategy crash detection).
     pub consecutive_errors: u64,
+    /// P0-1.2: Consecutive timeout counter for bridge restart decision.
+    pub consecutive_timeouts: u32,
 }
 
 impl PythonBridge {
     /// Start the Python bridge subprocess.
+    /// P0-1.2: Spawns a dedicated reader thread for timeout-safe reads.
     pub fn start() -> Result<Self, String> {
         let mut child = Command::new("python3")
             .args(["/app/python_brain/bridge.py"])
@@ -202,18 +211,65 @@ impl PythonBridge {
 
         let stdin = child.stdin.take().ok_or("No stdin on child process")?;
         let stdout = child.stdout.take().ok_or("No stdout on child process")?;
-        let reader = BufReader::new(stdout);
+
+        // P0-1.2: Spawn reader thread — reads lines from stdout and sends via channel.
+        // This allows the main thread to use recv_timeout() instead of blocking forever.
+        let (line_tx, line_rx) = mpsc::channel::<String>();
+        std::thread::Builder::new()
+            .name("aegis-bridge-reader".to_string())
+            .spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                let mut buf = String::with_capacity(4096);
+                loop {
+                    buf.clear();
+                    match reader.read_line(&mut buf) {
+                        Ok(0) => break, // EOF — Python process exited
+                        Ok(_) => {
+                            if line_tx.send(buf.clone()).is_err() {
+                                break; // Receiver dropped — PythonBridge was dropped
+                            }
+                        }
+                        Err(_) => break, // Read error — pipe broken
+                    }
+                }
+            })
+            .map_err(|e| format!("Failed to spawn bridge reader thread: {e}"))?;
 
         eprintln!("Python Bridge: subprocess started (pid={})", child.id());
 
         Ok(Self {
             child,
             stdin,
-            reader,
-            response_buf: String::with_capacity(4096),
+            line_rx,
             leverage_map: HashMap::new(),
             consecutive_errors: 0,
+            consecutive_timeouts: 0,
         })
+    }
+
+    /// P0-1.2: Read a line from Python bridge with timeout.
+    /// Returns None on timeout (after BRIDGE_READ_TIMEOUT_SECS).
+    fn read_line_timeout(&mut self) -> Option<String> {
+        match self.line_rx.recv_timeout(Duration::from_secs(BRIDGE_READ_TIMEOUT_SECS)) {
+            Ok(line) => {
+                self.consecutive_timeouts = 0;
+                Some(line)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.consecutive_timeouts += 1;
+                if self.consecutive_timeouts == 1 || self.consecutive_timeouts % 10 == 0 {
+                    eprintln!(
+                        "CRITICAL: Python Bridge read TIMEOUT ({}s, #{} consecutive) — stop-loss processing may be delayed!",
+                        BRIDGE_READ_TIMEOUT_SECS, self.consecutive_timeouts,
+                    );
+                }
+                None
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                eprintln!("CRITICAL: Python Bridge reader thread died — bridge subprocess likely crashed");
+                None
+            }
+        }
     }
 
     /// Send a tick to the Python bridge and get a signal back.
@@ -282,15 +338,14 @@ impl PythonBridge {
             return None;
         }
 
-        // Read response
-        self.response_buf.clear();
-        if self.reader.read_line(&mut self.response_buf).is_err() {
-            eprintln!("Python Bridge: stdout read failed");
-            return None;
-        }
+        // P0-1.2: Read response with timeout (prevents engine freeze if Python hangs)
+        let response_line = match self.read_line_timeout() {
+            Some(line) => line,
+            None => return None, // Timeout or disconnected — no signal
+        };
 
         // Parse response
-        let resp: serde_json::Value = serde_json::from_str(self.response_buf.trim()).ok()?;
+        let resp: serde_json::Value = serde_json::from_str(response_line.trim()).ok()?;
 
         let resp_type = resp.get("type")?.as_str()?;
 
@@ -366,15 +421,14 @@ impl PythonBridge {
             return None;
         }
 
-        // Read response
-        self.response_buf.clear();
-        if self.reader.read_line(&mut self.response_buf).is_err() {
-            eprintln!("Python Bridge: apex snapshot stdout read failed");
-            return None;
-        }
+        // P0-1.2: Read response with timeout (prevents engine freeze if Python hangs)
+        let response_line = match self.read_line_timeout() {
+            Some(line) => line,
+            None => return None, // Timeout or disconnected
+        };
 
         // Parse response
-        let resp: serde_json::Value = serde_json::from_str(self.response_buf.trim()).ok()?;
+        let resp: serde_json::Value = serde_json::from_str(response_line.trim()).ok()?;
 
         let resp_type = resp.get("type")?.as_str()?;
 
