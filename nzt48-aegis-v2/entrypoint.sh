@@ -31,7 +31,7 @@ fi
 
 # RT4-P2: Bridge SPOF watchdog (heartbeat monitor + auto-restart)
 echo "Starting bridge watchdog..."
-python3 -m python_brain.ouroboros.bridge_watchdog &
+python3 -m python_brain.ouroboros.bridge_watchdog --monitor &
 
 # N10a: Clean up stale KILL/PAUSE files from previous runs
 rm -f /app/data/KILL /app/data/PAUSE
