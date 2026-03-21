@@ -366,3 +366,12 @@ max_ranked_tickers = 100
 "MU2.L" = 45
 "GPT3.L" = 40
 "SP5L.L" = 35
+
+# ============================================================================
+# Leverage Boost — applied as additive bonus during LSE hours only
+# ============================================================================
+[leverage_boost]
+# Base bonus points for any leveraged/inverse ETP during LSE hours (08:00-16:30 GMT)
+base = 30.0
+# Additional bonus per leverage multiple (3x → +15, 5x → +25)
+per_multiplier = 5.0

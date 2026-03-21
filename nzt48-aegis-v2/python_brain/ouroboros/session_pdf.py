@@ -271,7 +271,7 @@ def generate_session_pdf(session: str = "all") -> Optional[Path]:
             pdf.cell(col_widths[0], 5, t.get("symbol", ""), fill=True, border=1)
             name = t.get("name", "")[:25]
             pdf.cell(col_widths[1], 5, name, fill=True, border=1)
-            pdf.cell(col_widths[2], 5, f"{t.get('leverage_factor', 1)}x", fill=True, border=1)
+            pdf.cell(col_widths[2], 5, f"{t.get('leverage_factor') or (3 if t.get('leveraged') else 1)}x", fill=True, border=1)
             pdf.cell(col_widths[3], 5, t.get("exchange", ""), fill=True, border=1)
             price = t.get("last_price", 0)
             pdf.cell(col_widths[4], 5, f"{price:.2f}" if price else "N/A", fill=True, border=1)
@@ -312,7 +312,7 @@ def generate_session_pdf(session: str = "all") -> Optional[Path]:
             pdf.cell(col_widths[1], 4.5, t.get("symbol", ""), fill=True, border=1)
             name = t.get("name", "")[:22]
             pdf.cell(col_widths[2], 4.5, name, fill=True, border=1)
-            pdf.cell(col_widths[3], 4.5, f"{t.get('leverage_factor', 1)}x", fill=True, border=1)
+            pdf.cell(col_widths[3], 4.5, f"{t.get('leverage_factor') or (3 if t.get('leveraged') else 1)}x", fill=True, border=1)
             pdf.cell(col_widths[4], 4.5, t.get("exchange", ""), fill=True, border=1)
             price = t.get("last_price", 0)
             pdf.cell(col_widths[5], 4.5, f"{price:.2f}" if price else "N/A", fill=True, border=1)

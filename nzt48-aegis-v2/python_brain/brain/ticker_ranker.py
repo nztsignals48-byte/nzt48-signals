@@ -18,12 +18,16 @@ No threading. No I/O in scoring functions (H07).
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+log = logging.getLogger("ticker_ranker")
 
 # ---------------------------------------------------------------------------
 # Constants (H109: no magic numbers)
@@ -64,11 +68,9 @@ LIQUIDITY_LOW_ADV = 10_000      # Low ADV → score 0
 MAX_RANKED_TICKERS = 100
 SCHEMA_VERSION = 1
 
-# ISA tickers — always known as LSE
-ISA_TICKERS = frozenset([
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-])
+# Leverage boost config — additive bonus for leveraged/inverse ETPs during LSE hours
+LEVERAGE_BOOST_BASE = 30.0      # Base bonus for leveraged/inverse during LSE hours
+LEVERAGE_BOOST_PER_MULT = 5.0   # Additional bonus per leverage multiple
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +122,79 @@ class RankingResult:
     session_window: str
     regime_state: str
     ticker_count: int
+
+
+# ---------------------------------------------------------------------------
+# Portfolio performance loader (defensive — never crashes the ranker)
+# ---------------------------------------------------------------------------
+
+_PROJECT_ROOT = Path(os.environ.get("AEGIS_ROOT", Path(__file__).resolve().parents[2]))
+_DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
+_PORTFOLIO_PERF_FILE = _DATA_DIR / "persistent_memory.json"
+
+
+def load_portfolio_performance(
+    portfolio_path: Optional[Path] = None,
+) -> Dict[str, "TickerPerformance"]:
+    """Load per-ticker performance data from persistent memory JSON.
+
+    Returns a dict of ticker symbol -> TickerPerformance suitable for passing
+    as the ouroboros_perf argument to rank_tickers().
+
+    The ranker MUST produce output even without historical performance data —
+    the other 5 scoring factors (spread, RVOL, regime, session, liquidity)
+    still work. This function therefore NEVER raises; on any failure it logs
+    a warning and returns an empty dict.
+
+    Args:
+        portfolio_path: Override path to persistent_memory.json.
+            Defaults to $AEGIS_DATA_DIR/persistent_memory.json.
+
+    Returns:
+        Dict mapping ticker symbols to TickerPerformance objects.
+        Empty dict on any load failure.
+    """
+    path = portfolio_path or _PORTFOLIO_PERF_FILE
+    if not path.exists():
+        log.info("Portfolio perf file not found: %s — proceeding with zero perf data", path)
+        return {}
+
+    try:
+        with open(path) as f:
+            portfolio_data = json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError, IOError) as e:
+        log.error("Failed to load portfolio data: %s — continuing with zero perf data", e)
+        return {}
+
+    # Extract per-ticker stats from persistent memory format
+    ticker_stats = portfolio_data.get("ticker_stats", {})
+    if not ticker_stats:
+        log.info("No ticker_stats in portfolio data — proceeding with zero perf data")
+        return {}
+
+    result: Dict[str, TickerPerformance] = {}
+    for symbol, stats in ticker_stats.items():
+        try:
+            total_trades = int(stats.get("total_trades", 0))
+            win_rate = float(stats.get("win_rate", 0.5))
+            total_pnl = float(stats.get("total_pnl", 0.0))
+            avg_win = float(stats.get("avg_win", 0.0))
+            avg_loss = float(stats.get("avg_loss", 0.0))
+            edge_ratio = (avg_win / abs(avg_loss)) if avg_loss != 0 else 1.0
+
+            result[symbol] = TickerPerformance(
+                ticker=symbol,
+                win_rate=win_rate,
+                edge_ratio=edge_ratio,
+                trade_count=total_trades,
+                total_pnl=total_pnl,
+            )
+        except (ValueError, TypeError, ZeroDivisionError) as e:
+            log.warning("Skipping malformed ticker stats for %s: %s", symbol, e)
+            continue
+
+    log.info("Loaded portfolio performance for %d tickers from %s", len(result), path)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +404,37 @@ def score_liquidity(avg_daily_volume: float) -> float:
     return 100.0 * (log_vol - log_low) / (log_high - log_low)
 
 
+def score_leverage_boost(ticker_data: TickerMarketData, lse_is_open: bool) -> float:
+    """Post-score additive bonus for leveraged/inverse ETPs during LSE hours.
+
+    When LSE is open, leveraged/inverse ETPs get a score boost proportional
+    to their leverage multiple. This ensures they naturally float to the top
+    of the ranking without hardcoding any specific tickers.
+
+    Args:
+        ticker_data: Market data for the ticker (must have exchange field).
+        lse_is_open: Whether the LSE is currently open.
+
+    Returns:
+        float >= 0.0 (additive bonus to composite score).
+    """
+    if not lse_is_open:
+        return 0.0
+    # Only boost LSE-listed tickers
+    if ticker_data.exchange not in ("LSE", "LSEETF"):
+        return 0.0
+    # Detect leveraged/inverse from ticker suffix pattern
+    # LSE leveraged ETPs: names like QQQ3.L, 3LUS.L, NVD3.L, QQQS.L, 3USS.L etc.
+    ticker = ticker_data.ticker
+    is_leveraged = ticker.endswith(".L") and any(c.isdigit() for c in ticker.replace(".L", ""))
+    if not is_leveraged:
+        return 0.0
+    # Infer leverage factor from digits in ticker (e.g. QQQ3 → 3, QQQ5 → 5, MU2 → 2)
+    digits = [int(c) for c in ticker.replace(".L", "") if c.isdigit()]
+    lev = max(digits) if digits else 3
+    return LEVERAGE_BOOST_BASE + lev * LEVERAGE_BOOST_PER_MULT
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -437,6 +543,7 @@ def rank_tickers(
     ouroboros_perf: Dict[str, TickerPerformance],
     spread_cache: Dict[str, float],
     preferred_tickers: Optional[List[str]] = None,
+    lse_is_open: bool = False,
 ) -> RankingResult:
     """Rank all tracked tickers by composite score for the current session.
 
@@ -449,6 +556,8 @@ def rank_tickers(
         spread_cache: Cached spread in basis points per ticker symbol.
         preferred_tickers: Override preferred tickers for this session.
             If None, derived from session_window.
+        lse_is_open: Whether the LSE is currently open. When True, leveraged/
+            inverse ETPs on LSE get an additive score boost.
 
     Returns:
         RankingResult with sorted list of up to MAX_RANKED_TICKERS tickers.
@@ -503,6 +612,9 @@ def rank_tickers(
             + W_SESSION * s_session
             + W_LIQUIDITY * s_liquidity
         )
+
+        # Post-score leverage boost for LSE leveraged/inverse ETPs
+        total += score_leverage_boost(md, lse_is_open)
 
         scores.append(TickerScore(
             ticker=md.ticker,
@@ -677,6 +789,7 @@ def run_ranking_cycle(
     config_dir: Path,
     report_dir: Path,
     preferred_tickers: Optional[List[str]] = None,
+    lse_is_open: bool = False,
 ) -> RankingResult:
     """Run the full ranking cycle: score, write TOML, write report.
 
@@ -691,6 +804,7 @@ def run_ranking_cycle(
         config_dir: Path to config/ directory.
         report_dir: Path to reports/ticker_rankings/ directory.
         preferred_tickers: Override preferred tickers for this session.
+        lse_is_open: Whether the LSE is currently open.
 
     Returns:
         RankingResult with the ranked list.
@@ -702,6 +816,7 @@ def run_ranking_cycle(
         ouroboros_perf=ouroboros_perf,
         spread_cache=spread_cache,
         preferred_tickers=preferred_tickers,
+        lse_is_open=lse_is_open,
     )
 
     strategies_path = config_dir / "strategies.toml"

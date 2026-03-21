@@ -79,6 +79,8 @@ impl Default for ChandelierStrategy {
 
 impl ExitStrategy for ChandelierStrategy {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
+        // ATR floor: minimum 0.5% of entry price to prevent zombie positions when ATR=0 on cold start
+        let atr = atr.max(pos.avg_entry * 0.005);
         let rung = self.compute_rung(pos, high, atr);
         match rung {
             // Rung 0: not yet at entry rung — keep initial stop
@@ -361,6 +363,18 @@ impl ExitEngine {
         if prev_price <= 0.0 {
             return false;
         }
+        // Guard: invalid bid/ask → cannot verify spike, assume not a spike
+        if bid <= 0.0 {
+            return false;
+        }
+        if ask <= 0.0 {
+            return false;
+        }
+        // Guard: crossed book (ask <= bid) → stale/corrupt quote data
+        if ask <= bid {
+            eprintln!("WARN: crossed book bid={} ask={}", bid, ask);
+            return false;
+        }
         let drop_pct = (prev_price - current_price) / prev_price;
         if drop_pct < self.config.price_spike_pct {
             return false;
@@ -563,6 +577,8 @@ impl Default for InfiniteChandelier {
 
 impl ExitStrategy for InfiniteChandelier {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
+        // ATR floor: minimum 0.5% of entry price to prevent zombie positions when ATR=0 on cold start
+        let atr = atr.max(pos.avg_entry * 0.005);
         let rung = self.compute_rung(pos, high, atr);
         match rung {
             // Rungs 0-4: delegate to base ChandelierStrategy (same new logic)

@@ -72,6 +72,17 @@ impl MarketTick {
     }
 }
 
+impl MarketTick {
+    /// Validate tick data is sane (not NaN/Inf, non-negative, bid < ask).
+    #[inline(always)]
+    pub fn is_valid(&self) -> bool {
+        let f = |v: f64| v.is_finite() && v >= 0.0;
+        f(self.bid) && f(self.ask) && f(self.last) && f(self.volume as f64)
+            && (self.bid == 0.0 || self.ask == 0.0 || self.ask >= self.bid)
+            && self.last >= 0.0
+    }
+}
+
 /// Validate that an f64 is not NaN or Infinite (H09).
 /// Returns Err with a descriptive message if invalid.
 pub fn validate_f64(value: f64, field_name: &str) -> Result<f64, String> {

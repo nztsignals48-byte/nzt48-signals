@@ -84,6 +84,14 @@ class VWAPCalculator:
         self._vwap_history: List[float] = []  # For slope calculation
         self._volume_history: List[float] = []  # For volume profile
 
+    def get_history(self) -> List[float]:
+        """Return a copy of the VWAP history list (public accessor).
+
+        Used by bridge.py for VWAP distance calculations. Returns a copy
+        to prevent external mutation of internal state.
+        """
+        return list(self._vwap_history)
+
     def reset(self) -> None:
         """Reset all state for a new trading session. Call at session open."""
         self._cum_tp_vol = 0.0

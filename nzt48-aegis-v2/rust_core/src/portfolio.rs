@@ -92,6 +92,19 @@ impl PortfolioState {
         }
     }
 
+    /// Check if adding a position would breach the ISA £20K annual limit.
+    /// Returns Ok(()) if within limit, Err(msg) if would breach.
+    pub fn check_isa_limit(&self, proposed_cost: f64, isa_limit: f64) -> Result<(), String> {
+        if isa_limit > 0.0 && self.isa_year_invested + proposed_cost > isa_limit {
+            Err(format!(
+                "ISA limit breach: invested={:.0} + proposed={:.0} > limit={:.0}",
+                self.isa_year_invested, proposed_cost, isa_limit,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn add_position(&mut self, pos: PositionState) {
         let cost = pos.avg_entry * pos.qty as f64;
         self.cash -= cost;

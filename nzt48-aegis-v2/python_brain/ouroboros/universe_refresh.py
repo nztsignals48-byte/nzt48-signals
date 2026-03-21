@@ -447,7 +447,7 @@ def update_initial_universe_toml(new_etps: List[Dict[str, Any]]) -> None:
 
     for etp in new_etps:
         sym = etp["symbol"]
-        leverage = etp.get("leverage_factor", 3)
+        leverage = etp.get("leverage_factor") or (3 if etp.get("leveraged") else 1)
         name = etp.get("name", "")
         sector = etp.get("sector", "Unknown")
         inverse = etp.get("inverse", False)

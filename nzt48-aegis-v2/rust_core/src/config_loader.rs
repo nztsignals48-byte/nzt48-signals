@@ -542,7 +542,23 @@ impl EngineConfig {
         let content = std::fs::read_to_string(path)?;
         let raw: RawContracts =
             toml::from_str(&content).map_err(|e| ConfigError::Parse(format!("{path:?}: {e}")))?;
-        Ok(raw.contracts)
+        let mut contracts = raw.contracts;
+        for contract in &mut contracts {
+            if contract.leverage < 1 || contract.leverage > 10 {
+                eprintln!(
+                    "WARN: contract {} has invalid leverage {}, clamping to [1,10]",
+                    contract.symbol, contract.leverage
+                );
+                contract.leverage = contract.leverage.max(1).min(10);
+            }
+            if contract.leverage > 5 {
+                eprintln!(
+                    "INFO: contract {} has high leverage {}",
+                    contract.symbol, contract.leverage
+                );
+            }
+        }
+        Ok(contracts)
     }
 
     /// Load contracts from a standalone path (for hot-reload via SIGHUP).

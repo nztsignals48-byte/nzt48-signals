@@ -707,6 +707,19 @@ impl IbkrBroker {
         self.l1_subs.len() as u32
     }
 
+    /// Return the current data drought severity level.
+    /// 0 = no drought, 1 = severe (recommend reconnect), 2 = critical (recommend HALT).
+    /// Caller (main loop) should check this and escalate risk regime accordingly.
+    pub fn data_drought_level(&self) -> u8 {
+        if self.zero_data_polls >= 3500 {
+            2 // Critical — halt trading
+        } else if self.zero_data_polls >= 1500 {
+            1 // Severe — recommend reconnect
+        } else {
+            0 // Normal
+        }
+    }
+
     /// Return all registered TickerIds from the contract map.
     pub fn contract_map_keys(&self) -> Vec<TickerId> {
         self.contract_map.keys().copied().collect()
@@ -952,6 +965,30 @@ impl IbkrBroker {
                          bar_subs={} mkt_subs={} l1_subs={}",
                         self.sub_errors_detected,
                         self.bar_subs.len(), self.mktdata_subs.len(), self.l1_subs.len()
+                    );
+                }
+            }
+
+            // Escalation thresholds: increasingly severe responses to prolonged data drought.
+            // ~3500 polls ≈ 6-7 minutes of zero data at 100ms loop cadence.
+            // ~1500 polls ≈ 2.5-3 minutes of zero data.
+            if self.zero_data_polls >= 3500 {
+                // Only log once at threshold crossing (not every poll)
+                if self.zero_data_polls == 3500 || self.zero_data_polls % 3500 == 0 {
+                    eprintln!(
+                        "DATA DROUGHT CRITICAL: {} empty polls — escalating to HALT. \
+                         No market data for ~{:.0} minutes. Engine should halt trading.",
+                        self.zero_data_polls,
+                        self.zero_data_polls as f64 * 0.1 / 60.0
+                    );
+                }
+            } else if self.zero_data_polls >= 1500 {
+                if self.zero_data_polls == 1500 || self.zero_data_polls % 1500 == 0 {
+                    eprintln!(
+                        "DATA DROUGHT SEVERE: {} empty polls — recommending reconnect. \
+                         No market data for ~{:.0} minutes.",
+                        self.zero_data_polls,
+                        self.zero_data_polls as f64 * 0.1 / 60.0
                     );
                 }
             }

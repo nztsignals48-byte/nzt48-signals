@@ -578,6 +578,17 @@ def orchestrate(
     if aggression == 0.0:
         return []
 
+    # Auction period gate: block entries during LSE open/close auctions.
+    # Open auction: 07:50-08:00 London (28200-28800 secs from midnight).
+    # Close auction: 16:30-16:35 London (59400-59700 secs from midnight).
+    # These windows have no continuous order book — prices are indicative only.
+    t = ctx.london_time_secs
+    if (28200 <= t < 28800) or (59400 <= t < 59700):
+        if log_fn:
+            log_fn("DEBUG", f"Orchestrator: AUCTION GATE — blocking entries "
+                   f"(london_secs={t}, session={session.value})")
+        return []
+
     # 2. Filter strategies eligible for this session + regime
     eligible_strategies = [
         s for s in strategies

@@ -6,6 +6,7 @@
 //! This avoids the PyO3 extension-module vs auto-initialize conflict.
 
 use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -196,17 +197,26 @@ pub struct PythonBridge {
     pub consecutive_timeouts: u32,
     /// P2-3.5: Consecutive ticks where Python returned 0 signals (crash gap detection).
     pub consecutive_empty: u32,
+    /// Set on stdin write/flush failure — caller should respawn the bridge.
+    pub needs_respawn: bool,
 }
 
 impl PythonBridge {
     /// Start the Python bridge subprocess.
     /// P0-1.2: Spawns a dedicated reader thread for timeout-safe reads.
     pub fn start() -> Result<Self, String> {
+        // Pipe stderr to a log file instead of inheriting (avoids lost diagnostics).
+        let stderr_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/app/data/bridge_stderr.log")
+            .map_err(|e| format!("Failed to open bridge stderr log: {e}"))?;
+
         let mut child = Command::new("python3")
             .args(["/app/python_brain/bridge.py"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::from(stderr_file))
             .current_dir("/app")
             .spawn()
             .map_err(|e| format!("Failed to start Python bridge: {e}"))?;
@@ -247,6 +257,7 @@ impl PythonBridge {
             consecutive_errors: 0,
             consecutive_timeouts: 0,
             consecutive_empty: 0,
+            needs_respawn: false,
         })
     }
 
@@ -331,13 +342,15 @@ impl PythonBridge {
             ctx.equity,
         );
 
-        // Send
+        // Send — broken pipe means Python process is dead, flag for respawn.
         if writeln!(self.stdin, "{msg}").is_err() {
-            eprintln!("Python Bridge: stdin write failed");
+            eprintln!("CRITICAL: Python Bridge stdin write failed — marking for respawn");
+            self.needs_respawn = true;
             return None;
         }
         if self.stdin.flush().is_err() {
-            eprintln!("Python Bridge: stdin flush failed");
+            eprintln!("CRITICAL: Python Bridge stdin flush failed (broken pipe) — marking for respawn");
+            self.needs_respawn = true;
             return None;
         }
 
@@ -423,13 +436,15 @@ impl PythonBridge {
             ticker_id.0, snapshots_json
         );
 
-        // Send
+        // Send — broken pipe means Python process is dead, flag for respawn.
         if writeln!(self.stdin, "{msg}").is_err() {
-            eprintln!("Python Bridge: apex snapshot stdin write failed");
+            eprintln!("CRITICAL: Python Bridge apex snapshot stdin write failed — marking for respawn");
+            self.needs_respawn = true;
             return None;
         }
         if self.stdin.flush().is_err() {
-            eprintln!("Python Bridge: apex snapshot stdin flush failed");
+            eprintln!("CRITICAL: Python Bridge apex snapshot stdin flush failed (broken pipe) — marking for respawn");
+            self.needs_respawn = true;
             return None;
         }
 

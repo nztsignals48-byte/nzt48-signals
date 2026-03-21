@@ -25,6 +25,7 @@ Quarantine rules (same as nightly_v6):
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import logging
@@ -454,27 +455,98 @@ def extract_spread_data(events: List[Dict[str, Any]]) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Regime label lookup from RiskStateChange events (binary search)
+# ---------------------------------------------------------------------------
+def _collect_regime_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extract and sort RiskStateChange events from WAL by timestamp.
+
+    Returns a list of dicts with keys 'ts' (nanosecond timestamp) and 'to'
+    (regime label), sorted by timestamp ascending.
+    """
+    regime_events: List[Dict[str, Any]] = []
+    for event in events:
+        payload = event.get("payload", {})
+        if "RiskStateChange" in payload:
+            rsc = payload["RiskStateChange"]
+            ts = event.get("ts", rsc.get("ts", 0))
+            to_regime = rsc.get("to", rsc.get("new_state", "normal"))
+            regime_events.append({"ts": ts, "to": to_regime})
+    regime_events.sort(key=lambda e: e["ts"])
+    return regime_events
+
+
+def _find_closest_regime(regime_events: List[Dict[str, Any]], timestamp_ns: int) -> str:
+    """Binary search for the active regime at a given nanosecond timestamp.
+
+    Finds the most recent RiskStateChange that occurred at or before the given
+    timestamp. If the timestamp predates all regime events, uses the first
+    known regime. Returns "normal" if no regime events exist.
+    """
+    if not regime_events:
+        return "normal"
+    timestamps = [e["ts"] for e in regime_events]
+    idx = bisect.bisect_right(timestamps, timestamp_ns) - 1
+    if idx < 0:
+        return regime_events[0].get("to", "normal")
+    return regime_events[idx].get("to", "normal")
+
+
+# ---------------------------------------------------------------------------
 # Regime scale computation from historical metrics
 # ---------------------------------------------------------------------------
 def compute_regime_scales(events: List[Dict[str, Any]]) -> Dict[str, float]:
     """Compute regime-specific performance scales from WAL PositionClosed events.
 
     Groups trades by regime_at_entry, computes win rate per regime, and scales
-    relative to the best-performing regime.
+    relative to the best-performing regime. When PositionClosed events lack a
+    regime label, performs a binary search on RiskStateChange events to find
+    the closest-in-time regime.
     """
+    # Pre-load all RiskStateChange events sorted by timestamp for binary search
+    regime_events = _collect_regime_events(events)
+    if regime_events:
+        log.info("Loaded %d RiskStateChange events for regime lookup (range: %s -> %s)",
+                 len(regime_events),
+                 regime_events[0].get("to", "?"),
+                 regime_events[-1].get("to", "?"))
+
     regime_trades: Dict[str, List[float]] = {}
     for event in events:
         payload = event.get("payload", {})
         if "PositionClosed" in payload:
             pc = payload["PositionClosed"]
-            # PositionClosed in WAL doesn't carry regime directly,
-            # so we use defaults. The nightly_v6 TradeRecord has it
-            # from the WAL enrichment step.
             pnl = pc.get("final_pnl", 0.0)
-            # Without regime label in PositionClosed, group all together
-            regime_trades.setdefault("all", []).append(pnl)
 
-    # Since WAL PositionClosed doesn't carry regime, return defaults
+            # Try to get regime from the PositionClosed event itself
+            regime = pc.get("regime_at_entry", pc.get("regime", ""))
+
+            # If no regime label, binary search RiskStateChange events
+            if not regime:
+                entry_ts = pc.get("entry_ts", pc.get("opened_at", event.get("ts", 0)))
+                regime = _find_closest_regime(regime_events, entry_ts)
+
+            regime_trades.setdefault(regime, []).append(pnl)
+
+    # If we have regime-grouped trades, compute win-rate-based scales
+    if regime_trades and any(len(v) >= 3 for v in regime_trades.values()):
+        regime_win_rates: Dict[str, float] = {}
+        for regime_name, pnls in regime_trades.items():
+            if len(pnls) >= 3:  # Need at least 3 trades for meaningful WR
+                wins = sum(1 for p in pnls if p > 0)
+                regime_win_rates[regime_name] = wins / len(pnls)
+
+        if regime_win_rates:
+            best_wr = max(regime_win_rates.values())
+            scales = dict(DEFAULT_REGIME_SCALES)  # Start with defaults
+            for regime_name, wr in regime_win_rates.items():
+                # Scale relative to best regime: best = 1.0, others proportional
+                scale = wr / best_wr if best_wr > 0 else 0.75
+                scales[regime_name] = round(max(0.30, min(1.0, scale)), 2)
+            log.info("Computed regime scales from %d regimes: %s",
+                     len(regime_win_rates), scales)
+            return scales
+
+    # Fallback: not enough trades per regime — return defaults
     # The nightly_v6 recommendations may override these
     return dict(DEFAULT_REGIME_SCALES)
 

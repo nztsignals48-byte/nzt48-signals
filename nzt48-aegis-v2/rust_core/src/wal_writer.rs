@@ -122,6 +122,14 @@ impl WalWriter {
         Ok(())
     }
 
+    /// Force fsync on the WAL file. Used during graceful shutdown to guarantee
+    /// all buffered data reaches stable storage before process exit.
+    pub fn sync(&mut self) -> Result<(), WalError> {
+        self.file.flush()?;
+        self.file.sync_all()?;
+        Ok(())
+    }
+
     /// Write an unparseable OrderIntent to dead letter queue (H81).
     pub fn dead_letter(&self, data: &str) -> Result<(), WalError> {
         let file_path = Self::today_dead_letter_path(&self.dead_letter_dir);

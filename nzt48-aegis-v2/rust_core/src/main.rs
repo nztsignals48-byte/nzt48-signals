@@ -1088,11 +1088,24 @@ fn main() {
         }
     }
 
-    // Graceful shutdown
+    // Graceful shutdown — WAL flush guarantee
+    eprintln!("SHUTDOWN: Flushing WAL before exit...");
     if let Some(ref mut bridge) = python_bridge {
         bridge.shutdown();
     }
-    engine.shutdown();
+    engine.shutdown(); // SC-01: cancels orders, flattens positions, writes SystemShutdown WAL event (fsync'd)
+
+    // Explicit WAL sync: engine.shutdown() writes SystemShutdown via write_wal() which
+    // calls WalWriter::append() → flush() + sync_all(). But as a belt-and-suspenders
+    // guarantee, force one final fsync on the WAL file to ensure no buffered data is lost.
+    if let Some(ref mut wal) = engine.wal {
+        if let Err(e) = wal.sync() {
+            eprintln!("SHUTDOWN: WAL final sync failed: {e} (data may be in OS buffer)");
+        } else {
+            eprintln!("SHUTDOWN: WAL final sync complete — all events persisted to disk");
+        }
+    }
+
     eprintln!(
         "Engine stopped. {} ticks, {} signals, {} filtered. Goodbye.",
         total_ticks, signals_generated, ticks_filtered,

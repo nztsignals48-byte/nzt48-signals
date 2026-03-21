@@ -526,7 +526,7 @@ def score_ticker_with_price(
     if momentum < MAX_NEGATIVE_MOMENTUM:
         return None
 
-    leverage_factor = ticker_info.get("leverage_factor", 1)
+    leverage_factor = ticker_info.get("leverage_factor") or (3 if ticker_info.get("leveraged") else 1)
     spread_proxy = volatility / max(last_price, 0.01) if last_price > 0 else 999
 
     return {
@@ -557,7 +557,7 @@ def score_ticker_static(ticker_info: Dict[str, Any]) -> Dict[str, Any]:
     a static composite score. This allows ranking 30K+ tickers without
     any network calls.
     """
-    leverage_factor = ticker_info.get("leverage_factor", 1)
+    leverage_factor = ticker_info.get("leverage_factor") or (3 if ticker_info.get("leveraged") else 1)
     market_cap = ticker_info.get("market_cap_usd", 0)
     avg_volume = ticker_info.get("avg_daily_volume", 0)
     exchange = ticker_info.get("exchange", "Unknown")
@@ -760,7 +760,7 @@ def rank_and_score(scored_tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         rank_normalize(price_scored, "spread_proxy", higher_is_better=False)
 
         for t in price_scored:
-            leverage = t.get("leverage_factor", 1)
+            leverage = t.get("leverage_factor") or (3 if t.get("leveraged") else 1)
             if leverage >= 5:
                 t["leverage_norm"] = 1.0
             elif leverage >= 3:
@@ -881,73 +881,54 @@ def classify_into_tiers(all_tickers: List[Dict[str, Any]]) -> Tuple[
 
 def generate_watchlist(
     scored: List[Dict[str, Any]],
-    tier1_n: int = TIER1_VANGUARD,
-    tier2_n: int = TIER2_WARM,
-    tier3_n: int = TIER3_APEX,
+    tier1_n: int = 100,  # Flat 100 tickers — no tier hierarchy
     lse_is_open: bool = True,
 ) -> Dict[str, Any]:
-    """Generate the active watchlist from scored tickers.
+    """Generate active watchlist from scored tickers.
 
-    When LSE is OPEN: Core 12 ISA-eligible ETPs are placed at the front of
-    Vanguard tier regardless of composite score.
-    When LSE is CLOSED: Core 12 are NOT force-included — all slots go to
-    exchanges that are actually trading.
+    Pure ranking: top 100 by composite score. No forced tickers.
+    During LSE hours, leveraged/inverse ETPs are already boosted by
+    ticker_ranker's score_leverage_boost(), so they naturally float
+    to the top without any hardcoded set.
     """
-    CORE_12 = {
-        "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-        "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
-    }
+    # Hysteresis: load previous watchlist, give +5 bonus to tickers already in it
+    # This prevents excessive churn between consecutive runs
+    prev_tickers: set = set()
+    try:
+        if WATCHLIST_FILE.exists():
+            with open(WATCHLIST_FILE) as f:
+                prev = json.load(f)
+            prev_tickers = set(prev.get("tickers", []))
+    except Exception:
+        pass
 
-    if lse_is_open:
-        # LSE OPEN: Core 12 at front of vanguard
-        core_tickers = [t for t in scored if t.get("symbol") in CORE_12]
-        non_core = [t for t in scored if t.get("symbol") not in CORE_12]
+    for t in scored:
+        if t.get("symbol") in prev_tickers:
+            t["composite_score"] = t.get("composite_score", 0) + 5.0
 
-        # Add any core tickers not in scored list (shouldn't happen, but safety net)
-        found_core_syms = {t["symbol"] for t in core_tickers}
-        for sym in sorted(CORE_12 - found_core_syms):
-            core_tickers.append({
-                "symbol": sym, "exchange": "LSE", "name": sym,
-                "type": "leveraged_etp", "sector": "Technology",
-                "currency": "GBP", "leveraged": True, "inverse": False,
-                "leverage_factor": 3 if "5" not in sym else 5,
-                "last_price": 0, "volatility_ann": 0, "avg_daily_volume": 0,
-                "momentum_pct": 0, "abs_momentum_pct": 0,
-                "scoring_tier": "core", "composite_score": 1.0,
-            })
-        remaining_vanguard_slots = max(0, tier1_n - len(core_tickers))
-        vanguard = core_tickers + non_core[:remaining_vanguard_slots]
-    else:
-        # LSE CLOSED: no Core 12 forcing — pure ranking across open exchanges
-        core_tickers = []
-        non_core = scored
-        remaining_vanguard_slots = tier1_n
-        vanguard = non_core[:tier1_n]
+    # Re-sort after hysteresis bonus
+    scored.sort(key=lambda t: t.get("composite_score", 0), reverse=True)
 
-    # Warm and Apex from remaining non-core
-    warm_start = remaining_vanguard_slots
-    warm = non_core[warm_start:warm_start + tier2_n]
-    apex = non_core[warm_start + tier2_n:warm_start + tier2_n + tier3_n]
-    cold_count = max(0, len(non_core) - warm_start - tier2_n - tier3_n)
+    # Minimum notional volume gate: $500K daily
+    scored = [t for t in scored if (t.get("avg_daily_volume", 0) * t.get("last_price", 0)) >= 500_000
+              or t.get("avg_daily_volume", 0) == 0]  # Allow if volume unknown
+
+    # Minimum score threshold
+    scored = [t for t in scored if t.get("composite_score", 0) >= 10.0]
+
+    # Take top 100
+    top_100 = scored[:tier1_n]
 
     def clean(t: Dict[str, Any]) -> Dict[str, Any]:
         return {k: v for k, v in t.items()
                 if not k.endswith("_norm") and k != "spread_proxy"}
 
-    vanguard_clean = [clean(t) for t in vanguard]
-    warm_clean = [clean(t) for t in warm]
-    apex_clean = [clean(t) for t in apex]
-
     watchlist = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "total_scored": len(scored),
-        # Flat symbol list for quick access (vanguard tier only)
-        "tickers": [t["symbol"] for t in vanguard_clean],
+        "tickers": [t["symbol"] for t in top_100],
         "tier_counts": {
-            "vanguard_t1": len(vanguard),
-            "warm_t2": len(warm),
-            "apex_t3": len(apex),
-            "cold_t4": cold_count,
+            "active": len(top_100),
         },
         "scoring_weights": {
             "volatility": W_VOLATILITY,
@@ -956,32 +937,30 @@ def generate_watchlist(
             "momentum": W_MOMENTUM,
             "spread_proxy": W_SPREAD_PROXY,
         },
-        # Backwards compatibility
-        "vanguard_count": len(vanguard),
-        "apex_count": len(warm) + len(apex),
-        "vanguard": vanguard_clean,
-        "apex": warm_clean + apex_clean,
-        # New tier fields
-        "warm": warm_clean,
-        "apex_t3": apex_clean,
+        "vanguard": [clean(t) for t in top_100],
     }
-
     return watchlist
 
 
 def save_watchlist(watchlist: Dict[str, Any]) -> Path:
     """Save the active watchlist and regenerate initial_universe.toml for Rust engine.
 
-    SAFETY: If the watchlist has 0 vanguard tickers, we still save the JSON
+    SAFETY: Atomic write via tmp + os.replace to avoid partial reads by engine.
+    If the watchlist has 0 vanguard tickers, we still save the JSON
     (for diagnostics) but skip overwriting initial_universe.toml to prevent
     the engine from starting with an empty universe on next restart.
     """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(WATCHLIST_FILE, "w") as f:
+    # Atomic write: write to .tmp then os.replace to avoid partial reads by engine
+    tmp_path = WATCHLIST_FILE.with_suffix(".json.tmp")
+    with open(tmp_path, "w") as f:
         json.dump(watchlist, f, indent=2, default=str)
-    log.info("Watchlist saved: %s", WATCHLIST_FILE)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(str(tmp_path), str(WATCHLIST_FILE))
+    log.info("Watchlist saved (atomic): %s", WATCHLIST_FILE)
 
-    # Bridge: regenerate initial_universe.toml from top Vanguard + Warm tickers
+    # Bridge: regenerate initial_universe.toml from top Vanguard tickers
     # so the Rust engine picks up the daily-ranked universe on restart.
     _regenerate_universe_toml(watchlist)
 
@@ -1005,8 +984,8 @@ def _regenerate_universe_toml(watchlist: Dict[str, Any]) -> None:
     that config_loader.rs expects. This bridges the gap between the Python
     ticker_selector and the Rust engine's universe.
 
-    Core 12 are only force-included if they're already in the vanguard
-    (i.e., LSE was open when the watchlist was generated).
+    Leveraged/inverse ETPs naturally appear in the vanguard when LSE is
+    open (via score boost in ticker_ranker).
 
     SAFETY: Never overwrites the seed file with 0 tickers — this would kill
     the engine on restart. If scoring fails (e.g. after-hours, no data),
@@ -1019,7 +998,7 @@ def _regenerate_universe_toml(watchlist: Dict[str, Any]) -> None:
         log.warning("Ticker selector scored 0 vanguard tickers — NOT overwriting %s", toml_path)
         return
 
-    # Take vanguard as-is (already market-hours-aware — Core 12 only present when LSE open)
+    # Take vanguard as-is (already market-hours-aware — leveraged ETPs boosted when LSE open)
     seen = set()
     all_tickers = []
 
@@ -1044,7 +1023,7 @@ def _regenerate_universe_toml(watchlist: Dict[str, Any]) -> None:
         symbol = t.get("symbol", "")
         if not symbol:
             continue
-        leverage = t.get("leverage_factor", 1)
+        leverage = t.get("leverage_factor") or (3 if t.get("leveraged") else 1)
         sector = _SECTOR_MAP.get(t.get("sector", "Unknown"), "Unknown")
         inverse = t.get("inverse", False)
         leveraged = t.get("leveraged", False)
@@ -1096,7 +1075,7 @@ def generate_report(watchlist: Dict[str, Any], scored: List[Dict[str, Any]]) -> 
             "volatility": round(t.get("volatility_ann", 0), 4),
             "volume": int(t.get("avg_daily_volume", 0)),
             "momentum": round(t.get("momentum_pct", 0), 2),
-            "leverage": t.get("leverage_factor", 1),
+            "leverage": t.get("leverage_factor") or (3 if t.get("leveraged") else 1),
             "tier": t.get("scoring_tier", "unknown"),
         })
 
@@ -1128,8 +1107,8 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
     """Execute the ticker selection pipeline with tiered scoring.
 
     Unified mode (default): Selects the best 100 tickers across ALL 6 markets,
-    filtered by which exchanges are currently open. LSE leveraged/inverse ETPs
-    are always included regardless of market hours.
+    filtered by which exchanges are currently open. During LSE hours,
+    leveraged/inverse ETPs get a score boost and naturally float to the top.
 
     The engine reads active_watchlist.json every 15 minutes and rotates
     its IBKR subscriptions to match (max 100 data lines).
@@ -1155,12 +1134,9 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
 
     # Market-hours-aware filtering: only include tickers from exchanges that are
     # currently OPEN. This maximises the value of each IBKR data line.
-    # NO exceptions — if LSE is closed, LSE tickers (including Core 12) are excluded.
-    # This frees up all 100 IBKR slots for exchanges that are actually trading.
-    CORE_12_SYMBOLS = {
-        "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-        "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
-    }
+    # No forced tickers — leveraged/inverse ETPs get a score boost via
+    # ticker_ranker.score_leverage_boost() when LSE is open, so they naturally
+    # float to the top without any hardcoded set.
     before_filter = len(all_tickers)
     open_exchanges = set()
     for exch in EXCHANGE_LOCAL_HOURS:
@@ -1178,7 +1154,7 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
                  session, len(all_tickers), sorted(session_exchanges))
     else:
         # Unified mode: ONLY include tickers from open exchanges.
-        # When LSE is open: Core 12 + all LSE leveraged/inverse ETPs are included.
+        # When LSE is open: all LSE tickers included (leveraged ETPs boosted by ranker).
         # When LSE is closed: NO LSE tickers at all — all 100 slots for open markets.
         all_tickers = [
             t for t in all_tickers
@@ -1245,7 +1221,7 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
                 "currency": t.get("currency", "USD"),
                 "leveraged": t.get("leveraged", False),
                 "inverse": t.get("inverse", False),
-                "leverage_factor": t.get("leverage_factor", 1),
+                "leverage_factor": t.get("leverage_factor") or (3 if t.get("leveraged") else 1),
                 "last_price": 0,
                 "volatility_ann": 0,
                 "avg_daily_volume": t.get("avg_daily_volume", 0),
@@ -1304,9 +1280,9 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
 
     # Step 6b: Enrich with company names from master universe + hardcoded + yfinance
     name_lookup = {t["symbol"]: t.get("name", "") for t in master.get("tickers", []) if t.get("name")}
-    # Hardcoded names for Core 12 ETPs + most traded Asian tickers
+    # Hardcoded names for LSE leveraged ETPs + most traded Asian tickers
     KNOWN_NAMES = {
-        # ISA Core 12 leveraged ETPs
+        # LSE leveraged ETPs
         "QQQ3.L": "WisdomTree Nasdaq 100 3x Lev",
         "QQQS.L": "WisdomTree Nasdaq 100 3x Short",
         "3LUS.L": "WisdomTree S&P 500 3x Lev",
@@ -1469,6 +1445,11 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
         else:
             log.info("Step 7b: No backfill data available, skipping adjustments")
 
+    # API failure fallback: if scored list is suspiciously small, keep previous watchlist
+    if len(scored) < 10:
+        log.error("SCANNER DEGRADED: Only %d tickers scored — keeping previous watchlist", len(scored))
+        return 1
+
     watchlist = generate_watchlist(scored, lse_is_open=lse_is_open)
 
     # Always save to the unified active_watchlist.json.
@@ -1492,10 +1473,7 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
     log.info("Ticker Selector complete in %.1fs", elapsed)
     log.info("  Total universe: %d tickers", len(all_tickers))
     log.info("  Total scored: %d tickers", len(scored))
-    log.info("  Tier 1 (Vanguard): %d tickers", watchlist["tier_counts"]["vanguard_t1"])
-    log.info("  Tier 2 (Warm):     %d tickers", watchlist["tier_counts"]["warm_t2"])
-    log.info("  Tier 3 (Apex):     %d tickers", watchlist["tier_counts"]["apex_t3"])
-    log.info("  Tier 4 (Cold):     %d tickers", watchlist["tier_counts"]["cold_t4"])
+    log.info("  Active watchlist:  %d tickers", watchlist["tier_counts"]["active"])
     if scored:
         log.info("  Top 5 by composite score:")
         for i, t in enumerate(scored[:5], 1):
@@ -1504,7 +1482,7 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
                      t["composite_score"],
                      t.get("volatility_ann", 0) * 100,
                      t.get("momentum_pct", 0),
-                     t.get("leverage_factor", 1),
+                     t.get("leverage_factor") or (3 if t.get("leveraged") else 1),
                      t.get("scoring_tier", "?"))
     log.info("=" * 60)
 

@@ -97,14 +97,14 @@ mod lse_tests {
     #[test]
     fn test_lse_before_open() {
         let lse = LSEMarketHours::new();
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 7, 59, 0).unwrap();  // Mon 07:59 GMT
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 7, 59, 0).expect("valid static date");  // Mon 07:59 GMT
         assert!(!lse.is_open(utc));
     }
 
     #[test]
     fn test_lse_at_open() {
         let lse = LSEMarketHours::new();
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 8, 0, 0).unwrap();  // Mon 08:00 GMT
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 8, 0, 0).expect("valid static date");  // Mon 08:00 GMT
         assert!(lse.is_open(utc));
     }
 
@@ -112,21 +112,21 @@ mod lse_tests {
     fn test_lse_midday_open() {
         // FIX: LSE has NO lunch break — trades continuously 08:00-16:30
         let lse = LSEMarketHours::new();
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 12, 1, 0).unwrap();  // Mon 12:01 GMT
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 12, 1, 0).expect("valid static date");  // Mon 12:01 GMT
         assert!(lse.is_open(utc)); // Now correctly open
     }
 
     #[test]
     fn test_lse_at_close() {
         let lse = LSEMarketHours::new();
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 16, 30, 0).unwrap();  // Mon 16:30 GMT
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 16, 30, 0).expect("valid static date");  // Mon 16:30 GMT
         assert!(lse.is_open(utc));
     }
 
     #[test]
     fn test_lse_weekend() {
         let lse = LSEMarketHours::new();
-        let utc = Utc.with_ymd_and_hms(2026, 3, 14, 12, 0, 0).unwrap();  // Sat
+        let utc = Utc.with_ymd_and_hms(2026, 3, 14, 12, 0, 0).expect("valid static date");  // Sat
         assert!(!lse.is_open(utc));
     }
 }
@@ -204,7 +204,7 @@ mod us_tests {
     fn test_us_premarket_open() {
         let us = USMarketHours::new();
         // 09:00 GMT = 04:00 ET (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 9, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 9, 0, 0).expect("valid static date");
         assert!(us.is_premarket_open(utc));
     }
 
@@ -212,7 +212,7 @@ mod us_tests {
     fn test_us_cash_open() {
         let us = USMarketHours::new();
         // 14:30 GMT = 09:30 ET (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 14, 30, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 14, 30, 0).expect("valid static date");
         assert!(us.is_cash_open(utc));
     }
 
@@ -220,7 +220,7 @@ mod us_tests {
     fn test_us_afterhours_open() {
         let us = USMarketHours::new();
         // 21:00 GMT = 16:00 ET (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 21, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 21, 0, 0).expect("valid static date");
         assert!(us.is_afterhours_open(utc));
     }
 }
@@ -296,7 +296,7 @@ mod hk_tests {
     fn test_hk_open() {
         let hk = HKMarketHours::new();
         // 01:30 GMT = 09:30 HKT (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 1, 30, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 1, 30, 0).expect("valid static date");
         assert!(hk.is_open(utc));
     }
 
@@ -304,7 +304,7 @@ mod hk_tests {
     fn test_hk_lunch_break() {
         let hk = HKMarketHours::new();
         // 04:30 GMT = 12:30 HKT (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 4, 30, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 4, 30, 0).expect("valid static date");
         assert!(!hk.is_open(utc));
     }
 }
@@ -366,21 +366,21 @@ mod session_router_tests {
     #[test]
     fn test_hk_session_detection() {
         // 01:30 GMT = 09:30 HKT (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 1, 30, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 1, 30, 0).expect("valid static date");
         assert_eq!(get_current_session(utc), TradingSession::Phase1Hk);
     }
 
     #[test]
     fn test_lse_session_detection() {
         // 10:00 GMT (Mon)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 10, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 10, 0, 0).expect("valid static date");
         assert_eq!(get_current_session(utc), TradingSession::Phase2Lse);
     }
 
     #[test]
     fn test_us_cash_session_detection() {
         // 17:00 GMT = 12:00 EDT (Mon 16 Mar 2026, after DST: UTC-4, during US 09:30-16:00)
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 17, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 17, 0, 0).expect("valid static date");
         assert_eq!(get_current_session(utc), TradingSession::Phase4Uscash);
     }
 
@@ -388,14 +388,14 @@ mod session_router_tests {
     fn test_power_hour_detection() {
         // 19:00 GMT = 15:00 EDT (Mon 16 Mar 2026, after DST: UTC-4)
         // Power hour is the last hour of cash market: 15:00-16:00 ET = 19:00-20:00 GMT
-        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 19, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 16, 19, 0, 0).expect("valid static date");
         assert_eq!(get_current_session(utc), TradingSession::Phase5PowerHour);
     }
 
     #[test]
     fn test_closed_session_weekend() {
         // Sat 12:00 GMT
-        let utc = Utc.with_ymd_and_hms(2026, 3, 14, 12, 0, 0).unwrap();
+        let utc = Utc.with_ymd_and_hms(2026, 3, 14, 12, 0, 0).expect("valid static date");
         assert_eq!(get_current_session(utc), TradingSession::Closed);
     }
 }
@@ -497,42 +497,42 @@ mod holiday_tests {
 
     #[test]
     fn test_new_years_day() {
-        let date = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid static date");
         assert!(HolidayCalendar::is_uk_holiday(date));
         assert!(HolidayCalendar::is_us_holiday(date));
     }
 
     #[test]
     fn test_good_friday_2026() {
-        let date = NaiveDate::from_ymd_opt(2026, 4, 3).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 4, 3).expect("valid static date");
         assert!(HolidayCalendar::is_uk_holiday(date));
         assert!(HolidayCalendar::is_us_holiday(date));
     }
 
     #[test]
     fn test_christmas() {
-        let date = NaiveDate::from_ymd_opt(2026, 12, 25).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 12, 25).expect("valid static date");
         assert!(HolidayCalendar::is_uk_holiday(date));
     }
 
     #[test]
     fn test_us_only_holiday() {
         // MLK Day is US-only, not UK
-        let date = NaiveDate::from_ymd_opt(2026, 1, 19).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 1, 19).expect("valid static date");
         assert!(HolidayCalendar::is_us_holiday(date));
         assert!(!HolidayCalendar::is_uk_holiday(date));
     }
 
     #[test]
     fn test_regular_trading_day() {
-        let date = NaiveDate::from_ymd_opt(2026, 3, 16).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("valid static date");
         assert!(!HolidayCalendar::is_holiday(date));
         assert!(!HolidayCalendar::is_market_closed(date));
     }
 
     #[test]
     fn test_saturday_closed() {
-        let date = NaiveDate::from_ymd_opt(2026, 3, 14).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 3, 14).expect("valid static date");
         assert!(HolidayCalendar::is_market_closed(date));
     }
 }

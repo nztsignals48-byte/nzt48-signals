@@ -29,6 +29,8 @@ pub enum FilterReason {
     SyntheticHalt,
     /// Ticker is halted pending manual review.
     TickerHalted,
+    /// Tick data failed validation (NaN, Inf, negative, or crossed book).
+    InvalidTick,
 }
 
 /// Result of routing a tick through the universe.
@@ -174,6 +176,8 @@ pub struct Universe {
     pub last_mkt_data_req_ns: u64,
     /// Whether any reqMktData request has been made yet.
     has_requested: bool,
+    /// Rate-limit invalid-tick warnings: last warning timestamp per ticker (ns).
+    invalid_tick_last_warn_ns: HashMap<TickerId, u64>,
 }
 
 impl Universe {
@@ -184,6 +188,7 @@ impl Universe {
             tickers: HashMap::new(),
             last_mkt_data_req_ns: 0,
             has_requested: false,
+            invalid_tick_last_warn_ns: HashMap::new(),
         }
     }
 
@@ -281,6 +286,20 @@ impl Universe {
     /// Route a tick: classify, filter, and return the routing decision.
     /// This is the hot-path function called on every incoming tick.
     pub fn route_tick(&mut self, tick: &MarketTick, now_ns: u64) -> RouteResult {
+        // NaN/Inf/crossed-book guard — reject garbage ticks before any processing.
+        if !tick.is_valid() {
+            // Rate-limited log: only warn once per ticker per 60 seconds.
+            let last_warn = self.invalid_tick_last_warn_ns.get(&tick.ticker_id).copied().unwrap_or(0);
+            if now_ns.saturating_sub(last_warn) > 60_000_000_000 {
+                eprintln!(
+                    "INVALID_TICK: ticker={} bid={} ask={} last={} vol={} — NaN/Inf/negative/crossed",
+                    tick.ticker_id.0, tick.bid, tick.ask, tick.last, tick.volume,
+                );
+                self.invalid_tick_last_warn_ns.insert(tick.ticker_id, now_ns);
+            }
+            return RouteResult::Filtered(FilterReason::InvalidTick);
+        }
+
         let Some(state) = self.tickers.get_mut(&tick.ticker_id) else {
             return RouteResult::Filtered(FilterReason::TickerHalted);
         };

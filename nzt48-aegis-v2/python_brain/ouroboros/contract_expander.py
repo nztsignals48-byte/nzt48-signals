@@ -133,7 +133,7 @@ def _yf_to_exchange_currency(yf_symbol: str, exchange: str = "") -> Tuple[str, s
 
 def _detect_leverage(ticker: Dict[str, Any]) -> int:
     """Detect leverage factor from ticker metadata."""
-    lev = ticker.get("leverage_factor", 1)
+    lev = ticker.get("leverage_factor") or (3 if ticker.get("leveraged") else 1)
     if lev and lev > 1:
         return int(lev)
     # Try to detect from symbol name
@@ -228,7 +228,7 @@ def load_candidates() -> List[Dict[str, Any]]:
                             "exchange": t.get("exchange", ""),
                             "name": t.get("name", ""),
                             "sector": t.get("sector", "Unknown"),
-                            "leverage_factor": t.get("leverage_factor", 1),
+                            "leverage_factor": t.get("leverage_factor") or (3 if t.get("leveraged") else 1),
                             "source": f"watchlist_{tier_key}",
                         })
         except Exception as e:
@@ -253,7 +253,7 @@ def load_candidates() -> List[Dict[str, Any]]:
                 seen_symbols.add(sym)
                 # Assign a base score for master universe tickers
                 vol = t.get("avg_daily_volume", 0)
-                lev = t.get("leverage_factor", 1) or 1
+                lev = t.get("leverage_factor") or (3 if t.get("leveraged") else 1)
                 # Simple scoring: leverage * log(volume)
                 import math
                 score = 0.1 + (0.3 if lev > 1 else 0) + min(0.3, math.log10(max(vol, 1)) / 10)

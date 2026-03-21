@@ -102,19 +102,53 @@ def _moreira_muir_scale(log_returns, vol_target_annual, window, days_per_year):
     return float(np.clip(scale, 0.01, 2.0))
 
 
-def evaluate(ticks, log_fn=None):
+def _is_auction_period(timestamp_ns: int) -> bool:
+    """Check if a nanosecond UTC timestamp falls within LSE auction windows.
+
+    LSE open auction:  07:50-08:00 UTC (approximate — BST offset not applied,
+                       but Rust bridge sends UTC timestamps and LSE auctions
+                       are defined in London local time. During BST, this gate
+                       fires 1 hour early — acceptable conservative behaviour).
+    LSE close auction: 16:30-16:35 UTC.
+
+    Returns True if the timestamp is within an auction window.
+    """
+    if timestamp_ns == 0:
+        return False
+    utc_secs_of_day = (timestamp_ns // 1_000_000_000) % 86400
+    # Open auction: 07:50-08:00 UTC = 28200-28800 secs
+    if 28200 <= utc_secs_of_day < 28800:
+        return True
+    # Close auction: 16:30-16:35 UTC = 59400-59700 secs
+    if 59400 <= utc_secs_of_day < 59700:
+        return True
+    return False
+
+
+def evaluate(ticks, log_fn=None, confidence_floor=None):
     """Evaluate Vanguard Sniper on a batch of ticks for ONE ticker.
 
     Args:
         ticks: list of dicts with keys: last, bid, ask, volume, timestamp_ns.
             Must be chronologically ordered. Rolling window max 500 bars.
         log_fn: optional callback(level, message) for logging to Rust (H08).
+        confidence_floor: optional override for minimum confidence. If None,
+            uses the default from brain.config.CONFIDENCE_FLOOR.
 
     Returns:
         dict with keys {confidence, kelly_fraction, features} or None.
         None means no signal (filtered, insufficient data, below floor).
     """
     if not ticks:
+        return None
+
+    # Auction period gate: block entries during LSE open/close auctions.
+    # Prices during auctions are indicative only — no continuous order book.
+    last_tick = ticks[-1]
+    ts_ns = last_tick.get("timestamp_ns", 0)
+    if _is_auction_period(ts_ns):
+        if log_fn:
+            log_fn(LOG_LEVEL_DEBUG, "vanguard: AUCTION GATE — blocking signal during auction period")
         return None
 
     n = len(ticks)
@@ -196,10 +230,11 @@ def evaluate(ticks, log_fn=None):
     # killing 100% of signals. Vol-drag is already handled by 12-factor Kelly.
     confidence = momentum_score
 
-    # Confidence floor (from config, H109)
-    if confidence < CONFIDENCE_FLOOR:
+    # Confidence floor (parameter override or config default, H109)
+    _floor = confidence_floor if confidence_floor is not None else CONFIDENCE_FLOOR
+    if confidence < _floor:
         if log_fn:
-            log_fn(LOG_LEVEL_DEBUG, f"vanguard: confidence {confidence:.1f} < floor")
+            log_fn(LOG_LEVEL_DEBUG, f"vanguard: confidence {confidence:.1f} < floor {_floor}")
         return None
 
     # Kelly fraction: preliminary sizing with Moreira-Muir applied to SIZE, not confidence.

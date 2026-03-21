@@ -6,7 +6,7 @@ use crate::cross_asset_macro::{CrossAssetMacro, MacroIndicator, MacroRegimeSigna
 use crate::portfolio::PortfolioState;
 use crate::sector_rotation::sector_for_ticker;
 use crate::types::{Direction, RiskDecision, RiskRegime, TickerId, VetoReason};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// P2-3.18: Promoted constants for compiler optimization.
 const KELLY_RAMP_TARGET: u32 = 250;
@@ -96,7 +96,7 @@ pub struct RiskArbiter {
     pub regime: RiskRegime,
     pub config: RiskConfig,
     /// Recent approved intents: (ticker_id, timestamp_ns) for velocity tracking.
-    velocity_log: Vec<(TickerId, u64)>,
+    velocity_log: VecDeque<(TickerId, u64)>,
     /// Ouroboros-calibrated regime scaling multipliers (e.g. "Reduce" → 0.4).
     pub regime_scales: HashMap<String, f64>,
     /// Ouroboros-calibrated per-ticker Kelly fraction caps.
@@ -119,7 +119,7 @@ impl RiskArbiter {
         Self {
             regime: RiskRegime::Normal,
             config,
-            velocity_log: Vec::new(),
+            velocity_log: VecDeque::new(),
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
             simulation_mode: false,
@@ -433,7 +433,7 @@ impl RiskArbiter {
         }
 
         // Record approved intent for velocity tracking
-        self.velocity_log.push((intent_ticker, ts));
+        self.velocity_log.push_back((intent_ticker, ts));
 
         RiskDecision {
             decision_timestamp_ns: ts,
@@ -485,8 +485,18 @@ impl RiskArbiter {
     }
 
     fn prune_velocity(&mut self, now_ns: u64) {
-        let cutoff = now_ns.saturating_sub(self.config.velocity_window_ns);
-        self.velocity_log.retain(|(_, ts)| *ts >= cutoff);
+        // O(1) amortized: pop expired entries from front (VecDeque is time-ordered).
+        while let Some(&(_, ts)) = self.velocity_log.front() {
+            if now_ns.saturating_sub(ts) > 300_000_000_000 {
+                self.velocity_log.pop_front();
+            } else {
+                break;
+            }
+        }
+        // Hard ceiling: prevent unbounded growth from clock skew or bursts.
+        if self.velocity_log.len() > 50_000 {
+            self.velocity_log.pop_front();
+        }
     }
 
     /// CHECK 20: Macro Regime Escalation (Phase 9).

@@ -60,6 +60,16 @@ _tick_counts = {}
 SIGNAL_COOLDOWN_TICKS = 300
 _last_signal_tick = {}  # ticker_id → tick count when last signal was emitted
 
+# 5-minute bar aggregation cache — avoid recomputing OHLCV bars on every tick
+# when no new complete 5-min bar has formed.
+# ticker_id → (last_n_5min_bars, cached_bars_5m_list)
+_bar_cache: dict = {}
+
+# Blacklist logging dedup — tracks which symbols have already been logged
+# as blacklisted (reset daily to catch config changes across sessions).
+_blacklist_warned: set = set()
+_blacklist_warned_date: str = ""
+
 # ============================================================================
 # Gate veto logging — tracks WHY signals were suppressed and what WOULD have happened
 # Logged to stderr as GATE_VETO lines, also written to /app/data/gate_vetoes.ndjson
@@ -70,14 +80,12 @@ _gate_veto_counts = {}  # (ticker_id, gate_name) → count (rate limit logging)
 
 def _log_gate_veto(ticker_id, gate_name, price, indicators, reason_detail=""):
     """Log a gate veto with full indicator context for missed-winner analysis."""
-    import json as _json, time as _time
-
     key = (ticker_id, gate_name)
     _gate_veto_counts[key] = _gate_veto_counts.get(key, 0) + 1
     count = _gate_veto_counts[key]
 
     record = {
-        "ts": _time.time(),
+        "ts": time.time(),
         "ticker_id": ticker_id,
         "symbol": ticker_symbols.get(ticker_id, "?"),
         "gate": gate_name,
@@ -88,9 +96,14 @@ def _log_gate_veto(ticker_id, gate_name, price, indicators, reason_detail=""):
 
     try:
         with open(_gate_veto_log_path, "a") as f:
-            f.write(_json.dumps(record) + "\n")
-    except Exception:
-        pass
+            f.write(json.dumps(record) + "\n")
+    except (ValueError, KeyError, TypeError, IOError, json.JSONDecodeError, OSError) as e:
+        # Log file write failure is non-fatal — default stance: VETO still applies.
+        # Only log the first error to avoid spam.
+        if not getattr(_log_gate_veto, '_err_logged', False):
+            sys.stderr.write(f"Bridge: gate veto log write failed: {e}\n")
+            sys.stderr.flush()
+            _log_gate_veto._err_logged = True
 
     if count <= 3 or count % 100 == 0:
         sym = ticker_symbols.get(ticker_id, str(ticker_id))
@@ -588,19 +601,24 @@ def process_tick(msg):
     BARS_PER_5MIN = 60  # 60 × 5s = 5 minutes
     n_5min_bars = len(ticks) // BARS_PER_5MIN
 
-    # Aggregate into 5-minute OHLCV bars
-    bars_5m = []
-    for i in range(n_5min_bars):
-        chunk = ticks[i * BARS_PER_5MIN : (i + 1) * BARS_PER_5MIN]
-        bar = {
-            "open": chunk[0]["last"],
-            "high": max(t["last"] for t in chunk),
-            "low": min(t["last"] for t in chunk),
-            "close": chunk[-1]["last"],
-            "volume": sum(t["volume"] for t in chunk),
-            "last": chunk[-1]["last"],
-        }
-        bars_5m.append(bar)
+    # Aggregate into 5-minute OHLCV bars (cached — only recompute when new bar forms)
+    cached = _bar_cache.get(ticker_id)
+    if cached and cached[0] == n_5min_bars:
+        bars_5m = cached[1]
+    else:
+        bars_5m = []
+        for i in range(n_5min_bars):
+            chunk = ticks[i * BARS_PER_5MIN : (i + 1) * BARS_PER_5MIN]
+            bar = {
+                "open": chunk[0]["last"],
+                "high": max(t["last"] for t in chunk),
+                "low": min(t["last"] for t in chunk),
+                "close": chunk[-1]["last"],
+                "volume": sum(t["volume"] for t in chunk),
+                "last": chunk[-1]["last"],
+            }
+            bars_5m.append(bar)
+        _bar_cache[ticker_id] = (n_5min_bars, bars_5m)
 
     # Compute indicators on 5-MINUTE bars (not 5-second)
     if bars_5m:
@@ -653,10 +671,12 @@ def process_tick(msg):
     spread_pct_raw = ((ask - bid) / ((ask + bid) / 2) * 100) if bid > 0 and ask > 0 else 0
     vwap_dist_raw = 0.0
     _vc = vwap_calculators.get(ticker_id)
-    if _vc and hasattr(_vc, '_vwap_history') and _vc._vwap_history:
-        _lv = _vc._vwap_history[-1]
-        if _lv > 0:
-            vwap_dist_raw = (msg["last"] - _lv) / _lv * 100
+    if _vc:
+        _vh = _vc.get_history()
+        if _vh:
+            _lv = _vh[-1]
+            if _lv > 0:
+                vwap_dist_raw = (msg["last"] - _lv) / _lv * 100
     _ind = {
         "hurst": hurst, "adx": adx, "rvol": rvol, "vol_slope": vol_slope,
         "n_5min_bars": n_5min_bars, "n_ticks": len(ticks), "hurst_regime": hurst_regime,
@@ -675,13 +695,17 @@ def process_tick(msg):
     blacklist = _load_ticker_blacklist()
     sym = ticker_symbols.get(ticker_id, "")
     if sym and sym in blacklist:
-        # Don't log every tick (too noisy) — just first occurrence
-        if not hasattr(process_tick, '_blacklist_logged'):
-            process_tick._blacklist_logged = set()
-        if sym not in process_tick._blacklist_logged:
+        # Don't log every tick (too noisy) — just first occurrence per day
+        global _blacklist_warned, _blacklist_warned_date
+        import datetime as _dt
+        _today = _dt.date.today().isoformat()
+        if _blacklist_warned_date != _today:
+            _blacklist_warned = set()
+            _blacklist_warned_date = _today
+        if sym not in _blacklist_warned:
             sys.stderr.write(f"BLACKLIST_VETO: {sym} (tid={ticker_id}) suppressed by Ouroboros blacklist\n")
             sys.stderr.flush()
-            process_tick._blacklist_logged.add(sym)
+            _blacklist_warned.add(sym)
         return no_signal_base
 
     # =========================================================================
@@ -818,8 +842,9 @@ def process_tick(msg):
     # If price is >1.5% above VWAP, we're chasing. Wait for pullback.
     # =========================================================================
     vwap_calc = vwap_calculators.get(ticker_id)
-    if vwap_calc and hasattr(vwap_calc, '_vwap_history') and vwap_calc._vwap_history and len(ticks) > 60:
-        last_vwap = vwap_calc._vwap_history[-1]
+    _vwap_hist = vwap_calc.get_history() if vwap_calc else []
+    if _vwap_hist and len(ticks) > 60:
+        last_vwap = _vwap_hist[-1]
         if last_vwap > 0:
             vwap_distance_pct = (msg["last"] - last_vwap) / last_vwap * 100
             # For LONG entries: reject if price too far ABOVE VWAP (chasing)
@@ -863,15 +888,11 @@ def process_tick(msg):
     vanguard_signal = None
 
     # Phase E: Apply adaptive confidence floor — use the HIGHER of adaptive and leverage floors
+    # Passed as parameter to vanguard_evaluate() — no global config mutation.
     adaptive_floor = _load_adaptive_floor()
     effective_floor = leverage_conf_floor
     if adaptive_floor is not None:
         effective_floor = max(leverage_conf_floor, adaptive_floor)
-    try:
-        import brain.config as _brain_cfg
-        _brain_cfg.CONFIDENCE_FLOOR = effective_floor
-    except Exception:
-        pass
 
     # =========================================================================
     # FIX 10: Multi-timeframe confirmation before VanguardSniper
@@ -917,7 +938,7 @@ def process_tick(msg):
         eval_ticks = [{"last": b["close"], "high": b["high"], "low": b["low"],
                        "bid": b["close"], "ask": b["close"],
                        "volume": b["volume"]} for b in bars_5m] if bars_5m else ticks
-        result = vanguard_evaluate(eval_ticks)
+        result = vanguard_evaluate(eval_ticks, confidence_floor=effective_floor)
         if result is not None:
             # Run 12-factor Kelly sizing.
             total_trades = msg.get("total_trades", 0)
@@ -1053,8 +1074,9 @@ def process_tick(msg):
     # G2: Extension filter — reject if price moved >3% from session VWAP
     # (buying extension = immediate adverse excursion)
     vwap_calc = vwap_calculators.get(ticker_id)
-    if vwap_calc and vwap_calc._vwap_history and len(ticks) > 30:
-        last_vwap = vwap_calc._vwap_history[-1]
+    _g2_vwap_hist = vwap_calc.get_history() if vwap_calc else []
+    if _g2_vwap_hist and len(ticks) > 30:
+        last_vwap = _g2_vwap_hist[-1]
         if last_vwap > 0:
             extension = abs(msg["last"] - last_vwap) / last_vwap * 100
             if extension > 3.0:

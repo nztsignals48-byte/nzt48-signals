@@ -32,22 +32,16 @@
 # ISA Universe Refresh — 06:00 UTC daily Mon-Fri (before any market open)
 0 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.universe_refresh >> /var/log/universe_refresh.log 2>&1
 
-# Smart Ticker Selector — 06:30 UTC daily Mon-Fri (full daily re-score after universe refresh)
-30 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector.log 2>&1
+# Universe Scanner — every 2 hours, 22h/day (23:00-21:00 UTC Mon-Fri)
+# Provides top 100 tickers based on which markets are open.
+# During LSE hours: leveraged/inverse ETPs boosted via configurable score bonus.
+# flock prevents overlapping runs if previous scan hangs.
+# Dark window = 21:00-23:00 UTC (2h, no scan).
+0 23 * * 0-4 flock -n /tmp/ticker_selector.lock cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector.log 2>&1
+0 1,3,5,7,9,11,13,15,17,19,21 * * 1-5 flock -n /tmp/ticker_selector.lock cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector.log 2>&1
 
-# UNIFIED 15-minute ticker rotation — runs 22 hours/day (23:00-21:00 UTC Mon-Fri)
-# Single unified watchlist across ALL 6 markets. Market-hours-aware:
-# only includes tickers from exchanges currently open + LSE leveraged ETPs always.
-# Ouroboros learns and improves rankings every 15 min with live price data.
-# NO --skip-fetch: always uses live yfinance data for accurate scoring.
-
-# Asian + pre-market hours: every 15 min from 23:00-07:45 UTC (Mon-Fri)
-# 23:xx runs on Sunday night for Monday Asian open
-*/15 23 * * 0-4 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
-*/15 0-7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
-
-# European + US overlap + US-only hours: every 15 min from 08:00-20:45 UTC (Mon-Fri)
-*/15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_selector >> /var/log/ticker_selector_15m.log 2>&1
+# Bridge stderr log rotation — daily at 05:00 UTC (before nightly learning)
+0 5 * * * truncate -s 0 /app/data/bridge_stderr.log 2>/dev/null
 
 # Session Briefing PDFs + Telegram (at session open)
 # DST-aware: cron fires at BOTH possible UTC times (GMT and BST).
