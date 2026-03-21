@@ -12,7 +12,7 @@
 # USAGE:
 #   1. Start tmux session: tmux new -s aegis_master_build
 #   2. Inside tmux, export API key and run:
-#   POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+#   POLYGON_API_KEY="${POLYGON_KEY}" \
 #   bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 #   3. To detach: Press Ctrl+B then D
 #   4. To reattach: tmux attach -t aegis_master_build
@@ -191,7 +191,7 @@ if [ -z "$POLYGON_API_KEY" ]; then
   log_error "POLYGON_API_KEY not set"
   echo ""
   echo "Set it before running:"
-  echo "  export POLYGON_API_KEY=\"e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6\""
+  echo "  export POLYGON_API_KEY=\"\${POLYGON_KEY}\""
   echo "  bash $AEGIS_ROOT/THE_MASTER_COMMAND.sh"
   exit 1
 fi

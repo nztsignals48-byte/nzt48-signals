@@ -384,7 +384,7 @@
 
 ### RT-4-02 | CRITICAL | API Keys Hardcoded in Shell Scripts: Polygon Key Visible in Plaintext
 
-**Finding:** THE_MASTER_COMMAND.sh contains the Polygon API key in plaintext on line 15 (`POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"`) and EXECUTE_FULL_PLAN.sh line 40 repeats the same key. AEGIS_COMPLETE_EXECUTION.sh also contains the key. While PR-12 confirms `.env` is never committed to git, the API keys are hardcoded directly in committed shell scripts.
+**Finding:** THE_MASTER_COMMAND.sh contains the Polygon API key in plaintext on line 15 (`POLYGON_API_KEY="[REDACTED - see .env]"`) and EXECUTE_FULL_PLAN.sh line 40 repeats the same key. AEGIS_COMPLETE_EXECUTION.sh also contains the key. While PR-12 confirms `.env` is never committed to git, the API keys are hardcoded directly in committed shell scripts.
 
 **Evidence:** `THE_MASTER_COMMAND.sh:15`, `AEGIS_COMPLETE_EXECUTION.sh:40`, `EXECUTE_FULL_PLAN.sh:28`. These are committed to git (they are tracked in the repository). The Polygon API key provides access to market data APIs and could be used to consume API credits or exfiltrate data.
 

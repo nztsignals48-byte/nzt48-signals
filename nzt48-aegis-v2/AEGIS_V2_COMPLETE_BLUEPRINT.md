@@ -523,7 +523,7 @@ This will:
 
 **Cost**: $0 (Polygon Starter free tier)
 
-**API Key**: `e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6`
+**API Key**: `[REDACTED - see .env]`
 
 ---
 
@@ -832,7 +832,7 @@ Enter choice [c/s/q]:
 ## Step 1: Set Polygon API Key
 
 ```bash
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 ```
 
 ## Step 2: Run Master Command

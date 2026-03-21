@@ -29,6 +29,10 @@ else
     echo "Kill switch listener skipped (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set)"
 fi
 
+# RT4-P2: Bridge SPOF watchdog (heartbeat monitor + auto-restart)
+echo "Starting bridge watchdog..."
+python3 -m python_brain.ouroboros.bridge_watchdog &
+
 # N10a: Clean up stale KILL/PAUSE files from previous runs
 rm -f /app/data/KILL /app/data/PAUSE
 

@@ -246,7 +246,7 @@ Before you run THE_MASTER_COMMAND.sh, execute this checklist:
 - [ ] **IB Gateway Authenticated**: 2FA complete, gateway is listening
 - [ ] **tmux Session Created**: `tmux new -s aegis_master_build`
 - [ ] **Inside tmux**: Verified `echo $TMUX` returns session name
-- [ ] **Polygon API Key Set**: `export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"`
+- [ ] **Polygon API Key Set**: `export POLYGON_API_KEY="[REDACTED - see .env]"`
 - [ ] **Read Seventeenth-Order-Audit**: You understand all 4 traps
 
 ### During Phase 0 (Day 1)
@@ -327,7 +327,7 @@ tmux new -s aegis_master_build
 ### Step 2: Inside tmux, Execute
 ```bash
 # Inside the tmux session:
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 

@@ -177,7 +177,7 @@ Reports:
 
 ### Basic Execution
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 
@@ -276,7 +276,7 @@ This prevents the issue where users might "just run the command" without underst
 To execute:
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 

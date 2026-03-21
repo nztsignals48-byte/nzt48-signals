@@ -111,7 +111,7 @@ else:
 ### 4. Set Your Polygon API Key
 
 ```bash
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 
 # Verify:
 echo $POLYGON_API_KEY
@@ -152,7 +152,7 @@ tmux attach -t aegis_master_build
 # (or if already inside, skip this)
 
 # Step 2: Set environment variables
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 export ANTHROPIC_API_KEY="sk-ant-..."
 
 # Step 3: Run the master command
@@ -328,7 +328,7 @@ Total: $3,500-6,000 (NOT $0)
 Inside your tmux session:
 
 ```bash
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 export ANTHROPIC_API_KEY="sk-ant-..."
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
@@ -390,7 +390,7 @@ You are about to execute a 504-hour autonomous orchestration pipeline that will:
 
 ```bash
 tmux new -s aegis_master_build
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 export ANTHROPIC_API_KEY="sk-ant-..."
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```

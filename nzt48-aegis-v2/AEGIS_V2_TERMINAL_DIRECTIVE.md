@@ -541,7 +541,7 @@ System is ready but NOT deployed to live.
 ## THE MASTER COMMAND
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/AEGIS_INTERACTIVE.sh
 ```
 

@@ -8,7 +8,7 @@
 ## 🚀 THE ONE COMMAND TO RULE THEM ALL
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 
@@ -291,7 +291,7 @@ The system will pause at these points and ask for approval:
 ### First Time
 ```bash
 # Set Polygon API key
-export POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6"
+export POLYGON_API_KEY="[REDACTED - see .env]"
 
 # Run master command
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
@@ -415,7 +415,7 @@ bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ## 🚀 READY?
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 

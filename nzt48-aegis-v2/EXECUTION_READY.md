@@ -198,7 +198,7 @@ Cost: $0
 ### Command
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 
@@ -317,7 +317,7 @@ Cost for Live Phase 5+: ~$65/month
 Execute the master command:
 
 ```bash
-POLYGON_API_KEY="e8vYJGn7M2Aa033mAjMuJ4eNvijgRHa6" \
+POLYGON_API_KEY="[REDACTED - see .env]" \
 bash /Users/rr/nzt48-signals/nzt48-aegis-v2/THE_MASTER_COMMAND.sh
 ```
 
