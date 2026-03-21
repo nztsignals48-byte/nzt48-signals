@@ -8,14 +8,9 @@ use crate::sector_rotation::sector_for_ticker;
 use crate::types::{Direction, RiskDecision, RiskRegime, TickerId, VetoReason};
 use std::collections::{HashMap, VecDeque};
 
-/// P2-3.18: Promoted constants for compiler optimization.
-const KELLY_RAMP_TARGET: u32 = 250;
+// Sprint 6: All constants moved to config.toml [hardening] section.
+// Accessed via self.config.* in RiskArbiter methods.
 const VELOCITY_WINDOW_5MIN_NS: u64 = 300_000_000_000;
-const SYSTEM_VELOCITY_MAX: usize = 3;
-const VIX_HIGH_ENTER: f64 = 25.0;
-const VIX_HIGH_EXIT: f64 = 22.0;
-const VIX_EXTREME_ENTER: f64 = 35.0;
-const VIX_EXTREME_EXIT: f64 = 30.0;
 
 /// Context provided by the caller for each evaluation.
 #[derive(Clone, Debug)]
@@ -58,6 +53,15 @@ pub struct EvalContext {
     pub ticker_locked: bool,
     /// Momentum re-entry: How many positions already held for this ticker.
     pub ticker_position_count: u32,
+    // --- WIRED Sprint 2 (2026-03-21) ---
+    /// Sprint 2B: GARCH EVT CVaR — tail risk expected shortfall for this ticker.
+    pub evt_cvar: f64,
+    /// Sprint 2A: Kalman divergence — (raw - smoothed) / smoothed. Positive = breakout signal.
+    pub kalman_divergence: f64,
+    /// Sprint 3A: Native spread in basis points before FX conversion.
+    pub native_spread_bps: f64,
+    /// Sprint 2D: Structural tradability score from Python bridge [0-100].
+    pub structural_score: f64,
 }
 
 impl Default for EvalContext {
@@ -86,6 +90,11 @@ impl Default for EvalContext {
             ticker_trade_count: 0,
             ticker_locked: false,
             ticker_position_count: 0,
+            // Sprint 2 defaults: conservative (fail-closed)
+            evt_cvar: 0.0,           // No tail risk data = no reduction (will be overridden)
+            kalman_divergence: 0.0,  // No divergence data
+            native_spread_bps: 0.0,  // No spread data
+            structural_score: 50.0,  // Neutral default (won't trigger veto at 40 or penalty at 60)
         }
     }
 }
@@ -196,8 +205,15 @@ impl RiskArbiter {
             return self.reject(VetoReason::WalUnavailable, ts);
         }
 
-        // CHECK 10: Confidence Floor
-        if intent_confidence < self.config.confidence_floor {
+        // CHECK 10: Confidence Floor — FIXED (Sprint 5, T-07): leverage-aware.
+        // 3x ETP with base floor 55% → adjusted floor 55/√3 = 31.8%
+        // 5x ETP with base floor 55% → adjusted floor 55/√5 = 24.6%
+        // 1x equity with base floor 55% → floor 55% (unchanged)
+        // Rationale: leveraged products amplify moves, so a lower raw confidence
+        // still represents a high expected-value trade after leverage.
+        let leverage_sqrt = (ctx.leverage_factor.max(1) as f64).sqrt();
+        let adjusted_floor = self.config.confidence_floor / leverage_sqrt;
+        if intent_confidence < adjusted_floor {
             return self.reject(
                 VetoReason::ConfidenceBelowFloor {
                     confidence_x10: (intent_confidence * 10.0) as u32,
@@ -250,7 +266,7 @@ impl RiskArbiter {
         if ctx.bid > 0.0 && self.config.min_gross_edge_pct > 0.0 {
             let spread_pct = (ctx.ask - ctx.bid) / ctx.bid * 100.0;
             // Reject if spread alone exceeds the minimum edge threshold
-            if spread_pct > self.config.min_gross_edge_pct * 2.0 {
+            if spread_pct > self.config.min_gross_edge_pct * self.config.spread_edge_ratio {
                 return self.reject(
                     VetoReason::GrossEdgeTooLow {
                         edge_bps: (self.config.min_gross_edge_pct * 100.0) as u32,
@@ -305,6 +321,30 @@ impl RiskArbiter {
             return self.reject(VetoReason::DailyDrawdownBreached, ts);
         }
 
+        // CHECK 30: Weekly Drawdown — configurable % from Monday HWM → FLATTEN (Sprint 10)
+        if enforce_live_gates && portfolio.weekly_drawdown_pct() > self.config.weekly_drawdown_pct {
+            self.regime = RiskRegime::Flatten;
+            return self.reject(VetoReason::WeeklyDrawdownBreached, ts);
+        }
+
+        // CHECK 31: Peak Drawdown from all-time HWM → HALT (Sprint 10)
+        if enforce_live_gates {
+            let peak_dd = portfolio.peak_drawdown_pct();
+            if peak_dd > self.config.peak_drawdown_halt_pct {
+                self.regime = RiskRegime::Halt;
+                return self.reject(VetoReason::PeakDrawdownHalt { drawdown_pct: peak_dd as u32 }, ts);
+            }
+        }
+
+        // CHECK 32: Equity Floor — hard floor at % of initial equity (Sprint 10)
+        if enforce_live_gates {
+            let floor = portfolio.initial_equity * self.config.equity_floor_pct / 100.0;
+            if portfolio.equity < floor {
+                self.regime = RiskRegime::Halt;
+                return self.reject(VetoReason::EquityFloorBreached, ts);
+            }
+        }
+
         // CHECK 19: Velocity Check (H37)
         self.prune_velocity(ts);
         let recent = self
@@ -316,10 +356,10 @@ impl RiskArbiter {
             return self.reject(VetoReason::VelocityCheckTriggered, ts);
         }
 
-        // CHECK 19b: System-wide velocity (P1-2.5) — max SYSTEM_VELOCITY_MAX entries per 5-minute window across ALL tickers.
+        // CHECK 19b: System-wide velocity — max system_velocity_max entries per 5-minute window across ALL tickers.
         let system_cutoff = ts.saturating_sub(VELOCITY_WINDOW_5MIN_NS);
         let system_recent = self.velocity_log.iter().filter(|(_, t)| *t >= system_cutoff).count();
-        if system_recent >= SYSTEM_VELOCITY_MAX {
+        if system_recent >= self.config.system_velocity_max {
             return self.reject(VetoReason::VelocityCheckTriggered, ts);
         }
 
@@ -338,10 +378,14 @@ impl RiskArbiter {
         if ctx.ticker_position_count > 0 {
             let max_allowed = if ctx.ticker_locked {
                 1 // Locked tickers: no re-entry
-            } else if ctx.ticker_ic >= 0.20 && ctx.ticker_trade_count >= 20 {
-                3 // 70%+ WR with 20+ trades: up to 3
-            } else if ctx.ticker_ic >= 0.10 && ctx.ticker_trade_count >= 10 {
-                2 // 60%+ WR with 10+ trades: up to 2
+            } else if ctx.ticker_ic >= self.config.reentry_3pos_ic
+                && ctx.ticker_trade_count >= self.config.reentry_3pos_trades
+            {
+                3
+            } else if ctx.ticker_ic >= self.config.reentry_2pos_ic
+                && ctx.ticker_trade_count >= self.config.reentry_2pos_trades
+            {
+                2
             } else {
                 1 // Default: single position only
             };
@@ -357,8 +401,7 @@ impl RiskArbiter {
 
         // CHECK 24: CVaR Heat — portfolio-level conditional value at risk
         let cvar_heat = portfolio.cvar_heat_pct(&ctx.volatilities);
-        if cvar_heat > self.config.portfolio_heat_limit_pct * 1.5 {
-            // CVaR heat limit = 1.5x the basic heat limit
+        if cvar_heat > self.config.portfolio_heat_limit_pct * self.config.cvar_heat_multiplier {
             return self.reject(
                 VetoReason::CvarHeatExceeded {
                     cvar_pct: cvar_heat as u32,
@@ -369,7 +412,7 @@ impl RiskArbiter {
 
         // CHECK 25: GARCH forecast sigma too high — leverage-scaled (Avellaneda & Zhang 2010).
         // P0-03 FIX: 3x ETP has ~√3 × vol, 5x has ~√5 × vol. Scale threshold accordingly.
-        let garch_threshold = 0.80 * (ctx.leverage_factor.max(1) as f64).sqrt();
+        let garch_threshold = self.config.garch_threshold_base * (ctx.leverage_factor.max(1) as f64).sqrt();
         if ctx.garch_sigma > garch_threshold {
             return self.reject(
                 VetoReason::GarchVolTooHigh {
@@ -380,7 +423,7 @@ impl RiskArbiter {
         }
 
         // CHECK 26: Scanner score below minimum threshold (< 30)
-        if ctx.scanner_score > 0.0 && ctx.scanner_score < 30.0 {
+        if ctx.scanner_score > 0.0 && ctx.scanner_score < self.config.scanner_score_min {
             return self.reject(
                 VetoReason::ScannerScoreTooLow {
                     score: ctx.scanner_score as u32,
@@ -397,13 +440,14 @@ impl RiskArbiter {
         } else {
             intent_kelly
         };
-        if ctx.kelly_fraction_raw > 0.0 && ctx.kelly_fraction_raw < 0.005 {
+        if ctx.kelly_fraction_raw > 0.0 && ctx.kelly_fraction_raw < self.config.kelly_fraction_floor {
             return self.reject(VetoReason::KellyBelowFloor, ts);
         }
 
         // All checks passed. Calculate adjusted size.
-        // SC-13: Kelly scaling ramp — max(0.1, min(1.0, trades/KELLY_RAMP_TARGET))
-        let kelly_ramp = (self.config.kelly_ramp_trades as f64 / KELLY_RAMP_TARGET as f64).clamp(0.1, 1.0);
+        // SC-13: Kelly scaling ramp — configurable target, clamp range
+        let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)
+            .clamp(self.config.kelly_ramp_clamp_min, self.config.kelly_ramp_clamp_max);
         let ramped_kelly = effective_kelly * kelly_ramp;
         let size = ramped_kelly * portfolio.equity;
         // Ouroboros-calibrated regime scaling (fall back to hardcoded defaults).
@@ -423,7 +467,7 @@ impl RiskArbiter {
 
         // SC-05: Minimum entry size gate.
         // Suspended during Kelly ramp when validated_trades < KELLY_RAMP_TARGET.
-        if self.config.kelly_ramp_trades >= KELLY_RAMP_TARGET && adjusted_size < self.config.minimum_entry_gbp {
+        if self.config.kelly_ramp_trades >= self.config.kelly_ramp_target && adjusted_size < self.config.minimum_entry_gbp {
             return self.reject(
                 VetoReason::BelowMinimumEntrySize {
                     size_gbp: adjusted_size as u32,
@@ -511,15 +555,15 @@ impl RiskArbiter {
         // P1-2.7: VIX hysteresis deadband — prevents flip-flopping at VIX boundaries.
         // Enter high: VIX >= VIX_HIGH_ENTER, exit high: VIX < VIX_HIGH_EXIT (3-point deadband)
         // Enter extreme: VIX >= VIX_EXTREME_ENTER, exit extreme: VIX < VIX_EXTREME_EXIT (5-point deadband)
-        if vix >= VIX_EXTREME_ENTER {
+        if vix >= self.config.vix_extreme_enter {
             self.vix_extreme = true;
             self.vix_high = true;
-        } else if vix < VIX_EXTREME_EXIT {
+        } else if vix < self.config.vix_extreme_exit {
             self.vix_extreme = false;
         }
-        if vix >= VIX_HIGH_ENTER {
+        if vix >= self.config.vix_high_enter {
             self.vix_high = true;
-        } else if vix < VIX_HIGH_EXIT {
+        } else if vix < self.config.vix_high_exit {
             self.vix_high = false;
         }
 
@@ -539,7 +583,7 @@ impl RiskArbiter {
         }
 
         // Trigger B: Macro Stress + Stale Ticks → HALT (data unreliable)
-        if macro_signal == MacroRegimeSignal::Stress && ctx.last_tick_age_secs > 60 {
+        if macro_signal == MacroRegimeSignal::Stress && ctx.last_tick_age_secs > self.config.macro_stress_stale_tick_secs {
             self.regime = RiskRegime::Halt;
             return Some(VetoReason::MacroStressWithStaleTicks);
         }
@@ -564,27 +608,25 @@ impl RiskArbiter {
     /// P1-2.16: Record equity snapshot for drawdown velocity tracking.
     /// Call this every tick/evaluation cycle with current equity.
     pub fn record_equity_snapshot(&mut self, now_ns: u64, equity: f64) {
-        // Only record every 60 seconds to avoid excessive memory
-        let interval_ns: u64 = 60_000_000_000;
+        let interval_ns: u64 = self.config.equity_snapshot_interval_secs * 1_000_000_000;
         if let Some((last_ts, _)) = self.equity_snapshots.last() {
             if now_ns < *last_ts + interval_ns {
                 return;
             }
         }
         self.equity_snapshots.push((now_ns, equity));
-        // Prune older than 2 hours
-        let cutoff = now_ns.saturating_sub(7_200_000_000_000);
+        let cutoff = now_ns.saturating_sub(self.config.equity_snapshot_retention_secs * 1_000_000_000);
         self.equity_snapshots.retain(|(ts, _)| *ts >= cutoff);
     }
 
     /// P1-2.16: Check drawdown velocity — if equity dropped >2% in 1 hour → HALT.
     pub fn check_drawdown_velocity(&mut self, now_ns: u64, current_equity: f64) -> bool {
-        let one_hour_ago = now_ns.saturating_sub(3_600_000_000_000);
-        // Find earliest snapshot >= 1 hour ago
-        if let Some((_, equity_1h_ago)) = self.equity_snapshots.iter().find(|(ts, _)| *ts >= one_hour_ago) {
-            if *equity_1h_ago > 0.0 {
-                let drawdown_pct = ((*equity_1h_ago - current_equity) / *equity_1h_ago) * 100.0;
-                if drawdown_pct > 2.0 {
+        let window_ns = self.config.drawdown_velocity_window_secs * 1_000_000_000;
+        let window_ago = now_ns.saturating_sub(window_ns);
+        if let Some((_, equity_then)) = self.equity_snapshots.iter().find(|(ts, _)| *ts >= window_ago) {
+            if *equity_then > 0.0 {
+                let drawdown_pct = ((*equity_then - current_equity) / *equity_then) * 100.0;
+                if drawdown_pct > self.config.drawdown_velocity_pct {
                     eprintln!(
                         "DRAWDOWN_VELOCITY: {:.2}% drawdown in 1 hour (threshold 2%) — escalating to HALT",
                         drawdown_pct

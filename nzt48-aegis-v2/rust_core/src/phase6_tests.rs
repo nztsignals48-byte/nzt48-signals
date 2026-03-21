@@ -144,6 +144,7 @@ mod tests {
 
     /// Test 6.11: Legacy mode compat — all display as ACTIVE
     #[test]
+    #[allow(deprecated)]
     fn test_legacy_modes_display_active() {
         assert_eq!(format!("{}", SessionMode::ModeA), "ACTIVE");
         assert_eq!(format!("{}", SessionMode::ModeB), "ACTIVE");

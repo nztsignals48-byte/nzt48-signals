@@ -38,6 +38,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
+from python_brain.ouroboros.contract_loader import load_all_symbols, load_leverage_map
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -45,16 +46,9 @@ from brain.indicators.volume_analytics import calculate_rvol
 DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
 REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 
-PRIMARY_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-]
+PRIMARY_TICKERS = load_all_symbols()
 
-LEVERAGE_MAP = {
-    "QQQ3.L": 3, "3LUS.L": 3, "3SEM.L": 3, "GPT3.L": 3,
-    "NVD3.L": 3, "TSL3.L": 3, "TSM3.L": 3, "MU2.L": 2,
-    "QQQS.L": 3, "3USS.L": 3, "QQQ5.L": 5, "5SPY.L": 5,
-}
+LEVERAGE_MAP = load_leverage_map()
 
 # Chandelier exit ladder (5 rungs): ATR multiplier for each rung
 CHANDELIER_RUNGS = [3.0, 2.5, 2.0, 1.5, 1.0]

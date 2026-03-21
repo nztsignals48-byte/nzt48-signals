@@ -164,6 +164,14 @@ pub enum VetoReason {
     DailyTradeLimitReached { count: u32, limit: u32 },
     /// N0d: Expected gross edge too low to cover spread + commission.
     GrossEdgeTooLow { edge_bps: u32, min_bps: u32 },
+    /// Sprint 10: Weekly drawdown limit breached.
+    WeeklyDrawdownBreached,
+    /// Sprint 10: Peak drawdown from HWM → HALT.
+    PeakDrawdownHalt { drawdown_pct: u32 },
+    /// Sprint 10: Equity below hard floor.
+    EquityFloorBreached,
+    /// Sprint 10: Risk per trade exceeds limit.
+    RiskPerTradeExceeded { risk_pct: u32 },
 }
 
 /// Python-visible wrapper for VetoReason (simplified for FFI).
@@ -345,6 +353,22 @@ impl From<&VetoReason> for PyVetoReason {
             VetoReason::GrossEdgeTooLow { edge_bps, min_bps } => Self {
                 name: "GrossEdgeTooLow".into(),
                 detail: format!("edge={edge_bps}bps, spread={min_bps}bps"),
+            },
+            VetoReason::WeeklyDrawdownBreached => Self {
+                name: "WeeklyDrawdownBreached".into(),
+                detail: String::new(),
+            },
+            VetoReason::PeakDrawdownHalt { drawdown_pct } => Self {
+                name: "PeakDrawdownHalt".into(),
+                detail: format!("{drawdown_pct}%"),
+            },
+            VetoReason::EquityFloorBreached => Self {
+                name: "EquityFloorBreached".into(),
+                detail: String::new(),
+            },
+            VetoReason::RiskPerTradeExceeded { risk_pct } => Self {
+                name: "RiskPerTradeExceeded".into(),
+                detail: format!("{risk_pct}bps"),
             },
         }
     }

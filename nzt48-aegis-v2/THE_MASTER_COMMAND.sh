@@ -132,16 +132,16 @@ fi
 echo ""
 
 # TRAP 2: IB Gateway Port Check
-log_info "Checking IB Gateway availability (port 4004)..."
-if nc -vz 127.0.0.1 4004 &>/dev/null; then
-  log_success "IB Gateway is listening (port 4004 responding)"
+log_info "Checking IB Gateway availability (port 4003)..."
+if nc -vz 127.0.0.1 4003 &>/dev/null; then
+  log_success "IB Gateway is listening (port 4003 responding)"
 else
-  log_warning "IB Gateway NOT responding on port 4004"
+  log_warning "IB Gateway NOT responding on port 4003"
   echo ""
   echo "Phase 0 Task 3 requires IB Gateway to be running:"
   echo "  1. Start IB Gateway: docker-compose up ib-gateway"
   echo "  2. Authenticate with 2FA (open http://localhost:5900 for VNC)"
-  echo "  3. Verify port is listening: nc -vz 127.0.0.1 4004"
+  echo "  3. Verify port is listening: nc -vz 127.0.0.1 4003"
   echo ""
   log_warning "Proceeding without IB Gateway (auto-approved, will use yfinance fallback)"
 fi

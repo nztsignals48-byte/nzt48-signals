@@ -830,20 +830,19 @@ def run_method4_lse_leveraged() -> List[Dict[str, Any]]:
                     ticker_type="leveraged_etp",
                 ))
 
-    # Add known named patterns (QQQ, SP5, NVD, TSL, etc.)
-    named_patterns = [
-        ("QQQ3.L", 3, False), ("QQQ5.L", 5, False), ("QQQS.L", 3, True),
-        ("5SPY.L", 5, False), ("3LUS.L", 3, False), ("3USS.L", 3, True),
-        ("3SEM.L", 3, True),
-        ("NVD3.L", 3, False), ("TSL3.L", 3, False), ("TSM3.L", 3, False),
-        ("MU2.L", 2, False), ("GPT3.L", 3, False), ("AMD3.L", 3, False),
-        ("3OIL.L", 3, False), ("3OIS.L", 3, True),
-        ("3GDL.L", 3, False), ("3GDS.L", 3, True),
-        ("3SVL.L", 3, False), ("3SVS.L", 3, True),
-        ("3NGL.L", 3, False), ("3NGS.L", 3, True),
-        ("FTSL.L", 3, False), ("FTSS.L", 3, True),
-        ("DAXL.L", 3, False), ("DAXS.L", 3, True),
-    ]
+    # WIRED (Sprint 3): Load named patterns from contracts.toml instead of hardcoded list.
+    # Builds (symbol, leverage_factor, is_inverse) tuples from contract data.
+    from python_brain.ouroboros.contract_loader import load_leverage_map, load_lse_symbols
+    lev_map = load_leverage_map()
+    lse_syms = set(load_lse_symbols())
+    named_patterns = []
+    for sym in lse_syms:
+        lev = lev_map.get(sym, 1)
+        if lev > 1:
+            # Heuristic: symbols ending in S before .L suffix are inverse
+            base = sym.replace(".L", "")
+            is_inverse = base.endswith("S") and len(base) >= 3
+            named_patterns.append((sym, lev, is_inverse))
 
     for sym, lev, inv in named_patterns:
         if sym not in seen:

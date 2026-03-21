@@ -49,6 +49,18 @@ gap_cooldown_mins = 15
 synthetic_halt_limp_secs = 30     # Per-ticker Limp Mode threshold
 synthetic_halt_full_secs = 120    # Per-ticker full HALT threshold
 
+# Sprint 7: Per-exchange entry cutoffs (local time at each exchange).
+# Engine checks ticker's exchange → applies correct cutoff.
+# Format: "HH:MM" in exchange-local timezone.
+[timing.exchange_cutoffs]
+LSE = "15:45"                     # London local (45min before 16:30 close)
+US = "15:30"                      # New York local (30min before 16:00 close)
+HKEX = "15:30"                    # Hong Kong local (30min before 16:00 close)
+TSE = "14:30"                     # Tokyo local (30min before 15:00 close)
+XETRA = "17:00"                   # Frankfurt local (30min before 17:30 close)
+EURONEXT = "17:00"                # Paris local (30min before 17:30 close)
+SGX = "16:30"                     # Singapore local (30min before 17:00 close)
+
 [volatility]
 # Yang-Zhang (2000) estimator — mandatory for Moreira-Muir scaling
 # The ONLY estimator that handles overnight gaps in leveraged ETPs
@@ -189,6 +201,135 @@ Insurance = ["IAG"]
 Financials = ["VAS"]
 Media = ["AFL"]
 Luxury = ["OR", "LVMH"]
+
+# Sprint 6: Chandelier exit ladder — all rung thresholds and trail multipliers configurable.
+# Ouroboros tunes nightly via dynamic_weights.toml chandelier_atr_mult overlay.
+[chandelier]
+# Percentage gain thresholds to reach each rung [rung1=entry, rung2, rung3, rung4, rung5].
+# Audit-restructured (2026-03-18) for compounding optimality: tighter rungs.
+rung_pct = [0.0, 0.008, 0.015, 0.025, 0.040]
+# Initial stop: entry - Nx ATR. Tightened from 2.0 for compounding.
+initial_stop_atr_mult = 1.5
+# Trailing ATR multipliers per rung (rung 3, 4, 5+). Tighter = less profit given back.
+rung3_trail_atr = 1.0
+rung4_trail_atr = 0.75
+rung5_trail_atr = 0.5
+# ATR floor as fraction of entry price (prevents zombie stops on cold start).
+atr_floor_pct = 0.005
+# Price spike filter threshold (fraction). 10% = 0.10.
+price_spike_pct = 0.10
+# Dust threshold in GBP. Remainder below this → market sell.
+dust_threshold_gbp = 500.0
+
+# Sprint 6: InfiniteChandelier adaptive multiplier bounds.
+# Each pair is [min, max]. Engine clamps to these ranges.
+[chandelier.adaptive]
+volatility_range = [0.8, 1.5]        # Low vol → tighter, high vol → wider
+volatility_ann_low = 0.20             # Below 20% annualized → min multiplier
+volatility_ann_high = 0.50            # Above 50% annualized → max multiplier
+time_decay_range = [0.8, 1.0]         # Open → 1.0, close → 0.8
+time_decay_slope = 0.2                # Linear tightening rate
+momentum_range = [1.0, 1.3]           # Strong momentum → wider trail
+momentum_sensitivity = 10.0           # Multiplier slope
+liquidity_range = [1.0, 1.4]          # Illiquid → wider stops
+liquidity_sensitivity = 40.0          # Amihud slope
+heat_range = [0.7, 1.0]              # High heat → tighter
+heat_low_pct = 2.0                    # Below 2% heat → neutral (1.0)
+heat_high_pct = 8.0                   # Above 8% heat → tightest (0.7)
+regime_reduce_mult = 0.6              # REDUCE regime multiplier
+mega_runner_threshold_atr = 3.0       # Profit > 3 ATR → activate bonus
+mega_runner_slope = 0.2               # Widening rate per ATR above threshold
+mega_runner_range = [1.0, 2.0]        # Max 2x trail width for runners
+
+# Sprint 6: Entry type base confidences — Ouroboros tunes nightly based on rolling Wilson score.
+[entry_types]
+type_a_confidence = 65.0              # DipRecovery
+type_b_confidence = 82.0              # EarlyRunner — YOUR EDGE
+type_c_confidence = 72.0              # OverboughtFade
+type_d_confidence = 70.0              # SupportBounce
+# Type A thresholds
+type_a_rsi_oversold = 40.0
+type_a_volume_spike_mult = 1.8
+type_a_drop_atr_mult = 2.0
+# Type B thresholds
+type_b_rsi_low = 30.0
+type_b_rsi_high = 70.0
+type_b_momentum_bars = 3
+# Type C thresholds
+type_c_rsi_overbought = 75.0
+# Type D thresholds
+type_d_price_proximity_pct = 1.0
+type_d_rsi_low = 20.0
+type_d_rsi_high = 40.0
+# Confidence decay
+confidence_decay_rate_per_hour = 2.1
+
+# Sprint 6: Risk arbiter hardening — thresholds previously hardcoded as constants.
+[hardening]
+# System-wide velocity: max entries per 5-minute window across ALL tickers.
+system_velocity_max = 10
+# Kelly ramp: number of trades before full Kelly applied.
+kelly_ramp_target = 250
+kelly_ramp_clamp_min = 0.1
+kelly_ramp_clamp_max = 1.0
+# VIX hysteresis deadband (enter/exit thresholds with 3-5 point gap).
+vix_high_enter = 25.0
+vix_high_exit = 22.0
+vix_extreme_enter = 35.0
+vix_extreme_exit = 30.0
+# GARCH volatility ceiling (base, leverage-scaled via √leverage).
+garch_threshold_base = 0.80
+# CVaR heat multiplier (CVaR limit = Nx basic heat limit).
+cvar_heat_multiplier = 1.5
+# Momentum re-entry IC thresholds (Wilson score).
+reentry_3pos_ic = 0.20
+reentry_3pos_trades = 20
+reentry_2pos_ic = 0.10
+reentry_2pos_trades = 10
+# Macro stress + stale tick threshold (seconds).
+macro_stress_stale_tick_secs = 60
+# Drawdown velocity: equity drop % in 1 hour → HALT.
+drawdown_velocity_pct = 2.0
+drawdown_velocity_window_secs = 3600
+# Equity snapshot recording interval and retention.
+equity_snapshot_interval_secs = 60
+equity_snapshot_retention_secs = 7200
+# Spread/edge rejection multiplier.
+spread_edge_ratio = 2.0
+# Scanner score minimum threshold.
+scanner_score_min = 30.0
+# Kelly fraction floor.
+kelly_fraction_floor = 0.005
+
+# Sprint 6: Broker resilience — watchdog, circuit breaker, order lifecycle.
+[hardening.broker]
+tick_watchdog_timeout_secs = 120
+broker_disconnect_escalate_secs = 10
+zombie_halt_timeout_mins = 30
+circuit_breaker_errors = 5
+circuit_breaker_window_secs = 60
+circuit_breaker_cooldown_secs = 30
+# Order lifecycle timeouts.
+order_ack_timeout_secs = 5
+order_fill_timeout_secs = 60
+order_max_retries = 3
+
+# Sprint 6: Stale tick threshold for signal rejection (ms). Separate from config staleness.
+[hardening.ticks]
+stale_tick_ms = 500
+bar_history_ttl_secs = 3600
+signal_cooldown_ticks = 60            # Per-ticker cooldown (60 ticks × 5s = 5 min)
+
+# Sprint 6: Position sizing gates.
+[hardening.sizing]
+min_trade_gbp_sim = 20.0
+min_trade_gbp_live = 1500.0
+high_price_guard_sim = 2000.0
+stop_pct_clamp_min = 0.01
+stop_pct_clamp_max = 0.10
+cold_start_stop_pct = 0.05
+kelly_notional_floor_gbp = 100.0
+kelly_notional_cap_pct = 0.25
 
 [crucible]
 # Crucible phase overrides (Days 1-30)

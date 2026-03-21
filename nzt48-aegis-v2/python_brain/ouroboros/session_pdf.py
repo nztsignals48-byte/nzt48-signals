@@ -89,10 +89,9 @@ SESSION_HOURS = {
     },
 }
 
-CORE_12 = {
-    "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-    "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
-}
+# WIRED (Sprint 3): Dynamic contract loading replaces hardcoded CORE_12.
+from python_brain.ouroboros.contract_loader import load_lse_symbols
+CORE_12 = set(load_lse_symbols())  # Name kept for backward compat; contains ALL LSE symbols now
 
 # ---------------------------------------------------------------------------
 # Colours (institutional dark theme adapted for PDF)

@@ -513,22 +513,14 @@ def _get_session_preferred_tickers(session_window: str) -> List[str]:
     except (ValueError, IndexError):
         return []
 
-    # Morning LSE session (08:00-10:30): Gap Fade preferred tickers
-    if 480 <= start_mins < 630:
-        return ["QQQ3.L", "3LUS.L", "NVD3.L"]
-
-    # Midday session (10:30-14:30): VWAP dip buy preferred
-    if 630 <= start_mins < 870:
-        return ["QQQ3.L", "3LUS.L"]
-
-    # US overlap (14:30-16:00): Cross-market momentum preferred
-    if 870 <= start_mins < 960:
-        return ["QQQ3.L", "3LUS.L", "NVD3.L"]
-
-    # US power hour (20:00-21:00): Intraday momentum preferred
-    if 1200 <= start_mins < 1260:
-        return ["QQQ3.L", "3LUS.L", "NVD3.L", "TSL3.L"]
-
+    # WIRED (Sprint 3 / Sprint 7A): Dynamic session-preferred tickers.
+    # Previously hardcoded 12 LSE ETPs. Now returns empty — preferences are driven by:
+    # 1. Thompson Sampler top-K ranking (/app/data/thompson_top_k.json)
+    # 2. Ouroboros per-session performance stats
+    # 3. Scanner results from IBKR
+    # The calling code falls back to general ranking when this returns empty.
+    # TODO(Sprint 6): Load session preferences from Ouroboros persistent_memory
+    #   based on per-session win rate per instrument.
     return []
 
 

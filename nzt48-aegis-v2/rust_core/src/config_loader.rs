@@ -53,6 +53,15 @@ struct RawConfig {
     inverse_pairs: RawInversePairs,
     sectors: HashMap<String, Vec<String>>,
     crucible: CrucibleConfig,
+    /// Sprint 6: Chandelier exit ladder config.
+    #[serde(default)]
+    chandelier: RawChandelier,
+    /// Sprint 6: Entry type base confidences and thresholds.
+    #[serde(default)]
+    entry_types: RawEntryTypes,
+    /// Sprint 6: Risk arbiter hardening — previously hardcoded constants.
+    #[serde(default)]
+    hardening: RawHardening,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +113,9 @@ struct RawTiming {
     gap_cooldown_mins: u32,
     synthetic_halt_limp_secs: u32,
     synthetic_halt_full_secs: u32,
+    /// Sprint 7: Per-exchange entry cutoffs (exchange name → "HH:MM" local time).
+    #[serde(default)]
+    exchange_cutoffs: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,7 +133,27 @@ struct RawRisk {
     /// N0d: Minimum gross edge to justify entry.
     #[serde(default = "default_min_gross_edge_pct")]
     min_gross_edge_pct: f64,
+    /// Sprint 10: Portfolio risk gates.
+    #[serde(default = "default_weekly_dd")]
+    weekly_drawdown_pct: f64,
+    #[serde(default = "default_peak_dd")]
+    peak_drawdown_halt_pct: f64,
+    #[serde(default = "default_eq_floor")]
+    equity_floor_pct: f64,
+    #[serde(default = "default_overnight")]
+    overnight_exposure_cap_pct: f64,
+    #[serde(default = "default_max_corr")]
+    max_correlated_positions: u32,
+    #[serde(default = "default_risk_per_trade")]
+    max_risk_per_trade_pct: f64,
 }
+
+fn default_weekly_dd() -> f64 { 7.0 }
+fn default_peak_dd() -> f64 { 15.0 }
+fn default_eq_floor() -> f64 { 70.0 }
+fn default_overnight() -> f64 { 50.0 }
+fn default_max_corr() -> u32 { 3 }
+fn default_risk_per_trade() -> f64 { 0.75 }
 
 fn default_daily_trade_limit() -> u32 { 3 }
 fn default_min_gross_edge_pct() -> f64 { 0.15 }
@@ -235,6 +267,372 @@ pub struct CrucibleConfig {
     pub paper_uses_live_gates: bool,
 }
 
+// ── Sprint 6: Chandelier config ──
+
+#[derive(Debug, Deserialize)]
+pub struct RawChandelier {
+    #[serde(default = "default_rung_pct")]
+    pub rung_pct: Vec<f64>,
+    #[serde(default = "default_initial_stop_atr")]
+    pub initial_stop_atr_mult: f64,
+    #[serde(default = "default_rung3_trail")]
+    pub rung3_trail_atr: f64,
+    #[serde(default = "default_rung4_trail")]
+    pub rung4_trail_atr: f64,
+    #[serde(default = "default_rung5_trail")]
+    pub rung5_trail_atr: f64,
+    #[serde(default = "default_atr_floor")]
+    pub atr_floor_pct: f64,
+    #[serde(default = "default_spike_pct")]
+    pub price_spike_pct: f64,
+    #[serde(default = "default_dust")]
+    pub dust_threshold_gbp: f64,
+    #[serde(default)]
+    pub adaptive: RawChandelierAdaptive,
+}
+
+impl Default for RawChandelier {
+    fn default() -> Self {
+        Self {
+            rung_pct: default_rung_pct(),
+            initial_stop_atr_mult: default_initial_stop_atr(),
+            rung3_trail_atr: default_rung3_trail(),
+            rung4_trail_atr: default_rung4_trail(),
+            rung5_trail_atr: default_rung5_trail(),
+            atr_floor_pct: default_atr_floor(),
+            price_spike_pct: default_spike_pct(),
+            dust_threshold_gbp: default_dust(),
+            adaptive: RawChandelierAdaptive::default(),
+        }
+    }
+}
+
+fn default_rung_pct() -> Vec<f64> { vec![0.0, 0.008, 0.015, 0.025, 0.040] }
+fn default_initial_stop_atr() -> f64 { 1.5 }
+fn default_rung3_trail() -> f64 { 1.0 }
+fn default_rung4_trail() -> f64 { 0.75 }
+fn default_rung5_trail() -> f64 { 0.5 }
+fn default_atr_floor() -> f64 { 0.005 }
+fn default_spike_pct() -> f64 { 0.10 }
+fn default_dust() -> f64 { 500.0 }
+
+#[derive(Debug, Deserialize)]
+pub struct RawChandelierAdaptive {
+    #[serde(default = "default_vol_range")]
+    pub volatility_range: [f64; 2],
+    #[serde(default = "default_vol_low")]
+    pub volatility_ann_low: f64,
+    #[serde(default = "default_vol_high")]
+    pub volatility_ann_high: f64,
+    #[serde(default = "default_time_range")]
+    pub time_decay_range: [f64; 2],
+    #[serde(default = "default_time_slope")]
+    pub time_decay_slope: f64,
+    #[serde(default = "default_mom_range")]
+    pub momentum_range: [f64; 2],
+    #[serde(default = "default_mom_sens")]
+    pub momentum_sensitivity: f64,
+    #[serde(default = "default_liq_range")]
+    pub liquidity_range: [f64; 2],
+    #[serde(default = "default_liq_sens")]
+    pub liquidity_sensitivity: f64,
+    #[serde(default = "default_heat_range")]
+    pub heat_range: [f64; 2],
+    #[serde(default = "default_heat_low")]
+    pub heat_low_pct: f64,
+    #[serde(default = "default_heat_high")]
+    pub heat_high_pct: f64,
+    #[serde(default = "default_regime_reduce")]
+    pub regime_reduce_mult: f64,
+    #[serde(default = "default_mega_thresh")]
+    pub mega_runner_threshold_atr: f64,
+    #[serde(default = "default_mega_slope")]
+    pub mega_runner_slope: f64,
+    #[serde(default = "default_mega_range")]
+    pub mega_runner_range: [f64; 2],
+}
+
+impl Default for RawChandelierAdaptive {
+    fn default() -> Self {
+        Self {
+            volatility_range: default_vol_range(),
+            volatility_ann_low: default_vol_low(),
+            volatility_ann_high: default_vol_high(),
+            time_decay_range: default_time_range(),
+            time_decay_slope: default_time_slope(),
+            momentum_range: default_mom_range(),
+            momentum_sensitivity: default_mom_sens(),
+            liquidity_range: default_liq_range(),
+            liquidity_sensitivity: default_liq_sens(),
+            heat_range: default_heat_range(),
+            heat_low_pct: default_heat_low(),
+            heat_high_pct: default_heat_high(),
+            regime_reduce_mult: default_regime_reduce(),
+            mega_runner_threshold_atr: default_mega_thresh(),
+            mega_runner_slope: default_mega_slope(),
+            mega_runner_range: default_mega_range(),
+        }
+    }
+}
+
+fn default_vol_range() -> [f64; 2] { [0.8, 1.5] }
+fn default_vol_low() -> f64 { 0.20 }
+fn default_vol_high() -> f64 { 0.50 }
+fn default_time_range() -> [f64; 2] { [0.8, 1.0] }
+fn default_time_slope() -> f64 { 0.2 }
+fn default_mom_range() -> [f64; 2] { [1.0, 1.3] }
+fn default_mom_sens() -> f64 { 10.0 }
+fn default_liq_range() -> [f64; 2] { [1.0, 1.4] }
+fn default_liq_sens() -> f64 { 40.0 }
+fn default_heat_range() -> [f64; 2] { [0.7, 1.0] }
+fn default_heat_low() -> f64 { 2.0 }
+fn default_heat_high() -> f64 { 8.0 }
+fn default_regime_reduce() -> f64 { 0.6 }
+fn default_mega_thresh() -> f64 { 3.0 }
+fn default_mega_slope() -> f64 { 0.2 }
+fn default_mega_range() -> [f64; 2] { [1.0, 2.0] }
+
+// ── Sprint 6: Entry types config ──
+
+#[derive(Debug, Deserialize)]
+pub struct RawEntryTypes {
+    #[serde(default = "default_type_a_conf")] pub type_a_confidence: f64,
+    #[serde(default = "default_type_b_conf")] pub type_b_confidence: f64,
+    #[serde(default = "default_type_c_conf")] pub type_c_confidence: f64,
+    #[serde(default = "default_type_d_conf")] pub type_d_confidence: f64,
+    #[serde(default = "default_type_a_rsi")] pub type_a_rsi_oversold: f64,
+    #[serde(default = "default_type_a_vol")] pub type_a_volume_spike_mult: f64,
+    #[serde(default = "default_type_a_drop")] pub type_a_drop_atr_mult: f64,
+    #[serde(default = "default_type_b_rsi_lo")] pub type_b_rsi_low: f64,
+    #[serde(default = "default_type_b_rsi_hi")] pub type_b_rsi_high: f64,
+    #[serde(default = "default_type_b_bars")] pub type_b_momentum_bars: usize,
+    #[serde(default = "default_type_c_rsi")] pub type_c_rsi_overbought: f64,
+    #[serde(default = "default_type_d_prox")] pub type_d_price_proximity_pct: f64,
+    #[serde(default = "default_type_d_rsi_lo")] pub type_d_rsi_low: f64,
+    #[serde(default = "default_type_d_rsi_hi")] pub type_d_rsi_high: f64,
+    #[serde(default = "default_decay_rate")] pub confidence_decay_rate_per_hour: f64,
+}
+
+impl Default for RawEntryTypes {
+    fn default() -> Self {
+        Self {
+            type_a_confidence: default_type_a_conf(),
+            type_b_confidence: default_type_b_conf(),
+            type_c_confidence: default_type_c_conf(),
+            type_d_confidence: default_type_d_conf(),
+            type_a_rsi_oversold: default_type_a_rsi(),
+            type_a_volume_spike_mult: default_type_a_vol(),
+            type_a_drop_atr_mult: default_type_a_drop(),
+            type_b_rsi_low: default_type_b_rsi_lo(),
+            type_b_rsi_high: default_type_b_rsi_hi(),
+            type_b_momentum_bars: default_type_b_bars(),
+            type_c_rsi_overbought: default_type_c_rsi(),
+            type_d_price_proximity_pct: default_type_d_prox(),
+            type_d_rsi_low: default_type_d_rsi_lo(),
+            type_d_rsi_high: default_type_d_rsi_hi(),
+            confidence_decay_rate_per_hour: default_decay_rate(),
+        }
+    }
+}
+
+fn default_type_a_conf() -> f64 { 65.0 }
+fn default_type_b_conf() -> f64 { 82.0 }
+fn default_type_c_conf() -> f64 { 72.0 }
+fn default_type_d_conf() -> f64 { 70.0 }
+fn default_type_a_rsi() -> f64 { 40.0 }
+fn default_type_a_vol() -> f64 { 1.8 }
+fn default_type_a_drop() -> f64 { 2.0 }
+fn default_type_b_rsi_lo() -> f64 { 30.0 }
+fn default_type_b_rsi_hi() -> f64 { 70.0 }
+fn default_type_b_bars() -> usize { 3 }
+fn default_type_c_rsi() -> f64 { 75.0 }
+fn default_type_d_prox() -> f64 { 1.0 }
+fn default_type_d_rsi_lo() -> f64 { 20.0 }
+fn default_type_d_rsi_hi() -> f64 { 40.0 }
+fn default_decay_rate() -> f64 { 2.1 }
+
+// ── Sprint 6: Hardening config ──
+
+#[derive(Debug, Deserialize)]
+pub struct RawHardening {
+    #[serde(default = "default_sys_vel")] pub system_velocity_max: usize,
+    #[serde(default = "default_kelly_target")] pub kelly_ramp_target: u32,
+    #[serde(default = "default_kelly_clamp_min")] pub kelly_ramp_clamp_min: f64,
+    #[serde(default = "default_kelly_clamp_max")] pub kelly_ramp_clamp_max: f64,
+    #[serde(default = "default_vix_h_enter")] pub vix_high_enter: f64,
+    #[serde(default = "default_vix_h_exit")] pub vix_high_exit: f64,
+    #[serde(default = "default_vix_e_enter")] pub vix_extreme_enter: f64,
+    #[serde(default = "default_vix_e_exit")] pub vix_extreme_exit: f64,
+    #[serde(default = "default_garch_base")] pub garch_threshold_base: f64,
+    #[serde(default = "default_cvar_mult")] pub cvar_heat_multiplier: f64,
+    #[serde(default = "default_re3_ic")] pub reentry_3pos_ic: f64,
+    #[serde(default = "default_re3_trades")] pub reentry_3pos_trades: u32,
+    #[serde(default = "default_re2_ic")] pub reentry_2pos_ic: f64,
+    #[serde(default = "default_re2_trades")] pub reentry_2pos_trades: u32,
+    #[serde(default = "default_macro_stale")] pub macro_stress_stale_tick_secs: u64,
+    #[serde(default = "default_dd_vel_pct")] pub drawdown_velocity_pct: f64,
+    #[serde(default = "default_dd_vel_win")] pub drawdown_velocity_window_secs: u64,
+    #[serde(default = "default_eq_snap_int")] pub equity_snapshot_interval_secs: u64,
+    #[serde(default = "default_eq_snap_ret")] pub equity_snapshot_retention_secs: u64,
+    #[serde(default = "default_spread_edge")] pub spread_edge_ratio: f64,
+    #[serde(default = "default_scan_min")] pub scanner_score_min: f64,
+    #[serde(default = "default_kelly_floor")] pub kelly_fraction_floor: f64,
+    #[serde(default)]
+    pub broker: RawBrokerHardening,
+    #[serde(default)]
+    pub ticks: RawTickHardening,
+    #[serde(default)]
+    pub sizing: RawSizingHardening,
+}
+
+impl Default for RawHardening {
+    fn default() -> Self {
+        Self {
+            system_velocity_max: default_sys_vel(),
+            kelly_ramp_target: default_kelly_target(),
+            kelly_ramp_clamp_min: default_kelly_clamp_min(),
+            kelly_ramp_clamp_max: default_kelly_clamp_max(),
+            vix_high_enter: default_vix_h_enter(),
+            vix_high_exit: default_vix_h_exit(),
+            vix_extreme_enter: default_vix_e_enter(),
+            vix_extreme_exit: default_vix_e_exit(),
+            garch_threshold_base: default_garch_base(),
+            cvar_heat_multiplier: default_cvar_mult(),
+            reentry_3pos_ic: default_re3_ic(),
+            reentry_3pos_trades: default_re3_trades(),
+            reentry_2pos_ic: default_re2_ic(),
+            reentry_2pos_trades: default_re2_trades(),
+            macro_stress_stale_tick_secs: default_macro_stale(),
+            drawdown_velocity_pct: default_dd_vel_pct(),
+            drawdown_velocity_window_secs: default_dd_vel_win(),
+            equity_snapshot_interval_secs: default_eq_snap_int(),
+            equity_snapshot_retention_secs: default_eq_snap_ret(),
+            spread_edge_ratio: default_spread_edge(),
+            scanner_score_min: default_scan_min(),
+            kelly_fraction_floor: default_kelly_floor(),
+            broker: RawBrokerHardening::default(),
+            ticks: RawTickHardening::default(),
+            sizing: RawSizingHardening::default(),
+        }
+    }
+}
+
+fn default_sys_vel() -> usize { 10 }
+fn default_kelly_target() -> u32 { 250 }
+fn default_kelly_clamp_min() -> f64 { 0.1 }
+fn default_kelly_clamp_max() -> f64 { 1.0 }
+fn default_vix_h_enter() -> f64 { 25.0 }
+fn default_vix_h_exit() -> f64 { 22.0 }
+fn default_vix_e_enter() -> f64 { 35.0 }
+fn default_vix_e_exit() -> f64 { 30.0 }
+fn default_garch_base() -> f64 { 0.80 }
+fn default_cvar_mult() -> f64 { 1.5 }
+fn default_re3_ic() -> f64 { 0.20 }
+fn default_re3_trades() -> u32 { 20 }
+fn default_re2_ic() -> f64 { 0.10 }
+fn default_re2_trades() -> u32 { 10 }
+fn default_macro_stale() -> u64 { 60 }
+fn default_dd_vel_pct() -> f64 { 2.0 }
+fn default_dd_vel_win() -> u64 { 3600 }
+fn default_eq_snap_int() -> u64 { 60 }
+fn default_eq_snap_ret() -> u64 { 7200 }
+fn default_spread_edge() -> f64 { 2.0 }
+fn default_scan_min() -> f64 { 30.0 }
+fn default_kelly_floor() -> f64 { 0.005 }
+
+#[derive(Debug, Deserialize)]
+pub struct RawBrokerHardening {
+    #[serde(default = "default_watchdog")] pub tick_watchdog_timeout_secs: u64,
+    #[serde(default = "default_broker_esc")] pub broker_disconnect_escalate_secs: u64,
+    #[serde(default = "default_zombie")] pub zombie_halt_timeout_mins: u64,
+    #[serde(default = "default_cb_errors")] pub circuit_breaker_errors: u32,
+    #[serde(default = "default_cb_window")] pub circuit_breaker_window_secs: u64,
+    #[serde(default = "default_cb_cool")] pub circuit_breaker_cooldown_secs: u64,
+    #[serde(default = "default_ack_timeout")] pub order_ack_timeout_secs: u64,
+    #[serde(default = "default_fill_timeout")] pub order_fill_timeout_secs: u64,
+    #[serde(default = "default_order_retries")] pub order_max_retries: u32,
+}
+
+impl Default for RawBrokerHardening {
+    fn default() -> Self {
+        Self {
+            tick_watchdog_timeout_secs: default_watchdog(),
+            broker_disconnect_escalate_secs: default_broker_esc(),
+            zombie_halt_timeout_mins: default_zombie(),
+            circuit_breaker_errors: default_cb_errors(),
+            circuit_breaker_window_secs: default_cb_window(),
+            circuit_breaker_cooldown_secs: default_cb_cool(),
+            order_ack_timeout_secs: default_ack_timeout(),
+            order_fill_timeout_secs: default_fill_timeout(),
+            order_max_retries: default_order_retries(),
+        }
+    }
+}
+
+fn default_watchdog() -> u64 { 120 }
+fn default_broker_esc() -> u64 { 10 }
+fn default_zombie() -> u64 { 30 }
+fn default_cb_errors() -> u32 { 5 }
+fn default_cb_window() -> u64 { 60 }
+fn default_cb_cool() -> u64 { 30 }
+fn default_ack_timeout() -> u64 { 5 }
+fn default_fill_timeout() -> u64 { 60 }
+fn default_order_retries() -> u32 { 3 }
+
+#[derive(Debug, Deserialize)]
+pub struct RawTickHardening {
+    #[serde(default = "default_stale_tick_ms")] pub stale_tick_ms: u64,
+    #[serde(default = "default_bar_ttl")] pub bar_history_ttl_secs: u64,
+}
+
+impl Default for RawTickHardening {
+    fn default() -> Self {
+        Self {
+            stale_tick_ms: default_stale_tick_ms(),
+            bar_history_ttl_secs: default_bar_ttl(),
+        }
+    }
+}
+
+fn default_stale_tick_ms() -> u64 { 500 }
+fn default_bar_ttl() -> u64 { 3600 }
+
+#[derive(Debug, Deserialize)]
+pub struct RawSizingHardening {
+    #[serde(default = "default_min_sim")] pub min_trade_gbp_sim: f64,
+    #[serde(default = "default_min_live")] pub min_trade_gbp_live: f64,
+    #[serde(default = "default_high_price")] pub high_price_guard_sim: f64,
+    #[serde(default = "default_stop_min")] pub stop_pct_clamp_min: f64,
+    #[serde(default = "default_stop_max")] pub stop_pct_clamp_max: f64,
+    #[serde(default = "default_cold_stop")] pub cold_start_stop_pct: f64,
+    #[serde(default = "default_kelly_floor_gbp")] pub kelly_notional_floor_gbp: f64,
+    #[serde(default = "default_kelly_cap")] pub kelly_notional_cap_pct: f64,
+}
+
+impl Default for RawSizingHardening {
+    fn default() -> Self {
+        Self {
+            min_trade_gbp_sim: default_min_sim(),
+            min_trade_gbp_live: default_min_live(),
+            high_price_guard_sim: default_high_price(),
+            stop_pct_clamp_min: default_stop_min(),
+            stop_pct_clamp_max: default_stop_max(),
+            cold_start_stop_pct: default_cold_stop(),
+            kelly_notional_floor_gbp: default_kelly_floor_gbp(),
+            kelly_notional_cap_pct: default_kelly_cap(),
+        }
+    }
+}
+
+fn default_min_sim() -> f64 { 20.0 }
+fn default_min_live() -> f64 { 1500.0 }
+fn default_high_price() -> f64 { 2000.0 }
+fn default_stop_min() -> f64 { 0.01 }
+fn default_stop_max() -> f64 { 0.10 }
+fn default_cold_stop() -> f64 { 0.05 }
+fn default_kelly_floor_gbp() -> f64 { 100.0 }
+fn default_kelly_cap() -> f64 { 0.25 }
+
 // ── N8a: Live config overlay structs (all fields optional) ──
 
 #[derive(Debug, Deserialize, Default)]
@@ -346,6 +744,14 @@ pub struct EngineConfig {
     pub wal_schema_version: u8,
     pub gap_cooldown_mins: u32,
     pub slippage_pct: f64,
+    /// Sprint 6: Chandelier exit ladder config.
+    pub chandelier: RawChandelier,
+    /// Sprint 6: Entry type base confidences and thresholds.
+    pub entry_types: RawEntryTypes,
+    /// Sprint 6: Risk arbiter hardening config.
+    pub hardening: RawHardening,
+    /// Sprint 7: Per-exchange entry cutoffs (exchange → "HH:MM" local time).
+    pub exchange_cutoffs: HashMap<String, String>,
 }
 
 impl EngineConfig {
@@ -378,6 +784,36 @@ impl EngineConfig {
             kelly_ramp_trades: 0,
             daily_trade_limit: raw.risk.max_daily_trades,
             min_gross_edge_pct: raw.risk.min_gross_edge_pct,
+            // Sprint 6: Wire hardening config into RiskConfig
+            system_velocity_max: raw.hardening.system_velocity_max,
+            kelly_ramp_target: raw.hardening.kelly_ramp_target,
+            kelly_ramp_clamp_min: raw.hardening.kelly_ramp_clamp_min,
+            kelly_ramp_clamp_max: raw.hardening.kelly_ramp_clamp_max,
+            vix_high_enter: raw.hardening.vix_high_enter,
+            vix_high_exit: raw.hardening.vix_high_exit,
+            vix_extreme_enter: raw.hardening.vix_extreme_enter,
+            vix_extreme_exit: raw.hardening.vix_extreme_exit,
+            garch_threshold_base: raw.hardening.garch_threshold_base,
+            cvar_heat_multiplier: raw.hardening.cvar_heat_multiplier,
+            reentry_3pos_ic: raw.hardening.reentry_3pos_ic,
+            reentry_3pos_trades: raw.hardening.reentry_3pos_trades,
+            reentry_2pos_ic: raw.hardening.reentry_2pos_ic,
+            reentry_2pos_trades: raw.hardening.reentry_2pos_trades,
+            macro_stress_stale_tick_secs: raw.hardening.macro_stress_stale_tick_secs,
+            drawdown_velocity_pct: raw.hardening.drawdown_velocity_pct,
+            drawdown_velocity_window_secs: raw.hardening.drawdown_velocity_window_secs,
+            equity_snapshot_interval_secs: raw.hardening.equity_snapshot_interval_secs,
+            equity_snapshot_retention_secs: raw.hardening.equity_snapshot_retention_secs,
+            spread_edge_ratio: raw.hardening.spread_edge_ratio,
+            scanner_score_min: raw.hardening.scanner_score_min,
+            kelly_fraction_floor: raw.hardening.kelly_fraction_floor,
+            // Sprint 10: Portfolio risk gates
+            weekly_drawdown_pct: raw.risk.weekly_drawdown_pct,
+            peak_drawdown_halt_pct: raw.risk.peak_drawdown_halt_pct,
+            equity_floor_pct: raw.risk.equity_floor_pct,
+            overnight_exposure_cap_pct: raw.risk.overnight_exposure_cap_pct,
+            max_correlated_positions: raw.risk.max_correlated_positions,
+            max_risk_per_trade_pct: raw.risk.max_risk_per_trade_pct,
         };
 
         Ok(EngineConfig {
@@ -397,6 +833,10 @@ impl EngineConfig {
             wal_schema_version: raw.wal.schema_version,
             gap_cooldown_mins: raw.timing.gap_cooldown_mins,
             slippage_pct: raw.risk.slippage_assumption_pct,
+            chandelier: raw.chandelier,
+            entry_types: raw.entry_types,
+            hardening: raw.hardening,
+            exchange_cutoffs: raw.timing.exchange_cutoffs,
         })
     }
 

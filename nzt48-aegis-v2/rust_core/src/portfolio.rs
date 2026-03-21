@@ -56,7 +56,12 @@ impl Default for CostBasisEntry {
 pub struct PortfolioState {
     positions: HashMap<TickerId, PositionState>,
     pending_count: u32,
+    /// Mark-to-market equity (cash + current value of positions). Used for P&L display.
     pub equity: f64,
+    /// FIXED (Sprint 5, SK-01): Entry-based equity for Kelly sizing.
+    /// = cash + sum(entry_price * qty) for all positions.
+    /// Does NOT include unrealised P&L — prevents undersizing after drawdowns.
+    pub equity_for_sizing: f64,
     pub cash: f64,
     pub high_water_mark: f64,
     pub daily_pnl: f64,
@@ -71,6 +76,10 @@ pub struct PortfolioState {
     /// N0a: Daily trade count for frequency management.
     /// Reset in maybe_daily_reset(). Incremented on each approved entry fill.
     pub daily_trade_count: u32,
+    /// Sprint 10: Initial equity (set once at startup, never modified).
+    pub initial_equity: f64,
+    /// Sprint 10: Weekly high-water mark (reset Monday 00:00 UTC).
+    pub weekly_high_water_mark: f64,
 }
 
 impl PortfolioState {
@@ -79,6 +88,7 @@ impl PortfolioState {
             positions: HashMap::new(),
             pending_count: 0,
             equity,
+            equity_for_sizing: equity,
             cash: equity,
             high_water_mark: equity,
             daily_pnl: 0.0,
@@ -89,6 +99,8 @@ impl PortfolioState {
             cost_basis: HashMap::new(),
             dividend_withholding_factor: 0.85,
             daily_trade_count: 0,
+            initial_equity: equity,
+            weekly_high_water_mark: equity,
         }
     }
 
@@ -213,6 +225,22 @@ impl PortfolioState {
         (self.high_water_mark - self.equity) / self.high_water_mark * 100.0
     }
 
+    /// Sprint 10: Weekly drawdown from weekly HWM (%).
+    pub fn weekly_drawdown_pct(&self) -> f64 {
+        if self.weekly_high_water_mark <= 0.0 {
+            return 0.0;
+        }
+        (self.weekly_high_water_mark - self.equity) / self.weekly_high_water_mark * 100.0
+    }
+
+    /// Sprint 10: Peak drawdown from all-time HWM (%).
+    pub fn peak_drawdown_pct(&self) -> f64 {
+        if self.high_water_mark <= 0.0 {
+            return 0.0;
+        }
+        (self.high_water_mark - self.equity) / self.high_water_mark * 100.0
+    }
+
     /// Cash as percentage of equity.
     pub fn cash_buffer_pct(&self) -> f64 {
         if self.equity <= 0.0 {
@@ -255,13 +283,17 @@ impl PortfolioState {
     }
 
     /// Mark-to-market: recalculate equity from cash + sum of position market values.
-    /// FIX: equity was set at construction and NEVER updated, always showing initial value.
+    /// FIXED (Sprint 5, SK-01): Also computes equity_for_sizing using entry prices (not marked).
     pub fn mark_to_market(&mut self, last_prices: &std::collections::HashMap<TickerId, f64>) {
-        let position_value: f64 = self.positions.values().map(|p| {
+        let position_value_marked: f64 = self.positions.values().map(|p| {
             let price = last_prices.get(&p.ticker_id).copied().unwrap_or(p.avg_entry);
             price * p.qty as f64
         }).sum();
-        self.equity = self.cash + position_value;
+        let position_value_entry: f64 = self.positions.values().map(|p| {
+            p.avg_entry * p.qty as f64
+        }).sum();
+        self.equity = self.cash + position_value_marked;
+        self.equity_for_sizing = self.cash + position_value_entry;
         // Update daily P&L
         self.daily_pnl = self.equity - self.high_water_mark;
     }

@@ -55,10 +55,9 @@ log = logging.getLogger("backfill_foundation")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "SP5L.L",
-]
+from python_brain.ouroboros.contract_loader import load_all_symbols
+
+DEFAULT_TICKERS = load_all_symbols()
 
 TICKER_ID_MAP = {sym: i for i, sym in enumerate(DEFAULT_TICKERS)}
 

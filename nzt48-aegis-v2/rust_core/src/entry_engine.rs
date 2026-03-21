@@ -60,33 +60,70 @@ impl EntrySignal {
 // Entry Type A: Dip Recovery (40 LOC)
 // ============================================================================
 
+/// Sprint 6: Configurable entry type parameters (from config.toml [entry_types]).
+#[derive(Clone, Debug)]
+pub struct EntryTypeConfig {
+    pub type_a_confidence: f64,
+    pub type_b_confidence: f64,
+    pub type_c_confidence: f64,
+    pub type_d_confidence: f64,
+    pub type_a_rsi_oversold: f64,
+    pub type_a_volume_spike_mult: f64,
+    pub type_a_drop_atr_mult: f64,
+    pub type_b_rsi_low: f64,
+    pub type_b_rsi_high: f64,
+    pub type_b_momentum_bars: usize,
+    pub type_c_rsi_overbought: f64,
+    pub type_d_price_proximity_pct: f64,
+    pub type_d_rsi_low: f64,
+    pub type_d_rsi_high: f64,
+    pub confidence_decay_rate_per_hour: f64,
+}
+
+impl Default for EntryTypeConfig {
+    fn default() -> Self {
+        Self {
+            type_a_confidence: 65.0,
+            type_b_confidence: 82.0,
+            type_c_confidence: 72.0,
+            type_d_confidence: 70.0,
+            type_a_rsi_oversold: 40.0,
+            type_a_volume_spike_mult: 1.8,
+            type_a_drop_atr_mult: 2.0,
+            type_b_rsi_low: 30.0,
+            type_b_rsi_high: 70.0,
+            type_b_momentum_bars: 3,
+            type_c_rsi_overbought: 75.0,
+            type_d_price_proximity_pct: 1.0,
+            type_d_rsi_low: 20.0,
+            type_d_rsi_high: 40.0,
+            confidence_decay_rate_per_hour: 2.1,
+        }
+    }
+}
+
 /// Type A: Price drops 2+ ATR from recent high, RSI oversold, volume expanding.
 /// Entry logic: Buy the dip when volatility spike + weak hands panic.
 pub struct DipRecoveryDetector;
 
 impl DipRecoveryDetector {
-    /// Detect Type A entry: Oversold dip with volume expansion
-    /// Triggers when:
-    /// - RSI < 40 (oversold)
-    /// - Volume expansion > 1.8x MA (fear spike)
-    /// - Price drop >= 2.0x ATR (significant decline)
-    /// Base confidence: 65%
-    pub fn detect(
+    /// Detect Type A entry with configurable thresholds.
+    pub fn detect_cfg(
         rsi: f64,
         rvol: f64,
         vol_ma20: f64,
         price_drop_atr_multiple: f64,
         ticker_id: TickerId,
+        cfg: &EntryTypeConfig,
     ) -> Option<EntrySignal> {
-        // All three conditions must be met
-        let trigger = rsi < 40.0                      // Oversold panic
-            && rvol > vol_ma20 * 1.8                 // Volume spike on decline
-            && price_drop_atr_multiple >= 2.0;       // Significant drop (2+ ATR)
+        let trigger = rsi < cfg.type_a_rsi_oversold
+            && rvol > vol_ma20 * cfg.type_a_volume_spike_mult
+            && price_drop_atr_multiple >= cfg.type_a_drop_atr_mult;
 
         if trigger {
             Some(EntrySignal {
                 entry_type: EntryType::DipRecovery,
-                base_confidence: 65.0,
+                base_confidence: cfg.type_a_confidence,
                 ticker_id,
                 side: Direction::Long,
                 strategy: StrategyId::VanguardSniper,
@@ -94,6 +131,17 @@ impl DipRecoveryDetector {
         } else {
             None
         }
+    }
+
+    /// Legacy detect with hardcoded defaults (backward compat for tests).
+    pub fn detect(
+        rsi: f64,
+        rvol: f64,
+        vol_ma20: f64,
+        price_drop_atr_multiple: f64,
+        ticker_id: TickerId,
+    ) -> Option<EntrySignal> {
+        Self::detect_cfg(rsi, rvol, vol_ma20, price_drop_atr_multiple, ticker_id, &EntryTypeConfig::default())
     }
 }
 
@@ -151,41 +199,33 @@ impl EarlyRunnerDetector {
         }
     }
 
-    /// Detect Type B entry: Momentum building + not overbought yet
-    /// Triggers when:
-    /// - Last 3 bars: RVOL rising (momentum confirmed)
-    /// - Current RSI 30-60 (early, not overbought yet)
-    /// Base confidence: 82% (YOUR EDGE)
-    ///
-    /// Note: Must call detect() 3+ times before triggering (needs history).
-    pub fn detect(
+    /// Detect Type B entry with configurable thresholds.
+    pub fn detect_cfg(
         &mut self,
         current_rvol: f64,
         rsi: f64,
         ticker_id: TickerId,
+        cfg: &EntryTypeConfig,
     ) -> Option<EntrySignal> {
-        // Track last 3 RVOL values for trend
         self.rvol_history.push_back(current_rvol);
-        if self.rvol_history.len() > 3 {
+        if self.rvol_history.len() > cfg.type_b_momentum_bars {
             self.rvol_history.pop_front();
         }
 
-        // Need 3 bars to confirm uptrend
-        if self.rvol_history.len() < 3 {
+        if self.rvol_history.len() < cfg.type_b_momentum_bars {
             return None;
         }
 
         let vals: Vec<f64> = self.rvol_history.iter().copied().collect();
-        let rising = vals[0] < vals[1] && vals[1] < vals[2];
+        let rising = vals.windows(2).all(|w| w[0] < w[1]);
 
-        let trigger = rising                        // RVOL rising (momentum confirmed)
-            && rsi > 30.0 && rsi < 70.0;           // AUDIT-FIX: raised ceiling 60→70 (was too tight, missed valid entries)
-            // But still blocks overbought (RSI > 70) entries that chase extended moves
+        let trigger = rising
+            && rsi > cfg.type_b_rsi_low && rsi < cfg.type_b_rsi_high;
 
         if trigger {
             Some(EntrySignal {
                 entry_type: EntryType::EarlyRunner,
-                base_confidence: 82.0,  // YOUR EDGE
+                base_confidence: cfg.type_b_confidence,
                 ticker_id,
                 side: Direction::Long,
                 strategy: StrategyId::VanguardSniper,
@@ -193,6 +233,16 @@ impl EarlyRunnerDetector {
         } else {
             None
         }
+    }
+
+    /// Legacy detect with hardcoded defaults.
+    pub fn detect(
+        &mut self,
+        current_rvol: f64,
+        rsi: f64,
+        ticker_id: TickerId,
+    ) -> Option<EntrySignal> {
+        self.detect_cfg(current_rvol, rsi, ticker_id, &EntryTypeConfig::default())
     }
 
     /// Reset history (useful for testing or ticker switch)
@@ -277,17 +327,18 @@ impl OverboughtFadeDetector {
     ///
     /// Note: volume_divergence_confirmed should be pre-calculated
     /// (price_pct_change > 0 AND volume < vol_ma20)
-    pub fn detect(
+    pub fn detect_cfg(
         rsi: f64,
         vol_divergence_confirmed: bool,
         ticker_id: TickerId,
+        cfg: &EntryTypeConfig,
     ) -> Option<EntrySignal> {
-        let trigger = rsi > 75.0 && vol_divergence_confirmed;
+        let trigger = rsi > cfg.type_c_rsi_overbought && vol_divergence_confirmed;
 
         if trigger {
             Some(EntrySignal {
                 entry_type: EntryType::OverboughtFade,
-                base_confidence: 72.0,
+                base_confidence: cfg.type_c_confidence,
                 ticker_id,
                 side: Direction::Long,  // Actual trade would be SHORT via inverse ETP
                 strategy: StrategyId::ApexScout,
@@ -295,6 +346,15 @@ impl OverboughtFadeDetector {
         } else {
             None
         }
+    }
+
+    /// Legacy detect with hardcoded defaults.
+    pub fn detect(
+        rsi: f64,
+        vol_divergence_confirmed: bool,
+        ticker_id: TickerId,
+    ) -> Option<EntrySignal> {
+        Self::detect_cfg(rsi, vol_divergence_confirmed, ticker_id, &EntryTypeConfig::default())
     }
 }
 
@@ -344,25 +404,25 @@ impl SupportBounceDetector {
     /// - Current price within 1% of daily low
     /// - RSI 20-40 (panic oversold, recovery possible)
     /// Base confidence: 70%
-    pub fn detect(
+    pub fn detect_cfg(
         current_price: f64,
         daily_low: f64,
         rsi: f64,
         ticker_id: TickerId,
+        cfg: &EntryTypeConfig,
     ) -> Option<EntrySignal> {
-        // Calculate how far above daily low
         if daily_low <= 0.0 {
-            return None; // Invalid daily low
+            return None;
         }
 
         let price_pct_above_low = ((current_price - daily_low) / daily_low) * 100.0;
-        let trigger = price_pct_above_low <= 1.0 // Within 1% of daily low
-            && rsi >= 20.0 && rsi <= 40.0;       // Oversold but recovering
+        let trigger = price_pct_above_low <= cfg.type_d_price_proximity_pct
+            && rsi >= cfg.type_d_rsi_low && rsi <= cfg.type_d_rsi_high;
 
         if trigger {
             Some(EntrySignal {
                 entry_type: EntryType::SupportBounce,
-                base_confidence: 70.0,
+                base_confidence: cfg.type_d_confidence,
                 ticker_id,
                 side: Direction::Long,
                 strategy: StrategyId::VanguardSniper,
@@ -370,6 +430,16 @@ impl SupportBounceDetector {
         } else {
             None
         }
+    }
+
+    /// Legacy detect with hardcoded defaults.
+    pub fn detect(
+        current_price: f64,
+        daily_low: f64,
+        rsi: f64,
+        ticker_id: TickerId,
+    ) -> Option<EntrySignal> {
+        Self::detect_cfg(current_price, daily_low, rsi, ticker_id, &EntryTypeConfig::default())
     }
 }
 
@@ -490,10 +560,15 @@ mod tier_tests {
 /// Apply time-based confidence decay to entry signal.
 /// Confidence degrades at 2.1% per hour held.
 /// Entry loses edge as opportunity window closes.
-pub fn apply_confidence_decay(base_confidence: f64, hours_held: f64) -> f64 {
-    let decay_rate = 2.1;  // % per hour
+/// Sprint 6: Configurable decay rate.
+pub fn apply_confidence_decay_cfg(base_confidence: f64, hours_held: f64, decay_rate: f64) -> f64 {
     let decayed = base_confidence - (decay_rate * hours_held);
-    decayed.max(0.0)  // Clamp at 0 (no negative confidence)
+    decayed.max(0.0)
+}
+
+/// Legacy: backward compat with hardcoded 2.1% per hour.
+pub fn apply_confidence_decay(base_confidence: f64, hours_held: f64) -> f64 {
+    apply_confidence_decay_cfg(base_confidence, hours_held, 2.1)
 }
 
 #[cfg(test)]

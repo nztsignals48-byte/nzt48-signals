@@ -51,11 +51,18 @@ REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 RECS_FILE = DATA_DIR / "ouroboros_recommendations.json"
 WATCHLIST_FILE = CONFIG_DIR / "active_watchlist.json"
 
-# Primary ISA tickers (canonical order matches nightly_v6.py and contracts.toml)
-PRIMARY_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-]
+# WIRED (Sprint 7A): PRIMARY_TICKERS removed — dynamic loading from contracts.toml.
+# Previously hardcoded 12 LSE ETPs. Now loads ALL contracts dynamically.
+def _load_contract_symbols() -> list:
+    """Load all contract symbols from contracts.toml dynamically."""
+    import toml as _toml
+    contracts_path = CONFIG_DIR / "contracts.toml"
+    if contracts_path.exists():
+        data = _toml.load(str(contracts_path))
+        return [c["symbol"] for c in data.get("contracts", []) if c.get("symbol")]
+    return []
+
+PRIMARY_TICKERS = _load_contract_symbols()
 TICKER_ID_MAP: Dict[str, int] = {sym: i for i, sym in enumerate(PRIMARY_TICKERS)}
 
 # Default regime scale values (engine expects these keys)
@@ -732,8 +739,21 @@ def generate_dynamic_weights_toml(
     ]
 
     # Phase E: Ticker blacklist — suppress tickers with proven poor WR
-    # Tickers with WR < 30% over 10+ trades get blacklisted (no new entries).
-    # Engine reads this and rejects signals for blacklisted tickers.
+    # WIRED (Sprint 3E/3F): Uses Wilson score interval instead of raw WR to avoid
+    # overreacting to small samples. Wilson lower bound < 0.20 with N >= 20 → blacklist.
+    # Wilson lower bound > 0.45 with N >= 10 AND previously blacklisted → whitelist.
+    import math
+
+    def _wilson_lower(wins: int, n: int, z: float = 1.96) -> float:
+        """Wilson score interval lower bound (95% confidence)."""
+        if n == 0:
+            return 0.0
+        phat = wins / n
+        denom = 1 + z * z / n
+        centre = phat + z * z / (2 * n)
+        spread = z * math.sqrt((phat * (1 - phat) + z * z / (4 * n)) / n)
+        return (centre - spread) / denom
+
     blacklisted = []
     try:
         from python_brain.ouroboros.persistent_memory import load_memory
@@ -741,10 +761,12 @@ def generate_dynamic_weights_toml(
         if hasattr(mem, 'ticker_stats') and mem.ticker_stats:
             for sym, ts in mem.ticker_stats.items():
                 trades = ts.get("total_trades", 0)
-                wr = ts.get("win_rate", 0.5)
-                if trades >= 10 and wr < 0.30:
+                wins = ts.get("wins", int(ts.get("win_rate", 0.5) * max(trades, 1)))
+                wilson_lb = _wilson_lower(wins, trades)
+                if trades >= 20 and wilson_lb < 0.20:
                     blacklisted.append(sym)
-                    log.info("Ticker blacklisted: %s (WR=%.0f%% over %d trades)", sym, wr * 100, trades)
+                    log.info("Ticker blacklisted: %s (Wilson LB=%.2f, %d/%d trades)",
+                             sym, wilson_lb, wins, trades)
     except Exception:
         pass
 

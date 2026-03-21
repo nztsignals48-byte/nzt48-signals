@@ -48,16 +48,37 @@ bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 # Per-ticker VWAP calculators (persist across ticks, reset at session open)
 vwap_calculators = defaultdict(VWAPCalculator)
 
+# Sprint 7: Track last trading date per ticker for VWAP session reset.
+# When a new date is detected, reset VWAP calculator for that ticker.
+_last_vwap_date = {}  # ticker_id → date string "YYYY-MM-DD"
+
 # Ticker ID → symbol mapping (populated from tick messages)
 ticker_symbols = {}
 
 # Tick counters for diagnostic logging (per-ticker)
 _tick_counts = {}
 
-# Per-ticker signal cooldown: prevents signal spam (e.g. NVD3.L firing every tick).
-# After a signal fires for a ticker, suppress further signals for COOLDOWN_TICKS ticks.
-# 300 ticks × 5s = 25 minutes cooldown per ticker after signal emission.
-SIGNAL_COOLDOWN_TICKS = 300
+# Per-ticker signal cooldown: prevents signal spam.
+# FIXED (Sprint 5, T-08): Reduced from 300 (25min) to 60 (5min).
+# Sprint 6: Now loaded from config.toml [hardening.ticks] if available.
+def _load_cooldown_from_config():
+    """Load signal cooldown ticks from config.toml, default 60."""
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = "/app/config/config.toml"
+        if not os.path.exists(cfg_path):
+            return 60
+        with open(cfg_path, "rb") as f:
+            data = tomllib.load(f)
+        # Cooldown in ticks (each tick = 5s). Default 60 = 5 minutes.
+        return data.get("hardening", {}).get("ticks", {}).get("signal_cooldown_ticks", 60)
+    except Exception:
+        return 60
+
+SIGNAL_COOLDOWN_TICKS = _load_cooldown_from_config()
 _last_signal_tick = {}  # ticker_id → tick count when last signal was emitted
 
 # 5-minute bar aggregation cache — avoid recomputing OHLCV bars on every tick
@@ -593,6 +614,17 @@ def process_tick(msg):
 
     ticks = list(bar_history[ticker_id])
 
+    # Sprint 7: VWAP session reset — detect date change and reset VWAP calculator.
+    ts_ns = msg.get("timestamp_ns", 0)
+    if ts_ns > 0:
+        from datetime import datetime, timezone
+        _tick_dt = datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=timezone.utc)
+        _tick_date = _tick_dt.strftime("%Y-%m-%d")
+        _prev_date = _last_vwap_date.get(ticker_id)
+        if _prev_date is not None and _tick_date != _prev_date:
+            vwap_calculators[ticker_id].reset()
+        _last_vwap_date[ticker_id] = _tick_date
+
     # =========================================================================
     # FIX 1: Aggregate 5-second bars into 5-MINUTE bars for indicator computation.
     # Raw 5-second bars produce meaningless indicators (ADX=99, Hurst=1.0).
@@ -779,10 +811,13 @@ def process_tick(msg):
 
     # Component 3: Volume quality (0-20 pts)
     # Rising volume + decent RVOL = good. Flat volume + low RVOL = bad.
+    # FIXED (Sprint 5, T-05): Lowered RVOL thresholds — LSE ETPs average RVOL 0.8-1.2.
+    # Old threshold (1.5) killed 40%+ of valid signals.
+    # TODO(Sprint 6): Make configurable, per-session baselines from Ouroboros.
     vol_score = 0
-    if rvol > 1.5:
+    if rvol > 1.0:
         vol_score += 10
-    elif rvol > 1.0:
+    elif rvol > 0.7:
         vol_score += 5
     if vol_slope > 0:
         vol_score += 10
@@ -791,12 +826,15 @@ def process_tick(msg):
     sts_components["volume"] = min(20, vol_score)
 
     # Component 4: ADX trend strength (0-15 pts)
-    # ADX > 25 = strong trend, ADX > 35 = very strong, ADX < 15 = no trend
-    if adx >= 35:
+    # FIXED (Sprint 5, T-04): Lowered thresholds — LSE ETPs average ADX 18-22.
+    # Old thresholds (25/35) were killing 30%+ of valid signals.
+    # New: ADX > 20 = strong, ADX > 30 = very strong, ADX > 12 = some trend
+    # TODO(Sprint 6): Make configurable from config.toml, per-regime adaptive.
+    if adx >= 30:
         sts_components["adx_strength"] = 15
-    elif adx >= 25:
+    elif adx >= 20:
         sts_components["adx_strength"] = 10
-    elif adx >= 15:
+    elif adx >= 12:
         sts_components["adx_strength"] = 5
     else:
         sts_components["adx_strength"] = 0
@@ -1035,9 +1073,9 @@ def process_tick(msg):
     # ---- LSE Leveraged ETP Boost during LSE hours ----
     # During LSE hours (08:00-16:30 London), boost LSE leveraged ETPs by +20 confidence
     # so they are preferred over raw US equities (NVD3.L preferred over NVDA etc.)
-    LSE_LEVERAGED_TICKERS = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}  # First 12 ticker IDs = LSE ETPs
-    lse_symbols = {"QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "3SEM.L",
-                   "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "5SPY.L"}
+    from python_brain.ouroboros.contract_loader import load_lse_symbols
+    lse_symbols = set(load_lse_symbols())
+    LSE_LEVERAGED_TICKERS = set(range(len(lse_symbols)))  # Ticker IDs for LSE ETPs
     symbol = ticker_symbols.get(ticker_id, "")
     is_lse_leveraged = ticker_id in LSE_LEVERAGED_TICKERS or symbol in lse_symbols
 
@@ -1105,10 +1143,13 @@ def process_tick(msg):
         best = orchestrator_signal
 
     if best:
-        # N3a: Structural tradability score confidence adjustment.
-        # Score > 70: boost confidence by (score - 70) / 5 (max +6)
+        # N3a: Structural tradability score — FIXED (Sprint 5, SK-03).
+        # Preserve raw strategy_confidence for risk gate CHECK 10 (unmodified).
+        # Adjusted confidence is for logging/telemetry only.
+        best["strategy_confidence"] = best["confidence"]  # Raw, unmodified
+        # Score > 70: boost adjusted confidence by (score - 70) / 5 (max +6)
         # Score 50-70: no adjustment
-        # Score 30-50: penalize confidence by (50 - score) / 5 (max -4)
+        # Score 30-50: penalize adjusted confidence by (50 - score) / 5 (max -4)
         if structural_score > 70:
             sts_boost = min(6, (structural_score - 70) // 5)
             best["confidence"] = min(100, best["confidence"] + sts_boost)

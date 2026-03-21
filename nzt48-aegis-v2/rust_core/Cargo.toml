@@ -27,12 +27,11 @@ chrono-tz = "0.8"
 
 [features]
 default = []
-quantum_apex = []
-neural_hawkes = []
-dqn_signal_weighting = []
+# STRIPPED: quantum_apex, neural_hawkes, dqn_signal_weighting — theater code removed 2026-03-21
 
-[build-dependencies]
-cc = "1"
+# NOTE: cc build-dependency removed — was only needed for quantum_apex.cpp FFI
+# [build-dependencies]
+# cc = "1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

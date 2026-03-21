@@ -1280,7 +1280,8 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
 
     # Step 6b: Enrich with company names from master universe + hardcoded + yfinance
     name_lookup = {t["symbol"]: t.get("name", "") for t in master.get("tickers", []) if t.get("name")}
-    # Hardcoded names for LSE leveraged ETPs + most traded Asian tickers
+    # Display names for known instruments (cosmetic only — does not affect trading logic).
+    # TODO(Sprint 7): Load names from contracts.toml `name` field or IBKR contractDetails.
     KNOWN_NAMES = {
         # LSE leveraged ETPs
         "QQQ3.L": "WisdomTree Nasdaq 100 3x Lev",

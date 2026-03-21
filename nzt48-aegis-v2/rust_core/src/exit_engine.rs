@@ -52,6 +52,10 @@ pub struct ChandelierStrategy {
     /// Covers: entry commission + exit commission + spread cost.
     /// Default 0.002 (0.2%) — conservative for LSE leveraged ETPs.
     pub round_trip_fee_pct: f64,
+    /// Sprint 6: Initial stop ATR multiplier (rung 1). Default 1.5.
+    pub initial_stop_atr_mult: f64,
+    /// Sprint 6: ATR floor as fraction of entry price. Default 0.005 (0.5%).
+    pub atr_floor_pct: f64,
 }
 
 impl Default for ChandelierStrategy {
@@ -73,21 +77,49 @@ impl Default for ChandelierStrategy {
             rung4_trail_atr: 0.75,   // Rung 4: 0.75x ATR below peak
             rung5_trail_atr: 0.5,    // Rung 5+: 0.5x ATR below peak (tightest)
             round_trip_fee_pct: 0.003, // 0.3% round-trip (conservative for LSE 3x ETPs)
+            initial_stop_atr_mult: 1.5,
+            atr_floor_pct: 0.005,
+        }
+    }
+}
+
+impl ChandelierStrategy {
+    /// Sprint 6: Construct from config values.
+    pub fn from_config(
+        rung_pct: &[f64],
+        initial_stop_atr_mult: f64,
+        rung3_trail_atr: f64,
+        rung4_trail_atr: f64,
+        rung5_trail_atr: f64,
+        round_trip_fee_pct: f64,
+        atr_floor_pct: f64,
+    ) -> Self {
+        let mut thresholds = [0.0; 5];
+        for (i, val) in rung_pct.iter().take(5).enumerate() {
+            thresholds[i] = *val;
+        }
+        Self {
+            rung_pct_thresholds: thresholds,
+            rung3_trail_atr,
+            rung4_trail_atr,
+            rung5_trail_atr,
+            round_trip_fee_pct,
+            initial_stop_atr_mult,
+            atr_floor_pct,
         }
     }
 }
 
 impl ExitStrategy for ChandelierStrategy {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
-        // ATR floor: minimum 0.5% of entry price to prevent zombie positions when ATR=0 on cold start
-        let atr = atr.max(pos.avg_entry * 0.005);
+        // ATR floor: minimum atr_floor_pct of entry price to prevent zombie positions when ATR=0 on cold start
+        let atr = atr.max(pos.avg_entry * self.atr_floor_pct);
         let rung = self.compute_rung(pos, high, atr);
         match rung {
             // Rung 0: not yet at entry rung — keep initial stop
             0 => pos.stop_price,
-            // Rung 1: entry. Stop = entry - 1.5x ATR (audit-tightened from 2x for compounding)
-            // Tighter initial stop reduces per-trade loss, improving break-even Rung 2+ rate
-            1 => pos.avg_entry - 1.5 * atr,
+            // Rung 1: entry. Stop = entry - Nx ATR (configurable, default 1.5)
+            1 => pos.avg_entry - self.initial_stop_atr_mult * atr,
             // Rung 2: +2% gain. Stop = breakeven INCLUDING round-trip fees.
             // You literally cannot lose money once this rung is reached.
             2 => {
@@ -504,45 +536,113 @@ impl AdaptiveMultipliers {
             * self.mega_runner
     }
 
-    /// Update volatility multiplier from realized vol.
-    /// Low vol (< 20% ann) → 0.8, High vol (> 50% ann) → 1.5
-    pub fn update_volatility(&mut self, realized_vol_ann: f64) {
-        self.volatility = (0.8 + (realized_vol_ann - 0.20) * (0.7 / 0.30)).clamp(0.8, 1.5);
+    /// Sprint 6: Update all multipliers from config-driven parameters.
+    pub fn update_volatility_cfg(&mut self, realized_vol_ann: f64, cfg: &AdaptiveConfig) {
+        let range_span = cfg.volatility_range[1] - cfg.volatility_range[0];
+        let vol_span = cfg.volatility_ann_high - cfg.volatility_ann_low;
+        let raw = cfg.volatility_range[0] + (realized_vol_ann - cfg.volatility_ann_low) * (range_span / vol_span);
+        self.volatility = raw.clamp(cfg.volatility_range[0], cfg.volatility_range[1]);
     }
 
-    /// Update time decay: linear tightening from 1.0 at open to 0.8 at close.
-    pub fn update_time_decay(&mut self, time_fraction: f64) {
-        self.time_decay = (1.0 - 0.2 * time_fraction).clamp(0.8, 1.0);
+    pub fn update_time_decay_cfg(&mut self, time_fraction: f64, cfg: &AdaptiveConfig) {
+        let raw = cfg.time_decay_range[1] - cfg.time_decay_slope * time_fraction;
+        self.time_decay = raw.clamp(cfg.time_decay_range[0], cfg.time_decay_range[1]);
     }
 
-    /// Update momentum multiplier from price momentum percentage.
-    pub fn update_momentum(&mut self, momentum_pct: f64) {
-        self.momentum = (1.0 + momentum_pct.abs() * 10.0).clamp(1.0, 1.3);
+    pub fn update_momentum_cfg(&mut self, momentum_pct: f64, cfg: &AdaptiveConfig) {
+        let raw = 1.0 + momentum_pct.abs() * cfg.momentum_sensitivity;
+        self.momentum = raw.clamp(cfg.momentum_range[0], cfg.momentum_range[1]);
     }
 
-    /// Update liquidity from Amihud illiquidity ratio.
-    pub fn update_liquidity(&mut self, amihud: f64) {
-        self.liquidity = (1.0 + amihud * 40.0).clamp(1.0, 1.4);
+    pub fn update_liquidity_cfg(&mut self, amihud: f64, cfg: &AdaptiveConfig) {
+        let raw = 1.0 + amihud * cfg.liquidity_sensitivity;
+        self.liquidity = raw.clamp(cfg.liquidity_range[0], cfg.liquidity_range[1]);
     }
 
-    /// Update heat multiplier from portfolio heat percentage.
-    pub fn update_heat(&mut self, heat_pct: f64) {
-        // High heat (>8%) → tighter (0.7), low heat (<2%) → neutral (1.0)
-        self.heat = (1.0 - (heat_pct - 2.0).max(0.0) * (0.3 / 6.0)).clamp(0.7, 1.0);
+    pub fn update_heat_cfg(&mut self, heat_pct: f64, cfg: &AdaptiveConfig) {
+        let heat_span = cfg.heat_high_pct - cfg.heat_low_pct;
+        let range_span = cfg.heat_range[1] - cfg.heat_range[0];
+        let raw = cfg.heat_range[1] - (heat_pct - cfg.heat_low_pct).max(0.0) * (range_span / heat_span);
+        self.heat = raw.clamp(cfg.heat_range[0], cfg.heat_range[1]);
     }
 
-    /// Update regime multiplier.
-    pub fn update_regime(&mut self, is_reduce: bool) {
-        self.regime = if is_reduce { 0.6 } else { 1.0 };
+    pub fn update_regime_cfg(&mut self, is_reduce: bool, cfg: &AdaptiveConfig) {
+        self.regime = if is_reduce { cfg.regime_reduce_mult } else { 1.0 };
     }
 
-    /// Update mega-runner bonus based on profit in ATR multiples.
-    /// > 3 ATR profit → gradually widen to let winners run.
-    pub fn update_mega_runner(&mut self, profit_atr: f64) {
-        if profit_atr > 3.0 {
-            self.mega_runner = (1.0 + (profit_atr - 3.0) * 0.2).clamp(1.0, 2.0);
+    pub fn update_mega_runner_cfg(&mut self, profit_atr: f64, cfg: &AdaptiveConfig) {
+        if profit_atr > cfg.mega_runner_threshold_atr {
+            let raw = 1.0 + (profit_atr - cfg.mega_runner_threshold_atr) * cfg.mega_runner_slope;
+            self.mega_runner = raw.clamp(cfg.mega_runner_range[0], cfg.mega_runner_range[1]);
         } else {
             self.mega_runner = 1.0;
+        }
+    }
+
+    /// Legacy methods for backward compatibility (use hardcoded defaults).
+    pub fn update_volatility(&mut self, realized_vol_ann: f64) {
+        self.update_volatility_cfg(realized_vol_ann, &AdaptiveConfig::default());
+    }
+    pub fn update_time_decay(&mut self, time_fraction: f64) {
+        self.update_time_decay_cfg(time_fraction, &AdaptiveConfig::default());
+    }
+    pub fn update_momentum(&mut self, momentum_pct: f64) {
+        self.update_momentum_cfg(momentum_pct, &AdaptiveConfig::default());
+    }
+    pub fn update_liquidity(&mut self, amihud: f64) {
+        self.update_liquidity_cfg(amihud, &AdaptiveConfig::default());
+    }
+    pub fn update_heat(&mut self, heat_pct: f64) {
+        self.update_heat_cfg(heat_pct, &AdaptiveConfig::default());
+    }
+    pub fn update_regime(&mut self, is_reduce: bool) {
+        self.update_regime_cfg(is_reduce, &AdaptiveConfig::default());
+    }
+    pub fn update_mega_runner(&mut self, profit_atr: f64) {
+        self.update_mega_runner_cfg(profit_atr, &AdaptiveConfig::default());
+    }
+}
+
+/// Sprint 6: Adaptive multiplier configuration (from config.toml [chandelier.adaptive]).
+#[derive(Clone, Debug)]
+pub struct AdaptiveConfig {
+    pub volatility_range: [f64; 2],
+    pub volatility_ann_low: f64,
+    pub volatility_ann_high: f64,
+    pub time_decay_range: [f64; 2],
+    pub time_decay_slope: f64,
+    pub momentum_range: [f64; 2],
+    pub momentum_sensitivity: f64,
+    pub liquidity_range: [f64; 2],
+    pub liquidity_sensitivity: f64,
+    pub heat_range: [f64; 2],
+    pub heat_low_pct: f64,
+    pub heat_high_pct: f64,
+    pub regime_reduce_mult: f64,
+    pub mega_runner_threshold_atr: f64,
+    pub mega_runner_slope: f64,
+    pub mega_runner_range: [f64; 2],
+}
+
+impl Default for AdaptiveConfig {
+    fn default() -> Self {
+        Self {
+            volatility_range: [0.8, 1.5],
+            volatility_ann_low: 0.20,
+            volatility_ann_high: 0.50,
+            time_decay_range: [0.8, 1.0],
+            time_decay_slope: 0.2,
+            momentum_range: [1.0, 1.3],
+            momentum_sensitivity: 10.0,
+            liquidity_range: [1.0, 1.4],
+            liquidity_sensitivity: 40.0,
+            heat_range: [0.7, 1.0],
+            heat_low_pct: 2.0,
+            heat_high_pct: 8.0,
+            regime_reduce_mult: 0.6,
+            mega_runner_threshold_atr: 3.0,
+            mega_runner_slope: 0.2,
+            mega_runner_range: [1.0, 2.0],
         }
     }
 }
@@ -552,6 +652,7 @@ impl AdaptiveMultipliers {
 pub struct InfiniteChandelier {
     pub base: ChandelierStrategy,
     pub multipliers: AdaptiveMultipliers,
+    pub adaptive_config: AdaptiveConfig,
 }
 
 impl InfiniteChandelier {
@@ -559,6 +660,7 @@ impl InfiniteChandelier {
         Self {
             base: ChandelierStrategy::default(),
             multipliers: AdaptiveMultipliers::default(),
+            adaptive_config: AdaptiveConfig::default(),
         }
     }
 
@@ -571,19 +673,23 @@ impl InfiniteChandelier {
 
 impl Default for InfiniteChandelier {
     fn default() -> Self {
-        Self::new()
+        Self {
+            base: ChandelierStrategy::default(),
+            multipliers: AdaptiveMultipliers::default(),
+            adaptive_config: AdaptiveConfig::default(),
+        }
     }
 }
 
 impl ExitStrategy for InfiniteChandelier {
     fn compute_stop(&self, pos: &PositionState, high: f64, atr: f64) -> f64 {
-        // ATR floor: minimum 0.5% of entry price to prevent zombie positions when ATR=0 on cold start
-        let atr = atr.max(pos.avg_entry * 0.005);
+        // ATR floor: minimum atr_floor_pct of entry price to prevent zombie positions when ATR=0 on cold start
+        let atr = atr.max(pos.avg_entry * self.base.atr_floor_pct);
         let rung = self.compute_rung(pos, high, atr);
         match rung {
             // Rungs 0-4: delegate to base ChandelierStrategy (same new logic)
             0 => pos.stop_price,
-            1 => pos.avg_entry - 1.5 * atr, // AUDIT-FIX: match base ChandelierStrategy (was 1.0x)
+            1 => pos.avg_entry - self.base.initial_stop_atr_mult * atr,
             2 => {
                 let fee_amount = pos.avg_entry * self.base.round_trip_fee_pct;
                 pos.avg_entry + fee_amount
@@ -607,16 +713,18 @@ impl ExitStrategy for InfiniteChandelier {
 
     fn update_multipliers(&mut self, vol: f64, time_frac: f64, momentum: f64,
                           amihud: f64, heat: f64, is_reduce: bool) {
-        self.multipliers.update_volatility(vol);
-        self.multipliers.update_time_decay(time_frac);
-        self.multipliers.update_momentum(momentum);
-        self.multipliers.update_liquidity(amihud);
-        self.multipliers.update_heat(heat);
-        self.multipliers.update_regime(is_reduce);
+        let cfg = &self.adaptive_config;
+        self.multipliers.update_volatility_cfg(vol, cfg);
+        self.multipliers.update_time_decay_cfg(time_frac, cfg);
+        self.multipliers.update_momentum_cfg(momentum, cfg);
+        self.multipliers.update_liquidity_cfg(amihud, cfg);
+        self.multipliers.update_heat_cfg(heat, cfg);
+        self.multipliers.update_regime_cfg(is_reduce, cfg);
     }
 
     fn update_mega_runner(&mut self, profit_atr: f64) {
-        self.multipliers.update_mega_runner(profit_atr);
+        let cfg = &self.adaptive_config;
+        self.multipliers.update_mega_runner_cfg(profit_atr, cfg);
     }
 }
 

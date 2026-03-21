@@ -17,6 +17,11 @@ pub struct StateCheckpoint {
     pub regime: String,
     /// Per-position hashes: ticker_id → (qty, entry_price).
     pub positions: BTreeMap<u32, (i64, f64)>,
+    /// Sprint 10: VIX hysteresis state (persisted for crash recovery).
+    pub vix_high: bool,
+    pub vix_extreme: bool,
+    /// Sprint 10: Circuit breaker tripped state (nanoseconds, 0 = not tripped).
+    pub circuit_breaker_tripped_ns: u64,
     /// Computed hash of the checkpoint.
     pub hash: u64,
 }
@@ -36,10 +41,22 @@ impl StateCheckpoint {
             position_count,
             regime: regime.to_string(),
             positions,
+            vix_high: false,
+            vix_extreme: false,
+            circuit_breaker_tripped_ns: 0,
             hash: 0,
         };
         cp.hash = cp.compute_hash();
         cp
+    }
+
+    /// Set VIX hysteresis and circuit breaker state, then recompute hash.
+    pub fn with_risk_state(mut self, vix_high: bool, vix_extreme: bool, cb_tripped_ns: u64) -> Self {
+        self.vix_high = vix_high;
+        self.vix_extreme = vix_extreme;
+        self.circuit_breaker_tripped_ns = cb_tripped_ns;
+        self.hash = self.compute_hash();
+        self
     }
 
     /// Compute a deterministic hash of the checkpoint state.
@@ -63,6 +80,16 @@ impl StateCheckpoint {
         // Hash regime.
         for byte in self.regime.as_bytes() {
             hash ^= *byte as u64;
+            hash = hash.wrapping_mul(prime);
+        }
+
+        // Hash VIX hysteresis and circuit breaker state.
+        hash ^= self.vix_high as u64;
+        hash = hash.wrapping_mul(prime);
+        hash ^= self.vix_extreme as u64;
+        hash = hash.wrapping_mul(prime);
+        for byte in self.circuit_breaker_tripped_ns.to_le_bytes() {
+            hash ^= byte as u64;
             hash = hash.wrapping_mul(prime);
         }
 

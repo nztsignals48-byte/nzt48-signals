@@ -42,6 +42,7 @@ services:
       - ./config:/app/config
       - aegis-events:/app/events
       - aegis-data:/app/data
+      - aegis-logs:/var/log          # Sprint 8B: Persist Ouroboros/cron logs across restarts
     # SC-01a: Graceful shutdown grace period (flatten positions + wait fills)
     stop_grace_period: 60s
     # SC-16: Shared memory for IPC
@@ -127,6 +128,7 @@ services:
 volumes:
   aegis-events:
   aegis-data:
+  aegis-logs:
   aegis-redis-data:
 
 networks:

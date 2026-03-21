@@ -39,6 +39,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
 from python_brain.ouroboros.cost_model import costs as _cost_model
+from python_brain.ouroboros.contract_loader import load_lse_symbols
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -49,10 +50,7 @@ CONFIG_DIR = Path(os.environ.get("AEGIS_CONFIG_DIR", _PROJECT_ROOT / "config"))
 REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 RECS_FILE = DATA_DIR / "ouroboros_recommendations.json"
 
-PRIMARY_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-]
+PRIMARY_TICKERS = load_lse_symbols()
 
 TICKER_ID_MAP = {sym: i for i, sym in enumerate(PRIMARY_TICKERS)}
 
@@ -190,6 +188,14 @@ def load_todays_trades(date_str: str) -> List[TradeRecord]:
                     payload = event.get("payload", {})
                     if "PositionClosed" in payload:
                         pc = payload["PositionClosed"]
+                        # FIXED (Sprint 3I): Date filter — only include trades that exited TODAY.
+                        # Without this, trades from previous days leak into daily analytics.
+                        exit_ns = pc.get("exit_time_ns", 0)
+                        if exit_ns > 0:
+                            from datetime import datetime, timezone
+                            exit_date = datetime.fromtimestamp(exit_ns / 1e9, tz=timezone.utc).strftime("%Y-%m-%d")
+                            if exit_date != date_str:
+                                continue  # Skip trades that closed on a different day
                         trades.append(TradeRecord(
                             ticker=pc.get("symbol", f"TID_{pc.get('ticker_id', '?')}"),
                             ticker_id=pc.get("ticker_id", -1),
@@ -233,7 +239,10 @@ def analyze_trades(trades: List[TradeRecord], date_str: str) -> DailyMetrics:
 
     metrics.total_trades = len(trades)
     metrics.wins = sum(1 for t in trades if t.pnl > 0)
-    metrics.losses = sum(1 for t in trades if t.pnl <= 0)
+    # FIXED (Sprint 5, 3K): Breakeven trades (pnl=0) no longer counted as losses.
+    # pnl=0 typically = spread-victim breakeven, not a signal failure.
+    metrics.losses = sum(1 for t in trades if t.pnl < 0)
+    metrics.breakeven = sum(1 for t in trades if t.pnl == 0.0)
     metrics.total_pnl = sum(t.pnl for t in trades)
     metrics.win_rate = metrics.wins / metrics.total_trades if metrics.total_trades > 0 else 0.0
 

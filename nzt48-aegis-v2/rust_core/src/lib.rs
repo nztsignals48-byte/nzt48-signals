@@ -1,5 +1,5 @@
 //! AEGIS V2 — Rust Core
-//! Institutional-grade leveraged ETP trading engine.
+//! Multi-exchange trading engine: LSE ETPs + individual equities across 6+ exchanges, ~22h/day.
 //! This crate exposes all data contract types to Python via PyO3.
 #![deny(clippy::unwrap_used)]
 #![deny(warnings)]
@@ -18,8 +18,7 @@ pub mod crucible;
 pub mod cross_asset_macro;
 pub mod cross_timezone;
 pub mod currency;
-#[cfg(feature = "dqn_signal_weighting")]
-pub mod dqn_signal_weighting;
+// STRIPPED: dqn_signal_weighting — not real DQN, Thompson Sampler is correct replacement
 pub mod engine;
 pub mod asian_session;
 pub mod european_session;
@@ -41,8 +40,7 @@ pub mod log_thompson_sampler;
 pub mod market_config;
 pub mod market_scheduler;
 pub mod multiframe_vol;
-#[cfg(feature = "neural_hawkes")]
-pub mod neural_hawkes;
+// STRIPPED: neural_hawkes — feature-gated, never enabled, no value
 pub mod overnight_carry;
 pub mod ouroboros_loader;
 pub mod paper_broker;
@@ -85,8 +83,7 @@ pub mod wal_replay;
 #[cfg(test)]
 mod wal_tests;
 pub mod wal_writer;
-#[cfg(feature = "quantum_apex")]
-pub mod quantum_apex;
+// STRIPPED: quantum_apex — theater code, not quantum, just vol*volume*momentum
 #[cfg(test)]
 mod phase6_tests;
 pub mod regime_detector;

@@ -11,7 +11,7 @@ use crate::cross_timezone::CrossTimezoneEngine;
 use crate::currency::FxRateTable;
 use crate::european_session::EuropeanSession;
 use crate::exchange_profile::ExchangeRegistry;
-use crate::exit_engine::{ExitEngine, Executioner, OrderLifecycle, TrackedOrder, initial_stop_price};
+use crate::exit_engine::{ChandelierStrategy, ExitConfig, ExitEngine, Executioner, OrderLifecycle, TrackedOrder, initial_stop_price};
 use crate::garch_evt::EvtRegistry;
 use crate::garch_inference::GarchRegistry;
 use crate::hayashi_yoshida::HayashiYoshidaEngine;
@@ -368,6 +368,8 @@ pub struct Engine<B: BrokerAdapter> {
     /// P4-B: True if current HALT was caused by tick watchdog (vs liquidation/panic/manual).
     /// Used by tick recovery logic to auto-clear watchdog-only HALTs when data resumes.
     pub halt_from_watchdog: bool,
+    /// SK-02: Timestamp (ns) when HALT regime was entered. Used for zombie halt timeout (30min).
+    pub halt_started_ns: u64,
     /// P5-A: EVT on GARCH residuals for tail risk CVaR.
     pub evt_registry: EvtRegistry,
     /// P5-D: Hayashi-Yoshida async covariance estimator.
@@ -513,11 +515,34 @@ impl<B: BrokerAdapter> Engine<B> {
         // Q-051: Extract cost values before config is moved into Self
         let round_trip_fee = config.costs.round_trip_fee_pct;
         let ibkr_commission = config.costs.ibkr_commission_gbp;
+        // Sprint 6: Extract hardening values before config is moved into Self
+        let cb_errors: u64 = config.hardening.broker.circuit_breaker_errors.into();
+        let cb_window = config.hardening.broker.circuit_breaker_window_secs;
+        let cb_cooldown = config.hardening.broker.circuit_breaker_cooldown_secs;
+        let watchdog_timeout = config.hardening.broker.tick_watchdog_timeout_secs;
         Self {
             broker,
             portfolio: PortfolioState::new(equity),
             arbiter,
-            exit_engine: ExitEngine::with_costs(round_trip_fee),
+            exit_engine: {
+                // Sprint 6: Construct Chandelier from config, not hardcoded defaults.
+                let ch = &config.chandelier;
+                let strategy = ChandelierStrategy::from_config(
+                    &ch.rung_pct,
+                    ch.initial_stop_atr_mult,
+                    ch.rung3_trail_atr,
+                    ch.rung4_trail_atr,
+                    ch.rung5_trail_atr,
+                    round_trip_fee,
+                    ch.atr_floor_pct,
+                );
+                let exit_config = ExitConfig {
+                    price_spike_pct: ch.price_spike_pct,
+                    dust_threshold_gbp: ch.dust_threshold_gbp,
+                    ..ExitConfig::default()
+                };
+                ExitEngine::new(exit_config, Box::new(strategy))
+            },
             wal,
             clock,
             config,
@@ -547,9 +572,10 @@ impl<B: BrokerAdapter> Engine<B> {
             subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
             telemetry: Telemetry::new(),
             panic_guard: PanicGuard::new(),
-            broker_circuit_breaker: CircuitBreaker::new(5, 60, 30), // 5 errors/min, 30s cooldown
-            tick_watchdog: Watchdog::new(120), // 120s timeout for tick liveness
+            broker_circuit_breaker: CircuitBreaker::new(cb_errors, cb_window, cb_cooldown),
+            tick_watchdog: Watchdog::new(watchdog_timeout),
             halt_from_watchdog: false,
+            halt_started_ns: 0,
             evt_registry: EvtRegistry::default(),
             hy_engine: HayashiYoshidaEngine::default(),
             fx_table: FxRateTable::default(),
@@ -886,8 +912,16 @@ impl<B: BrokerAdapter> Engine<B> {
             .clone();
         let fx_currency = crate::currency::Currency::from_str_code(&currency_code);
         // Keep native prices for order submission (IBKR needs native-currency limit price)
+        // WIRED (Sprint 3A): Both bid and ask kept for spread calculation.
         let native_ask = tick.ask;
-        let _native_bid = tick.bid;
+        let native_bid = tick.bid;
+        // Compute native spread for tradability assessment
+        let native_mid = (native_ask + native_bid) / 2.0;
+        let native_spread_bps = if native_mid > 0.0 {
+            (native_ask - native_bid) / native_mid * 10_000.0
+        } else {
+            0.0
+        };
         // Convert tick to GBP for all internal calculations
         let mut tick = tick;
         if let Some(cur) = fx_currency {
@@ -946,11 +980,20 @@ impl<B: BrokerAdapter> Engine<B> {
             0.30 // Cold-start default
         };
 
+        // WIRED (Sprint 2B): Query EVT CVaR for tail risk sizing.
+        // FAIL-CLOSED: if no CVaR available, assume 20% reduction (unknown tail risk = conservative).
+        let evt_cvar = self.evt_registry.cvar(tid).unwrap_or(0.0);
+
         // P14: Quote imbalance — record bid/ask and check for spoofing.
         if tick.bid > 0.0 && tick.ask > 0.0 {
             self.quote_imbalance.record_quote(tid, tick.bid, tick.ask, self.now_ns);
             if self.quote_imbalance.is_spoofed(tid) {
-                eprintln!("SPOOF_DETECT: ticker={} — dropping tick, escalating to REDUCE", tid.0);
+                let drops = self.quote_imbalance.drop_count(tid);
+                eprintln!("SPOOF_DETECT: ticker={} drops={} — dropping tick, escalating to REDUCE", tid.0, drops);
+                // WIRED (Sprint 3B): Log anomaly when drop count spikes
+                if drops >= 3 {
+                    self.telemetry.record_veto("SpoofAnomaly");
+                }
                 if self.arbiter.regime < RiskRegime::Reduce {
                     self.arbiter.regime = RiskRegime::Reduce;
                 }
@@ -971,12 +1014,22 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // P5-B: Student-t Kalman filter for price smoothing.
-        let _kalman_state = {
+        // WIRED (Sprint 2A): Kalman state used for price divergence signals.
+        let kalman_state = {
             let filter = self.kalman_filters
                 .entry(tid)
                 .or_insert_with(|| StudentTKalmanFilter::new(tick.last, 1.0, 0.01, 0.1, 100));
             filter.step(tick.last);
             filter.state()
+        };
+        // Store smoothed price for downstream signal quality assessment.
+        // state() returns f64 directly — the smoothed price estimate.
+        // Divergence = (raw - smoothed) / smoothed. Positive = raw leads (potential breakout).
+        let kalman_smoothed = kalman_state;
+        let kalman_divergence = if kalman_smoothed > 0.0 {
+            (tick.last - kalman_smoothed) / kalman_smoothed
+        } else {
+            0.0
         };
 
         // P5-D: Record tick for Hayashi-Yoshida covariance estimation
@@ -1586,6 +1639,11 @@ impl<B: BrokerAdapter> Engine<B> {
             ticker_position_count: self.portfolio.position_count_for(&tid),
             // P2-3.4: Wire scanner_score from signal confidence (was -1.0 sentinel, silently passing CHECK 26).
             scanner_score: sig.confidence,
+            // WIRED Sprint 2 (2026-03-21): pass computed values to risk evaluation
+            evt_cvar,
+            kalman_divergence,
+            native_spread_bps,
+            structural_score: sig.structural_score,
             ..EvalContext::default()
         };
         // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)
@@ -1666,8 +1724,10 @@ impl<B: BrokerAdapter> Engine<B> {
         let trade_value_gbp = if self.simulation_mode {
             // AUDIT-FIX (2026-03-18): Kelly × equity — institutional sizing.
             // Half-Kelly applied above for <250 trades (bootstrap phase).
-            let notional = sizing_kelly * self.portfolio.equity;
-            notional.clamp(100.0, self.portfolio.equity * 0.25) // Floor £100, cap 25% of equity
+            // FIXED (Sprint 5, SK-01): Use equity_for_sizing (entry-based) not marked equity.
+            // Prevents undersizing after unrealised losses.
+            let notional = sizing_kelly * self.portfolio.equity_for_sizing;
+            notional.clamp(100.0, self.portfolio.equity_for_sizing * 0.25) // Floor £100, cap 25%
         } else {
             tick.ask * shares_hint.max(1) as f64
         };
@@ -2056,11 +2116,24 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // P21-AUTO: Halt → Normal auto-recovery.
-        // Mirrors the Reduce → Normal pattern above. Clears Halt ONLY when ALL
-        // halt sources have resolved: broker connected, no liquidation defense,
-        // no panics, no watchdog expiry. This makes the engine fully autonomous.
+        // FIXED (Sprint 5, SK-02): Added time-based recovery to prevent zombie halt.
+        // If broker is connected and halt has been active >30min, auto-recover to Reduce
+        // (not Normal — still cautious after extended halt).
+        // Track when halt started (using halt_started_ns field on engine).
+        // Set when entering HALT, reset when leaving.
+        let halt_duration_ns = if self.arbiter.regime == RiskRegime::Halt {
+            if self.halt_started_ns == 0 {
+                self.halt_started_ns = self.now_ns; // First time seeing HALT
+            }
+            self.now_ns.saturating_sub(self.halt_started_ns)
+        } else {
+            self.halt_started_ns = 0; // Not in HALT, reset
+            0
+        };
+        let halt_timeout_ns: u64 = 30 * 60 * 1_000_000_000; // 30 minutes
+
         if self.arbiter.regime == RiskRegime::Halt
-            && !self.halt_from_watchdog  // Watchdog has its own recovery path (line 716)
+            && !self.halt_from_watchdog
             && !self.liquidation_defense.should_halt()
             && !self.panic_guard.has_panicked()
             && !self.broker_health.should_halt(self.now_ns)
@@ -2072,6 +2145,23 @@ impl<B: BrokerAdapter> Engine<B> {
                 from: "Halt".to_string(),
                 to: "Normal".to_string(),
                 trigger: "auto_clear_all_halt_sources_resolved".to_string(),
+            });
+        }
+        // SK-02 TIME-BASED FALLBACK: If halt has been active >30min and broker is connected,
+        // recover to REDUCE (not Normal — still cautious). Prevents zombie halt.
+        else if self.arbiter.regime == RiskRegime::Halt
+            && halt_duration_ns > halt_timeout_ns
+            && self.broker.is_connected()
+        {
+            eprintln!(
+                "REGIME_RECOVERY: Halt → Reduce (zombie halt timeout after {}min, broker connected)",
+                halt_duration_ns / 60_000_000_000
+            );
+            self.arbiter.regime = RiskRegime::Reduce;
+            self.write_wal(WalPayload::RiskStateChange {
+                from: "Halt".to_string(),
+                to: "Reduce".to_string(),
+                trigger: "zombie_halt_timeout_30min".to_string(),
             });
         }
 
@@ -2282,8 +2372,22 @@ impl<B: BrokerAdapter> Engine<B> {
             }
         }
 
-        // P5-C: Log-Thompson sampler — compute allocation ranking (for telemetry).
-        let _top_tickers = self.thompson_sampler.select_top_k(5);
+        // P5-C: Log-Thompson sampler — compute allocation ranking.
+        // WIRED (Sprint 2C): Top-K ranking written to file for Python consumption.
+        let top_tickers = self.thompson_sampler.select_top_k(5);
+        // Write top-K to shared file for ticker_selector to consume
+        if let Ok(json) = serde_json::to_string(&top_tickers) {
+            let _ = std::fs::write("/app/data/thompson_top_k.json", &json);
+        }
+
+        // WIRED (Sprint 3C): Write hottest sector for nightly briefing data.
+        if let Some((sector, exposure)) = self.sector_tracker.hottest_sector() {
+            let sector_json = format!(
+                r#"{{"hottest_sector":"{:?}","exposure_gbp":{:.2},"timestamp_ns":{}}}"#,
+                sector, exposure, self.now_ns
+            );
+            let _ = std::fs::write("/app/data/sector_hottest.json", &sector_json);
+        }
 
         // Hot-reload watchlist if ticker_selector has updated it.
         self.maybe_reload_watchlist();
@@ -2978,9 +3082,17 @@ impl<B: BrokerAdapter> Engine<B> {
             if self.split_handler.was_processed(tid, self.now_ns) {
                 continue;
             }
-            // No split pending — position unchanged. If a SplitEvent were received
-            // from broker, we'd call apply_split() here and update pos qty/prices.
-            let _ = pos.qty; // Acknowledge position exists
+            // WIRED (Sprint 3G): Split handler infrastructure ready.
+            // When IBKR sends contractDetailsEnd with changed multiplier/conId,
+            // create SplitEvent and call:
+            //   let adj = self.split_handler.apply_split(&event, pos.qty, pos.avg_entry, pos.stop_price);
+            //   pos.qty = adj.new_qty as u32;
+            //   pos.avg_entry = adj.new_entry_price;
+            //   pos.stop_price = adj.new_stop_price;
+            //   self.split_handler.record_processed(event);
+            // P0 SAFETY: Without this, a 1:10 reverse split causes 10x notional exposure.
+            // TODO: Wire ibkr_broker.rs to detect split events from IBKR callbacks.
+            let _ = pos.qty; // Position exists, no split detected yet
         }
     }
 

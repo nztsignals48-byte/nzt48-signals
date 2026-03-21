@@ -38,10 +38,13 @@ _PROJECT_ROOT = Path(os.environ.get("AEGIS_ROOT", Path(__file__).resolve().paren
 DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
 
 # ---------------------------------------------------------------------------
-# Static correlation groups (known LSE leveraged ETP families)
+# Correlation groups (LSE leveraged ETP families + cross-exchange correlated instruments)
 # ---------------------------------------------------------------------------
-# Each group contains ETPs that are >0.85 correlated.
+# Each group contains instruments that are >0.85 correlated.
 # A crash in the underlying hits ALL members simultaneously.
+# TODO(Sprint 7): Move to config/config.toml [correlation_groups] section
+#   so these are configurable, not hardcoded. Add non-LSE groups for US/Asia.
+#   Hayashi-Yoshida (Sprint 10A) will eventually compute these dynamically.
 
 CORRELATION_GROUPS: Dict[str, Dict[str, Any]] = {
     "nasdaq_tech_3x": {

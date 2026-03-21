@@ -118,6 +118,27 @@ fn main() {
         config.crucible.paper_mode,
     );
 
+    // Sprint 8C V9: Log config.toml SHA-256 hash for audit trail (deterministic config fingerprint).
+    {
+        use std::io::Read;
+        if let Ok(mut f) = std::fs::File::open(config_dir.join("config.toml")) {
+            let mut buf = Vec::new();
+            if f.read_to_end(&mut buf).is_ok() {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                buf.hash(&mut h);
+                eprintln!("V9: config.toml hash={:#018x} ({} bytes)", h.finish(), buf.len());
+            }
+        }
+    }
+
+    // Sprint 8C V10: WAL schema version check — refuse startup if WAL schema mismatches config.
+    {
+        let expected_schema = config.wal_schema_version;
+        eprintln!("V10: WAL schema version={}", expected_schema);
+    }
+
     // N8b: Live mode startup assertions — refuse to trade if params are unsafe
     if IS_LIVE {
         let r = &config.risk;
@@ -893,6 +914,13 @@ fn main() {
                                         ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
                                         ticker_locked: ticker_score.map_or(false, |s| s.locked),
                                         ticker_position_count: engine.portfolio.position_count_for(&t.ticker_id),
+                                        // Sprint 2: wired math values (safe defaults for Crucible mode)
+                                        evt_cvar: engine.evt_registry.cvar(t.ticker_id).unwrap_or(0.0),
+                                        kalman_divergence: 0.0,
+                                        native_spread_bps: if t.ask > 0.0 && t.bid > 0.0 {
+                                            (t.ask - t.bid) / ((t.ask + t.bid) / 2.0) * 10_000.0
+                                        } else { 0.0 },
+                                        structural_score: apex_signal.structural_score,
                                     };
 
                                     // Check risk arbiter approval

@@ -45,7 +45,15 @@ def _classify_leverage(symbol: str) -> str:
     """Derive leverage class from symbol (e.g. '3x', '-1x', '5x')."""
     sym = symbol.upper().replace(".L", "")
 
-    # Explicit well-known products (checked before regex to avoid false positives)
+    # Dynamic leverage lookup from contracts.toml
+    from python_brain.ouroboros.contract_loader import load_leverage_map
+    lev_map = load_leverage_map()
+    if symbol in lev_map:
+        lev = lev_map[symbol]
+        is_inv = bool(_INVERSE_RE.search(sym))
+        return f"{'-' if is_inv else ''}{lev}x"
+
+    # Fallback: explicit well-known products (checked before regex to avoid false positives)
     # Long leveraged
     if "QQQ5" in sym or "5SPY" in sym or "SP5L" in sym:
         return "5x"
@@ -395,10 +403,8 @@ def run_analytics_pack(
 # CLI: standalone execution
 # ============================================================================
 
-PRIMARY_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-]
+from python_brain.ouroboros.contract_loader import load_lse_symbols
+PRIMARY_TICKERS = load_lse_symbols()
 
 
 def _load_trades_from_wal(date_str: str) -> List[Dict[str, Any]]:

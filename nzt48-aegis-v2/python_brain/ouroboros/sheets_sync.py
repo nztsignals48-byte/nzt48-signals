@@ -279,11 +279,9 @@ TAB_DEFINITIONS: Dict[str, List[str]] = {
     ],
 }
 
-# Ticker ID -> symbol mapping (mirrors nightly_v6.py PRIMARY_TICKERS)
-PRIMARY_TICKERS = [
-    "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-    "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-]
+# Ticker ID -> symbol mapping (dynamically loaded from contracts.toml)
+from python_brain.ouroboros.contract_loader import load_all_symbols
+PRIMARY_TICKERS = load_all_symbols()
 
 
 def _resolve_ticker(ticker_id: int) -> str:

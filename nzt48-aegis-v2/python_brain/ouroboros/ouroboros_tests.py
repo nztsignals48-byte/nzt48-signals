@@ -40,6 +40,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("ouroboros_tests")
 
+# Test fixture: small representative subset for deterministic tests.
+# Production code uses contract_loader.load_lse_symbols() instead.
 PRIMARY_TICKERS = [
     "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
     "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
