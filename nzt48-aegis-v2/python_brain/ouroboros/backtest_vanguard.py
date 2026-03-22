@@ -44,6 +44,57 @@ ISA_TICKERS = [
     "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
 ]
 
+
+def _load_universe_from_contracts() -> List[str]:
+    """Load all yfinance-compatible symbols from contracts.toml."""
+    config_dir = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config"))
+    contracts_path = config_dir / "contracts.toml"
+    if not contracts_path.exists():
+        log.warning("contracts.toml not found at %s, using ISA_TICKERS", contracts_path)
+        return ISA_TICKERS
+
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    with open(contracts_path, "rb") as f:
+        data = tomllib.load(f)
+
+    symbols = []
+    for c in data.get("contracts", []):
+        sym = c.get("symbol", "")
+        exchange = c.get("exchange", "")
+        # Build yfinance-compatible symbol
+        if exchange == "LSEETF":
+            yf_sym = f"{sym}.L" if not sym.endswith(".L") else sym
+        elif exchange in ("XETRA", "IBIS"):
+            yf_sym = sym  # XETRA tickers work as-is in yfinance
+        elif exchange == "EURONEXT":
+            yf_sym = sym  # Paris/Amsterdam tickers
+        elif exchange == "SMART":
+            yf_sym = sym  # US tickers
+        elif exchange in ("TSE", "HKEX", "SGX", "KSE"):
+            # Asian exchanges: yfinance format varies, skip for now
+            # TSE needs .T suffix, HKEX needs .HK, SGX needs .SI
+            if exchange == "TSE":
+                yf_sym = f"{sym}.T"
+            elif exchange == "HKEX":
+                yf_sym = f"{sym:>04s}.HK"
+            elif exchange == "SGX":
+                yf_sym = f"{sym}.SI"
+            else:
+                continue  # Skip KSE (not available)
+        else:
+            yf_sym = sym
+
+        if yf_sym and yf_sym not in symbols:
+            symbols.append(yf_sym)
+
+    log.info("Loaded %d symbols from contracts.toml (%d exchanges)", len(symbols),
+             len(set(c.get("exchange", "") for c in data.get("contracts", []))))
+    return symbols
+
 # Strategy parameters (mirror bridge.py VanguardSniper)
 EMA_FAST = 5
 EMA_SLOW = 20
@@ -582,8 +633,8 @@ def run_full_backtest(
     days: int = 30,
     equity: float = STARTING_EQUITY,
 ) -> Dict[str, Any]:
-    """Run backtest across all ISA tickers and produce unified report."""
-    tickers = tickers or ISA_TICKERS
+    """Run backtest across full universe and produce unified report."""
+    tickers = tickers or _load_universe_from_contracts()
     results: Dict[str, BacktestResult] = {}
     all_trades: List[BacktestTrade] = []
 
@@ -720,12 +771,18 @@ def main():
 
     parser = argparse.ArgumentParser(description="VanguardSniper 30-Day Backtest (N9a)")
     parser.add_argument("--days", type=int, default=30, help="Lookback days (max 59)")
-    parser.add_argument("--ticker", type=str, help="Single ticker (default: all ISA)")
+    parser.add_argument("--ticker", type=str, help="Single ticker")
+    parser.add_argument("--isa-only", action="store_true", help="Only test original 12 ISA ETPs")
     parser.add_argument("--json", action="store_true", help="JSON output to stdout")
     parser.add_argument("--send-telegram", action="store_true", help="Send report via Telegram")
     args = parser.parse_args()
 
-    tickers = [args.ticker] if args.ticker else None
+    if args.ticker:
+        tickers = [args.ticker]
+    elif args.isa_only:
+        tickers = ISA_TICKERS
+    else:
+        tickers = None  # Full universe from contracts.toml
     report = run_full_backtest(tickers=tickers, days=args.days)
 
     if args.json:
