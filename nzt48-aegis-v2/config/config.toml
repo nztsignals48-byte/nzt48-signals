@@ -144,19 +144,23 @@ reconnect_backoff_secs = [1, 2, 4, 8, 16, 32, 60]
 rate_limit_msgs_per_sec = 50
 reqmktdata_pacing_ms = 10
 historical_data_max_per_10min = 60
-max_simultaneous_lines = 100        # Free IBKR default, no Quote Boosters
+max_simultaneous_lines = 100        # IBKR reqMktData limit per client (100 concurrent)
 
 [rotation]
-# Dynamic subscription rotation — 100 free lines across 1,000 tickers
-tier1_permanent_lines = 50           # Top 50 Vanguard, always subscribed
-tier2_rotating_lines = 50            # Shared between Vanguard warm + Apex
-tier2_rotation_secs = 60             # Rotate every 60 seconds
-tier2_vanguard_batches = 5           # 250 Vanguard warm in 5 batches
-tier3_apex_batches = 14              # 700 Apex in 14 batches
+# Dynamic subscription rotation — 100 IBKR lines across 300 tickers.
+# Every 15 minutes, swap 50 tickers (keeping top 50 permanent).
+# Full 300-ticker universe scanned in 75 minutes (5 rotations × 50).
+tier1_permanent_lines = 50           # Top 50 from watchlist, always subscribed
+tier2_rotating_lines = 50            # Rotated every 15 min (50 new tickers per cycle)
+tier2_rotation_secs = 900            # 15 minutes = 900 seconds
+tier2_vanguard_batches = 5           # 250 Vanguard warm in 5 batches of 50
+tier3_apex_batches = 1               # Remaining tickers scanned via snapshot
 tier1_promotion_confidence = 80      # Promote warm->hot if signal > 80
-full_vanguard_scan_mins = 5          # Complete Vanguard warm scan
-full_apex_scan_mins = 15             # Complete Apex scan
+full_vanguard_scan_mins = 75         # Full 300-ticker scan every 75 min (5 × 15min)
+full_apex_scan_mins = 120            # Apex snapshot scan every 2 hours
 open_position_always_tier1 = true    # Tickers with positions = permanent
+# Total unique tickers scanned per cycle: 50 permanent + 50 rotating × 5 cycles = 300
+total_scan_universe = 300
 
 [wal]
 schema_version = 1
