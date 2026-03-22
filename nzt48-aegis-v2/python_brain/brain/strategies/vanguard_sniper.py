@@ -238,7 +238,7 @@ def evaluate(ticks, log_fn=None, confidence_floor=None):
         return None
 
     # Kelly fraction: preliminary sizing with Moreira-Muir applied to SIZE, not confidence.
-    kelly = min((confidence / 1000.0) * mm_scale, 0.20)  # Vol-scaled, capped at H57
+    kelly = min((confidence / 1000.0) * mm_scale, 0.05)  # BT-008: optimal Kelly=5%
 
     features = {
         "adx": float(current_adx),

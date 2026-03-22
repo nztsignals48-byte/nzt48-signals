@@ -326,7 +326,7 @@ impl Default for RawChandelier {
 }
 
 fn default_rung_pct() -> Vec<f64> { vec![0.0, 0.008, 0.015, 0.025, 0.040] }
-fn default_initial_stop_atr() -> f64 { 2.0 }
+fn default_initial_stop_atr() -> f64 { 1.5 } // BT-003: optimal ATR=1.5
 fn default_rung3_trail() -> f64 { 1.0 }
 fn default_rung4_trail() -> f64 { 0.75 }
 fn default_rung5_trail() -> f64 { 0.5 }

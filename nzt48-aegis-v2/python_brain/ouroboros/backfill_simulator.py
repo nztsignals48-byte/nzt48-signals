@@ -64,8 +64,8 @@ LEVERAGE_MAP = load_leverage_map()
 CHANDELIER_RUNG_PCTS = [0.0, 0.008, 0.015, 0.025, 0.040]
 # Chandelier exit: ATR multiplier per rung (trailing stop tightens as rung advances)
 # Rung 0 = initial stop (widest), Rung 4 = tightest trail
-# MUST match config.toml [chandelier] initial_stop_atr_mult=2.0, rung3_trail=1.0, etc.
-CHANDELIER_RUNGS = [2.0, 1.8, 1.5, 1.0, 0.75]
+# MUST match config.toml [chandelier] initial_stop_atr_mult=1.5, rung3_trail=1.0, etc.
+CHANDELIER_RUNGS = [1.5, 1.35, 1.125, 1.0, 0.75]
 CHANDELIER_ATR_PERIOD = 14
 
 # Entry signal thresholds — MUST match bridge.py Sprint 5 T-04/T-05 fixes
@@ -73,7 +73,7 @@ RSI_OVERSOLD = 30
 RSI_OVERBOUGHT = 70
 RSI_PERIOD = 14
 RVOL_ENTRY_THRESHOLD = 0.7  # Was 1.8 — lowered to match live (Sprint 5 T-05)
-VOLUME_SURGE_MULT = 1.0  # Was 2.0 — lowered to match live (Sprint 5 T-05)
+VOLUME_SURGE_MULT = 2.5  # TypeB-TIGHT: only genuine volume anomalies (BT-003 validated)
 
 STARTING_EQUITY = 10_000.0  # GBP
 

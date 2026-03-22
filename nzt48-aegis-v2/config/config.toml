@@ -38,7 +38,7 @@ SGX = 500.0                          # SGD
 
 [kelly]
 fraction_cap = 0.5
-clamp_max = 0.20
+clamp_max = 0.05                    # BT-008: optimal Kelly=5% (20% causes 73% max DD)
 volatility_drag_3x = 9
 volatility_drag_5x = 25
 
@@ -98,6 +98,43 @@ BOE = 10                             # Bank of England — UK-focused
 ECB = 15                             # European Central Bank
 BOJ = 10                             # Bank of Japan — Asia-focused
 default = 15                         # Fallback for unlisted event types
+
+# BT-004: Hour-of-day confidence multipliers (UTC). 02:00=68.6% WR, 01:00=40.1%.
+[timing.hour_weights]
+"00" = 1.0
+"01" = 0.7
+"02" = 1.3
+"03" = 1.0
+"04" = 1.0
+"05" = 1.0
+"06" = 1.1
+"07" = 1.0
+"08" = 1.1
+"09" = 1.1
+"10" = 1.0
+"11" = 0.9
+"12" = 0.9
+"13" = 1.0
+"14" = 1.1
+"15" = 1.1
+"16" = 1.1
+"17" = 0.9
+"18" = 1.0
+"19" = 1.0
+"20" = 1.0
+"21" = 0.8
+"22" = 0.9
+"23" = 0.9
+
+# BT-005: Per-exchange position sizing weights. US=58.1% WR, SGX=47.5%.
+[position.exchange_sizing_weights]
+US = 1.0
+LSE = 0.9
+TSE = 0.9
+HKEX = 0.8
+SGX = 0.5
+XETRA = 0.85
+EURONEXT = 0.85
 
 [volatility]
 # Yang-Zhang (2000) estimator — mandatory for Moreira-Muir scaling
@@ -280,8 +317,8 @@ Luxury = ["OR", "LVMH"]
 # Percentage gain thresholds to reach each rung [rung1=entry, rung2, rung3, rung4, rung5].
 # Audit-restructured (2026-03-18) for compounding optimality: tighter rungs.
 rung_pct = [0.0, 0.008, 0.015, 0.025, 0.040]
-# Initial stop: entry - Nx ATR. Widened from 1.5 (avg rung=1.1 across 65K trades = too tight).
-initial_stop_atr_mult = 2.0
+# Initial stop: entry - Nx ATR. BT-003: optimal=1.5 (PF 1477 vs 1319 at 2.0).
+initial_stop_atr_mult = 1.5
 # Trailing ATR multipliers per rung (rung 3, 4, 5+). Tighter = less profit given back.
 rung3_trail_atr = 1.0
 rung4_trail_atr = 0.75

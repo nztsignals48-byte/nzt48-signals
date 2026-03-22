@@ -1427,7 +1427,7 @@ def process_tick(msg):
 
                 # Kelly fraction from orchestrator: use sizing_mult * confidence / 1000
                 # (preliminary sizing, same approach as VanguardSniper)
-                orch_kelly = min(intent.confidence * intent.sizing_mult / 1000.0, 0.20)
+                orch_kelly = min(intent.confidence * intent.sizing_mult / 1000.0, 0.05)  # BT-008: Kelly 5%
 
                 # Compute shares from Kelly fraction
                 equity = msg.get("equity", 10000.0)
@@ -1581,7 +1581,7 @@ def process_tick(msg):
 
         # Plan 1 Phase 3: Apply adaptive Kelly cap (drawdown-aware)
         # Overrides the static clamp_max from config.toml during drawdown
-        if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.20:
+        if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.05:  # BT-008: Kelly 5%
             if best["kelly_fraction"] > _adaptive_kelly_cap:
                 best["kelly_fraction"] = _adaptive_kelly_cap
                 equity = msg.get("equity", 10000.0)
