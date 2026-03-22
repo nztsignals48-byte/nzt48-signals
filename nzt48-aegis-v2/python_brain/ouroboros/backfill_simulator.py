@@ -38,7 +38,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
-from python_brain.ouroboros.contract_loader import load_all_symbols, load_leverage_map
+from python_brain.ouroboros.contract_loader import load_yfinance_symbols, load_leverage_map
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -46,7 +46,7 @@ from python_brain.ouroboros.contract_loader import load_all_symbols, load_levera
 DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
 REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 
-PRIMARY_TICKERS = load_all_symbols()
+PRIMARY_TICKERS = load_yfinance_symbols()
 
 LEVERAGE_MAP = load_leverage_map()
 
@@ -690,13 +690,14 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
-def run_backfill() -> int:
+def run_backfill(days: int = 7) -> int:
     """Execute the backfill simulation."""
     start = time.monotonic()
-    log.info("Ouroboros v6.0 Backfill Simulator starting...")
+    log.info("Ouroboros v6.0 Backfill Simulator starting (%dd)...", days)
 
-    # Fetch historical data
-    data = fetch_historical_data(PRIMARY_TICKERS, period="7d")
+    # yfinance: max 59 days for 5-min data, 7 days for 1-min
+    period = f"{days}d"
+    data = fetch_historical_data(PRIMARY_TICKERS, period=period)
     if not data:
         log.error("No historical data fetched. Aborting.")
         return 1
@@ -725,8 +726,15 @@ def run_backfill() -> int:
 
 def main():
     """CLI entry point."""
+    import argparse
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [Backfill] %(levelname)s %(message)s")
+
+    parser = argparse.ArgumentParser(description="Ouroboros v6.0 Backfill Simulator")
+    parser.add_argument("--days", type=int, default=7, help="Lookback days (max 59 for 5-min data)")
+    args = parser.parse_args()
+
     try:
-        sys.exit(run_backfill())
+        sys.exit(run_backfill(days=min(args.days, 59)))
     except Exception as e:
         log.error("Backfill simulator crashed: %s", e, exc_info=True)
         sys.exit(1)

@@ -46,54 +46,16 @@ ISA_TICKERS = [
 
 
 def _load_universe_from_contracts() -> List[str]:
-    """Load all yfinance-compatible symbols from contracts.toml."""
-    config_dir = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config"))
-    contracts_path = config_dir / "contracts.toml"
-    if not contracts_path.exists():
-        log.warning("contracts.toml not found at %s, using ISA_TICKERS", contracts_path)
-        return ISA_TICKERS
-
+    """Load full universe from contracts.toml via centralized loader."""
     try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib  # type: ignore[no-redef]
-
-    with open(contracts_path, "rb") as f:
-        data = tomllib.load(f)
-
-    symbols = []
-    for c in data.get("contracts", []):
-        sym = c.get("symbol", "")
-        exchange = c.get("exchange", "")
-        # Build yfinance-compatible symbol
-        if exchange == "LSEETF":
-            yf_sym = f"{sym}.L" if not sym.endswith(".L") else sym
-        elif exchange in ("XETRA", "IBIS"):
-            yf_sym = sym  # XETRA tickers work as-is in yfinance
-        elif exchange == "EURONEXT":
-            yf_sym = sym  # Paris/Amsterdam tickers
-        elif exchange == "SMART":
-            yf_sym = sym  # US tickers
-        elif exchange in ("TSE", "HKEX", "SGX", "KSE"):
-            # Asian exchanges: yfinance format varies, skip for now
-            # TSE needs .T suffix, HKEX needs .HK, SGX needs .SI
-            if exchange == "TSE":
-                yf_sym = f"{sym}.T"
-            elif exchange == "HKEX":
-                yf_sym = f"{sym:>04s}.HK"
-            elif exchange == "SGX":
-                yf_sym = f"{sym}.SI"
-            else:
-                continue  # Skip KSE (not available)
-        else:
-            yf_sym = sym
-
-        if yf_sym and yf_sym not in symbols:
-            symbols.append(yf_sym)
-
-    log.info("Loaded %d symbols from contracts.toml (%d exchanges)", len(symbols),
-             len(set(c.get("exchange", "") for c in data.get("contracts", []))))
-    return symbols
+        from python_brain.ouroboros.contract_loader import load_yfinance_symbols
+        symbols = load_yfinance_symbols()
+        if symbols:
+            return symbols
+    except Exception as e:
+        log.warning("contract_loader failed: %s", e)
+    log.warning("Falling back to ISA_TICKERS (%d)", len(ISA_TICKERS))
+    return ISA_TICKERS
 
 # Strategy parameters (mirror bridge.py VanguardSniper)
 EMA_FAST = 5
