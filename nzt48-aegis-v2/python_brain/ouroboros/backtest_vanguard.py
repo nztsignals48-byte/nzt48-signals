@@ -335,8 +335,8 @@ def generate_signals(
         if hurst[i] < 0.40:
             continue
 
-        # ADX strength: require > 15
-        if adx[i] < 15:
+        # ADX strength: require >= 12 (Sprint 5 T-04: was 15, lowered)
+        if adx[i] < 12:
             continue
 
         # Volume trend: require positive volume (simplified)
@@ -356,11 +356,13 @@ def generate_signals(
 
         # Compute confidence
         confidence = CONFIDENCE_BASE
-        # ADX boost
-        if adx[i] > 35:
+        # ADX boost (Sprint 5 T-04: lowered thresholds to match live)
+        if adx[i] > 30:
+            confidence += 15
+        elif adx[i] > 20:
+            confidence += 10
+        elif adx[i] > 12:
             confidence += 5
-        elif adx[i] > 25:
-            confidence += 3
         # Hurst boost
         if hurst[i] > 0.60:
             confidence += 4

@@ -50,16 +50,19 @@ PRIMARY_TICKERS = load_yfinance_symbols()
 
 LEVERAGE_MAP = load_leverage_map()
 
-# Chandelier exit ladder (5 rungs): ATR multiplier for each rung
-CHANDELIER_RUNGS = [3.0, 2.5, 2.0, 1.5, 1.0]
+# Chandelier exit ladder (5 rungs): % gain thresholds — MUST match exit_engine.rs
+# Rung 0 = entry, Rung 1 = +0.8%, Rung 2 = +1.5%, Rung 3 = +2.5%, Rung 4 = +4.0%
+CHANDELIER_RUNG_PCTS = [0.0, 0.008, 0.015, 0.025, 0.040]
+# ATR multiplier for trailing stop (used WITHIN a rung)
+CHANDELIER_ATR_MULT = 3.0  # MUST match config.toml [chandelier] initial_stop_atr_mult
 CHANDELIER_ATR_PERIOD = 14
 
-# Entry signal thresholds
+# Entry signal thresholds — MUST match bridge.py Sprint 5 T-04/T-05 fixes
 RSI_OVERSOLD = 30
 RSI_OVERBOUGHT = 70
 RSI_PERIOD = 14
-RVOL_ENTRY_THRESHOLD = 1.8
-VOLUME_SURGE_MULT = 2.0
+RVOL_ENTRY_THRESHOLD = 0.7  # Was 1.8 — lowered to match live (Sprint 5 T-05)
+VOLUME_SURGE_MULT = 1.0  # Was 2.0 — lowered to match live (Sprint 5 T-05)
 
 STARTING_EQUITY = 10_000.0  # GBP
 
