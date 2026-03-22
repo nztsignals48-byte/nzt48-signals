@@ -505,16 +505,45 @@ def call_claude(prompt: str, is_evening: bool = False) -> Optional[str]:
 
     log.info("Claude CLI briefing completed in %.1fs (cost: $0.00)", elapsed)
 
-    # Extract briefing text
+    # Extract briefing text from Claude response
     if isinstance(result, dict):
+        # Direct briefing_text key
         text = result.get("briefing_text", "")
         if text:
             return text
+
+        # Claude helper returns {"text": "...", "raw": True} when response isn't pure JSON
+        # The text may contain embedded JSON with briefing_text inside it
+        raw_text = result.get("text", "")
+        if raw_text:
+            # Try to find {"briefing_text": "..."} embedded in the text
+            import re
+            match = re.search(r'\{"briefing_text"\s*:\s*"', raw_text)
+            if match:
+                # Extract from the JSON object start
+                json_start = match.start()
+                try:
+                    # Find the complete JSON object
+                    embedded = raw_text[json_start:]
+                    parsed = json.loads(embedded)
+                    if isinstance(parsed, dict) and "briefing_text" in parsed:
+                        return parsed["briefing_text"]
+                except json.JSONDecodeError:
+                    # Try with escaped newlines
+                    pass
+
+            # If no embedded JSON found, use the raw text as the briefing
+            # Strip any leading "thinking" text before the actual briefing
+            if "<b>" in raw_text:
+                # Find where the HTML briefing starts
+                html_start = raw_text.find("<b>")
+                return raw_text[html_start:]
+            return raw_text
+
         # Fallback: if the response was the briefing itself as some other structure
-        # try to reconstruct
         if "executive_summary" in result or "summary" in result:
             return json.dumps(result, indent=2)
-        # Last resort: return raw
+
         log.warning("Claude response missing briefing_text key -- using raw output")
         return str(result)
 
