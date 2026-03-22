@@ -75,6 +75,10 @@ services:
       - READ_ONLY_API=false
       - TWOFA_TIMEOUT_ACTION=restart
       - TWS_ACCEPT_INCOMING=accept
+      # IBC auto-restart: daily at 01:00 UTC (dark window) to maintain 2FA session
+      - AUTO_RESTART_TIME=01:00
+      # IBC cold restart: Sunday 02:00 UTC (full re-auth before Monday open)
+      - COLD_RESTART_TIME=02:00
     expose:
       - "4001"
       - "4003"

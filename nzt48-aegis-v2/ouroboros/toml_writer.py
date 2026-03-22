@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -69,7 +69,7 @@ def write_dynamic_weights(
     """Write dynamic_weights.toml."""
     path = config_dir / DYNAMIC_WEIGHTS_FILE
     lines = [
-        f"# Ouroboros dynamic weights — generated {datetime.utcnow().isoformat()}Z",
+        f"# Ouroboros dynamic weights — generated {datetime.now(timezone.utc).isoformat()}Z",
         f"schema_version = {SCHEMA_VERSION}",
         "",
         "[bayesian]",
@@ -130,7 +130,7 @@ def write_universe_classification(
             tier2.append(tid)
 
     lines = [
-        f"# Ouroboros universe — generated {datetime.utcnow().isoformat()}Z",
+        f"# Ouroboros universe — generated {datetime.now(timezone.utc).isoformat()}Z",
         f"schema_version = {SCHEMA_VERSION}",
         "",
         "[tiers]",
@@ -193,7 +193,7 @@ def write_fx_rates(config_dir: Path, rates: Dict[str, float]) -> Path:
     """P8: Write fx_rates.toml for engine consumption."""
     path = config_dir / "fx_rates.toml"
     lines = [
-        f"# FX rates (GBP base) — generated {datetime.utcnow().isoformat()}Z",
+        f"# FX rates (GBP base) — generated {datetime.now(timezone.utc).isoformat()}Z",
         "",
         "[rates]",
     ]
@@ -212,7 +212,7 @@ def archive_results(
     """Archive generated TOML files to parameter_history/."""
     history_dir = config_dir / PARAMETER_HISTORY_DIR
     history_dir.mkdir(exist_ok=True)
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     archive_path = history_dir / f"ouroboros_{date_str}.json"
 
     archive = {

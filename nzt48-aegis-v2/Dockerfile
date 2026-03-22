@@ -3,6 +3,9 @@
 
 FROM python:3.12-bookworm
 
+# tini: lightweight init for PID 1 — reaps zombie child processes
+RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+
 # Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && . "$HOME/.cargo/env" \
@@ -61,10 +64,11 @@ ENV TZ=UTC
 # Config and WAL dirs are volume-mounted at runtime
 VOLUME ["/app/config", "/app/events"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD pgrep aegis || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD pgrep aegis >/dev/null && test -f /app/events/current.ndjson || exit 1
 
 # Entrypoint runs both aegis engine and supercronic
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/app/entrypoint.sh"]

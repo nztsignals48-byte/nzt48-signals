@@ -23,7 +23,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -627,7 +627,7 @@ def rank_tickers(
 
     return RankingResult(
         rankings=top,
-        timestamp=datetime.utcnow().isoformat() + "Z",
+        timestamp=datetime.now(timezone.utc).isoformat() + "Z",
         session_window=session_window,
         regime_state=regime_state,
         ticker_count=len(top),
@@ -716,7 +716,7 @@ def write_ranking_report(
     """
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
     filename = f"ranking_{ts}.txt"
     path = report_dir / filename
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # AEGIS V2 — Entrypoint: runs aegis engine + supercronic + WAL watcher
-set -e
+# NOTE: no set -e — pre-boot steps are best-effort; only the engine exec is critical.
 
 IBKR_HOST=${IBKR_HOST:-ib-gateway}
 IBKR_PORT=${IBKR_PORT:-4003}

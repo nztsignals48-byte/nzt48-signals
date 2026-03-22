@@ -40,8 +40,13 @@ from brain.vwap import VWAPBar, VWAPCalculator
 from brain.rsi_ibs import calculate_rsi, calculate_ibs, calculate_sma
 from brain.gap_detector import calculate_gap_pct
 from python_brain.ouroboros.cost_model import costs as _cost_model
+from python_brain.ouroboros.bridge_watchdog import write_heartbeat as _write_heartbeat
 
 MAX_BARS = 500
+
+# Heartbeat: write every 30s so the watchdog knows we're alive
+_last_heartbeat_time = 0.0
+_HEARTBEAT_INTERVAL = 30.0
 
 bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 
@@ -1192,8 +1197,16 @@ def process_apex_snapshot(msg):
 
 def main():
     """Main loop: read JSON lines from stdin, write responses to stdout."""
+    global _last_heartbeat_time
     sys.stderr.write("Python Brain Bridge: started\n")
     sys.stderr.flush()
+
+    # Write initial heartbeat immediately on startup
+    _last_heartbeat_time = time.time()
+    try:
+        _write_heartbeat({"ticks_processed": 0})
+    except Exception:
+        pass
 
     for line in sys.stdin:
         line = line.strip()
@@ -1210,6 +1223,15 @@ def main():
             continue
 
         msg_type = msg.get("type", "")
+
+        # Periodic heartbeat for watchdog (every 30s)
+        now = time.time()
+        if now - _last_heartbeat_time >= _HEARTBEAT_INTERVAL:
+            _last_heartbeat_time = now
+            try:
+                _write_heartbeat({"ticks_processed": sum(_tick_counts.values())})
+            except Exception:
+                pass
 
         if msg_type == "tick":
             try:

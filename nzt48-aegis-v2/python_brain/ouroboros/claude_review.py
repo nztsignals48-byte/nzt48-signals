@@ -152,8 +152,8 @@ def _load_gate_vetoes(date_str: str, max_lines: int = 200) -> List[Dict[str, Any
                         vetoes.append(entry)
                     elif isinstance(ts, (int, float)):
                         # Nanosecond timestamp
-                        from datetime import datetime as dt
-                        evt_date = dt.utcfromtimestamp(ts / 1e9).strftime("%Y-%m-%d")
+                        from datetime import datetime as dt, timezone as tz
+                        evt_date = dt.fromtimestamp(ts / 1e9, tz=tz.utc).strftime("%Y-%m-%d")
                         if evt_date == date_str:
                             vetoes.append(entry)
                 except json.JSONDecodeError:

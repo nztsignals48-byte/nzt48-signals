@@ -511,6 +511,23 @@ impl PythonBridge {
 impl Drop for PythonBridge {
     fn drop(&mut self) {
         self.shutdown();
+        // Reap the child process to prevent zombies.
+        // Give it 2s to exit gracefully after shutdown message, then kill.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_status)) => break, // Reaped
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = self.child.kill();
+                        let _ = self.child.wait(); // Reap after kill
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
     }
 }
 
