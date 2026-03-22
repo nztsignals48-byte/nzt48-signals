@@ -1525,7 +1525,7 @@ def generate_dynamic_weights_toml(
         f"# Performance-based entry type sizing weights (Plan 1 Phase 3)",
         f"# TypeD WR < 35% → 0.5x, TypeB WR > 45% → 1.5x, else 1.0x",
     ]
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         weight = entry_weights.get(etype, 1.0)
         lines.append(f"{etype} = {weight:.2f}")
 
@@ -1580,6 +1580,8 @@ def generate_dynamic_weights_toml(
         "TypeB": "type_b_confidence",
         "TypeC": "type_c_confidence",
         "TypeD": "type_d_confidence",
+        "TypeE": "type_e_confidence",
+        "TypeF": "type_f_confidence",
     }
 
     lines += [
@@ -1588,7 +1590,7 @@ def generate_dynamic_weights_toml(
         f"# Ouroboros-tuned per-entry-type confidence (WAL + backfill feedback)",
         f"# Bounds: [{ENTRY_CONF_MIN}, {ENTRY_CONF_MAX}]",
     ]
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         conf = entry_confs.get(etype, ENTRY_CONF_DEFAULTS[etype])
         field = type_to_field[etype]
         lines.append(f"{field} = {conf:.1f}")
@@ -1609,7 +1611,7 @@ def generate_dynamic_weights_toml(
         f"# WR > 50% → lower floor (more trades), WR < 30% → 100 (disable)",
         f"# Bounds: [{THOMPSON_CONF_MIN}, {THOMPSON_CONF_MAX}], max ±{THOMPSON_MAX_STEP}/cycle",
     ]
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         conf = thompson_confs.get(etype, ENTRY_CONF_DEFAULTS[etype])
         field = type_to_field[etype]
         lines.append(f"{field} = {conf:.1f}")
