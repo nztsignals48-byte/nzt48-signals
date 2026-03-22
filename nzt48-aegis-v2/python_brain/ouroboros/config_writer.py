@@ -1168,6 +1168,78 @@ def compute_adaptive_kelly_cap(history: List[Dict[str, Any]], metrics: Dict[str,
 
 
 # ---------------------------------------------------------------------------
+# BT-004: Adaptive hour-of-day confidence weights from rolling hourly WR
+# ---------------------------------------------------------------------------
+
+# Default hour weights (UTC). Matches config.toml [timing.hour_weights].
+DEFAULT_HOUR_WEIGHTS = {h: 1.0 for h in range(24)}
+
+
+def compute_adaptive_hour_weights(events: List[Dict[str, Any]]) -> Dict[int, float]:
+    """Compute hour-of-day confidence weights from rolling hourly WR of WAL trades.
+
+    Scans all PositionClosed events (last 30 days loaded by caller). Groups
+    trades by UTC hour of entry. For each hour with >= 5 trades, computes
+    Bayesian WR and converts to a confidence multiplier:
+
+      multiplier = 0.5 + (bayesian_wr * 1.0)
+
+    This maps:
+      WR 0%  → 0.50 (halve confidence in worst hours)
+      WR 50% → 1.00 (neutral)
+      WR 100% → 1.50 (boost for best hours)
+
+    Clamped to [0.5, 1.5]. Hours with < 5 trades keep default 1.0.
+
+    Returns {0: 1.0, 1: 0.7, 2: 1.3, ...} — keyed by UTC hour (int 0-23).
+    """
+    hour_wins: Dict[int, int] = {}
+    hour_total: Dict[int, int] = {}
+
+    for event in events:
+        payload = event.get("payload", {})
+        if "PositionClosed" not in payload:
+            continue
+        pc = payload["PositionClosed"]
+        pnl = pc.get("final_pnl", 0.0)
+
+        # Extract entry UTC hour from entry_ts (nanoseconds) or opened_at
+        entry_ts = pc.get("entry_ts", pc.get("opened_at", event.get("ts", 0)))
+        if entry_ts <= 0:
+            continue
+
+        # Convert nanosecond timestamp to UTC hour
+        try:
+            entry_dt = datetime.fromtimestamp(entry_ts / 1_000_000_000, tz=timezone.utc)
+            utc_hour = entry_dt.hour
+        except (OSError, ValueError, OverflowError):
+            continue
+
+        hour_total[utc_hour] = hour_total.get(utc_hour, 0) + 1
+        if pnl > 0:
+            hour_wins[utc_hour] = hour_wins.get(utc_hour, 0) + 1
+
+    # Compute Bayesian-smoothed weights per hour
+    weights: Dict[int, float] = {}
+    for h in range(24):
+        total = hour_total.get(h, 0)
+        wins = hour_wins.get(h, 0)
+        if total >= 5:
+            # Bayesian WR with Beta(2,2) prior
+            bwr = bayesian_win_rate(wins, total)
+            # Map: 0% WR → 0.5, 50% WR → 1.0, 100% WR → 1.5
+            mult = 0.5 + bwr
+            mult = max(0.5, min(1.5, mult))
+            weights[h] = round(mult, 2)
+            log.info("Hour weight %02d: WR=%.0f%% (%d/%d) → %.2f",
+                     h, (wins / total) * 100, wins, total, weights[h])
+        else:
+            weights[h] = 1.0  # Insufficient data → neutral
+
+    return weights
+
+
+# ---------------------------------------------------------------------------
 # TOML generators
 # ---------------------------------------------------------------------------
 def generate_dynamic_weights_toml(
@@ -1466,6 +1538,21 @@ def generate_dynamic_weights_toml(
             lines.append(f'{exch} = {exchange_weights[exch]:.2f}')
     else:
         lines.append(f"# No exchange data yet — all default 1.0x")
+
+    # BT-004: Adaptive hour-of-day confidence weights from rolling WAL hourly WR.
+    # Bridge loads these from [adaptive_hour_weights] and multiplies signal
+    # confidence by the hour weight before best-signal selection.
+    adaptive_hour_wts = compute_adaptive_hour_weights(events)
+    lines += [
+        f"",
+        f"[adaptive_hour_weights]",
+        f"# Hour-of-day confidence multipliers from rolling WAL hourly WR (BT-004)",
+        f"# Bayesian-smoothed: WR 0%→0.50, WR 50%→1.00, WR 100%→1.50",
+        f"# Hours with < 5 trades default to 1.0",
+    ]
+    for h in range(24):
+        wt = adaptive_hour_wts.get(h, 1.0)
+        lines.append(f'"{h:02d}" = {wt:.2f}')
 
     # P3.5: Adaptive Kelly cap (drawdown-aware)
     adaptive_kelly_cap = compute_adaptive_kelly_cap(history, metrics)

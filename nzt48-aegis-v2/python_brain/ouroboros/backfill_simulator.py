@@ -254,6 +254,20 @@ def compute_atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period:
     return atr
 
 
+def _compute_obv(closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
+    """On-Balance Volume. Returns array same length as prices."""
+    n = len(closes)
+    obv = np.zeros(n, dtype=np.float64)
+    for i in range(1, n):
+        if closes[i] > closes[i - 1]:
+            obv[i] = obv[i - 1] + volumes[i]
+        elif closes[i] < closes[i - 1]:
+            obv[i] = obv[i - 1] - volumes[i]
+        else:
+            obv[i] = obv[i - 1]
+    return obv
+
+
 # ---------------------------------------------------------------------------
 # Entry signal classification — NO COOLDOWN, NO DAILY CAP
 # ---------------------------------------------------------------------------
@@ -263,13 +277,17 @@ def classify_entries(
     rsi: np.ndarray,
     rvol_arr: np.ndarray,
     regime: str,
+    highs: Optional[np.ndarray] = None,
+    lows: Optional[np.ndarray] = None,
 ) -> List[Tuple[int, str]]:
-    """Identify entry signals and classify as Type A/B/C/D.
+    """Identify entry signals and classify as Type A/B/C/D/E/F.
 
     Type A: Momentum breakout (RSI > 50 + RVOL surge + trending regime)
     Type B: Volume anomaly (RVOL > 2x + any regime)
     Type C: Oversold bounce (RSI < 30 + mean_reverting regime)
     Type D: Continuation (price above 20-bar EMA + trending regime)
+    Type E: IBS Mean Reversion (IBS < 0.1 + RVOL > 1.0 + mean_reverting)
+    Type F: OBV Divergence (OBV-RSI(5) < 30 + RVOL > 0.7)
 
     No cooldown between entries and no daily cap — simulator captures ALL
     possible signals to provide maximum data for Ouroboros learning.
@@ -287,6 +305,10 @@ def classify_entries(
     alpha = 2.0 / 21.0
     for i in range(1, n):
         ema20[i] = alpha * closes[i] + (1 - alpha) * ema20[i - 1]
+
+    # Precompute OBV and OBV-RSI(5) for TypeF detection
+    obv = _compute_obv(closes, volumes)
+    obv_rsi5 = compute_rsi(obv, period=5)
 
     # Scan for entries (skip first 21 bars for indicator warmup)
     # No cooldown, no daily cap — capture every signal for maximum data
@@ -314,6 +336,20 @@ def classify_entries(
             # Only trigger if price just crossed above EMA
             if i > 0 and closes[i - 1] <= ema20[i - 1]:
                 entries.append((i, "TypeD"))
+                continue
+
+        # Type E: IBS Mean Reversion (IBS < 0.1 + RVOL > 1.0 + mean_reverting)
+        if highs is not None and lows is not None:
+            if regime == "mean_reverting" and rvol_arr[i] > 1.0:
+                ibs_val = (closes[i] - lows[i]) / max(highs[i] - lows[i], 1e-9)
+                if ibs_val < 0.10:
+                    entries.append((i, "TypeE"))
+                    continue
+
+        # Type F: OBV Divergence (OBV-RSI(5) < 30 + RVOL > 0.7)
+        if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < 30.0 and rvol_arr[i] > 0.7:
+            entries.append((i, "TypeF"))
+            continue
 
     return entries
 
@@ -478,7 +514,7 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
         dates = [str(i) for i in range(len(df))]
 
     # Classify entry signals (no cooldown, no daily cap)
-    entries = classify_entries(closes, volumes, rsi, rvol_arr, regime)
+    entries = classify_entries(closes, volumes, rsi, rvol_arr, regime, highs=highs, lows=lows)
 
     for entry_bar, entry_type in entries:
         entry_price = closes[entry_bar]
@@ -673,7 +709,7 @@ def generate_simulation_report(
     # --- PER-ENTRY-TYPE ---
     lines += ["", "PER-ENTRY-TYPE PERFORMANCE", "-" * 80]
     lines.append(f"  {'Type':10s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s} {'Avg Rung':>10s}")
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         tt = by_type.get(etype, [])
         if not tt:
             lines.append(f"  {etype:10s} {'0':>8s} {'--':>7s} {'--':>6s} {'--':>7s} {'--':>12s} {'--':>10s}")
@@ -904,7 +940,7 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
             })
 
         # Suggest entry type filter if a type has very poor performance
-        for entry_type in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        for entry_type in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
             type_trades = [t for t in trades if t.entry_type == entry_type]
             if len(type_trades) >= 3:
                 type_wr = sum(1 for t in type_trades if t.pnl > 0) / len(type_trades)

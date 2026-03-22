@@ -34,7 +34,7 @@ from brain.strategies.autonomous_orchestrator import (
     orchestrate,
 )
 from brain.sizing.kelly_12factor import kelly_12factor
-from brain.indicators.volume_analytics import calculate_rvol, volume_divergence
+from brain.indicators.volume_analytics import calculate_rvol, volume_divergence, classify_volume_bvc, calculate_vpin
 from brain.indicators.hurst import estimate_hurst, classify_regime
 from brain.vwap import VWAPBar, VWAPCalculator
 from brain.rsi_ibs import calculate_rsi, calculate_ibs, calculate_sma
@@ -488,6 +488,24 @@ def _load_adaptive_params():
         for exch, weight in axw.items():
             _adaptive_exchange_weights[exch] = float(weight)
 
+        # BT-005: Fallback — if dynamic_weights.toml has no adaptive exchange
+        # weights (first boot, or nightly had no per-exchange data), load the
+        # static baseline from config.toml [position.exchange_sizing_weights].
+        if not _adaptive_exchange_weights:
+            cfg_path = "/app/config/config.toml"
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "rb") as f:
+                    cfg = tomllib.load(f)
+                static_ew = cfg.get("position", {}).get("exchange_sizing_weights", {})
+                for exch, weight in static_ew.items():
+                    _adaptive_exchange_weights[exch] = float(weight)
+                if _adaptive_exchange_weights:
+                    sys.stderr.write(
+                        "Bridge: exchange weights fallback from config.toml "
+                        "[position.exchange_sizing_weights]: {}\n".format(_adaptive_exchange_weights)
+                    )
+                    sys.stderr.flush()
+
         # Adaptive Kelly cap
         ak = data.get("adaptive_kelly", {})
         if "kelly_cap" in ak:
@@ -525,6 +543,74 @@ def _load_adaptive_params():
     except Exception as e:
         sys.stderr.write(f"Bridge: failed to load adaptive params: {e}\n")
         sys.stderr.flush()
+
+
+# ============================================================================
+# BT-004: Hour-of-day confidence weight loader from config.toml
+# Lazy-loaded, cached for process lifetime (same pattern as _load_adaptive_floor).
+# Reads [timing.hour_weights] → {"00": 1.0, "01": 0.7, ...}
+# At runtime also checks [adaptive_hour_weights] in dynamic_weights.toml;
+# adaptive values (from nightly rolling WR) override static if present.
+# ============================================================================
+_hour_weights_loaded = False
+_hour_weights = {}  # UTC hour (int 0-23) → confidence multiplier (float)
+
+
+def _load_hour_weights():
+    """Load hour-of-day confidence weights from config.toml [timing.hour_weights].
+
+    Falls back to dynamic_weights.toml [adaptive_hour_weights] if present
+    (adaptive overrides static). Loaded once and cached for process lifetime.
+    """
+    global _hour_weights_loaded, _hour_weights
+    if _hour_weights_loaded:
+        return _hour_weights
+    _hour_weights_loaded = True
+
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        # Source 1: Static hour weights from config.toml
+        cfg_path = "/app/config/config.toml"
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            hw = cfg.get("timing", {}).get("hour_weights", {})
+            for hour_str, weight in hw.items():
+                try:
+                    _hour_weights[int(hour_str)] = float(weight)
+                except (ValueError, TypeError):
+                    continue
+
+        # Source 2: Adaptive hour weights from dynamic_weights.toml (override static)
+        dw_path = "/app/config/dynamic_weights.toml"
+        if os.path.exists(dw_path):
+            with open(dw_path, "rb") as f:
+                dw = tomllib.load(f)
+            ahw = dw.get("adaptive_hour_weights", {})
+            for hour_str, weight in ahw.items():
+                try:
+                    _hour_weights[int(hour_str)] = float(weight)
+                except (ValueError, TypeError):
+                    continue
+
+        if _hour_weights:
+            sys.stderr.write(
+                "Bridge: loaded hour weights ({} hours, range {:.2f}-{:.2f})\n".format(
+                    len(_hour_weights),
+                    min(_hour_weights.values()),
+                    max(_hour_weights.values()),
+                )
+            )
+            sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"Bridge: failed to load hour weights: {e}\n")
+        sys.stderr.flush()
+
+    return _hour_weights
 
 
 # ============================================================================
@@ -1006,6 +1092,23 @@ def process_tick(msg):
             den = sum((i - x_mean) ** 2 for i in range(n))
             vol_slope = num / den if den > 0 else 0.0
 
+    # =========================================================================
+    # Sprint D: VPIN shadow filter — compute but do NOT gate on it.
+    # VPIN (Volume-Synchronized Probability of Informed Trading) uses BVC
+    # to classify buy/sell volume, then measures order flow imbalance.
+    # High VPIN = high informed flow = potential adverse selection.
+    # SHADOW MODE: log values for Ouroboros analysis, never block signals.
+    # =========================================================================
+    _vpin_value = 0.0
+    if bars_5m and len(bars_5m) >= 20:
+        _bar_closes = [b.get("close", b.get("last", 0)) for b in bars_5m[-50:]]
+        _bar_volumes = [b.get("volume", 0) for b in bars_5m[-50:]]
+        try:
+            _buy_v, _sell_v = classify_volume_bvc(_bar_closes, _bar_volumes)
+            _vpin_value = calculate_vpin(_buy_v, _sell_v, n_buckets=min(20, len(_bar_closes)))
+        except Exception:
+            _vpin_value = 0.0
+
     no_signal_base = {
         "type": "no_signal",
         "ticker_id": ticker_id,
@@ -1034,6 +1137,7 @@ def process_tick(msg):
         "bid": bid, "ask": ask, "leverage": msg.get("leverage", 1),
         "session_mode": msg.get("session_mode", "?"),
         "volume": msg.get("volume", 0),
+        "vpin": _vpin_value,  # Sprint D: VPIN shadow (informational only)
     }
 
     # =========================================================================
@@ -1509,6 +1613,29 @@ def process_tick(msg):
     # Phase G gates (G1 spread, G2 VWAP extension) moved BEFORE signal eval
     # by T-03 (Sprint 5) — see above. No longer duplicated here.
 
+    # ---- BT-004: Apply hour-of-day confidence weights ----
+    # Multiply signal confidence by the UTC-hour weight BEFORE best-signal
+    # selection so that low-edge hours (e.g. 01:00 UTC) are naturally
+    # demoted relative to high-edge hours (e.g. 02:00 UTC).
+    hour_weights = _load_hour_weights()
+    if hour_weights:
+        _ts_ns_hw = msg.get("timestamp_ns", 0)
+        if _ts_ns_hw > 0:
+            from datetime import datetime as _dt_hw, timezone as _tz_hw
+            _utc_hour = _dt_hw.fromtimestamp(
+                _ts_ns_hw / 1_000_000_000, tz=_tz_hw.utc
+            ).hour
+            hw = hour_weights.get(_utc_hour, 1.0)
+            if hw != 1.0:
+                if vanguard_signal:
+                    vanguard_signal["confidence"] = max(
+                        0, min(100, int(vanguard_signal["confidence"] * hw))
+                    )
+                if orchestrator_signal:
+                    orchestrator_signal["confidence"] = max(
+                        0, min(100, int(orchestrator_signal["confidence"] * hw))
+                    )
+
     # ---- Select best signal (highest confidence wins) ----
     best = None
     if vanguard_signal and orchestrator_signal:
@@ -1588,6 +1715,12 @@ def process_tick(msg):
                 price = max(msg["last"], 1e-9)
                 best["shares"] = max(1, int(_adaptive_kelly_cap * equity / price))
             best["adaptive_kelly_cap"] = _adaptive_kelly_cap
+
+        # Sprint D: VPIN shadow fields — informational only, never gates.
+        # Ouroboros will analyse these to determine if VPIN adds predictive value
+        # before promoting to a real gate in a future sprint.
+        best["vpin"] = round(_vpin_value, 4)
+        best["vpin_would_block"] = bool(_vpin_value < 0.3 and rvol > 2.5)
 
         # Record cooldown timestamp
         _last_signal_tick[ticker_id] = tick_count

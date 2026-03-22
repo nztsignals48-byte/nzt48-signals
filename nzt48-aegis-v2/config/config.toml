@@ -330,6 +330,14 @@ price_spike_pct = 0.10
 # Dust threshold in GBP. Remainder below this → market sell.
 dust_threshold_gbp = 500.0
 
+# Sprint G: Volume exhaustion exit — tighten stop when RVOL signals climactic reversal.
+# When current RVOL exceeds rvol_exhaustion_mult (i.e., volume is 10x normal),
+# the Chandelier stop tightens to tight_stop_atr × ATR below peak.
+[chandelier.exhaustion]
+enabled = true
+rvol_exhaustion_mult = 10.0    # When current RVOL > 10x average, treat as exhaustion
+tight_stop_atr = 0.5           # Tighten stop to ATR 0.5 during exhaustion
+
 # Sprint 6: InfiniteChandelier adaptive multiplier bounds.
 # Each pair is [min, max]. Engine clamps to these ranges.
 [chandelier.adaptive]

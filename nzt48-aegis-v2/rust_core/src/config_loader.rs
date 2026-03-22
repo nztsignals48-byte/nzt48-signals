@@ -307,6 +307,9 @@ pub struct RawChandelier {
     pub dust_threshold_gbp: f64,
     #[serde(default)]
     pub adaptive: RawChandelierAdaptive,
+    /// Sprint G: Volume exhaustion exit config.
+    #[serde(default)]
+    pub exhaustion: RawChandelierExhaustion,
 }
 
 impl Default for RawChandelier {
@@ -321,9 +324,35 @@ impl Default for RawChandelier {
             price_spike_pct: default_spike_pct(),
             dust_threshold_gbp: default_dust(),
             adaptive: RawChandelierAdaptive::default(),
+            exhaustion: RawChandelierExhaustion::default(),
         }
     }
 }
+
+/// Sprint G: Volume exhaustion exit config (from config.toml [chandelier.exhaustion]).
+#[derive(Debug, Deserialize)]
+pub struct RawChandelierExhaustion {
+    #[serde(default = "default_exhaustion_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_exhaustion_rvol_mult")]
+    pub rvol_exhaustion_mult: f64,
+    #[serde(default = "default_exhaustion_tight_atr")]
+    pub tight_stop_atr: f64,
+}
+
+impl Default for RawChandelierExhaustion {
+    fn default() -> Self {
+        Self {
+            enabled: default_exhaustion_enabled(),
+            rvol_exhaustion_mult: default_exhaustion_rvol_mult(),
+            tight_stop_atr: default_exhaustion_tight_atr(),
+        }
+    }
+}
+
+fn default_exhaustion_enabled() -> bool { true }
+fn default_exhaustion_rvol_mult() -> f64 { 10.0 }
+fn default_exhaustion_tight_atr() -> f64 { 0.5 }
 
 fn default_rung_pct() -> Vec<f64> { vec![0.0, 0.008, 0.015, 0.025, 0.040] }
 fn default_initial_stop_atr() -> f64 { 1.5 } // BT-003: optimal ATR=1.5
@@ -429,6 +458,12 @@ pub struct RawEntryTypes {
     #[serde(default = "default_type_d_rsi_lo")] pub type_d_rsi_low: f64,
     #[serde(default = "default_type_d_rsi_hi")] pub type_d_rsi_high: f64,
     #[serde(default = "default_decay_rate")] pub confidence_decay_rate_per_hour: f64,
+    #[serde(default = "default_type_e_conf")] pub type_e_confidence: f64,
+    #[serde(default = "default_type_e_ibs")] pub type_e_ibs_threshold: f64,
+    #[serde(default = "default_type_e_rvol")] pub type_e_rvol_threshold: f64,
+    #[serde(default = "default_type_f_conf")] pub type_f_confidence: f64,
+    #[serde(default = "default_type_f_obv_rsi")] pub type_f_obv_rsi_threshold: f64,
+    #[serde(default = "default_type_f_rvol")] pub type_f_rvol_threshold: f64,
 }
 
 impl Default for RawEntryTypes {
@@ -449,6 +484,12 @@ impl Default for RawEntryTypes {
             type_d_rsi_low: default_type_d_rsi_lo(),
             type_d_rsi_high: default_type_d_rsi_hi(),
             confidence_decay_rate_per_hour: default_decay_rate(),
+            type_e_confidence: default_type_e_conf(),
+            type_e_ibs_threshold: default_type_e_ibs(),
+            type_e_rvol_threshold: default_type_e_rvol(),
+            type_f_confidence: default_type_f_conf(),
+            type_f_obv_rsi_threshold: default_type_f_obv_rsi(),
+            type_f_rvol_threshold: default_type_f_rvol(),
         }
     }
 }
@@ -468,6 +509,12 @@ fn default_type_d_prox() -> f64 { 1.0 }
 fn default_type_d_rsi_lo() -> f64 { 20.0 }
 fn default_type_d_rsi_hi() -> f64 { 40.0 }
 fn default_decay_rate() -> f64 { 2.1 }
+fn default_type_e_conf() -> f64 { 70.0 }
+fn default_type_e_ibs() -> f64 { 0.10 }
+fn default_type_e_rvol() -> f64 { 1.0 }
+fn default_type_f_conf() -> f64 { 68.0 }
+fn default_type_f_obv_rsi() -> f64 { 30.0 }
+fn default_type_f_rvol() -> f64 { 0.7 }
 
 // ── Sprint 6: Hardening config ──
 
@@ -762,6 +809,8 @@ struct RawEntryTypesLive {
     type_b_confidence: Option<f64>,
     type_c_confidence: Option<f64>,
     type_d_confidence: Option<f64>,
+    type_e_confidence: Option<f64>,
+    type_f_confidence: Option<f64>,
 }
 
 // ── Universe + Contracts ──
@@ -986,6 +1035,8 @@ impl EngineConfig {
             if let Some(v) = et.type_b_confidence { cfg.entry_types.type_b_confidence = v; }
             if let Some(v) = et.type_c_confidence { cfg.entry_types.type_c_confidence = v; }
             if let Some(v) = et.type_d_confidence { cfg.entry_types.type_d_confidence = v; }
+            if let Some(v) = et.type_e_confidence { cfg.entry_types.type_e_confidence = v; }
+            if let Some(v) = et.type_f_confidence { cfg.entry_types.type_f_confidence = v; }
         }
 
         eprintln!(

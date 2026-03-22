@@ -529,7 +529,7 @@ impl<B: BrokerAdapter> Engine<B> {
             exit_engine: {
                 // Sprint 6: Construct Chandelier from config, not hardcoded defaults.
                 let ch = &config.chandelier;
-                let strategy = ChandelierStrategy::from_config(
+                let mut strategy = ChandelierStrategy::from_config(
                     &ch.rung_pct,
                     ch.initial_stop_atr_mult,
                     ch.rung3_trail_atr,
@@ -537,6 +537,12 @@ impl<B: BrokerAdapter> Engine<B> {
                     ch.rung5_trail_atr,
                     round_trip_fee,
                     ch.atr_floor_pct,
+                );
+                // Sprint G: Wire volume exhaustion config into Chandelier strategy.
+                strategy.set_exhaustion_config(
+                    ch.exhaustion.enabled,
+                    ch.exhaustion.rvol_exhaustion_mult,
+                    ch.exhaustion.tight_stop_atr,
                 );
                 let exit_config = ExitConfig {
                     price_spike_pct: ch.price_spike_pct,
@@ -1124,6 +1130,26 @@ impl<B: BrokerAdapter> Engine<B> {
                 if atr > 0.0 {
                     let profit_atr = (tick.last - pos.avg_entry) / atr;
                     self.exit_engine.strategy_mut().update_mega_runner(profit_atr);
+                }
+
+                // Sprint G: Volume exhaustion — tighten stop when RVOL signals climactic reversal.
+                // RVOL is already relative volume (current/average), so RVOL >= 10 means 10x normal.
+                // If triggered, ratchet stop UP to (highest_high - tight_atr * ATR).
+                if atr > 0.0 {
+                    let current_rvol = self.bar_history.get(&tid)
+                        .map(|h| h.realized_vol(6120.0))
+                        .unwrap_or(0.0);
+                    if let Some(tight_atr) = self.exit_engine.check_exhaustion(current_rvol) {
+                        let exhaustion_stop = pos.highest_high - tight_atr * atr;
+                        // H68: stop ratchet — can NEVER decrease
+                        if exhaustion_stop > pos.stop_price {
+                            eprintln!(
+                                "EXHAUSTION: ticker={} rvol={:.1} tightening stop {:.4} → {:.4} (tight_atr={:.2})",
+                                tid.0, current_rvol, pos.stop_price, exhaustion_stop, tight_atr
+                            );
+                            pos.stop_price = exhaustion_stop;
+                        }
+                    }
                 }
 
                 pos.unrealized_pnl = (tick.last - pos.avg_entry) * pos.qty as f64;

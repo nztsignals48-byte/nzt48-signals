@@ -25,6 +25,10 @@ pub trait ExitStrategy: Send {
                           _amihud: f64, _heat: f64, _is_reduce: bool) {}
     /// P1-2.6: Update mega-runner bonus based on profit in ATR multiples.
     fn update_mega_runner(&mut self, _profit_atr: f64) {}
+    /// Sprint G: Check volume exhaustion. If current RVOL exceeds the exhaustion threshold,
+    /// returns Some(tight_atr) — the tightened ATR multiplier for the stop.
+    /// The engine calls this before compute_stop and uses the tighter value if triggered.
+    fn check_exhaustion(&self, _current_rvol: f64) -> Option<f64> { None }
 }
 
 /// Chandelier trailing-stop-only strategy — NO partial sells, FULL position rides.
@@ -56,6 +60,12 @@ pub struct ChandelierStrategy {
     pub initial_stop_atr_mult: f64,
     /// Sprint 6: ATR floor as fraction of entry price. Default 0.005 (0.5%).
     pub atr_floor_pct: f64,
+    /// Sprint G: Volume exhaustion — tighten stop when RVOL signals climactic reversal.
+    pub exhaustion_enabled: bool,
+    /// Sprint G: RVOL threshold for exhaustion (e.g., 10.0 = 10x normal volume).
+    pub exhaustion_rvol_mult: f64,
+    /// Sprint G: Tight ATR multiplier used during exhaustion (e.g., 0.5).
+    pub exhaustion_tight_atr: f64,
 }
 
 impl Default for ChandelierStrategy {
@@ -79,6 +89,9 @@ impl Default for ChandelierStrategy {
             round_trip_fee_pct: 0.003, // 0.3% round-trip (conservative for LSE 3x ETPs)
             initial_stop_atr_mult: 2.0,
             atr_floor_pct: 0.005,
+            exhaustion_enabled: true,
+            exhaustion_rvol_mult: 10.0,
+            exhaustion_tight_atr: 0.5,
         }
     }
 }
@@ -106,7 +119,18 @@ impl ChandelierStrategy {
             round_trip_fee_pct,
             initial_stop_atr_mult,
             atr_floor_pct,
+            // Sprint G: Defaults — caller should override via set_exhaustion_config
+            exhaustion_enabled: true,
+            exhaustion_rvol_mult: 10.0,
+            exhaustion_tight_atr: 0.5,
         }
+    }
+
+    /// Sprint G: Configure volume exhaustion parameters from config.
+    pub fn set_exhaustion_config(&mut self, enabled: bool, rvol_mult: f64, tight_atr: f64) {
+        self.exhaustion_enabled = enabled;
+        self.exhaustion_rvol_mult = rvol_mult;
+        self.exhaustion_tight_atr = tight_atr;
     }
 }
 
@@ -153,6 +177,14 @@ impl ExitStrategy for ChandelierStrategy {
 
     fn set_trail_atr(&mut self, mult: f64) {
         self.rung5_trail_atr = mult;
+    }
+
+    fn check_exhaustion(&self, current_rvol: f64) -> Option<f64> {
+        if self.exhaustion_enabled && current_rvol >= self.exhaustion_rvol_mult {
+            Some(self.exhaustion_tight_atr)
+        } else {
+            None
+        }
     }
 }
 
@@ -236,6 +268,12 @@ impl ExitEngine {
     /// P4-C: Check if using InfiniteChandelier.
     pub fn is_infinite_chandelier(&self) -> bool {
         self.config.use_infinite_chandelier
+    }
+
+    /// Sprint G: Check volume exhaustion. Returns Some(tight_atr) if RVOL signals
+    /// climactic volume (exhaustion), meaning the stop should tighten dramatically.
+    pub fn check_exhaustion(&self, current_rvol: f64) -> Option<f64> {
+        self.strategy.check_exhaustion(current_rvol)
     }
 
     /// Evaluate ALL exit conditions for a position on the current tick.
@@ -725,6 +763,11 @@ impl ExitStrategy for InfiniteChandelier {
     fn update_mega_runner(&mut self, profit_atr: f64) {
         let cfg = &self.adaptive_config;
         self.multipliers.update_mega_runner_cfg(profit_atr, cfg);
+    }
+
+    fn check_exhaustion(&self, current_rvol: f64) -> Option<f64> {
+        // Sprint G: Delegate exhaustion check to base ChandelierStrategy
+        self.base.check_exhaustion(current_rvol)
     }
 }
 
