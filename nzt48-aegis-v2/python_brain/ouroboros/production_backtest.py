@@ -486,6 +486,8 @@ def main():
     parser.add_argument("--interval", type=str, default="5m", help="Bar interval (5m, 60m, 1h)")
     parser.add_argument("--ticker", type=str, help="Single ticker")
     parser.add_argument("--expanded", action="store_true", help="Use expanded_universe.json")
+    parser.add_argument("--chunk", type=int, default=0, help="Chunk index (0-based) for parallel execution")
+    parser.add_argument("--chunks", type=int, default=1, help="Total number of chunks")
     args = parser.parse_args()
 
     # Load tickers
@@ -505,6 +507,14 @@ def main():
         except Exception:
             log.error("Cannot load tickers")
             sys.exit(1)
+
+    # Split into chunks for parallel execution
+    if args.chunks > 1:
+        chunk_size = len(tickers) // args.chunks + 1
+        start = args.chunk * chunk_size
+        end = min(start + chunk_size, len(tickers))
+        tickers = tickers[start:end]
+        log.info("Chunk %d/%d: tickers[%d:%d] = %d tickers", args.chunk + 1, args.chunks, start, end, len(tickers))
 
     log.info("Production-parity backtest: %d tickers, %dd, %s interval", len(tickers), args.days, args.interval)
 
