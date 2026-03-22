@@ -11,7 +11,7 @@
 #   XETRA/EURONEXT: ticker symbols (e.g. SAP, ASML)
 #   US/SMART: ticker symbols (e.g. AAPL, NVDA)
 #
-# Total: ~250 contracts across 6 market regions
+# Total: 402 contracts across 10 market regions (expanded 2026-03-22)
 # IBKR paper account supports 100 concurrent subscriptions — engine rotates based on market hours.
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2736,3 +2736,1439 @@ inverse_of = ""
 # ASX (Australian) — REMOVED (no IBKR data subscription)
 # Re-add when ASX Total (NP,L2) subscription is active (AUD 25/mo)
 # ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EXPANSION BATCH — 2026-03-22
+# Added ~120 new contracts across US, TSE, HKEX, XETRA, EURONEXT, KRX, ASX
+# Total target: 400+ contracts across 8 market regions
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# US EQUITIES EXPANSION — Semis, Mega-caps, Travel, Energy, Auto/EV, Tech, ETFs
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --- Semiconductors (strongest backtest theme) ---
+[[contracts]]
+symbol = "GOOGL"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADBE"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TXN"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADI"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ON"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SWKS"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MCHP"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NXPI"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GFS"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+# --- Mega-caps for diversification ---
+[[contracts]]
+symbol = "BRK B"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JNJ"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PG"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PEP"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MCD"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABBV"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BMY"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GILD"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRNA"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+# --- Travel (high volume events) ---
+[[contracts]]
+symbol = "BKNG"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Travel"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXPE"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Travel"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MAR"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Travel"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HLT"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Travel"
+inverse_of = ""
+
+# --- Energy (event-driven volume) ---
+[[contracts]]
+symbol = "SLB"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HAL"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OXY"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DVN"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MPC"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VLO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSX"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+# --- Auto/EV (high retail volume) ---
+[[contracts]]
+symbol = "F"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GM"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NIO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "XPEV"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LI"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+# --- Tech — liquid mid-caps ---
+[[contracts]]
+symbol = "PYPL"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INTU"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FTNT"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZM"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OKTA"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WDAY"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TWLO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+# --- ETFs (regime detection reference) ---
+[[contracts]]
+symbol = "SPY"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "ETF_Broad"
+inverse_of = ""
+
+[[contracts]]
+symbol = "QQQ"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "ETF_Tech"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IWM"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "ETF_SmallCap"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DIA"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "ETF_Broad"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TSE EXPANSION — Liquid mid/large caps, semiconductor equipment, consumer
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "4755"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9613"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2801"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3407"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6594"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6981"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "7832"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Entertainment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8725"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2502"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6752"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "7267"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "8053"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Trading"
+inverse_of = ""
+
+[[contracts]]
+symbol = "4523"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Pharmaceuticals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6976"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6146"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "9843"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2269"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "6645"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Electronics"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HKEX EXPANSION — Infrastructure, utilities, telco, financials
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "0066"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Transport"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0012"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0002"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0823"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1038"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Infrastructure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0669"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0941"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Telecom"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2628"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1113"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "0101"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# XETRA EXPANSION — DAX/MDAX liquid additions
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "MRK"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LIN"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHL"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BNR"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SRT3"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ENR"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PUM"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZAL"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HFG"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EURONEXT EXPANSION — Paris (SBF) + Milan (BVME)
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "RMS"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Luxury"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DG"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BN"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RI"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CA"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VIV"
+con_id = 0
+exchange = "EURONEXT"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Entertainment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STLAM"
+con_id = 0
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ISP"
+con_id = 0
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KRX (Korea Exchange) — 10 liquid Korean blue-chips
+# NOTE: KRX contracts may not work on this IBKR account (account-level
+# restriction verified 2026-03-19). Added anyway — engine will gracefully
+# handle subscription errors via reqContractDetails failure path.
+# Symbol: zero-padded 6-digit codes | Currency: KRW
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "005930"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "000660"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "035420"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "005380"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+[[contracts]]
+symbol = "051910"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "006400"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "035720"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "207940"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "373220"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "034730"
+con_id = 0
+exchange = "KRX"
+sec_type = "STK"
+currency = "KRW"
+leverage = 1
+sector = "Conglomerate"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ASX (Australian Securities Exchange) — 10 liquid blue-chips
+# NOTE: May require ASX Total (NP,L2) data subscription (AUD 25/mo).
+# Engine will handle subscription errors gracefully if not subscribed.
+# IBKR exchange: ASX | Currency: AUD | Symbol: ticker
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "BHP"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CBA"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSL"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NAB"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WBC"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ANZ"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WES"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MQG"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RIO"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FMG"
+con_id = 0
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ADDITIONAL US EQUITIES — Push to 120+ US total
+# High-volume names ideal for TypeB volume anomaly detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+[[contracts]]
+symbol = "CSCO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IBM"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "T"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Telecom"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VZ"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Telecom"
+inverse_of = ""
+
+[[contracts]]
+symbol = "C"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BAC"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WFC"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CVX"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COP"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LMT"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Aerospace"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RTX"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Aerospace"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GE"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HON"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LOW"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TGT"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NKE"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SBUX"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TMO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DHR"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ISRG"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+# --- Additional TSE to push to 80 ---
+[[contracts]]
+symbol = "3105"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "7272"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Automotive"
+inverse_of = ""
+
+# --- Additional HKEX to push to 52 ---
+[[contracts]]
+symbol = "0017"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1109"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Real_Estate"
+inverse_of = ""
+
+# --- Additional EURONEXT ---
+[[contracts]]
+symbol = "ABI"
+con_id = 0
+exchange = "AEB"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Consumer"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PHIA"
+con_id = 0
+exchange = "AEB"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Healthcare"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INGA"
+con_id = 0
+exchange = "AEB"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
