@@ -10,6 +10,9 @@ const NANOS_PER_SEC: u64 = 1_000_000_000;
 const ONE_MINUTE_NS: u64 = 60 * NANOS_PER_SEC;
 const DEFAULT_MAX_DISCONNECT_SECS: u64 = 120;
 const DEFAULT_MAX_FILL_ERROR_RATE_PCT: f64 = 5.0;
+// TODO(P3.6): Load these from config.toml [hardening.broker] instead of hardcoding.
+// Config keys: base_backoff_ms, max_backoff_ms, jitter_mod_ms.
+// Requires threading BrokerConfig into BrokerHealthMonitor::new() or adding a from_config() constructor.
 const MAX_BACKOFF_MS: u64 = 30_000;
 const BASE_BACKOFF_MS: u64 = 1_000;
 const JITTER_MOD: u64 = 1_000;

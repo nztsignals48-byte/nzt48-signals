@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf 
 # Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && . "$HOME/.cargo/env" \
-    && rustup default stable
+    && rustup install 1.94.0 && rustup default 1.94.0
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Sprint S03: Node.js 22 + Claude Code CLI ($0/month via Max subscription)

@@ -511,6 +511,8 @@ impl<B: BrokerAdapter> Engine<B> {
             // but it must be the SAME in paper and live.
             // risk_config.spread_veto_pct = 2.0;  // REMOVED — use config value (0.3%)
         }
+        // R6: Extract dividend withholding factor before risk_config is moved
+        let dividend_factor = risk_config.dividend_withholding_factor;
         let arbiter = RiskArbiter::new(risk_config);
         // Q-051: Extract cost values before config is moved into Self
         let round_trip_fee = config.costs.round_trip_fee_pct;
@@ -522,7 +524,7 @@ impl<B: BrokerAdapter> Engine<B> {
         let watchdog_timeout = config.hardening.broker.tick_watchdog_timeout_secs;
         Self {
             broker,
-            portfolio: PortfolioState::new(equity),
+            portfolio: PortfolioState::with_dividend_factor(equity, dividend_factor),
             arbiter,
             exit_engine: {
                 // Sprint 6: Construct Chandelier from config, not hardcoded defaults.
@@ -1756,7 +1758,13 @@ impl<B: BrokerAdapter> Engine<B> {
             _ => "XLON",
         };
         if let Some(profile) = self.exchange_registry.by_mic(exchange_mic) {
-            let _rounded = profile.round_tick(tick.ask);
+            let rounded = profile.round_tick(tick.ask);
+            if (rounded - tick.ask).abs() > f64::EPSILON {
+                eprintln!(
+                    "TICK_ROUND: ticker={} ask={:.4} rounded={:.4} (tick size mismatch)",
+                    tid.0, tick.ask, rounded,
+                );
+            }
         }
         let isa_check = self.isa_gate.check(exchange_mic, trade_value_gbp);
         if !matches!(isa_check, crate::isa_gate::IsaCheckResult::Allowed) {
@@ -3069,23 +3077,29 @@ impl<B: BrokerAdapter> Engine<B> {
     }
 
     /// P15: Check for pending split events and apply adjustments.
+    ///
+    /// BLOCKED (R1): Cannot uncomment split adjustment logic until:
+    ///   1. ibkr_broker.rs emits SplitEvent when contractDetailsEnd detects
+    ///      changed multiplier/conId (IBKR callback integration needed).
+    ///   2. This loop must be refactored to collect tickers first, then mutate
+    ///      positions (borrow checker: can't mutate while iterating &self.positions).
+    ///
+    /// P0 SAFETY: Without this, a 1:10 reverse split causes 10x notional exposure.
+    /// Priority: Wire before going live with any stock-split-prone underlyings.
     pub fn check_pending_splits(&mut self) {
         for (&tid, pos) in &self.positions {
-            // Check if any unprocessed split exists for this ticker.
-            // In live, split events come from IBKR — here we just verify none are pending.
             if self.split_handler.was_processed(tid, self.now_ns) {
                 continue;
             }
-            // WIRED (Sprint 3G): Split handler infrastructure ready.
-            // When IBKR sends contractDetailsEnd with changed multiplier/conId,
-            // create SplitEvent and call:
-            //   let adj = self.split_handler.apply_split(&event, pos.qty, pos.avg_entry, pos.stop_price);
-            //   pos.qty = adj.new_qty as u32;
-            //   pos.avg_entry = adj.new_entry_price;
-            //   pos.stop_price = adj.new_stop_price;
-            //   self.split_handler.record_processed(event);
-            // P0 SAFETY: Without this, a 1:10 reverse split causes 10x notional exposure.
-            // TODO: Wire ibkr_broker.rs to detect split events from IBKR callbacks.
+            // TODO(R1): When IBKR split events are wired, refactor to:
+            //   1. Collect pending splits into Vec<(TickerId, SplitEvent)>
+            //   2. After iteration, for each (tid, event):
+            //      let pos = self.positions.get_mut(&tid).unwrap();
+            //      let adj = self.split_handler.apply_split(&event, pos.qty, pos.avg_entry, pos.stop_price);
+            //      pos.qty = adj.new_qty as u32;
+            //      pos.avg_entry = adj.new_entry_price;
+            //      pos.stop_price = adj.new_stop_price;
+            //      self.split_handler.record_processed(event);
             let _ = pos.qty; // Position exists, no split detected yet
         }
     }

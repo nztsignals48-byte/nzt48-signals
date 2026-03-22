@@ -84,7 +84,15 @@ struct RawPosition {
     cash_buffer_pct: f64,
     isa_annual_limit_gbp: f64,
     isa_tax_year_start: String,
+    /// R6: Dividend withholding tax factor (UK ISA: 0.85 = 15% withholding).
+    #[serde(default = "default_dividend_withholding")]
+    dividend_withholding_factor: f64,
+    /// P3.4: Per-exchange minimum entry notional (exchange name → local currency amount).
+    #[serde(default)]
+    min_entry_per_exchange: HashMap<String, f64>,
 }
+
+fn default_dividend_withholding() -> f64 { 0.85 }
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -116,6 +124,12 @@ struct RawTiming {
     /// Sprint 7: Per-exchange entry cutoffs (exchange name → "HH:MM" local time).
     #[serde(default)]
     exchange_cutoffs: HashMap<String, String>,
+    /// P3.3: Per-exchange stale data threshold (exchange name → seconds).
+    #[serde(default)]
+    stale_data_per_exchange: HashMap<String, u64>,
+    /// P3.5: Economic blackout window per event type (event name → minutes).
+    #[serde(default)]
+    economic_blackout_minutes: HashMap<String, u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,6 +190,9 @@ pub struct CostsConfig {
     /// FX conversion cost fraction (for USD-denominated LSE ETPs).
     #[serde(default = "default_fx_conversion_pct")]
     pub fx_conversion_pct: f64,
+    /// P3.1: Per-exchange round-trip cost as fraction (exchange name → fee fraction).
+    #[serde(default)]
+    pub per_exchange: HashMap<String, f64>,
 }
 
 fn default_round_trip_fee_pct() -> f64 { 0.003 }
@@ -190,6 +207,7 @@ impl Default for CostsConfig {
             stamp_duty_pct: 0.0,
             ftt_pct: 0.0,
             fx_conversion_pct: default_fx_conversion_pct(),
+            per_exchange: HashMap::new(),
         }
     }
 }
@@ -551,6 +569,12 @@ pub struct RawBrokerHardening {
     #[serde(default = "default_ack_timeout")] pub order_ack_timeout_secs: u64,
     #[serde(default = "default_fill_timeout")] pub order_fill_timeout_secs: u64,
     #[serde(default = "default_order_retries")] pub order_max_retries: u32,
+    /// P3.6: Reconnect base backoff in milliseconds (exponential: base * 2^attempts).
+    #[serde(default = "default_base_backoff_ms")] pub base_backoff_ms: u64,
+    /// P3.6: Maximum backoff cap in milliseconds.
+    #[serde(default = "default_max_backoff_ms")] pub max_backoff_ms: u64,
+    /// P3.6: Jitter modulus in milliseconds (deterministic jitter = attempts * 137 % jitter_mod).
+    #[serde(default = "default_jitter_mod_ms")] pub jitter_mod_ms: u64,
 }
 
 impl Default for RawBrokerHardening {
@@ -565,6 +589,9 @@ impl Default for RawBrokerHardening {
             order_ack_timeout_secs: default_ack_timeout(),
             order_fill_timeout_secs: default_fill_timeout(),
             order_max_retries: default_order_retries(),
+            base_backoff_ms: default_base_backoff_ms(),
+            max_backoff_ms: default_max_backoff_ms(),
+            jitter_mod_ms: default_jitter_mod_ms(),
         }
     }
 }
@@ -578,6 +605,9 @@ fn default_cb_cool() -> u64 { 30 }
 fn default_ack_timeout() -> u64 { 5 }
 fn default_fill_timeout() -> u64 { 60 }
 fn default_order_retries() -> u32 { 3 }
+fn default_base_backoff_ms() -> u64 { 1_000 }
+fn default_max_backoff_ms() -> u64 { 30_000 }
+fn default_jitter_mod_ms() -> u64 { 1_000 }
 
 #[derive(Debug, Deserialize)]
 pub struct RawTickHardening {
@@ -648,6 +678,14 @@ struct RawConfigLive {
     chandelier: Option<RawChandelierLive>,
     #[serde(default)]
     kelly: Option<RawKellyLive>,
+    #[serde(default)]
+    timing: Option<RawTimingLive>,
+    #[serde(default)]
+    risk: Option<RawRiskLive>,
+    #[serde(default)]
+    hardening: Option<RawHardeningLive>,
+    #[serde(default)]
+    entry_types: Option<RawEntryTypesLive>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -683,6 +721,47 @@ struct RawChandelierLive {
 struct RawKellyLive {
     clamp_max: Option<f64>,
     clamp_min: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawTimingLive {
+    stale_data_threshold_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawRiskLive {
+    max_daily_trades: Option<u32>,
+    consecutive_loss_halt: Option<u32>,
+    min_gross_edge_pct: Option<f64>,
+    daily_drawdown_pct: Option<f64>,
+    weekly_drawdown_pct: Option<f64>,
+    peak_drawdown_halt_pct: Option<f64>,
+    max_risk_per_trade_pct: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawHardeningSizingLive {
+    min_trade_gbp_live: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawHardeningLive {
+    system_velocity_max: Option<usize>,
+    #[serde(default)]
+    sizing: Option<RawHardeningSizingLive>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+struct RawEntryTypesLive {
+    type_a_confidence: Option<f64>,
+    type_b_confidence: Option<f64>,
+    type_c_confidence: Option<f64>,
+    type_d_confidence: Option<f64>,
 }
 
 // ── Universe + Contracts ──
@@ -814,6 +893,8 @@ impl EngineConfig {
             overnight_exposure_cap_pct: raw.risk.overnight_exposure_cap_pct,
             max_correlated_positions: raw.risk.max_correlated_positions,
             max_risk_per_trade_pct: raw.risk.max_risk_per_trade_pct,
+            // R6: Dividend withholding from config (was hardcoded 0.85 in PortfolioState)
+            dividend_withholding_factor: raw.position.dividend_withholding_factor,
         };
 
         Ok(EngineConfig {
@@ -875,13 +956,47 @@ impl EngineConfig {
         // Note: Kelly params are in dynamic_weights.toml, not config.toml.
         // config.live.toml kelly section is for documentation/assertion only.
 
+        // C2: Apply timing overrides
+        if let Some(timing) = live.timing {
+            if let Some(v) = timing.stale_data_threshold_secs { cfg.risk.stale_data_threshold_secs = v; }
+        }
+
+        // C2: Apply risk overrides (uses same field names as config.toml [risk] section)
+        if let Some(risk) = live.risk {
+            if let Some(v) = risk.max_daily_trades { cfg.risk.daily_trade_limit = v; }
+            if let Some(v) = risk.consecutive_loss_halt { cfg.risk.consecutive_loss_halt = v; }
+            if let Some(v) = risk.min_gross_edge_pct { cfg.risk.min_gross_edge_pct = v; }
+            if let Some(v) = risk.daily_drawdown_pct { cfg.risk.daily_drawdown_pct = v; }
+            if let Some(v) = risk.weekly_drawdown_pct { cfg.risk.weekly_drawdown_pct = v; }
+            if let Some(v) = risk.peak_drawdown_halt_pct { cfg.risk.peak_drawdown_halt_pct = v; }
+            if let Some(v) = risk.max_risk_per_trade_pct { cfg.risk.max_risk_per_trade_pct = v; }
+        }
+
+        // C2: Apply hardening overrides
+        if let Some(hardening) = live.hardening {
+            if let Some(v) = hardening.system_velocity_max { cfg.risk.system_velocity_max = v; }
+            if let Some(sizing) = hardening.sizing {
+                if let Some(v) = sizing.min_trade_gbp_live { cfg.hardening.sizing.min_trade_gbp_live = v; }
+            }
+        }
+
+        // C2: Apply entry_types overrides
+        if let Some(et) = live.entry_types {
+            if let Some(v) = et.type_a_confidence { cfg.entry_types.type_a_confidence = v; }
+            if let Some(v) = et.type_b_confidence { cfg.entry_types.type_b_confidence = v; }
+            if let Some(v) = et.type_c_confidence { cfg.entry_types.type_c_confidence = v; }
+            if let Some(v) = et.type_d_confidence { cfg.entry_types.type_d_confidence = v; }
+        }
+
         eprintln!(
-            "N8a LIVE OVERLAY: max_pos={}, heat={:.1}%, sector={:.1}%, buffer={:.1}%, trades/day={}",
+            "N8a LIVE OVERLAY: max_pos={}, heat={:.1}%, sector={:.1}%, buffer={:.1}%, trades/day={}, consecutive_halt={}, edge={:.2}%",
             cfg.risk.max_positions,
             cfg.risk.portfolio_heat_limit_pct,
             cfg.risk.sector_heat_cap_pct,
             cfg.risk.cash_buffer_pct,
             cfg.risk.daily_trade_limit,
+            cfg.risk.consecutive_loss_halt,
+            cfg.risk.min_gross_edge_pct,
         );
 
         Ok(cfg)

@@ -105,6 +105,10 @@
 
 # === PLAN 2 CLAUDE INTELLIGENCE ROLES (Sprint S11-S19) ===
 
+# S10: Claude Forensic Review — 04:53 UTC Mon-Fri (after nightly_v6, trade + veto classification)
+# flock: serialize behind nightly_pipeline to avoid WAL read race conditions
+53 4 * * 1-5 flock -x /tmp/nightly.lock cd /app && python3 -m python_brain.ouroboros.claude_forensic_review >> /var/log/claude_forensic.log 2>&1
+
 # S12: Evening Briefing — 21:30 UTC Mon-Fri (after US close)
 30 21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_briefing --evening --send-telegram >> /var/log/claude_briefing.log 2>&1
 

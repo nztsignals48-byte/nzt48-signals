@@ -98,6 +98,12 @@ pub struct RiskConfig {
     pub max_correlated_positions: u32,
     /// Max risk per trade as % of equity.
     pub max_risk_per_trade_pct: f64,
+
+    // ── R6: Dividend withholding ──
+
+    /// WP-6: Dividend withholding tax factor (UK ISA: 0.85 = 15% withholding).
+    /// Moved from hardcoded 0.85 in PortfolioState to config.
+    pub dividend_withholding_factor: f64,
 }
 
 impl Default for RiskConfig {
@@ -154,6 +160,8 @@ impl Default for RiskConfig {
             overnight_exposure_cap_pct: 50.0,
             max_correlated_positions: 3,
             max_risk_per_trade_pct: 0.75,
+            // R6: UK ISA dividend withholding (net = gross * 0.85)
+            dividend_withholding_factor: 0.85,
         }
     }
 }

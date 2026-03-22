@@ -178,7 +178,13 @@ impl RiskArbiter {
         // ALWAYS enforced, including simulation mode. Without this gate,
         // simulation accumulates unlimited positions (59 observed vs max 3),
         // producing unrealistic paper-trade results that cannot transfer to live.
-        if portfolio.total_position_count() >= self.config.max_positions {
+        // P3.3 item 11: Regime-scaled — Reduce halves capacity, Flatten blocks all.
+        let max_positions = match self.regime {
+            RiskRegime::Reduce => (self.config.max_positions / 2).max(1),
+            RiskRegime::Flatten | RiskRegime::Halt => 0,
+            RiskRegime::Normal => self.config.max_positions,
+        };
+        if portfolio.total_position_count() >= max_positions {
             return self.reject(VetoReason::MaxPositionsReached, ts);
         }
 
@@ -211,8 +217,22 @@ impl RiskArbiter {
         // 1x equity with base floor 55% → floor 55% (unchanged)
         // Rationale: leveraged products amplify moves, so a lower raw confidence
         // still represents a high expected-value trade after leverage.
+        // P3.3 item 12: Regime-scaled — Reduce raises floor by 15%, Flatten rejects all.
         let leverage_sqrt = (ctx.leverage_factor.max(1) as f64).sqrt();
-        let adjusted_floor = self.config.confidence_floor / leverage_sqrt;
+        let base_floor = match self.regime {
+            RiskRegime::Reduce => self.config.confidence_floor * 1.15,
+            RiskRegime::Flatten | RiskRegime::Halt => {
+                // Flatten/Halt: reject all entries regardless of confidence.
+                return self.reject(
+                    VetoReason::ConfidenceBelowFloor {
+                        confidence_x10: (intent_confidence * 10.0) as u32,
+                    },
+                    ts,
+                );
+            }
+            RiskRegime::Normal => self.config.confidence_floor,
+        };
+        let adjusted_floor = base_floor / leverage_sqrt;
         if intent_confidence < adjusted_floor {
             return self.reject(
                 VetoReason::ConfidenceBelowFloor {
@@ -249,11 +269,17 @@ impl RiskArbiter {
         // At 0.50% RT cost per trade, every trade costs ~£10 on £2K position.
         // 3 trades/day × 252 = £7,560/year = 76% equity drag on £10K.
         // ALWAYS enforced, including simulation mode, so paper data reflects live economics.
-        if portfolio.daily_trade_count >= self.config.daily_trade_limit {
+        // P3.3 item 10: Regime-scaled — Reduce halves daily budget, Flatten blocks all.
+        let daily_limit = match self.regime {
+            RiskRegime::Reduce => (self.config.daily_trade_limit / 2).max(1),
+            RiskRegime::Flatten | RiskRegime::Halt => 0,
+            RiskRegime::Normal => self.config.daily_trade_limit,
+        };
+        if portfolio.daily_trade_count >= daily_limit {
             return self.reject(
                 VetoReason::DailyTradeLimitReached {
                     count: portfolio.daily_trade_count,
-                    limit: self.config.daily_trade_limit,
+                    limit: daily_limit,
                 },
                 ts,
             );

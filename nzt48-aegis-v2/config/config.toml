@@ -22,6 +22,19 @@ sector_heat_cap_pct = 80.0        # PAPER VALIDATION: Relaxed. Revert to 33 for 
 cash_buffer_pct = 5.0             # PAPER VALIDATION: Relaxed. Revert to 25 for live.
 isa_annual_limit_gbp = 20000      # Tracked in WAL, enforced by RiskArbiter
 isa_tax_year_start = "04-06"      # 6 April UK tax year start
+dividend_withholding_factor = 0.85  # R6: UK ISA net = gross * 0.85 (15% withholding)
+
+# P3.4: Per-exchange minimum entry notional (in local currency).
+# Prevents dust trades that get eaten by fixed commissions.
+# Overrides hardening.sizing.min_trade_gbp_* for the specific exchange.
+[position.min_entry_per_exchange]
+LSE = 1500.0                         # GBP
+US = 300.0                           # USD
+TSE = 50000.0                        # JPY
+HKEX = 2000.0                        # HKD
+XETRA = 500.0                        # EUR
+EURONEXT = 500.0                     # EUR
+SGX = 500.0                          # SGD
 
 [kelly]
 fraction_cap = 0.5
@@ -60,6 +73,31 @@ TSE = "14:30"                     # Tokyo local (30min before 15:00 close)
 XETRA = "17:00"                   # Frankfurt local (30min before 17:30 close)
 EURONEXT = "17:00"                # Paris local (30min before 17:30 close)
 SGX = "16:30"                     # Singapore local (30min before 17:00 close)
+
+# P3.3: Per-exchange stale data threshold (seconds).
+# If no tick received for this many seconds, mark data stale and reject new entries.
+# Overrides top-level stale_data_threshold_secs for the specific exchange.
+# Asian/emerging exchanges get longer thresholds due to lower tick frequency.
+[timing.stale_data_per_exchange]
+LSE = 120                            # seconds
+US = 90                              # seconds
+TSE = 180                            # seconds — lower tick frequency
+HKEX = 150                           # seconds
+XETRA = 120                          # seconds
+EURONEXT = 120                       # seconds
+SGX = 180                            # seconds — lower tick frequency
+
+# P3.5: Economic blackout window per event type (minutes before AND after event).
+# Engine suspends new entries within this window. Overrides default 15min for specific events.
+# FOMC/NFP have outsized impact → wider windows. Regional events → tighter.
+[timing.economic_blackout_minutes]
+FOMC = 30                            # Fed rate decision — massive vol spike
+NFP = 20                             # Non-Farm Payrolls — high impact
+CPI = 15                             # Consumer Price Index
+BOE = 10                             # Bank of England — UK-focused
+ECB = 15                             # European Central Bank
+BOJ = 10                             # Bank of Japan — Asia-focused
+default = 15                         # Fallback for unlisted event types
 
 [volatility]
 # Yang-Zhang (2000) estimator — mandatory for Moreira-Muir scaling
@@ -115,6 +153,18 @@ stamp_duty_pct = 0.0                 # 0% for ETPs/ETFs (would be 0.5% for UK eq
 ftt_pct = 0.0                        # 0% for UK ISA ETPs
 # FX conversion cost (for USD-denominated LSE ETPs)
 fx_conversion_pct = 0.002            # 0.2% IBKR FX spread estimate
+
+# P3.1: Per-exchange round-trip cost as fraction (spread + commission + fees).
+# Overrides round_trip_fee_pct for the specific exchange when available.
+# Used by Kelly sizing and Chandelier breakeven calculation.
+[costs.per_exchange]
+LSE = 0.0035                         # LSE ETPs: wider spreads, stamp duty reserve
+US = 0.0015                          # US equities: tight spreads, SEC fee
+TSE = 0.0025                         # Tokyo: exchange fee + clearing
+HKEX = 0.0030                        # Hong Kong: stamp duty + SFC levy
+XETRA = 0.0020                       # Germany: exchange fee
+EURONEXT = 0.0020                    # Paris: exchange fee
+SGX = 0.0025                         # Singapore: clearing + GST
 
 [execution]
 marketable_limit_buffer_pct = 0.1
@@ -335,6 +385,11 @@ circuit_breaker_cooldown_secs = 30
 order_ack_timeout_secs = 5
 order_fill_timeout_secs = 60
 order_max_retries = 3
+# P3.6: Reconnect backoff params (used by BrokerHealthMonitor::next_reconnect_delay_ms).
+# base_backoff_ms * 2^attempts, capped at max_backoff_ms, plus deterministic jitter mod jitter_mod_ms.
+base_backoff_ms = 1000
+max_backoff_ms = 30000
+jitter_mod_ms = 1000
 
 # Sprint 6: Stale tick threshold for signal rejection (ms). Separate from config staleness.
 [hardening.ticks]

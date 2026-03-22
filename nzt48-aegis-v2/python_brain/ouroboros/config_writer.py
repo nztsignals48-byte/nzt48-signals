@@ -50,6 +50,19 @@ CONFIG_DIR = Path(os.environ.get("AEGIS_CONFIG_DIR", _PROJECT_ROOT / "config"))
 REPORTS_DIR = DATA_DIR / "ouroboros_reports"
 RECS_FILE = DATA_DIR / "ouroboros_recommendations.json"
 WATCHLIST_FILE = CONFIG_DIR / "active_watchlist.json"
+BACKFILL_FEEDBACK_FILE = DATA_DIR / "backfill_feedback.json"
+NIGHTLY_OUTPUT_FILE = DATA_DIR / "nightly_output.json"
+
+# Entry type confidence bounds — Ouroboros may tune within these limits.
+ENTRY_CONF_MIN = 60.0
+ENTRY_CONF_MAX = 90.0
+# Base confidences (must match config.toml [entry_types])
+ENTRY_CONF_DEFAULTS = {
+    "TypeA": 65.0,
+    "TypeB": 82.0,
+    "TypeC": 72.0,
+    "TypeD": 80.0,
+}
 
 # WIRED (Sprint 7A): PRIMARY_TICKERS removed — dynamic loading from contracts.toml.
 # Previously hardcoded 12 LSE ETPs. Now loads ALL contracts dynamically.
@@ -600,6 +613,146 @@ def compute_kelly_fractions(metrics: Dict[str, Any], recs: Dict[str, Any]) -> Di
 
 
 # ---------------------------------------------------------------------------
+# Backfill feedback loader (item 49)
+# ---------------------------------------------------------------------------
+def load_backfill_feedback() -> Dict[str, float]:
+    """Load strategy_confidence_delta per entry type from backfill_feedback.json.
+
+    Returns a dict like {"TypeA": -0.3, "TypeB": 0.5, ...} or empty if unavailable.
+    The backfill simulator writes this file daily with simulated performance deltas
+    per entry type. Positive delta = backfill suggests raising confidence (type is
+    performing better than live), negative = lower it.
+
+    Staleness: ignores file if older than 48 hours.
+    """
+    if not BACKFILL_FEEDBACK_FILE.exists():
+        log.info("Backfill feedback not found: %s", BACKFILL_FEEDBACK_FILE)
+        return {}
+
+    try:
+        mtime = BACKFILL_FEEDBACK_FILE.stat().st_mtime
+        age_hours = (time.time() - mtime) / 3600.0
+        if age_hours > 48:
+            log.info("Backfill feedback stale (%.1f hours old). Ignoring.", age_hours)
+            return {}
+
+        with open(BACKFILL_FEEDBACK_FILE) as f:
+            data = json.load(f)
+
+        # Extract per-type deltas. The file format is:
+        # {"TypeA": {"strategy_confidence_delta": -0.3}, "TypeB": {...}, ...}
+        # OR it may be nested under a top-level key.
+        deltas: Dict[str, float] = {}
+
+        # Handle top-level dict where keys are entry types
+        for key in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+            entry = data.get(key, {})
+            if isinstance(entry, dict) and "strategy_confidence_delta" in entry:
+                deltas[key] = float(entry["strategy_confidence_delta"])
+
+        # Also handle flat "strategy_confidence_delta" dict format from nightly_v6
+        scd = data.get("strategy_confidence_delta", {})
+        if isinstance(scd, dict):
+            for key, val in scd.items():
+                if key in ENTRY_CONF_DEFAULTS:
+                    deltas[key] = float(val)
+
+        if deltas:
+            log.info("Loaded backfill feedback deltas: %s", deltas)
+        return deltas
+
+    except (json.JSONDecodeError, IOError, TypeError, ValueError) as e:
+        log.warning("Failed to load backfill feedback: %s", e)
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Per-entry-type confidence tuning from WAL trade data (P3.2/item 3)
+# ---------------------------------------------------------------------------
+def compute_entry_type_confidences(
+    events: List[Dict[str, Any]],
+    backfill_deltas: Dict[str, float],
+) -> Dict[str, float]:
+    """Compute Ouroboros-tuned per-entry-type confidence values.
+
+    Reads PositionClosed events from the WAL to gather per-type win rates,
+    then adjusts base confidences within [ENTRY_CONF_MIN, ENTRY_CONF_MAX].
+
+    Adjustment logic:
+      1. Start with base confidence from ENTRY_CONF_DEFAULTS.
+      2. If WAL has >= 10 trades for a type, compute WR delta vs 50% baseline:
+         adjustment = (wr - 0.50) * 20  (i.e. +/-10 points per 50pp WR swing)
+      3. Apply backfill_deltas (scaled by 5x to convert small deltas to confidence points).
+      4. Clamp to [ENTRY_CONF_MIN, ENTRY_CONF_MAX].
+
+    Returns {"TypeA": 63.0, "TypeB": 85.0, ...} — one entry per type.
+    """
+    # Gather per-type trade stats from WAL PositionClosed events
+    type_wins: Dict[str, int] = {}
+    type_total: Dict[str, int] = {}
+
+    for event in events:
+        payload = event.get("payload", {})
+        if "PositionClosed" in payload:
+            pc = payload["PositionClosed"]
+            etype = pc.get("entry_type", "")
+            if etype not in ENTRY_CONF_DEFAULTS:
+                continue
+            pnl = pc.get("final_pnl", 0.0)
+            type_total[etype] = type_total.get(etype, 0) + 1
+            if pnl > 0:
+                type_wins[etype] = type_wins.get(etype, 0) + 1
+
+    # Also try to load nightly_output.json for richer per-type stats
+    nightly_per_type: Dict[str, Dict[str, Any]] = {}
+    try:
+        if NIGHTLY_OUTPUT_FILE.exists():
+            with open(NIGHTLY_OUTPUT_FILE) as f:
+                nightly_data = json.load(f)
+            nightly_per_type = nightly_data.get("per_entry_type", {})
+    except (json.JSONDecodeError, IOError):
+        pass
+
+    # Merge nightly stats into WAL stats (nightly may have more history)
+    for etype, stats in nightly_per_type.items():
+        if etype in ENTRY_CONF_DEFAULTS:
+            nt = stats.get("trades", 0)
+            nw = stats.get("wins", 0)
+            if nt > type_total.get(etype, 0):
+                type_total[etype] = nt
+                type_wins[etype] = nw
+
+    # Compute adjusted confidences
+    result: Dict[str, float] = {}
+    for etype, base_conf in ENTRY_CONF_DEFAULTS.items():
+        adj = 0.0
+
+        # WAL-based adjustment: shift confidence based on observed WR
+        total = type_total.get(etype, 0)
+        wins = type_wins.get(etype, 0)
+        if total >= 10:
+            wr = wins / total
+            # +/-10 confidence points per 50pp WR swing from 50% baseline
+            adj += (wr - 0.50) * 20.0
+            log.info("Entry type %s: WAL WR=%.1f%% (%d/%d), adj=%+.1f",
+                     etype, wr * 100, wins, total, adj)
+
+        # Backfill delta adjustment: scale small deltas to confidence-point range
+        bf_delta = backfill_deltas.get(etype, 0.0)
+        if bf_delta != 0.0:
+            bf_adj = bf_delta * 5.0  # e.g. delta of +0.5 -> +2.5 confidence points
+            adj += bf_adj
+            log.info("Entry type %s: backfill delta=%+.2f, adj=%+.1f",
+                     etype, bf_delta, bf_adj)
+
+        new_conf = base_conf + adj
+        new_conf = max(ENTRY_CONF_MIN, min(ENTRY_CONF_MAX, new_conf))
+        result[etype] = round(new_conf, 1)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # TOML generators
 # ---------------------------------------------------------------------------
 def generate_dynamic_weights_toml(
@@ -845,6 +998,31 @@ def generate_dynamic_weights_toml(
         lines.append(f'direction = "{gate["direction"]}"')
         lines.append(f'threshold = {gate["threshold"]}')
         lines.append(f'lift_pct = {gate["lift_pct"]}')
+
+    # Item 49 + P3.2: Per-entry-type confidence tuning
+    # Reads backfill_feedback.json deltas and WAL trade data to adjust
+    # entry type confidences within [60, 90] bounds.
+    backfill_deltas = load_backfill_feedback()
+    entry_confs = compute_entry_type_confidences(events, backfill_deltas)
+
+    # Map TypeX -> config.toml field names for engine consumption
+    type_to_field = {
+        "TypeA": "type_a_confidence",
+        "TypeB": "type_b_confidence",
+        "TypeC": "type_c_confidence",
+        "TypeD": "type_d_confidence",
+    }
+
+    lines += [
+        f"",
+        f"[entry_type_confidences]",
+        f"# Ouroboros-tuned per-entry-type confidence (WAL + backfill feedback)",
+        f"# Bounds: [{ENTRY_CONF_MIN}, {ENTRY_CONF_MAX}]",
+    ]
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        conf = entry_confs.get(etype, ENTRY_CONF_DEFAULTS[etype])
+        field = type_to_field[etype]
+        lines.append(f"{field} = {conf:.1f}")
 
     lines.append("")  # trailing newline
     return "\n".join(lines)

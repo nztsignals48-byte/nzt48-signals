@@ -84,6 +84,12 @@ pub struct PortfolioState {
 
 impl PortfolioState {
     pub fn new(equity: f64) -> Self {
+        Self::with_dividend_factor(equity, 0.85)
+    }
+
+    /// R6: Construct with configurable dividend withholding factor.
+    /// Called from engine init where RiskConfig is available.
+    pub fn with_dividend_factor(equity: f64, dividend_withholding_factor: f64) -> Self {
         Self {
             positions: HashMap::new(),
             pending_count: 0,
@@ -97,7 +103,7 @@ impl PortfolioState {
             sector_map: HashMap::new(),
             inverse_map: HashMap::new(),
             cost_basis: HashMap::new(),
-            dividend_withholding_factor: 0.85,
+            dividend_withholding_factor,
             daily_trade_count: 0,
             initial_equity: equity,
             weekly_high_water_mark: equity,

@@ -475,6 +475,18 @@ def run_production_backtest(
         json.dump(report, f, indent=2)
     log.info("Report saved: %s", report_path)
 
+    # Optional: Claude backtest analysis (only when AEGIS_CLAUDE_ANALYSIS=1)
+    if os.environ.get("AEGIS_CLAUDE_ANALYSIS", "0") == "1":
+        try:
+            from python_brain.ouroboros.claude_backtest_analyst import analyze_backtest_report
+            log.info("Running Claude backtest analysis on %s", report_path)
+            analysis = analyze_backtest_report(report_path=str(report_path))
+            if analysis:
+                score = analysis.get("system_score", "?")
+                log.info("Claude backtest analysis complete: score=%s/10", score)
+        except Exception as e:
+            log.warning("Claude backtest analysis failed (non-critical): %s", e)
+
     return report
 
 

@@ -48,6 +48,9 @@ leverage = 3
 sector = "US_Broad"
 inverse_of = ""
 
+# C7: 3USS.L trades in USD on LSEETF — this is CORRECT.
+# Most LSE leveraged ETPs trade in USD on LSEETF, NOT GBP.
+# Only 3LUS.L and 5SPY.L are GBP-denominated. Verified 2026-03-22.
 [[contracts]]
 symbol = "3USS.L"
 con_id = 118833794
