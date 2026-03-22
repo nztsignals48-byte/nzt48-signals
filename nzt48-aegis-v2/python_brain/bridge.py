@@ -156,34 +156,45 @@ _ticker_blacklist = set()  # Set of symbols to reject signals for
 
 
 def _load_ticker_blacklist():
-    """Load ticker blacklist from dynamic_weights.toml.
+    """Load ticker blacklist from BOTH config.toml [blacklist] AND dynamic_weights.toml.
 
-    Ouroboros generates this list from persistent_memory: tickers with
-    WR < 30% over 10+ trades are blacklisted. Signals for blacklisted
-    tickers are suppressed before any gate evaluation.
-
-    BUILD NOW item N1c from IMPLEMENTATION_MASTER_PLAN v6.0.
+    Two sources merged:
+      1. config.toml [blacklist].tickers — static, operator-curated from backtest evidence
+      2. dynamic_weights.toml [ticker_blacklist].tickers — adaptive, Ouroboros-generated
     """
     global _ticker_blacklist_loaded, _ticker_blacklist
     if _ticker_blacklist_loaded:
         return _ticker_blacklist
     _ticker_blacklist_loaded = True
-    dw_path = "/app/config/dynamic_weights.toml"
-    if not os.path.exists(dw_path):
-        return _ticker_blacklist
     try:
         try:
             import tomllib
         except ImportError:
             import tomli as tomllib
-        with open(dw_path, "rb") as f:
-            data = tomllib.load(f)
-        bl = data.get("ticker_blacklist", {}).get("tickers", [])
-        if bl:
-            _ticker_blacklist = set(bl)
+
+        combined = set()
+
+        # Source 1: Static blacklist from config.toml
+        cfg_path = "/app/config/config.toml"
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            static_bl = cfg.get("blacklist", {}).get("tickers", [])
+            combined.update(static_bl)
+
+        # Source 2: Adaptive blacklist from dynamic_weights.toml
+        dw_path = "/app/config/dynamic_weights.toml"
+        if os.path.exists(dw_path):
+            with open(dw_path, "rb") as f:
+                dw = tomllib.load(f)
+            adaptive_bl = dw.get("ticker_blacklist", {}).get("tickers", [])
+            combined.update(adaptive_bl)
+
+        if combined:
+            _ticker_blacklist = combined
             sys.stderr.write(
                 "Bridge: loaded ticker blacklist ({} tickers): {}\n".format(
-                    len(bl), ", ".join(bl[:10])
+                    len(combined), ", ".join(sorted(combined)[:10])
                 )
             )
             sys.stderr.flush()
@@ -1096,16 +1107,33 @@ def process_tick(msg):
                 orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + 20, 100)
 
     # ---- Portfolio-level regime filter ----
-    # When the portfolio is in drawdown, scale down signal confidence to reduce
-    # new entries. This prevents the momentum-long bias from compounding losses
-    # during sustained market selloffs.
+    # When the portfolio is in drawdown:
+    #   - PENALIZE long signals (momentum-long bias compounds losses in selloffs)
+    #   - BOOST inverse/short signals (inverse ETPs have positive edge in drawdowns)
+    # Evidence: 59-day backfill shows 3NVD.L (short NVDA) PF 1.60 while NVD3.L (long) lost.
     drawdown_pct = msg.get("drawdown_pct", 0.0)
+    symbol = ticker_symbols.get(ticker_id, "")
+    is_inverse = (symbol.startswith("3S") or symbol.startswith("5S") or
+                  symbol.endswith("S.L") and len(symbol) <= 7 or
+                  symbol in ("QQQS.L", "3USS.L", "3STS.L", "3SAM.L", "3SNV.L",
+                             "3SAP.L", "3SMS.L", "3SEM.L"))
+
     if drawdown_pct > 0.02:  # >2% drawdown from HWM
         drawdown_penalty = min(int(drawdown_pct * 500), 20)  # 2%→10pts, 4%→20pts max
-        if vanguard_signal:
-            vanguard_signal["confidence"] = max(vanguard_signal["confidence"] - drawdown_penalty, 0)
-        if orchestrator_signal:
-            orchestrator_signal["confidence"] = max(orchestrator_signal["confidence"] - drawdown_penalty, 0)
+
+        if is_inverse:
+            # BOOST inverse signals during drawdown (they profit from falling market)
+            inverse_boost = min(int(drawdown_pct * 300), 15)  # 2%→6pts, 5%→15pts max
+            if vanguard_signal:
+                vanguard_signal["confidence"] = min(vanguard_signal["confidence"] + inverse_boost, 100)
+            if orchestrator_signal:
+                orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + inverse_boost, 100)
+        else:
+            # PENALIZE long signals during drawdown
+            if vanguard_signal:
+                vanguard_signal["confidence"] = max(vanguard_signal["confidence"] - drawdown_penalty, 0)
+            if orchestrator_signal:
+                orchestrator_signal["confidence"] = max(orchestrator_signal["confidence"] - drawdown_penalty, 0)
 
     # ---- Phase G: Pre-emission quality filters ----
     # These filters run AFTER signal generation but BEFORE emission.

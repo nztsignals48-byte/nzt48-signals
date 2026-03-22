@@ -160,6 +160,18 @@ open_position_always_tier1 = true    # Tickers with positions = permanent
 # Total unique tickers scanned per cycle: 50 permanent + 50 rotating × 5 cycles = 300
 total_scan_universe = 300
 
+# Static blacklist — tickers with proven negative edge from 59-day 65K-trade backfill.
+# These are blocked BEFORE signal generation (not just via dynamic Ouroboros blacklist).
+# Review quarterly — remove if spread/liquidity improves.
+[blacklist]
+# High-leverage LSE ETPs with wide spreads that destroy edge:
+tickers = [
+    "3LGO.L",   # 3x Google: 0% WR over 8 trades, -£1,942 (wide spread + low volume)
+    "3LSI.L",   # 3x Silver: 14% WR over 36 trades, -£7,293 (commodity vol + spread drag)
+    "LQQ3.L",   # Leveraged QQQ: 15% WR over 34 trades, -£3,468 (spread 2-3x wider than QQQ3.L)
+    "3LRR.L",   # 3x Russell: -£3,256 in 7-day sim (low liquidity)
+]
+
 [wal]
 schema_version = 1
 
@@ -169,6 +181,14 @@ schema_version = 1
 pairs = [
     ["QQQ3.L", "QQQS.L"],
     ["3LUS.L", "3USS.L"],
+    ["NVD3.L", "3NVD.L"],
+    ["TSL3.L", "3TSL.L"],
+    ["3LTS.L", "3STS.L"],
+    ["3LAM.L", "3SAM.L"],
+    ["3LMS.L", "3SMS.L"],
+    ["3LNV.L", "3SNV.L"],
+    ["3LAP.L", "3SAP.L"],
+    ["QQQ5.L", "QS5S.L"],
 ]
 
 [sectors]
