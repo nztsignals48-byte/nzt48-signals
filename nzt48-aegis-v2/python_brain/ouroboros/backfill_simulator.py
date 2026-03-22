@@ -707,9 +707,29 @@ def run_backfill(days: int = 7) -> int:
 
     log.info("Data fetched for %d/%d tickers", len(data), len(PRIMARY_TICKERS))
 
+    # Load blacklist from config.toml (skip proven losers)
+    blacklist = set()
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            blacklist = set(cfg.get("blacklist", {}).get("tickers", []))
+            if blacklist:
+                log.info("Blacklist loaded: %d tickers (%s)", len(blacklist), ", ".join(sorted(blacklist)))
+    except Exception:
+        pass
+
     # Simulate trades for each ticker
     all_trades: List[SimTrade] = []
     for ticker, df in data.items():
+        if ticker in blacklist:
+            log.info("  %s: SKIPPED (blacklisted)", ticker)
+            continue
         trades = simulate_ticker(ticker, df)
         all_trades.extend(trades)
         log.info("  %s: %d simulated trades", ticker, len(trades))
