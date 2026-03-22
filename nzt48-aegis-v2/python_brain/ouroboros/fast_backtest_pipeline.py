@@ -425,6 +425,8 @@ def _compute_equity_curve(trades: List[SimTrade]) -> Tuple[float, float, float]:
     max_dd_pct = 0.0
 
     for t in sorted(trades, key=lambda x: (x.date, x.entry_bar)):
+        if math.isnan(t.entry_price) or math.isnan(t.pnl) or t.entry_price <= 0:
+            continue
         position_size = equity * kelly_frac
         shares = math.floor(position_size / max(t.entry_price, 1e-9))
         if shares <= 0:

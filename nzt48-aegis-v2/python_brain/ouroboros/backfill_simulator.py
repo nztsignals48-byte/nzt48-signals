@@ -444,10 +444,10 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     trades: List[SimTrade] = []
     exchange = detect_exchange(ticker)
 
-    closes = df["Close"].values.astype(np.float64)
-    highs = df["High"].values.astype(np.float64)
-    lows = df["Low"].values.astype(np.float64)
-    volumes = df["Volume"].values.astype(np.float64)
+    closes = df["Close"].values.astype(np.float64).flatten()
+    highs = df["High"].values.astype(np.float64).flatten()
+    lows = df["Low"].values.astype(np.float64).flatten()
+    volumes = df["Volume"].values.astype(np.float64).flatten()
 
     if len(closes) < 30:
         return trades
