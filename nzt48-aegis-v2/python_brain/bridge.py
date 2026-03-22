@@ -1231,6 +1231,44 @@ def process_tick(msg):
         # Only allow if very high confidence from other factors
         leverage_conf_floor = max(leverage_conf_floor, 75)
 
+    # =========================================================================
+    # T-03 (Sprint 5): Phase G gates MOVED HERE from post-signal-generation.
+    # These don't depend on signal data — only bid/ask/VWAP which are already
+    # computed. Running them before signal eval avoids wasting 100ms+ of
+    # VanguardSniper + Orchestrator compute on ticks that will be vetoed anyway.
+    # =========================================================================
+
+    # G1: Spread quality gate — reject if bid/ask spread too wide (Q-051: uses CostModel)
+    # SIM_MODE: skip spread gate — backtests use synthetic bid/ask anyway.
+    if not _SIM_MODE and bid > 0 and ask > 0:
+        spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
+        # Leverage-aware spread limits derived from CostModel.spread_veto_pct
+        # Plan 1 Phase 3: Use adaptive spread veto if available (VIX-regime-aware)
+        # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
+        _base_spread_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
+        _base_spread_gate = _base_spread_raw * 100  # 0.3% -> 0.3
+        spread_limit = _base_spread_gate * 6.67 if leverage >= 3 else _base_spread_gate * 1.67
+        if spread_pct > spread_limit:
+            _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
+                           {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},
+                           "spread={:.2f}% > {:.1f}%".format(spread_pct, spread_limit))
+            return no_signal_base
+
+    # G2: Extension filter — reject if price moved >3% from session VWAP
+    # (buying extension = immediate adverse excursion)
+    # SIM_MODE: skip VWAP extension filter.
+    _g2_vwap_calc = vwap_calculators.get(ticker_id)
+    _g2_vwap_hist = _g2_vwap_calc.get_history() if _g2_vwap_calc else []
+    if not _SIM_MODE and _g2_vwap_hist and len(ticks) > 30:
+        last_vwap = _g2_vwap_hist[-1]
+        if last_vwap > 0:
+            extension = abs(msg["last"] - last_vwap) / last_vwap * 100
+            if extension > 3.0:
+                _log_gate_veto(ticker_id, "vwap_extension_3pct", msg["last"],
+                               {**_ind, "extension_pct": extension, "vwap": last_vwap},
+                               "extension={:.1f}% from VWAP (max 3%)".format(extension))
+                return no_signal_base
+
     # ---- Evaluate VanguardSniper (momentum + any non-reverting regime) ----
     vanguard_signal = None
 
@@ -1429,54 +1467,8 @@ def process_tick(msg):
             if orchestrator_signal:
                 orchestrator_signal["confidence"] = max(orchestrator_signal["confidence"] - drawdown_penalty, 0)
 
-    # ---- Phase G: Pre-emission quality filters ----
-    # These filters run AFTER signal generation but BEFORE emission.
-    # They suppress low-quality contexts that produce immediate stop-outs.
-
-    # G1: Spread quality gate — reject if bid/ask spread too wide (Q-051: uses CostModel)
-    # SIM_MODE: skip spread gate — backtests use synthetic bid/ask anyway.
-    bid = msg.get("bid", 0)
-    ask = msg.get("ask", 0)
-    if not _SIM_MODE and bid > 0 and ask > 0:
-        spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
-        # Leverage-aware spread limits derived from CostModel.spread_veto_pct
-        # Plan 1 Phase 3: Use adaptive spread veto if available (VIX-regime-aware)
-        # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
-        _base_spread_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
-        _base_spread_gate = _base_spread_raw * 100  # 0.3% -> 0.3
-        spread_limit = _base_spread_gate * 6.67 if leverage >= 3 else _base_spread_gate * 1.67
-        if spread_pct > spread_limit:
-            _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
-                           {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},
-                           "spread={:.2f}% > {:.1f}%".format(spread_pct, spread_limit))
-            return no_signal_base
-
-    # G2: Extension filter — reject if price moved >3% from session VWAP
-    # (buying extension = immediate adverse excursion)
-    # SIM_MODE: skip VWAP extension filter.
-    vwap_calc = vwap_calculators.get(ticker_id)
-    _g2_vwap_hist = vwap_calc.get_history() if vwap_calc else []
-    if not _SIM_MODE and _g2_vwap_hist and len(ticks) > 30:
-        last_vwap = _g2_vwap_hist[-1]
-        if last_vwap > 0:
-            extension = abs(msg["last"] - last_vwap) / last_vwap * 100
-            if extension > 3.0:
-                _log_gate_veto(ticker_id, "vwap_extension_3pct", msg["last"],
-                               {**_ind, "extension_pct": extension, "vwap": last_vwap},
-                               "extension={:.1f}% from VWAP (max 3%)".format(extension))
-                return no_signal_base
-
-    # ---- Per-ticker signal cooldown (prevent NVD3.L-style spam) ----
-    # After emitting a signal for a ticker, suppress for COOLDOWN_TICKS ticks.
-    # SIM_MODE: skip cooldown entirely to maximize signal count for backtesting.
-    tick_count = _tick_counts.get(ticker_id, 0)
-    if not _SIM_MODE:
-        last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
-        if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
-            remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
-            _log_gate_veto(ticker_id, "cooldown", msg["last"], _ind,
-                           "{}s remaining".format(remaining * 5))
-            return no_signal_base
+    # Phase G gates (G1 spread, G2 VWAP extension) moved BEFORE signal eval
+    # by T-03 (Sprint 5) — see above. No longer duplicated here.
 
     # ---- Select best signal (highest confidence wins) ----
     best = None
@@ -1486,6 +1478,25 @@ def process_tick(msg):
         best = vanguard_signal
     elif orchestrator_signal:
         best = orchestrator_signal
+
+    # =========================================================================
+    # T-06 (Sprint 5): Per-ticker cooldown AFTER best signal selection.
+    # Previously checked BEFORE signal generation, which blocked TypeB signals
+    # at t=0 that would have been better than the TypeA at t=1 that passed.
+    # Now we let both strategies evaluate, pick the best, THEN check cooldown.
+    # SIM_MODE: skip cooldown entirely to maximize signal count for backtesting.
+    # =========================================================================
+    tick_count = _tick_counts.get(ticker_id, 0)
+    if best and not _SIM_MODE:
+        last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
+        if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
+            remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
+            _log_gate_veto(ticker_id, "cooldown", msg["last"], _ind,
+                           "{}s remaining (best was {} conf={})".format(
+                               remaining * 5,
+                               best.get("strategy", "?"),
+                               best.get("confidence", 0)))
+            return no_signal_base
 
     if best:
         # N3a: Structural tradability score — FIXED (Sprint 5, SK-03).

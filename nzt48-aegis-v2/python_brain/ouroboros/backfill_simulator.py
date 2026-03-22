@@ -1,19 +1,28 @@
-"""Ouroboros v6.0 — Backfill Simulator.
+"""Ouroboros v7.0 — Backfill Simulator.
 
-Pulls 7-day historical data via yfinance for the 12 primary LSE ETPs and
+Pulls historical data via yfinance for a configurable ticker universe and
 simulates trades using the same indicators and strategies the live engine uses.
+
+Supports parallel downloads (ThreadPoolExecutor), chunked processing for
+memory management on constrained environments (4GB EC2), and exchange-aware
+reporting with per-hour/per-day-of-week breakdowns.
 
 Generates a simulation report showing:
   - Total simulated trades, win rate, profit factor
-  - Per-ticker and per-entry-type performance
-  - Best/worst days
-  - Hypothetical equity curve ("if we had this last week...")
+  - Per-exchange, per-ticker, per-entry-type performance
+  - Per-hour-of-day, per-day-of-week breakdowns
+  - Top 20 winners and top 20 losers
+  - Hypothetical equity curve
 
-Usage: python3 -m python_brain.ouroboros.backfill_simulator
+Usage:
+  python3 -m python_brain.ouroboros.backfill_simulator --days 730 --interval 60m
+  python3 -m python_brain.ouroboros.backfill_simulator --days 730 --interval 60m --universe /app/config/universe_10k.txt
+  python3 -m python_brain.ouroboros.backfill_simulator --days 730 --interval 60m --universe /app/config/universe_10k.txt --blacklist
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import math
@@ -22,10 +31,11 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -67,12 +77,94 @@ VOLUME_SURGE_MULT = 1.0  # Was 2.0 — lowered to match live (Sprint 5 T-05)
 
 STARTING_EQUITY = 10_000.0  # GBP
 
+# Parallel download settings
+DOWNLOAD_WORKERS = 10   # ThreadPoolExecutor concurrency for yfinance
+CHUNK_SIZE = 100         # Tickers per processing chunk (memory management)
+
+# Exchange detection from ticker suffix
+EXCHANGE_SUFFIX_MAP = {
+    ".T": "TSE",
+    ".HK": "HKEX",
+    ".L": "LSE",
+    ".DE": "XETRA",
+    ".PA": "Euronext",
+    ".AS": "Euronext",
+    ".SI": "SGX",
+    ".NS": "NSE",
+    ".KS": "KRX",
+    ".AX": "ASX",
+    ".TW": "TWSE",
+    ".SA": "B3",
+}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [Backfill] %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("backfill_sim")
+
+
+# ---------------------------------------------------------------------------
+# Exchange detection
+# ---------------------------------------------------------------------------
+def detect_exchange(ticker: str) -> str:
+    """Detect exchange from ticker suffix. No suffix = US."""
+    for suffix, exchange in EXCHANGE_SUFFIX_MAP.items():
+        if ticker.endswith(suffix):
+            return exchange
+    return "US"
+
+
+# ---------------------------------------------------------------------------
+# Universe loading
+# ---------------------------------------------------------------------------
+def load_universe_file(path: str) -> List[str]:
+    """Load tickers from a universe file (one per line, skip # comments and blanks).
+
+    Deduplicates while preserving order.
+    """
+    tickers: List[str] = []
+    seen: Set[str] = set()
+    filepath = Path(path)
+    if not filepath.exists():
+        log.error("Universe file not found: %s", path)
+        return []
+
+    with open(filepath, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            ticker = line.split()[0]  # Handle trailing comments/whitespace
+            if ticker not in seen:
+                seen.add(ticker)
+                tickers.append(ticker)
+
+    log.info("Loaded %d unique tickers from %s", len(tickers), path)
+    return tickers
+
+
+def load_blacklist_from_config() -> Set[str]:
+    """Load blacklisted tickers from config.toml [blacklist] section."""
+    blacklist: Set[str] = set()
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
+        if not cfg_path.exists():
+            cfg_path = _PROJECT_ROOT / "config" / "config.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            blacklist = set(cfg.get("blacklist", {}).get("tickers", []))
+            if blacklist:
+                log.info("Blacklist loaded: %d tickers (%s)", len(blacklist), ", ".join(sorted(blacklist)))
+    except Exception as e:
+        log.warning("Failed to load blacklist from config.toml: %s", e)
+    return blacklist
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +185,9 @@ class SimTrade:
     pnl_pct: float
     hold_bars: int
     regime: str
+    exchange: str = "US"
+    entry_hour: int = -1       # Hour of day (0-23) at entry
+    entry_weekday: int = -1    # Day of week (0=Mon, 6=Sun) at entry
 
 
 @dataclass
@@ -160,7 +255,7 @@ def compute_atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period:
 
 
 # ---------------------------------------------------------------------------
-# Entry signal classification
+# Entry signal classification — NO COOLDOWN, NO DAILY CAP
 # ---------------------------------------------------------------------------
 def classify_entries(
     closes: np.ndarray,
@@ -175,6 +270,9 @@ def classify_entries(
     Type B: Volume anomaly (RVOL > 2x + any regime)
     Type C: Oversold bounce (RSI < 30 + mean_reverting regime)
     Type D: Continuation (price above 20-bar EMA + trending regime)
+
+    No cooldown between entries and no daily cap — simulator captures ALL
+    possible signals to provide maximum data for Ouroboros learning.
 
     Returns list of (bar_index, entry_type).
     """
@@ -191,46 +289,24 @@ def classify_entries(
         ema20[i] = alpha * closes[i] + (1 - alpha) * ema20[i - 1]
 
     # Scan for entries (skip first 21 bars for indicator warmup)
-    # SIM_MODE: Load entry cooldown from config.toml [simulation] section.
-    # Default 0 = no cooldown between entries for maximum signal generation.
-    _entry_cooldown = 0
-    try:
-        try:
-            import tomllib as _tl
-        except ImportError:
-            import tomli as _tl
-        _cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
-        if not _cfg_path.exists():
-            _cfg_path = _PROJECT_ROOT / "config" / "config.toml"
-        if _cfg_path.exists():
-            with open(_cfg_path, "rb") as _f:
-                _sim_cfg = _tl.load(_f).get("simulation", {})
-                _entry_cooldown = int(_sim_cfg.get("entry_cooldown_bars", 0))
-    except Exception:
-        pass
-    last_entry_bar = -(_entry_cooldown + 1)
+    # No cooldown, no daily cap — capture every signal for maximum data
     for i in range(21, n - 5):  # Leave room for exit simulation
-        if _entry_cooldown > 0 and i - last_entry_bar < _entry_cooldown:
-            continue
         if np.isnan(rsi[i]) or np.isnan(rvol_arr[i]):
             continue
 
         # Type A: Momentum breakout
         if rsi[i] > 50 and rvol_arr[i] > RVOL_ENTRY_THRESHOLD and regime == "trending":
             entries.append((i, "TypeA"))
-            last_entry_bar = i
             continue
 
         # Type B: Volume anomaly
         if rvol_arr[i] > VOLUME_SURGE_MULT:
             entries.append((i, "TypeB"))
-            last_entry_bar = i
             continue
 
         # Type C: Oversold bounce
         if rsi[i] < RSI_OVERSOLD and regime == "mean_reverting":
             entries.append((i, "TypeC"))
-            last_entry_bar = i
             continue
 
         # Type D: Continuation
@@ -238,7 +314,6 @@ def classify_entries(
             # Only trigger if price just crossed above EMA
             if i > 0 and closes[i - 1] <= ema20[i - 1]:
                 entries.append((i, "TypeD"))
-                last_entry_bar = i
 
     return entries
 
@@ -289,41 +364,85 @@ def simulate_chandelier_exit(
 
 
 # ---------------------------------------------------------------------------
-# Main simulation
+# Parallel data fetching
 # ---------------------------------------------------------------------------
-def fetch_historical_data(tickers: List[str], period: str = "7d", interval: str = "5m") -> Dict[str, Any]:
-    """Fetch historical data via yfinance.
+def _fetch_single_ticker(ticker: str, period: str, interval: str) -> Tuple[str, Any]:
+    """Fetch a single ticker via yfinance. Returns (ticker, df_or_None).
 
-    Interval options: 1m (7d max), 2m/5m/15m/30m (60d max),
-                      60m/1h (730d max), 1d (unlimited).
+    Thread-safe: each call creates its own yfinance download session.
     """
     try:
         import yfinance as yf
     except ImportError:
+        return ticker, None
+
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
+        if df is None or df.empty:
+            return ticker, None
+        # Flatten MultiIndex columns if present
+        if hasattr(df.columns, 'levels'):
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        return ticker, df
+    except Exception:
+        return ticker, None
+
+
+def fetch_historical_data_parallel(
+    tickers: List[str],
+    period: str = "7d",
+    interval: str = "5m",
+    max_workers: int = DOWNLOAD_WORKERS,
+) -> Dict[str, Any]:
+    """Fetch historical data via yfinance using parallel ThreadPoolExecutor.
+
+    Downloads up to max_workers tickers simultaneously for ~10x speedup
+    over sequential fetching.
+    """
+    try:
+        import yfinance as yf  # noqa: F401 — verify import before spawning threads
+    except ImportError:
         log.error("yfinance not installed. Run: pip install yfinance")
         return {}
 
-    data = {}
-    for ticker in tickers:
-        log.info("Fetching %s (%s)...", ticker, period)
-        try:
-            df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
-            if df is None or df.empty:
-                log.warning("No data for %s (may be delisted or illiquid)", ticker)
-                continue
-            # Flatten MultiIndex columns if present
-            if hasattr(df.columns, 'levels'):
-                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-            data[ticker] = df
-            log.info("  %s: %d bars fetched", ticker, len(df))
-        except Exception as e:
-            log.warning("Failed to fetch %s: %s", ticker, e)
+    data: Dict[str, Any] = {}
+    total = len(tickers)
+    fetched = 0
+    failed = 0
+
+    log.info("Fetching %d tickers (%s, %s) with %d parallel workers...", total, period, interval, max_workers)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_fetch_single_ticker, ticker, period, interval): ticker
+            for ticker in tickers
+        }
+
+        for future in as_completed(futures):
+            ticker, df = future.result()
+            fetched += 1
+            if df is not None:
+                data[ticker] = df
+            else:
+                failed += 1
+            if fetched % 100 == 0 or fetched == total:
+                log.info("  Progress: %d/%d fetched (%d with data, %d empty/failed)",
+                         fetched, total, len(data), failed)
+
+    log.info("Download complete: %d/%d tickers returned data (%d failed)", len(data), total, failed)
     return data
 
 
+# ---------------------------------------------------------------------------
+# Per-ticker simulation
+# ---------------------------------------------------------------------------
 def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
-    """Simulate trades for one ticker across all available data."""
+    """Simulate trades for one ticker across all available data.
+
+    No daily cap, no cooldown — captures ALL signals for maximum Ouroboros data.
+    """
     trades: List[SimTrade] = []
+    exchange = detect_exchange(ticker)
 
     closes = df["Close"].values.astype(np.float64)
     highs = df["High"].values.astype(np.float64)
@@ -331,7 +450,6 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     volumes = df["Volume"].values.astype(np.float64)
 
     if len(closes) < 30:
-        log.warning("%s: insufficient data (%d bars), skipping", ticker, len(closes))
         return trades
 
     # Compute indicators
@@ -349,13 +467,17 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     hurst = estimate_hurst(closes.tolist(), max_lag=20)
     regime = classify_regime(hurst)
 
+    # Extract datetime info for hour-of-day / day-of-week reporting
+    index_list = list(df.index)
+    has_datetime = len(index_list) > 0 and hasattr(index_list[0], 'hour')
+
     # Get dates for reporting
     if hasattr(df.index, 'date'):
         dates = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df.index]
     else:
         dates = [str(i) for i in range(len(df))]
 
-    # Classify entry signals
+    # Classify entry signals (no cooldown, no daily cap)
     entries = classify_entries(closes, volumes, rsi, rvol_arr, regime)
 
     for entry_bar, entry_type in entries:
@@ -370,6 +492,17 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
         pnl = exit_price - entry_price
         pnl_pct = pnl / entry_price * 100.0
 
+        # Extract hour and weekday from index if available
+        entry_hour = -1
+        entry_weekday = -1
+        if has_datetime and entry_bar < len(index_list):
+            ts = index_list[entry_bar]
+            try:
+                entry_hour = ts.hour
+                entry_weekday = ts.weekday()
+            except AttributeError:
+                pass
+
         trades.append(SimTrade(
             ticker=ticker,
             date=dates[entry_bar] if entry_bar < len(dates) else "unknown",
@@ -383,18 +516,47 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
             pnl_pct=pnl_pct,
             hold_bars=exit_bar - entry_bar,
             regime=regime,
+            exchange=exchange,
+            entry_hour=entry_hour,
+            entry_weekday=entry_weekday,
         ))
 
     return trades
 
 
+# ---------------------------------------------------------------------------
+# Report helpers
+# ---------------------------------------------------------------------------
+def _stats_line(trades: List[SimTrade]) -> Tuple[int, int, float, float, float]:
+    """Return (count, wins, win_rate, total_pnl, profit_factor) for a list of trades."""
+    n = len(trades)
+    if n == 0:
+        return 0, 0, 0.0, 0.0, 0.0
+    wins = sum(1 for t in trades if t.pnl > 0)
+    wr = wins / n
+    gross_w = sum(t.pnl for t in trades if t.pnl > 0)
+    gross_l = abs(sum(t.pnl for t in trades if t.pnl <= 0))
+    pf = gross_w / max(gross_l, 1e-9)
+    total_pnl = sum(t.pnl for t in trades)
+    return n, wins, wr, total_pnl, pf
+
+
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
 def generate_simulation_report(
     all_trades: List[SimTrade],
     elapsed_secs: float,
+    ticker_list: List[str],
+    num_tickers_requested: int,
+    num_tickers_fetched: int,
 ) -> str:
-    """Generate comprehensive simulation report."""
+    """Generate comprehensive simulation report with exchange/hour/weekday breakdowns."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
     report_path = REPORTS_DIR / f"backfill_sim_{today}.txt"
 
     total = len(all_trades)
@@ -406,28 +568,33 @@ def generate_simulation_report(
     profit_factor = gross_wins / max(gross_losses, 1e-9)
     total_pnl = sum(t.pnl for t in all_trades)
     avg_rung = sum(t.rung_achieved for t in all_trades) / total if total > 0 else 0.0
+    avg_pnl_pct = sum(t.pnl_pct for t in all_trades) / total if total > 0 else 0.0
 
-    # Per-ticker
+    # Group by various dimensions
     by_ticker: Dict[str, List[SimTrade]] = defaultdict(list)
+    by_type: Dict[str, List[SimTrade]] = defaultdict(list)
+    by_day: Dict[str, List[SimTrade]] = defaultdict(list)
+    by_exchange: Dict[str, List[SimTrade]] = defaultdict(list)
+    by_hour: Dict[int, List[SimTrade]] = defaultdict(list)
+    by_weekday: Dict[int, List[SimTrade]] = defaultdict(list)
+
     for t in all_trades:
         by_ticker[t.ticker].append(t)
-
-    # Per-entry-type
-    by_type: Dict[str, List[SimTrade]] = defaultdict(list)
-    for t in all_trades:
         by_type[t.entry_type].append(t)
-
-    # Per-day
-    by_day: Dict[str, List[SimTrade]] = defaultdict(list)
-    for t in all_trades:
-        day_key = t.date[:10]
-        by_day[day_key].append(t)
+        by_day[t.date[:10]].append(t)
+        by_exchange[t.exchange].append(t)
+        if t.entry_hour >= 0:
+            by_hour[t.entry_hour].append(t)
+        if t.entry_weekday >= 0:
+            by_weekday[t.entry_weekday].append(t)
 
     # Hypothetical equity curve
     equity = STARTING_EQUITY
     kelly_frac = 0.10  # Conservative Kelly for simulation
     equity_curve = [equity]
-    for t in sorted(all_trades, key=lambda x: x.entry_bar):
+    max_equity = equity
+    max_drawdown = 0.0
+    for t in sorted(all_trades, key=lambda x: (x.date, x.entry_bar)):
         position_size = equity * kelly_frac
         shares = math.floor(position_size / max(t.entry_price, 1e-9))
         if shares <= 0:
@@ -435,20 +602,29 @@ def generate_simulation_report(
         trade_pnl = shares * t.pnl
         equity += trade_pnl
         equity_curve.append(equity)
+        max_equity = max(max_equity, equity)
+        dd = (max_equity - equity) / max_equity if max_equity > 0 else 0
+        max_drawdown = max(max_drawdown, dd)
 
     lines = [
-        f"{'=' * 70}",
-        f"  OUROBOROS v6.0 BACKFILL SIMULATION REPORT",
+        f"{'=' * 80}",
+        f"  OUROBOROS v7.0 BACKFILL SIMULATION REPORT",
         f"  Generated: {today}  |  Elapsed: {elapsed_secs:.1f}s",
-        f"{'=' * 70}",
+        f"{'=' * 80}",
+        "",
+        "UNIVERSE",
+        f"  Tickers requested:  {num_tickers_requested:,}",
+        f"  Tickers with data:  {num_tickers_fetched:,}",
+        f"  Exchanges:          {', '.join(sorted(by_exchange.keys()))}",
         "",
         "SUMMARY",
-        f"  Total simulated trades: {total}",
-        f"  Wins:                   {len(wins)}",
-        f"  Losses:                 {len(losses)}",
+        f"  Total simulated trades: {total:,}",
+        f"  Wins:                   {len(wins):,}",
+        f"  Losses:                 {len(losses):,}",
         f"  Win rate:               {win_rate:.1%}",
         f"  Profit factor:          {profit_factor:.2f}",
-        f"  Total PnL (per share):  GBP {total_pnl:+.4f}",
+        f"  Total PnL (per share):  {total_pnl:+,.4f}",
+        f"  Avg PnL %:              {avg_pnl_pct:+.4f}%",
         f"  Avg rung achieved:      {avg_rung:.1f}",
         f"  Avg hold (bars):        {sum(t.hold_bars for t in all_trades) / max(total, 1):.0f}",
         "",
@@ -456,70 +632,120 @@ def generate_simulation_report(
         f"  Starting equity:  GBP {STARTING_EQUITY:,.2f}",
         f"  Ending equity:    GBP {equity:,.2f}",
         f"  Return:           {((equity - STARTING_EQUITY) / STARTING_EQUITY) * 100:+.2f}%",
+        f"  Max drawdown:     {max_drawdown:.1%}",
         "",
     ]
 
-    # Per-ticker table
-    lines += ["PER-TICKER PERFORMANCE", "-" * 70]
-    lines.append(f"  {'Ticker':12s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s} {'Regime':>14s}")
-    for ticker in PRIMARY_TICKERS:
-        tt = by_ticker.get(ticker, [])
-        if not tt:
-            lines.append(f"  {ticker:12s} {'0':>6s} {'--':>5s} {'--':>6s} {'--':>10s} {'no data':>14s}")
-            continue
-        tw = sum(1 for t in tt if t.pnl > 0)
-        tp = sum(t.pnl for t in tt)
-        regime = tt[0].regime if tt else "?"
+    # --- PER-EXCHANGE BREAKDOWN ---
+    lines += ["PER-EXCHANGE PERFORMANCE", "-" * 80]
+    lines.append(f"  {'Exchange':12s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s} {'Avg Rung':>10s}")
+    for exchange in sorted(by_exchange.keys()):
+        tt = by_exchange[exchange]
+        n, w, wr, tp, pf = _stats_line(tt)
+        ar = sum(t.rung_achieved for t in tt) / n if n > 0 else 0
         lines.append(
-            f"  {ticker:12s} {len(tt):6d} {tw:5d} {tw / len(tt):6.0%} "
-            f"{tp:+10.4f} {regime:>14s}"
+            f"  {exchange:12s} {n:8,d} {w:7,d} {wr:6.1%} {pf:7.2f} {tp:+12.4f} {ar:10.1f}"
         )
 
-    # Per-entry-type table
-    lines += ["", "PER-ENTRY-TYPE PERFORMANCE", "-" * 70]
-    lines.append(f"  {'Type':10s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s} {'Avg Rung':>10s}")
+    # --- PER-HOUR-OF-DAY BREAKDOWN ---
+    if by_hour:
+        lines += ["", "PER-HOUR-OF-DAY PERFORMANCE", "-" * 80]
+        lines.append(f"  {'Hour':6s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s}")
+        for hour in sorted(by_hour.keys()):
+            tt = by_hour[hour]
+            n, w, wr, tp, pf = _stats_line(tt)
+            lines.append(
+                f"  {hour:02d}:00  {n:8,d} {w:7,d} {wr:6.1%} {pf:7.2f} {tp:+12.4f}"
+            )
+
+    # --- PER-DAY-OF-WEEK BREAKDOWN ---
+    if by_weekday:
+        lines += ["", "PER-DAY-OF-WEEK PERFORMANCE", "-" * 80]
+        lines.append(f"  {'Day':6s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s}")
+        for wd in sorted(by_weekday.keys()):
+            tt = by_weekday[wd]
+            n, w, wr, tp, pf = _stats_line(tt)
+            name = WEEKDAY_NAMES[wd] if 0 <= wd < 7 else f"Day{wd}"
+            lines.append(
+                f"  {name:6s} {n:8,d} {w:7,d} {wr:6.1%} {pf:7.2f} {tp:+12.4f}"
+            )
+
+    # --- PER-ENTRY-TYPE ---
+    lines += ["", "PER-ENTRY-TYPE PERFORMANCE", "-" * 80]
+    lines.append(f"  {'Type':10s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s} {'Avg Rung':>10s}")
     for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
         tt = by_type.get(etype, [])
         if not tt:
-            lines.append(f"  {etype:10s} {'0':>6s} {'--':>5s} {'--':>6s} {'--':>10s} {'--':>10s}")
+            lines.append(f"  {etype:10s} {'0':>8s} {'--':>7s} {'--':>6s} {'--':>7s} {'--':>12s} {'--':>10s}")
             continue
-        tw = sum(1 for t in tt if t.pnl > 0)
-        tp = sum(t.pnl for t in tt)
-        ar = sum(t.rung_achieved for t in tt) / len(tt)
+        n, w, wr, tp, pf = _stats_line(tt)
+        ar = sum(t.rung_achieved for t in tt) / n
         lines.append(
-            f"  {etype:10s} {len(tt):6d} {tw:5d} {tw / len(tt):6.0%} "
-            f"{tp:+10.4f} {ar:10.1f}"
+            f"  {etype:10s} {n:8,d} {w:7,d} {wr:6.1%} {pf:7.2f} {tp:+12.4f} {ar:10.1f}"
         )
 
-    # Per-day table
-    lines += ["", "PER-DAY PERFORMANCE", "-" * 70]
-    lines.append(f"  {'Date':12s} {'Trades':>6s} {'Wins':>5s} {'WR':>6s} {'PnL/sh':>10s}")
-    for day, day_trades in sorted(by_day.items()):
-        dw = sum(1 for t in day_trades if t.pnl > 0)
-        dp = sum(t.pnl for t in day_trades)
+    # --- TOP 20 WINNERS ---
+    if all_trades:
+        sorted_by_pnl_pct = sorted(all_trades, key=lambda t: t.pnl_pct, reverse=True)
+        top_winners = sorted_by_pnl_pct[:20]
+        lines += ["", "TOP 20 WINNERS", "-" * 80]
+        lines.append(f"  {'#':>3s} {'Ticker':14s} {'Date':12s} {'Type':8s} {'Exch':8s} {'PnL%':>8s} {'PnL/sh':>10s} {'Rung':>5s} {'Regime':>14s}")
+        for i, t in enumerate(top_winners, 1):
+            lines.append(
+                f"  {i:3d} {t.ticker:14s} {t.date[:10]:12s} {t.entry_type:8s} {t.exchange:8s} "
+                f"{t.pnl_pct:+8.2f} {t.pnl:+10.4f} {t.rung_achieved:5d} {t.regime:>14s}"
+            )
+
+    # --- TOP 20 LOSERS ---
+    if all_trades:
+        top_losers = sorted_by_pnl_pct[-20:]
+        lines += ["", "TOP 20 LOSERS", "-" * 80]
+        lines.append(f"  {'#':>3s} {'Ticker':14s} {'Date':12s} {'Type':8s} {'Exch':8s} {'PnL%':>8s} {'PnL/sh':>10s} {'Rung':>5s} {'Regime':>14s}")
+        for i, t in enumerate(top_losers, 1):
+            lines.append(
+                f"  {i:3d} {t.ticker:14s} {t.date[:10]:12s} {t.entry_type:8s} {t.exchange:8s} "
+                f"{t.pnl_pct:+8.2f} {t.pnl:+10.4f} {t.rung_achieved:5d} {t.regime:>14s}"
+            )
+
+    # --- PER-TICKER (top 50 by trade count) ---
+    ticker_by_count = sorted(by_ticker.items(), key=lambda x: len(x[1]), reverse=True)
+    lines += ["", "PER-TICKER PERFORMANCE (top 50 by trade count)", "-" * 80]
+    lines.append(f"  {'Ticker':14s} {'Exch':8s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s} {'Regime':>14s}")
+    for ticker, tt in ticker_by_count[:50]:
+        n, w, wr, tp, pf = _stats_line(tt)
+        regime = tt[0].regime if tt else "?"
+        exchange = tt[0].exchange if tt else "?"
         lines.append(
-            f"  {day:12s} {len(day_trades):6d} {dw:5d} "
-            f"{dw / len(day_trades):6.0%} {dp:+10.4f}"
+            f"  {ticker:14s} {exchange:8s} {n:8,d} {w:7,d} {wr:6.1%} {pf:7.2f} {tp:+12.4f} {regime:>14s}"
         )
+
+    # --- PER-DAY (last 30 days shown to keep report manageable) ---
+    lines += ["", "PER-DAY PERFORMANCE (last 30 days shown)", "-" * 80]
+    lines.append(f"  {'Date':12s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PnL/sh':>12s}")
+    day_items = sorted(by_day.items())
+    for day, day_trades in day_items[-30:]:
+        n, w, wr, tp, pf = _stats_line(day_trades)
+        lines.append(
+            f"  {day:12s} {n:8,d} {w:7,d} {wr:6.1%} {tp:+12.4f}"
+        )
+    if len(day_items) > 30:
+        lines.append(f"  ... ({len(day_items) - 30} earlier days omitted)")
 
     # Best/worst
     if all_trades:
-        best = max(all_trades, key=lambda t: t.pnl)
-        worst = min(all_trades, key=lambda t: t.pnl)
+        best = max(all_trades, key=lambda t: t.pnl_pct)
+        worst = min(all_trades, key=lambda t: t.pnl_pct)
         lines += [
             "",
-            f"BEST TRADE:  {best.ticker} on {best.date} — {best.entry_type} "
+            f"BEST TRADE:  {best.ticker} ({best.exchange}) on {best.date} - {best.entry_type} "
             f"PnL={best.pnl:+.4f} ({best.pnl_pct:+.2f}%) rung={best.rung_achieved}",
-            f"WORST TRADE: {worst.ticker} on {worst.date} — {worst.entry_type} "
+            f"WORST TRADE: {worst.ticker} ({worst.exchange}) on {worst.date} - {worst.entry_type} "
             f"PnL={worst.pnl:+.4f} ({worst.pnl_pct:+.2f}%) rung={worst.rung_achieved}",
         ]
 
     lines += [
         "",
-        f"  If we had these improvements last week, GBP {STARTING_EQUITY:,.0f} "
-        f"would be GBP {equity:,.2f} now",
-        "",
-        f"{'=' * 70}",
+        f"{'=' * 80}",
         "",
     ]
 
@@ -531,23 +757,28 @@ def generate_simulation_report(
     json_path = REPORTS_DIR / f"backfill_sim_{today}.json"
     json_data = {
         "date": today,
+        "universe_size": num_tickers_requested,
+        "tickers_with_data": num_tickers_fetched,
         "total_trades": total,
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": win_rate,
         "profit_factor": profit_factor,
         "total_pnl_per_share": total_pnl,
+        "avg_pnl_pct": avg_pnl_pct,
         "avg_rung": avg_rung,
         "starting_equity": STARTING_EQUITY,
         "ending_equity": equity,
         "return_pct": ((equity - STARTING_EQUITY) / STARTING_EQUITY) * 100,
-        "per_ticker": {
-            t: {
+        "max_drawdown_pct": max_drawdown * 100,
+        "per_exchange": {
+            ex: {
                 "trades": len(tt),
                 "wins": sum(1 for x in tt if x.pnl > 0),
+                "win_rate": sum(1 for x in tt if x.pnl > 0) / len(tt) if tt else 0,
                 "total_pnl": sum(x.pnl for x in tt),
             }
-            for t, tt in by_ticker.items()
+            for ex, tt in by_exchange.items()
         },
         "per_entry_type": {
             et: {
@@ -556,6 +787,24 @@ def generate_simulation_report(
                 "total_pnl": sum(x.pnl for x in tt),
             }
             for et, tt in by_type.items()
+        },
+        "per_hour": {
+            str(h): {
+                "trades": len(tt),
+                "wins": sum(1 for x in tt if x.pnl > 0),
+                "win_rate": sum(1 for x in tt if x.pnl > 0) / len(tt) if tt else 0,
+                "total_pnl": sum(x.pnl for x in tt),
+            }
+            for h, tt in sorted(by_hour.items())
+        },
+        "per_weekday": {
+            WEEKDAY_NAMES[wd] if 0 <= wd < 7 else f"Day{wd}": {
+                "trades": len(tt),
+                "wins": sum(1 for x in tt if x.pnl > 0),
+                "win_rate": sum(1 for x in tt if x.pnl > 0) / len(tt) if tt else 0,
+                "total_pnl": sum(x.pnl for x in tt),
+            }
+            for wd, tt in sorted(by_weekday.items())
         },
     }
     json_path.write_text(json.dumps(json_data, indent=2))
@@ -668,6 +917,21 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
                         "magnitude": 0,
                     })
 
+    # --- Per-exchange summary for feedback ---
+    by_exchange: Dict[str, List[SimTrade]] = defaultdict(list)
+    for t in all_trades:
+        by_exchange[t.exchange].append(t)
+
+    exchange_summary = {}
+    for ex, trades in by_exchange.items():
+        n = len(trades)
+        ex_wr = sum(1 for t in trades if t.pnl > 0) / n if n > 0 else 0
+        exchange_summary[ex] = {
+            "trades": n,
+            "win_rate": round(ex_wr, 4),
+            "avg_pnl_pct": round(sum(t.pnl_pct for t in trades) / n, 4) if n > 0 else 0,
+        }
+
     # --- Build feedback payload ---
     feedback = {
         "backfill_date": today,
@@ -676,6 +940,7 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
         "simulated_avg_return": round(avg_return, 4),
         "strategy_confidence_delta": strategy_confidence_delta,
         "recommended_parameter_changes": recommended_parameter_changes,
+        "per_exchange_summary": exchange_summary,
     }
 
     # --- Atomic write: tempfile + os.rename ---
@@ -711,51 +976,102 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
-def run_backfill(days: int = 7, interval: str = "5m") -> int:
-    """Execute the backfill simulation."""
+def run_backfill(
+    days: int = 7,
+    interval: str = "5m",
+    universe_path: Optional[str] = None,
+    use_blacklist: bool = False,
+) -> int:
+    """Execute the backfill simulation with chunked processing for memory management.
+
+    Args:
+        days: Lookback period in days.
+        interval: Bar interval (1m, 5m, 60m, 1d, etc.).
+        universe_path: Path to universe file (one ticker per line). If None, uses PRIMARY_TICKERS.
+        use_blacklist: If True, load and apply blacklist from config.toml.
+    """
     start = time.monotonic()
-    log.info("Ouroboros v6.0 Backfill Simulator starting (%dd, %s bars)...", days, interval)
+
+    # --- Determine ticker list ---
+    if universe_path:
+        tickers = load_universe_file(universe_path)
+        if not tickers:
+            log.error("No tickers loaded from universe file: %s", universe_path)
+            return 1
+    else:
+        tickers = list(PRIMARY_TICKERS)
+
+    # --- Load and apply blacklist ---
+    blacklist: Set[str] = set()
+    if use_blacklist:
+        blacklist = load_blacklist_from_config()
+
+    if blacklist:
+        before = len(tickers)
+        tickers = [t for t in tickers if t not in blacklist]
+        log.info("Blacklist removed %d tickers (%d -> %d)", before - len(tickers), before, len(tickers))
+
+    num_tickers_requested = len(tickers)
+    log.info(
+        "Ouroboros v7.0 Backfill Simulator starting (%dd, %s bars, %d tickers, chunks of %d)...",
+        days, interval, num_tickers_requested, CHUNK_SIZE,
+    )
 
     period = f"{days}d"
-    data = fetch_historical_data(PRIMARY_TICKERS, period=period, interval=interval)
-    if not data:
-        log.error("No historical data fetched. Aborting.")
-        return 1
 
-    log.info("Data fetched for %d/%d tickers", len(data), len(PRIMARY_TICKERS))
-
-    # Load blacklist from config.toml (skip proven losers)
-    blacklist = set()
-    try:
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib
-        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
-        if cfg_path.exists():
-            with open(cfg_path, "rb") as f:
-                cfg = tomllib.load(f)
-            blacklist = set(cfg.get("blacklist", {}).get("tickers", []))
-            if blacklist:
-                log.info("Blacklist loaded: %d tickers (%s)", len(blacklist), ", ".join(sorted(blacklist)))
-    except Exception:
-        pass
-
-    # Simulate trades for each ticker
+    # --- Chunked processing: download and simulate in chunks to limit memory ---
     all_trades: List[SimTrade] = []
-    for ticker, df in data.items():
-        if ticker in blacklist:
-            log.info("  %s: SKIPPED (blacklisted)", ticker)
+    num_tickers_fetched = 0
+    num_chunks = math.ceil(len(tickers) / CHUNK_SIZE)
+
+    for chunk_idx in range(num_chunks):
+        chunk_start = chunk_idx * CHUNK_SIZE
+        chunk_end = min(chunk_start + CHUNK_SIZE, len(tickers))
+        chunk_tickers = tickers[chunk_start:chunk_end]
+
+        log.info(
+            "--- Chunk %d/%d: tickers %d-%d (%d tickers) ---",
+            chunk_idx + 1, num_chunks, chunk_start + 1, chunk_end, len(chunk_tickers),
+        )
+
+        # Parallel download for this chunk
+        data = fetch_historical_data_parallel(chunk_tickers, period=period, interval=interval)
+        num_tickers_fetched += len(data)
+
+        if not data:
+            log.warning("Chunk %d: no data fetched, skipping", chunk_idx + 1)
             continue
-        trades = simulate_ticker(ticker, df)
-        all_trades.extend(trades)
-        log.info("  %s: %d simulated trades", ticker, len(trades))
+
+        # Simulate trades for each ticker in the chunk
+        chunk_trades = 0
+        for ticker, df in data.items():
+            trades = simulate_ticker(ticker, df)
+            all_trades.extend(trades)
+            chunk_trades += len(trades)
+
+        log.info(
+            "Chunk %d complete: %d tickers with data, %d trades simulated",
+            chunk_idx + 1, len(data), chunk_trades,
+        )
+
+        # Free chunk data to manage memory on 4GB EC2
+        del data
+        gc.collect()
 
     elapsed = time.monotonic() - start
-    log.info("Simulation complete: %d total trades in %.1fs", len(all_trades), elapsed)
+    log.info(
+        "Simulation complete: %d total trades from %d/%d tickers in %.1fs",
+        len(all_trades), num_tickers_fetched, num_tickers_requested, elapsed,
+    )
+
+    if not all_trades:
+        log.error("No trades simulated. Check ticker data availability.")
+        return 1
 
     # Generate report
-    report = generate_simulation_report(all_trades, elapsed)
+    report = generate_simulation_report(
+        all_trades, elapsed, tickers, num_tickers_requested, num_tickers_fetched,
+    )
     print(report)
 
     # Export feedback for nightly learning loop (ISS-018)
@@ -769,11 +1085,24 @@ def main():
     import argparse
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [Backfill] %(levelname)s %(message)s")
 
-    parser = argparse.ArgumentParser(description="Ouroboros v6.0 Backfill Simulator")
-    parser.add_argument("--days", type=int, default=7, help="Lookback days")
+    parser = argparse.ArgumentParser(description="Ouroboros v7.0 Backfill Simulator")
+    parser.add_argument("--days", type=int, default=7, help="Lookback days (default: 7)")
     parser.add_argument("--interval", type=str, default="5m",
                         help="Bar interval: 1m (7d max), 5m (59d max), 60m/1h (730d max), 1d (unlimited)")
+    parser.add_argument("--universe", type=str, default=None,
+                        help="Path to universe file with one ticker per line (skip # comments)")
+    parser.add_argument("--blacklist", action="store_true", default=False,
+                        help="Apply blacklist from config.toml [blacklist] section")
+    parser.add_argument("--workers", type=int, default=DOWNLOAD_WORKERS,
+                        help=f"Parallel download workers (default: {DOWNLOAD_WORKERS})")
+    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE,
+                        help=f"Tickers per processing chunk (default: {CHUNK_SIZE})")
     args = parser.parse_args()
+
+    # Allow runtime override of concurrency settings
+    global DOWNLOAD_WORKERS, CHUNK_SIZE
+    DOWNLOAD_WORKERS = args.workers
+    CHUNK_SIZE = args.chunk_size
 
     # Enforce yfinance limits
     max_days = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59,
@@ -781,7 +1110,12 @@ def main():
     limit = max_days.get(args.interval, 59)
 
     try:
-        sys.exit(run_backfill(days=min(args.days, limit), interval=args.interval))
+        sys.exit(run_backfill(
+            days=min(args.days, limit),
+            interval=args.interval,
+            universe_path=args.universe,
+            use_blacklist=args.blacklist,
+        ))
     except Exception as e:
         log.error("Backfill simulator crashed: %s", e, exc_info=True)
         sys.exit(1)
