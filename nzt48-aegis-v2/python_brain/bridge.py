@@ -900,6 +900,34 @@ def process_tick(msg):
         _last_vwap_date[ticker_id] = _tick_date
 
     # =========================================================================
+    # T-01 (Sprint 5): Blackout period enforcement — skip signal generation
+    # after per-exchange entry cutoff. Placed BEFORE indicator computation
+    # to avoid wasting 100ms+ of compute per tick. Rust risk_arbiter is the
+    # authoritative safety gate; this is purely a compute-saving early return.
+    # SIM_MODE: skip blackout to allow all signals through for backtesting.
+    # =========================================================================
+    if not _SIM_MODE:
+        _ts_ns = msg.get("timestamp_ns", 0)
+        if _is_in_blackout(ticker_id, _ts_ns):
+            # Rate-limit logging: once per ticker per day
+            global _blackout_warned, _blackout_warned_date
+            import datetime as _dt_bo
+            _today_bo = _dt_bo.date.today().isoformat()
+            if _blackout_warned_date != _today_bo:
+                _blackout_warned = set()
+                _blackout_warned_date = _today_bo
+            _bo_sym = ticker_symbols.get(ticker_id, str(ticker_id))
+            if _bo_sym not in _blackout_warned:
+                _bo_exch = _get_exchange_for_symbol(_bo_sym) or "?"
+                sys.stderr.write(
+                    f"BLACKOUT_VETO: {_bo_sym} (tid={ticker_id}) past {_bo_exch} entry cutoff\n"
+                )
+                sys.stderr.flush()
+                _blackout_warned.add(_bo_sym)
+            # Return minimal no_signal (indicators not yet computed — skip them)
+            return {"type": "no_signal", "ticker_id": ticker_id}
+
+    # =========================================================================
     # FIX 1: Aggregate 5-second bars into 5-MINUTE bars for indicator computation.
     # Raw 5-second bars produce meaningless indicators (ADX=99, Hurst=1.0).
     # 5-minute bars give proper trend/regime readings.
@@ -1014,32 +1042,6 @@ def process_tick(msg):
             sys.stderr.flush()
             _blacklist_warned.add(sym)
         return no_signal_base
-
-    # =========================================================================
-    # T-01 (Sprint 5): Blackout period enforcement — skip signal generation
-    # after per-exchange entry cutoff. Rust risk_arbiter is the authoritative
-    # gate, but this early return avoids wasting 100ms+ of compute per tick.
-    # SIM_MODE: skip blackout to allow all signals through for backtesting.
-    # =========================================================================
-    if not _SIM_MODE:
-        _ts_ns = msg.get("timestamp_ns", 0)
-        if _is_in_blackout(ticker_id, _ts_ns):
-            # Rate-limit logging: once per ticker per day
-            global _blackout_warned, _blackout_warned_date
-            import datetime as _dt_bo
-            _today_bo = _dt_bo.date.today().isoformat()
-            if _blackout_warned_date != _today_bo:
-                _blackout_warned = set()
-                _blackout_warned_date = _today_bo
-            _bo_sym = ticker_symbols.get(ticker_id, str(ticker_id))
-            if _bo_sym not in _blackout_warned:
-                _bo_exch = _get_exchange_for_symbol(_bo_sym) or "?"
-                sys.stderr.write(
-                    f"BLACKOUT_VETO: {_bo_sym} (tid={ticker_id}) past {_bo_exch} entry cutoff\n"
-                )
-                sys.stderr.flush()
-                _blackout_warned.add(_bo_sym)
-            return no_signal_base
 
     # =========================================================================
     # FIX 2: Raise warm-up to 200 bars (= 16 min of 5-second data = 3+ 5-min bars)
