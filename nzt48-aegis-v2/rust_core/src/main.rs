@@ -356,19 +356,22 @@ fn main() {
         eprintln!("Market data: skipped (no broker connection)");
     }
 
-    // P0-01: Subscribe to L1 tick-by-tick bid/ask for top 2 LSE ETPs only.
+    // P0-01: Subscribe to L1 tick-by-tick bid/ask for first N LSE ETPs.
     // IBKR paper limits tick-by-tick to ~2 concurrent (error 10190 at higher counts).
-    // 2 core instruments: QQQ3.L, 3LUS.L (highest liquidity).
-    // Mode rotation (P21) will subscribe/unsubscribe L1 as sessions change.
+    // Uses first 2 LSE contracts from contracts.toml (highest liquidity by convention).
     if broker_connected {
-        let l1_core: Vec<&str> = vec!["QQQ3.L", "3LUS.L"];
+        let mc = rust_core::market_config::MarketConfig::from_contracts(&config_dir);
+        let l1_core: Vec<&str> = mc.lse.iter()
+            .take(2)  // IBKR tick-by-tick limit
+            .map(|s| s.as_str())
+            .collect();
         let lse_tids: Vec<rust_core::types::TickerId> = l1_core.iter()
             .filter_map(|sym| broker.contract_map_keys().iter()
                 .find(|&&tid| broker.symbol_for(tid).map_or(false, |s| s == *sym))
                 .copied())
             .collect();
         let l1_count = broker.subscribe_l1_batch(&lse_tids);
-        eprintln!("Market data: subscribed to {l1_count} L1 bid/ask streams (top 2 LSE ETPs)");
+        eprintln!("Market data: subscribed to {l1_count} L1 bid/ask streams ({:?})", l1_core);
     }
 
     // Create tick channel for backpressure monitoring (Phase 6A)

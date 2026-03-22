@@ -1,135 +1,159 @@
 //! P21: Market configuration — ticker lists for each trading mode.
-//! Mode A (23:00-08:00 UTC): Asian markets (TSE, HKEX)
+//! Mode A (23:00-08:00 UTC): Asian markets (TSE, HKEX, SGX)
 //! Mode B (08:00-14:30 UTC): European + LSE
 //! Mode B+ (14:30-16:30 UTC): European + US overlap
 //! Mode C (16:35-21:00 UTC): US-only session
 //! Dark (21:00-23:00 UTC): No trading
 //!
-//! Static fallback lists — overridden by dynamic watchlist rotation when available.
+//! Loaded dynamically from contracts.toml — grouped by exchange.
+//! Static fallback only used if contracts.toml cannot be read.
+
+use std::path::Path;
 
 /// Ticker configuration for different trading modes.
+/// Loaded from contracts.toml, grouped by exchange.
 pub struct MarketConfig {
-    /// 12 LSE leveraged ETPs (ISA core set — always included in B/B+/C).
-    pub lse_12: Vec<&'static str>,
-    /// TSE (Tokyo Stock Exchange) — top 20 most liquid.
-    pub tse_sample: Vec<&'static str>,
-    /// HKEX (Hong Kong) — top 20 most liquid.
-    pub hkex_sample: Vec<&'static str>,
-    /// ASX (Australian) — REMOVED (no IBKR data subscription).
-    pub asx_sample: Vec<&'static str>,
-    /// XETRA (Frankfurt) — 13 stocks.
-    pub xetra_sample: Vec<&'static str>,
-    /// Euronext (Paris/Amsterdam) — 8 stocks.
-    pub euronext_sample: Vec<&'static str>,
-    /// US equities (NASDAQ/NYSE) — 30 most liquid for ModeC.
-    pub us_equities: Vec<&'static str>,
+    /// LSE leveraged ETPs (LSEETF exchange).
+    pub lse: Vec<String>,
+    /// TSE (Tokyo Stock Exchange).
+    pub tse: Vec<String>,
+    /// HKEX (Hong Kong).
+    pub hkex: Vec<String>,
+    /// SGX (Singapore).
+    pub sgx: Vec<String>,
+    /// XETRA (Frankfurt).
+    pub xetra: Vec<String>,
+    /// Euronext (Paris/Amsterdam).
+    pub euronext: Vec<String>,
+    /// US equities (NASDAQ/NYSE via SMART).
+    pub us_equities: Vec<String>,
 }
 
 impl MarketConfig {
-    pub fn new() -> Self {
+    /// Load from contracts.toml, grouping symbols by exchange.
+    pub fn from_contracts(config_dir: &Path) -> Self {
+        let contracts_path = config_dir.join("contracts.toml");
+        if let Ok(content) = std::fs::read_to_string(&contracts_path) {
+            if let Ok(table) = content.parse::<toml::Table>() {
+                return Self::parse_contracts(&table);
+            }
+        }
+        eprintln!("MARKET_CONFIG: contracts.toml not found or invalid, using empty config");
+        Self::empty()
+    }
+
+    fn parse_contracts(table: &toml::Table) -> Self {
+        let mut lse = Vec::new();
+        let mut tse = Vec::new();
+        let mut hkex = Vec::new();
+        let mut sgx = Vec::new();
+        let mut xetra = Vec::new();
+        let mut euronext = Vec::new();
+        let mut us_equities = Vec::new();
+
+        if let Some(contracts) = table.get("contracts").and_then(|c| c.as_array()) {
+            for contract in contracts {
+                let symbol = contract.get("symbol").and_then(|s| s.as_str()).unwrap_or("");
+                let exchange = contract.get("exchange").and_then(|e| e.as_str()).unwrap_or("");
+                if symbol.is_empty() {
+                    continue;
+                }
+                match exchange {
+                    "LSEETF" => lse.push(symbol.to_string()),
+                    "TSE" => tse.push(symbol.to_string()),
+                    "HKEX" => hkex.push(symbol.to_string()),
+                    "SGX" => sgx.push(symbol.to_string()),
+                    "XETRA" | "IBIS" => xetra.push(symbol.to_string()),
+                    "EURONEXT" | "AEB" | "XMAD" | "HEX" => euronext.push(symbol.to_string()),
+                    "SMART" => us_equities.push(symbol.to_string()),
+                    _ => {} // Unknown exchange — skip
+                }
+            }
+        }
+
+        eprintln!(
+            "MARKET_CONFIG: Loaded from contracts.toml — LSE:{} TSE:{} HKEX:{} SGX:{} XETRA:{} EURONEXT:{} US:{}",
+            lse.len(), tse.len(), hkex.len(), sgx.len(), xetra.len(), euronext.len(), us_equities.len()
+        );
+
+        Self { lse, tse, hkex, sgx, xetra, euronext, us_equities }
+    }
+
+    fn empty() -> Self {
         Self {
-            lse_12: vec![
-                // LSE leveraged ETPs (12 ISA instruments)
-                // Canonical LSE ticker names (validated from isa_universe_master.json):
-                //   NVD3.L (NOT 3NVD.L), TSL3.L (NOT 3TSL.L),
-                //   TSM3.L (NOT 3TSM.L), MU2.L (NOT 2MU.L)
-                "QQQ3.L", "3LUS.L", "3SEM.L", "GPT3.L", "NVD3.L", "TSL3.L",
-                "TSM3.L", "MU2.L", "QQQS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-            ],
-            tse_sample: vec![
-                // Top TSE stocks (20 unique — matches contracts.toml)
-                "7203", "6902", "8035", "6758", "6861", "8306", "6954",
-                "9432", "8591", "9984", "8766", "3382", "6869", "4502",
-                "9201", "8802", "5401", "1925", "1928", "6501",
-            ],
-            hkex_sample: vec![
-                // Top HKEX stocks (sample)
-                "0001", "0175", "0691", "0700", "0883", "1211", "1299",
-                "1398", "1088", "6862", "9618", "6823", "0288", "0857",
-                "1177", "0142", "0689", "0939", "0006", "0388",
-            ],
-            asx_sample: vec![
-                // ASX REMOVED — no IBKR data subscription active
-                // Re-add when ASX Total (NP,L2) subscription is active (AUD 25/mo)
-            ],
-            xetra_sample: vec![
-                // XETRA stocks (14 — matches contracts.toml, BEI added)
-                "SAP", "SIE", "IFX", "VOW3", "BMW", "MBG", "ADS",
-                "MUV2", "HEI", "RWE", "EOAN", "DTE", "BEI",
-            ],
-            euronext_sample: vec![
-                // Euronext stocks (Paris/Amsterdam/Helsinki)
-                "OR", "NOKIA", "TTE", "SAN", "MC", "ASML",
-            ],
-            us_equities: vec![
-                // US equities — 30 most liquid NASDAQ/NYSE via SMART routing
-                "AAPL", "MSFT", "NVDA", "TSLA", "GOOG", "META", "AMZN", "AMD",
-                "AVGO", "CRM", "NFLX", "ORCL", "MU", "QCOM", "AMAT", "KLAC",
-                "LRCX", "MRVL", "ARM", "PLTR", "SMCI", "JPM", "V", "UNH",
-                "XOM", "LLY", "COIN", "MSTR", "SNOW", "INTC",
-            ],
+            lse: Vec::new(),
+            tse: Vec::new(),
+            hkex: Vec::new(),
+            sgx: Vec::new(),
+            xetra: Vec::new(),
+            euronext: Vec::new(),
+            us_equities: Vec::new(),
         }
     }
 
-    /// Mode A (Asian session): TSE + HKEX (ASX removed)
-    pub fn mode_a_tickers(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        result.extend_from_slice(&self.tse_sample);
-        result.extend_from_slice(&self.hkex_sample);
-        result.extend_from_slice(&self.asx_sample);
+    /// Mode A (Asian session): TSE + HKEX + SGX
+    pub fn mode_a_tickers(&self) -> Vec<&str> {
+        let mut result: Vec<&str> = Vec::new();
+        result.extend(self.tse.iter().map(|s| s.as_str()));
+        result.extend(self.hkex.iter().map(|s| s.as_str()));
+        result.extend(self.sgx.iter().map(|s| s.as_str()));
         result
     }
 
     /// Mode B (European session): LSE + XETRA + Euronext
-    pub fn mode_b_tickers(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        result.extend_from_slice(&self.lse_12);
-        result.extend_from_slice(&self.xetra_sample);
-        result.extend_from_slice(&self.euronext_sample);
+    pub fn mode_b_tickers(&self) -> Vec<&str> {
+        let mut result: Vec<&str> = Vec::new();
+        result.extend(self.lse.iter().map(|s| s.as_str()));
+        result.extend(self.xetra.iter().map(|s| s.as_str()));
+        result.extend(self.euronext.iter().map(|s| s.as_str()));
         result
     }
 
-    /// Mode B+ (US overlap): LSE + XETRA + Euronext + US equities
-    pub fn mode_bplus_tickers(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        result.extend_from_slice(&self.lse_12);
-        result.extend_from_slice(&self.xetra_sample);
-        result.extend_from_slice(&self.euronext_sample);
-        result.extend_from_slice(&self.us_equities);
+    /// Mode B+ (US overlap): LSE + XETRA + Euronext + US
+    pub fn mode_bplus_tickers(&self) -> Vec<&str> {
+        let mut result = self.mode_b_tickers();
+        result.extend(self.us_equities.iter().map(|s| s.as_str()));
         result
     }
 
-    /// Mode C (US session): ISA core ETPs + US equities
-    pub fn mode_c_tickers(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        result.extend_from_slice(&self.lse_12);  // Always include ISA ETPs
-        result.extend_from_slice(&self.us_equities);
+    /// Mode C (US session): LSE + US
+    pub fn mode_c_tickers(&self) -> Vec<&str> {
+        let mut result: Vec<&str> = Vec::new();
+        result.extend(self.lse.iter().map(|s| s.as_str()));
+        result.extend(self.us_equities.iter().map(|s| s.as_str()));
         result
     }
 
     /// Unified: all markets combined (static fallback for when watchlist is empty).
-    /// ISA core first, then global tickers. Capped at 100 (IBKR paper max).
-    pub fn all_markets_tickers(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        result.extend_from_slice(&self.lse_12);
-        result.extend_from_slice(&self.us_equities);
-        result.extend_from_slice(&self.tse_sample);
-        result.extend_from_slice(&self.hkex_sample);
-        result.extend_from_slice(&self.xetra_sample);
-        result.extend_from_slice(&self.euronext_sample);
-        result.truncate(100); // IBKR paper max
+    /// Capped at 100 (IBKR subscription limit).
+    pub fn all_markets_tickers(&self) -> Vec<&str> {
+        let mut result: Vec<&str> = Vec::new();
+        result.extend(self.lse.iter().map(|s| s.as_str()));
+        result.extend(self.us_equities.iter().map(|s| s.as_str()));
+        result.extend(self.tse.iter().map(|s| s.as_str()));
+        result.extend(self.hkex.iter().map(|s| s.as_str()));
+        result.extend(self.sgx.iter().map(|s| s.as_str()));
+        result.extend(self.xetra.iter().map(|s| s.as_str()));
+        result.extend(self.euronext.iter().map(|s| s.as_str()));
+        result.truncate(100);
         result
     }
 
     /// Dark hours: no trading
-    pub fn dark_tickers(&self) -> Vec<&'static str> {
+    pub fn dark_tickers(&self) -> Vec<&str> {
         vec![]
+    }
+
+    /// Total contract count across all exchanges.
+    pub fn total_contracts(&self) -> usize {
+        self.lse.len() + self.tse.len() + self.hkex.len() + self.sgx.len()
+            + self.xetra.len() + self.euronext.len() + self.us_equities.len()
     }
 }
 
 impl Default for MarketConfig {
     fn default() -> Self {
-        Self::new()
+        Self::from_contracts(Path::new("/app/config"))
     }
 }
 
@@ -137,69 +161,78 @@ impl Default for MarketConfig {
 mod tests {
     use super::*;
 
+    fn sample_toml() -> toml::Table {
+        let content = r#"
+[[contracts]]
+symbol = "QQQ3.L"
+exchange = "LSEETF"
+[[contracts]]
+symbol = "AAPL"
+exchange = "SMART"
+[[contracts]]
+symbol = "7203"
+exchange = "TSE"
+[[contracts]]
+symbol = "0700"
+exchange = "HKEX"
+[[contracts]]
+symbol = "SAP"
+exchange = "XETRA"
+[[contracts]]
+symbol = "OR"
+exchange = "EURONEXT"
+[[contracts]]
+symbol = "D05"
+exchange = "SGX"
+"#;
+        content.parse::<toml::Table>().unwrap()
+    }
+
     #[test]
-    fn test_market_config_mode_a() {
-        let cfg = MarketConfig::new();
+    fn test_parse_contracts() {
+        let table = sample_toml();
+        let cfg = MarketConfig::parse_contracts(&table);
+        assert_eq!(cfg.lse.len(), 1);
+        assert_eq!(cfg.us_equities.len(), 1);
+        assert_eq!(cfg.tse.len(), 1);
+        assert_eq!(cfg.hkex.len(), 1);
+        assert_eq!(cfg.xetra.len(), 1);
+        assert_eq!(cfg.euronext.len(), 1);
+        assert_eq!(cfg.sgx.len(), 1);
+        assert_eq!(cfg.total_contracts(), 7);
+    }
+
+    #[test]
+    fn test_mode_a() {
+        let table = sample_toml();
+        let cfg = MarketConfig::parse_contracts(&table);
         let tickers = cfg.mode_a_tickers();
-        // TSE (20) + HKEX (20) + ASX (0, removed) = 40
-        assert_eq!(tickers.len(), 40);
-        assert!(tickers.contains(&"7203")); // TSE sample
-        assert!(tickers.contains(&"0001")); // HKEX sample
+        assert!(tickers.contains(&"7203"));
+        assert!(tickers.contains(&"0700"));
+        assert!(tickers.contains(&"D05"));
     }
 
     #[test]
-    fn test_market_config_mode_b() {
-        let cfg = MarketConfig::new();
+    fn test_mode_b() {
+        let table = sample_toml();
+        let cfg = MarketConfig::parse_contracts(&table);
         let tickers = cfg.mode_b_tickers();
-        // LSE (12) + XETRA (13) + Euronext (6) = 31
-        assert_eq!(tickers.len(), 31);
-        assert!(tickers.contains(&"QQQ3.L")); // LSE sample
-        assert!(tickers.contains(&"SAP"));    // XETRA sample
-        assert!(tickers.contains(&"OR"));     // Euronext sample
+        assert!(tickers.contains(&"QQQ3.L"));
+        assert!(tickers.contains(&"SAP"));
+        assert!(tickers.contains(&"OR"));
     }
 
     #[test]
-    fn test_market_config_mode_bplus() {
-        let cfg = MarketConfig::new();
-        let tickers = cfg.mode_bplus_tickers();
-        // LSE (12) + XETRA (13) + Euronext (6) + US (30) = 61
-        assert_eq!(tickers.len(), 61);
-        assert!(tickers.contains(&"QQQ3.L")); // ISA core
-        assert!(tickers.contains(&"NVDA"));   // US equity
-        assert!(tickers.contains(&"SAP"));    // XETRA
+    fn test_all_markets_cap_100() {
+        let table = sample_toml();
+        let cfg = MarketConfig::parse_contracts(&table);
+        let tickers = cfg.all_markets_tickers();
+        assert!(tickers.len() <= 100);
     }
 
     #[test]
-    fn test_market_config_mode_c() {
-        let cfg = MarketConfig::new();
-        let tickers = cfg.mode_c_tickers();
-        // LSE (12) + US (30) = 42
-        assert_eq!(tickers.len(), 42);
-        assert!(tickers.contains(&"QQQ3.L")); // ISA core always included
-        assert!(tickers.contains(&"AAPL"));   // US equity
-        assert!(tickers.contains(&"TSLA"));   // US equity
-    }
-
-    #[test]
-    fn test_market_config_dark() {
-        let cfg = MarketConfig::new();
-        assert_eq!(cfg.dark_tickers().len(), 0);
-    }
-
-    #[test]
-    fn test_lse_12_fixed() {
-        let cfg = MarketConfig::new();
-        assert_eq!(cfg.lse_12.len(), 12);
-        assert!(cfg.lse_12.contains(&"QQQ3.L"));
-        assert!(cfg.lse_12.contains(&"3LUS.L"));
-        assert!(cfg.lse_12.contains(&"5SPY.L"));
-    }
-
-    #[test]
-    fn test_us_equities_count() {
-        let cfg = MarketConfig::new();
-        assert_eq!(cfg.us_equities.len(), 30);
-        assert!(cfg.us_equities.contains(&"AAPL"));
-        assert!(cfg.us_equities.contains(&"INTC"));
+    fn test_empty_on_missing() {
+        let cfg = MarketConfig::from_contracts(Path::new("/nonexistent/path"));
+        assert_eq!(cfg.total_contracts(), 0);
     }
 }

@@ -597,7 +597,7 @@ impl<B: BrokerAdapter> Engine<B> {
             checkpoint_mgr: CheckpointManager::new(3600),
             session_mgr: SessionManager::new(),
             last_session_mode: SessionMode::Dark,
-            market_config: MarketConfig::new(),
+            market_config: MarketConfig::default(),
             latency_profiler: LatencyProfiler::new(),
             kalman_filters: HashMap::new(),
             thompson_sampler: LogThompsonSampler::new(),
@@ -2545,17 +2545,11 @@ impl<B: BrokerAdapter> Engine<B> {
         if watchlist_tickers.is_empty() {
             eprintln!("WATCHLIST_ROTATE: {} empty/missing, using static fallback", primary_path);
             // Combine all static tickers: ISA core + TSE + HKEX + XETRA + Euronext + US
-            let mut static_tickers = Vec::new();
-            static_tickers.extend_from_slice(&self.market_config.lse_12);
-            static_tickers.extend_from_slice(&self.market_config.tse_sample);
-            static_tickers.extend_from_slice(&self.market_config.hkex_sample);
-            static_tickers.extend_from_slice(&self.market_config.xetra_sample);
-            static_tickers.extend_from_slice(&self.market_config.euronext_sample);
-            static_tickers.extend_from_slice(&self.market_config.us_equities);
-            static_tickers.truncate(max_tickers);
+            let static_tickers = self.market_config.all_markets_tickers();
             let new_ticker_ids: Vec<TickerId> = static_tickers
                 .iter()
-                .map(|&sym| self.universe.intern.intern(sym))
+                .take(max_tickers)
+                .map(|sym| self.universe.intern.intern(sym))
                 .collect();
             self.execute_subscription_rotation(&new_ticker_ids, mode);
             return;
@@ -2566,8 +2560,8 @@ impl<B: BrokerAdapter> Engine<B> {
         let london_secs = self.london_time_secs();
         let lse_open = crate::clock::Clock::is_lse_open(london_secs);
         if lse_open {
-            let isa_core: Vec<(String, String, String)> = self.market_config.lse_12.iter()
-                .map(|&s| (s.to_string(), "LSEETF".to_string(), "GBP".to_string()))
+            let isa_core: Vec<(String, String, String)> = self.market_config.lse.iter()
+                .map(|s| (s.clone(), "LSEETF".to_string(), "GBP".to_string()))
                 .collect();
             let existing_symbols: std::collections::HashSet<String> =
                 watchlist_tickers.iter().map(|(s, _, _)| s.clone()).collect();

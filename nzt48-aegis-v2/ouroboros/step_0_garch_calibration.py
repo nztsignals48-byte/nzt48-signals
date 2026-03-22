@@ -148,21 +148,24 @@ def calibrate_universe(
 
 def main():
     """CLI entry point for standalone calibration."""
-    # ISA universe: 12 leveraged ETPs
-    isa_tickers = {
-        "QQQ3.L": 1,
-        "3LUS.L": 2,
-        "3SEM.L": 3,
-        "GPT3.L": 4,
-        "NVD3.L": 5,
-        "TSL3.L": 6,
-        "TSM3.L": 7,
-        "MU2.L": 8,
-        "QQQS.L": 9,
-        "3USS.L": 10,
-        "QQQ5.L": 11,
-        "5SPY.L": 12,
-    }
+    # Load full universe from contracts.toml (dynamic — no hardcoded tickers)
+    try:
+        from python_brain.ouroboros.contract_loader import load_yfinance_symbols
+        all_symbols = load_yfinance_symbols()
+    except ImportError:
+        # Fallback: try loading directly
+        import tomllib
+        contracts_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "config", "contracts.toml"
+        )
+        with open(contracts_path, "rb") as f:
+            data = tomllib.load(f)
+        all_symbols = [c["symbol"] for c in data.get("contracts", []) if c.get("symbol")]
+
+    # Build ticker_id map: {symbol: index}
+    universe = {sym: i for i, sym in enumerate(all_symbols)}
+    print(f"GARCH calibration: {len(universe)} tickers from contracts.toml")
 
     output_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -170,7 +173,7 @@ def main():
         "garch_params.json",
     )
 
-    calibrate_universe(isa_tickers, lookback_days=60, output_path=output_path)
+    calibrate_universe(universe, lookback_days=60, output_path=output_path)
 
 
 if __name__ == "__main__":
