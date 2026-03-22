@@ -4172,3 +4172,256 @@ currency = "EUR"
 leverage = 1
 sector = "Finance"
 inverse_of = ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GEMINI TIER-1 HOT-PATH ADDITIONS — 24 tickers missing from Gemini's 100
+# High-beta, high-volume instruments ideal for TypeB volume anomaly detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+# US Leveraged ETFs (8) — 3x products with massive intraday volume
+[[contracts]]
+symbol = "TQQQ"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SQQQ"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Technology"
+inverse_of = "TQQQ"
+
+[[contracts]]
+symbol = "SOXL"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SOXS"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Semiconductors"
+inverse_of = "SOXL"
+
+[[contracts]]
+symbol = "UPRO"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "US_Broad"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SPXU"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "US_Broad"
+inverse_of = "UPRO"
+
+[[contracts]]
+symbol = "TECL"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TECS"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Technology"
+inverse_of = "TECL"
+
+# US Additional (2) — High-beta crypto/vol proxies
+[[contracts]]
+symbol = "MARA"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VIXY"
+con_id = 0
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Volatility"
+inverse_of = ""
+
+# LSE Additional (6) — UK blue-chips + leveraged ETPs
+[[contracts]]
+symbol = "3LAA.L"
+con_id = 0
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Single_Stock"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3LAL.L"
+con_id = 0
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+leverage = 3
+sector = "Single_Stock"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3LMI.L"
+con_id = 0
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+leverage = 3
+sector = "Single_Stock"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BP.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHEL.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GLEN.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BARC.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STAN.L"
+con_id = 0
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+# HKEX Additional (2) — Semiconductor + tech
+[[contracts]]
+symbol = "0981"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2018"
+con_id = 0
+exchange = "HKEX"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+# TSE Additional (1) — Lasertec (semiconductor equipment)
+[[contracts]]
+symbol = "6920"
+con_id = 0
+exchange = "TSE"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Semiconductors"
+inverse_of = ""
+
+# XETRA Additional (1) — Rheinmetall (defense, massive volume)
+[[contracts]]
+symbol = "RHM"
+con_id = 0
+exchange = "XETRA"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Defense"
+inverse_of = ""
+
+# EURONEXT Additional (1) — Adyen (payments, high-beta)
+[[contracts]]
+symbol = "ADYEN"
+con_id = 0
+exchange = "AEB"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+sector = "Finance"
+inverse_of = ""
+
+# SGX Additional (1) — ComfortDelGro
+[[contracts]]
+symbol = "C52"
+con_id = 0
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+leverage = 1
+sector = "Transport"
+inverse_of = ""
