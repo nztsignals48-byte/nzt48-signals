@@ -274,8 +274,12 @@ def simulate_chandelier_exit(
 # ---------------------------------------------------------------------------
 # Main simulation
 # ---------------------------------------------------------------------------
-def fetch_historical_data(tickers: List[str], period: str = "7d") -> Dict[str, Any]:
-    """Fetch historical data via yfinance."""
+def fetch_historical_data(tickers: List[str], period: str = "7d", interval: str = "5m") -> Dict[str, Any]:
+    """Fetch historical data via yfinance.
+
+    Interval options: 1m (7d max), 2m/5m/15m/30m (60d max),
+                      60m/1h (730d max), 1d (unlimited).
+    """
     try:
         import yfinance as yf
     except ImportError:
@@ -286,7 +290,7 @@ def fetch_historical_data(tickers: List[str], period: str = "7d") -> Dict[str, A
     for ticker in tickers:
         log.info("Fetching %s (%s)...", ticker, period)
         try:
-            df = yf.download(ticker, period=period, interval="5m", progress=False, auto_adjust=True)
+            df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
             if df is None or df.empty:
                 log.warning("No data for %s (may be delisted or illiquid)", ticker)
                 continue
@@ -690,14 +694,13 @@ def export_backfill_feedback(all_trades: List[SimTrade]) -> bool:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
-def run_backfill(days: int = 7) -> int:
+def run_backfill(days: int = 7, interval: str = "5m") -> int:
     """Execute the backfill simulation."""
     start = time.monotonic()
-    log.info("Ouroboros v6.0 Backfill Simulator starting (%dd)...", days)
+    log.info("Ouroboros v6.0 Backfill Simulator starting (%dd, %s bars)...", days, interval)
 
-    # yfinance: max 59 days for 5-min data, 7 days for 1-min
     period = f"{days}d"
-    data = fetch_historical_data(PRIMARY_TICKERS, period=period)
+    data = fetch_historical_data(PRIMARY_TICKERS, period=period, interval=interval)
     if not data:
         log.error("No historical data fetched. Aborting.")
         return 1
@@ -750,11 +753,18 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [Backfill] %(levelname)s %(message)s")
 
     parser = argparse.ArgumentParser(description="Ouroboros v6.0 Backfill Simulator")
-    parser.add_argument("--days", type=int, default=7, help="Lookback days (max 59 for 5-min data)")
+    parser.add_argument("--days", type=int, default=7, help="Lookback days")
+    parser.add_argument("--interval", type=str, default="5m",
+                        help="Bar interval: 1m (7d max), 5m (59d max), 60m/1h (730d max), 1d (unlimited)")
     args = parser.parse_args()
 
+    # Enforce yfinance limits
+    max_days = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59,
+                "60m": 730, "1h": 730, "90m": 59, "1d": 9999}
+    limit = max_days.get(args.interval, 59)
+
     try:
-        sys.exit(run_backfill(days=min(args.days, 59)))
+        sys.exit(run_backfill(days=min(args.days, limit), interval=args.interval))
     except Exception as e:
         log.error("Backfill simulator crashed: %s", e, exc_info=True)
         sys.exit(1)
