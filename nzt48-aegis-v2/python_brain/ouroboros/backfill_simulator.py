@@ -50,11 +50,12 @@ PRIMARY_TICKERS = load_yfinance_symbols()
 
 LEVERAGE_MAP = load_leverage_map()
 
-# Chandelier exit ladder (5 rungs): % gain thresholds — MUST match exit_engine.rs
-# Rung 0 = entry, Rung 1 = +0.8%, Rung 2 = +1.5%, Rung 3 = +2.5%, Rung 4 = +4.0%
+# Chandelier exit: rung progression thresholds (% gain from entry) — MUST match exit_engine.rs
 CHANDELIER_RUNG_PCTS = [0.0, 0.008, 0.015, 0.025, 0.040]
-# ATR multiplier for trailing stop (used WITHIN a rung)
-CHANDELIER_ATR_MULT = 3.0  # MUST match config.toml [chandelier] initial_stop_atr_mult
+# Chandelier exit: ATR multiplier per rung (trailing stop tightens as rung advances)
+# Rung 0 = initial stop (widest), Rung 4 = tightest trail
+# MUST match config.toml [chandelier] initial_stop_atr_mult=2.0, rung3_trail=1.0, etc.
+CHANDELIER_RUNGS = [2.0, 1.8, 1.5, 1.0, 0.75]
 CHANDELIER_ATR_PERIOD = 14
 
 # Entry signal thresholds — MUST match bridge.py Sprint 5 T-04/T-05 fixes
@@ -250,16 +251,12 @@ def simulate_chandelier_exit(
 
         highest_since_entry = max(highest_since_entry, highs[i])
 
-        # Check rung progression (based on % gain from entry)
+        # Check rung progression (based on % gain from entry — uses CHANDELIER_RUNG_PCTS)
         pct_gain = (highest_since_entry - entry_price) / max(entry_price, 1e-9)
-        if pct_gain > 0.02:
-            current_rung = max(current_rung, 4)
-        elif pct_gain > 0.015:
-            current_rung = max(current_rung, 3)
-        elif pct_gain > 0.01:
-            current_rung = max(current_rung, 2)
-        elif pct_gain > 0.005:
-            current_rung = max(current_rung, 1)
+        for r in range(len(CHANDELIER_RUNG_PCTS) - 1, 0, -1):
+            if pct_gain >= CHANDELIER_RUNG_PCTS[r]:
+                current_rung = max(current_rung, r)
+                break
 
         # Chandelier stop based on current rung
         rung_mult = CHANDELIER_RUNGS[min(current_rung, len(CHANDELIER_RUNGS) - 1)]
