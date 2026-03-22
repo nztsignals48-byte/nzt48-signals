@@ -34,6 +34,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY rust_core/ rust_core/
 COPY python_brain/ python_brain/
 COPY ouroboros/ ouroboros/
+COPY scripts/ scripts/
+COPY CLAUDE.md ./
 
 # Build aegis binary (release) — build from workspace root
 ENV RUSTFLAGS="-C target-cpu=icelake-server"
