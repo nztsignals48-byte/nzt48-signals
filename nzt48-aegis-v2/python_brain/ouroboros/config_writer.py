@@ -739,19 +739,26 @@ def generate_dynamic_weights_toml(
         lines.append(f"{tier} = {frac:.6f}")
 
     # Phase E: Bounded adaptive confidence floor
-    # Q-073 FIX: Dynamic floor must NEVER go below static config minimum (65).
-    # This prevents Ouroboros from loosening entry quality below operator's safety setting.
-    # Hard floor: max(STATIC_MINIMUM, computed_value). Range: [65, 80].
-    STATIC_CONFIDENCE_FLOOR = 65  # Matches config.toml [signal].confidence_floor
-    adaptive_floor = STATIC_CONFIDENCE_FLOOR  # default = static minimum
-    if bayesian["trade_count"] >= 50:
-        if bayesian["win_rate"] > 0.55:
-            adaptive_floor = 70  # high WR → be more selective
-        elif bayesian["win_rate"] > 0.45:
-            adaptive_floor = 65  # decent WR → maintain floor
-        elif bayesian["win_rate"] < 0.30:
-            adaptive_floor = 65  # low WR → keep floor (don't loosen)
-    adaptive_floor = max(STATIC_CONFIDENCE_FLOOR, min(80, adaptive_floor))
+    # Bidirectional: raises when losing, lowers when winning.
+    # Range: [55, 80]. Never below 55 (absolute safety floor).
+    # Ratchets based on Bayesian WR over total trade history.
+    FLOOR_MIN = 55   # Absolute minimum (good conditions → more opportunities)
+    FLOOR_MAX = 80   # Absolute maximum (crisis conditions → very selective)
+    FLOOR_DEFAULT = 65  # Starting point / no-data default
+    adaptive_floor = FLOOR_DEFAULT
+    if bayesian["trade_count"] >= 20:
+        wr = bayesian["win_rate"]
+        if wr > 0.55:
+            adaptive_floor = 55   # winning consistently → lower floor, capture more
+        elif wr > 0.48:
+            adaptive_floor = 60   # decent → slightly below default
+        elif wr > 0.40:
+            adaptive_floor = 65   # break-even zone → default
+        elif wr > 0.30:
+            adaptive_floor = 70   # losing → raise floor, be more selective
+        else:
+            adaptive_floor = 75   # heavily losing → very conservative
+    adaptive_floor = max(FLOOR_MIN, min(FLOOR_MAX, adaptive_floor))
 
     lines += [
         f"",
@@ -794,7 +801,7 @@ def generate_dynamic_weights_toml(
     lines += [
         f"",
         f"[ticker_blacklist]",
-        f"# Tickers with WR < 30% over 10+ trades — no new entries allowed",
+        f"# Tickers with Wilson LB < 20% over 20+ trades — no new entries allowed",
         f"tickers = [{', '.join(repr(t) for t in sorted(blacklisted))}]",
     ]
 

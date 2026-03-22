@@ -1095,6 +1095,18 @@ def process_tick(msg):
             if orchestrator_signal:
                 orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + 20, 100)
 
+    # ---- Portfolio-level regime filter ----
+    # When the portfolio is in drawdown, scale down signal confidence to reduce
+    # new entries. This prevents the momentum-long bias from compounding losses
+    # during sustained market selloffs.
+    drawdown_pct = msg.get("drawdown_pct", 0.0)
+    if drawdown_pct > 0.02:  # >2% drawdown from HWM
+        drawdown_penalty = min(int(drawdown_pct * 500), 20)  # 2%→10pts, 4%→20pts max
+        if vanguard_signal:
+            vanguard_signal["confidence"] = max(vanguard_signal["confidence"] - drawdown_penalty, 0)
+        if orchestrator_signal:
+            orchestrator_signal["confidence"] = max(orchestrator_signal["confidence"] - drawdown_penalty, 0)
+
     # ---- Phase G: Pre-emission quality filters ----
     # These filters run AFTER signal generation but BEFORE emission.
     # They suppress low-quality contexts that produce immediate stop-outs.
