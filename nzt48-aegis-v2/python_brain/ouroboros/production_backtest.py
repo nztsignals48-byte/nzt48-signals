@@ -363,9 +363,10 @@ def run_production_backtest(
             if response is None:
                 continue
 
-            if response.get("type") == "signal" and not in_position:
+            resp_type = response.get("type", "")
+
+            if resp_type == "signal" and not in_position:
                 signals_generated += 1
-                in_position = True
                 entry_bar = i
                 entry_price = tick_msg["last"]
                 entry_time = str(df.index[i]) if i < len(df) else ""
@@ -373,41 +374,40 @@ def run_production_backtest(
                 entry_confidence = response.get("confidence", 0)
                 entry_kelly = response.get("kelly_fraction", 0.0)
 
-            elif in_position and i >= entry_bar + 2:
-                # Check exit
-                exit_bar, exit_price, rung = simulate_exit(bar_list, entry_bar, entry_price, ch_cfg)
+                # Immediately simulate Chandelier exit from this entry
+                exit_bar_idx, exit_price, rung = simulate_exit(bar_list, entry_bar, entry_price, ch_cfg)
 
-                if i >= exit_bar:
-                    fee = ch_cfg["round_trip_fee"]
-                    pnl = exit_price - entry_price - (entry_price * fee)
-                    pnl_pct = pnl / max(entry_price, 1e-9)
+                fee = ch_cfg["round_trip_fee"]
+                pnl = exit_price - entry_price - (entry_price * fee)
+                pnl_pct = pnl / max(entry_price, 1e-9)
 
-                    trade = Trade(
-                        ticker=symbol,
-                        entry_bar=entry_bar,
-                        entry_price=entry_price,
-                        entry_time=entry_time,
-                        exit_bar=exit_bar,
-                        exit_price=exit_price,
-                        exit_time=str(df.index[min(exit_bar, len(df)-1)]) if exit_bar < len(df) else "",
-                        pnl=pnl,
-                        pnl_pct=pnl_pct,
-                        rung=rung,
-                        strategy=entry_strategy,
-                        confidence=entry_confidence,
-                        kelly_fraction=entry_kelly,
-                        hold_bars=exit_bar - entry_bar,
-                    )
-                    all_trades.append(trade)
-                    trade_count += 1
-                    if pnl > 0:
-                        win_count += 1
+                trade = Trade(
+                    ticker=symbol,
+                    entry_bar=entry_bar,
+                    entry_price=entry_price,
+                    entry_time=entry_time,
+                    exit_bar=exit_bar_idx,
+                    exit_price=exit_price,
+                    exit_time=str(df.index[min(exit_bar_idx, len(df)-1)]) if exit_bar_idx < len(df) else "",
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    rung=rung,
+                    strategy=entry_strategy,
+                    confidence=entry_confidence,
+                    kelly_fraction=entry_kelly,
+                    hold_bars=exit_bar_idx - entry_bar,
+                )
+                all_trades.append(trade)
+                trade_count += 1
+                if pnl > 0:
+                    win_count += 1
 
-                    # Update equity (Kelly-sized)
-                    position_size = entry_kelly * current_equity
-                    current_equity += pnl_pct * position_size
+                # Update equity (Kelly-sized)
+                position_size = entry_kelly * current_equity
+                current_equity += pnl_pct * position_size
 
-                    in_position = False
+                # Skip ticks until exit bar (can't enter new position while in one)
+                # The bridge continues processing for indicator warmup
 
     # Stop bridge
     bridge.stop()
