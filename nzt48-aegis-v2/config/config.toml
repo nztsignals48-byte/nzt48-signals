@@ -83,14 +83,12 @@ max_correlated_positions = 3       # NEW: Max positions in >0.7 correlated instr
 max_risk_per_trade_pct = 0.75      # NEW: Dynamic sizing: position = (risk% × equity) / stop_width
 spread_veto_pct = 0.3              # Was 0.5%. Tightened per quant audit.
 slippage_assumption_pct = 0.5      # Was 1.0%. More realistic for paper.
-consecutive_loss_halt = 5          # Was 3. Audit: "3 too aggressive, triggers 1 in 6 sequences at 45% WR"
-# N0a: Daily trade frequency limit — THE #1 survival lever.
-# At 0.50% round-trip cost, each trade costs ~£10 on £2K position.
-# 3 trades/day × 252 days = £7,560/year = 76% equity drag on £10K.
-max_daily_trades = 10              # PAPER VALIDATION: Raised from 3 to collect more data. Revert to 3 for live.
+consecutive_loss_halt = 8          # PAPER: Raised from 5 to avoid premature halt during data collection. Revert to 5 for live.
+# N0a: Daily trade frequency limit.
+max_daily_trades = 20              # PAPER: Raised from 10 to maximize trade data across 300 tickers. Revert to 3 for live.
 # N0d: Minimum gross edge gate — reject trades where expected edge < 2×spread.
 # Prevents cost-killed trades (L5 Spread Victims).
-min_gross_edge_pct = 0.15          # N0d: Entry must expect >0.15% gross move to cover costs.
+min_gross_edge_pct = 0.10          # PAPER: Lowered from 0.15 for data collection. Revert to 0.15 for live.
 reject_to_halt_count = 3
 reject_to_halt_window_secs = 60
 
