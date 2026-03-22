@@ -651,11 +651,18 @@ def run_briefing(
 
     # Send via Telegram
     if send_tg:
-        success = send_telegram(briefing)
+        # Try HTML first, fall back to plain text if HTML parsing fails
+        success = send_telegram(briefing, parse_mode="HTML")
+        if not success:
+            log.info("HTML parse failed, retrying as plain text")
+            # Strip HTML tags for plain text fallback
+            import re
+            plain = re.sub(r'<[^>]+>', '', briefing)
+            success = send_telegram(plain, parse_mode=None)
         if success:
             log.info("Briefing sent via Telegram")
         else:
-            log.warning("Telegram send failed")
+            log.warning("Telegram send failed (both HTML and plain)")
 
     return briefing
 

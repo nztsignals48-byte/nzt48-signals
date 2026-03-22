@@ -59,19 +59,38 @@ def claude_query(
 
             output = result.stdout.strip()
 
-            # Handle markdown-wrapped JSON
-            if output.startswith("```json"):
-                output = output.split("```json", 1)[1]
-                if "```" in output:
-                    output = output.split("```", 1)[0]
-                output = output.strip()
-            elif output.startswith("```"):
-                output = output.split("```", 1)[1]
-                if "```" in output:
-                    output = output.split("```", 1)[0]
-                output = output.strip()
+            parsed = json.loads(output)
 
-            return json.loads(output)
+            # Claude CLI --output-format json wraps response in {"type":"result","result":"..."}
+            # Extract the actual content from the wrapper
+            if isinstance(parsed, dict) and parsed.get("type") == "result" and "result" in parsed:
+                inner = parsed["result"]
+                # The inner result may be a JSON string or plain text
+                if isinstance(inner, str):
+                    inner = inner.strip()
+                    # Try to parse inner as JSON (Claude often returns JSON inside the result string)
+                    # Handle markdown-wrapped JSON
+                    if inner.startswith("```json"):
+                        inner = inner.split("```json", 1)[1]
+                        if "```" in inner:
+                            inner = inner.split("```", 1)[0]
+                        inner = inner.strip()
+                    elif inner.startswith("```"):
+                        inner = inner.split("```", 1)[1]
+                        if "```" in inner:
+                            inner = inner.split("```", 1)[0]
+                        inner = inner.strip()
+                    try:
+                        return json.loads(inner)
+                    except json.JSONDecodeError:
+                        # Not JSON — return as text dict
+                        return {"text": inner, "raw": True}
+                elif isinstance(inner, dict):
+                    return inner
+                else:
+                    return {"text": str(inner), "raw": True}
+
+            return parsed
 
         except subprocess.TimeoutExpired:
             log.error(
@@ -151,11 +170,13 @@ def send_telegram(message: str, parse_mode: str = "HTML") -> bool:
     try:
         import requests
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        resp = requests.post(url, json={
+        payload = {
             "chat_id": chat_id,
             "text": message[:4096],
-            "parse_mode": parse_mode,
-        }, timeout=10)
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
             return True
         log.warning("Telegram: HTTP %d — %s", resp.status_code, resp.text[:200])
