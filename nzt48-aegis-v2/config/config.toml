@@ -315,10 +315,10 @@ mega_runner_range = [1.0, 2.0]        # Max 2x trail width for runners
 
 # Sprint 6: Entry type base confidences — Ouroboros tunes nightly based on rolling Wilson score.
 [entry_types]
-type_a_confidence = 65.0              # DipRecovery
-type_b_confidence = 82.0              # EarlyRunner — YOUR EDGE
-type_c_confidence = 72.0              # OverboughtFade
-type_d_confidence = 80.0              # SupportBounce — raised from 70 (59-day backfill: TypeD 39% WR worst performer, delta=-0.6)
+type_a_confidence = 65.0              # DipRecovery — base (Ouroboros nightly adjusts via adaptive_entry_confidence)
+type_b_confidence = 82.0              # EarlyRunner — CORE ALPHA (52.4% WR, PF 1.96)
+type_c_confidence = 72.0              # OverboughtFade — base (Ouroboros nightly adjusts)
+type_d_confidence = 80.0              # SupportBounce — base (Ouroboros nightly adjusts)
 # Type A thresholds
 type_a_rsi_oversold = 40.0
 type_a_volume_spike_mult = 1.8

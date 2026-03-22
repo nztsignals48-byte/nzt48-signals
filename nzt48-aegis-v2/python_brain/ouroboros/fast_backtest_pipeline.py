@@ -427,7 +427,11 @@ def _compute_equity_curve(trades: List[SimTrade]) -> Tuple[float, float, float]:
     for t in sorted(trades, key=lambda x: (x.date, x.entry_bar)):
         if math.isnan(t.entry_price) or math.isnan(t.pnl) or t.entry_price <= 0:
             continue
+        if math.isinf(equity) or equity > 1e15:
+            break  # Equity overflow — stop tracking
         position_size = equity * kelly_frac
+        if position_size / max(t.entry_price, 1e-9) > 1e12:
+            continue  # Skip unreasonably large positions
         shares = math.floor(position_size / max(t.entry_price, 1e-9))
         if shares <= 0:
             continue

@@ -437,6 +437,7 @@ _adaptive_spread_veto = None
 _adaptive_entry_weights = {}
 _adaptive_exchange_weights = {}
 _adaptive_kelly_cap = None
+_adaptive_entry_confidence = {}  # Thompson Sampler per-type confidence floors
 
 
 def _load_adaptive_params():
@@ -449,6 +450,7 @@ def _load_adaptive_params():
     global _adaptive_params_loaded
     global _adaptive_chandelier_atr, _adaptive_spread_veto
     global _adaptive_entry_weights, _adaptive_exchange_weights, _adaptive_kelly_cap
+    global _adaptive_entry_confidence
     if _adaptive_params_loaded:
         return
     _adaptive_params_loaded = True
@@ -491,6 +493,18 @@ def _load_adaptive_params():
         if "kelly_cap" in ak:
             _adaptive_kelly_cap = float(ak["kelly_cap"])
 
+        # Thompson Sampler per-type confidence floors
+        aec = data.get("adaptive_entry_confidence", {})
+        _type_field_map = {
+            "type_a_confidence": "TypeA",
+            "type_b_confidence": "TypeB",
+            "type_c_confidence": "TypeC",
+            "type_d_confidence": "TypeD",
+        }
+        for field, etype in _type_field_map.items():
+            if field in aec:
+                _adaptive_entry_confidence[etype] = float(aec[field])
+
         parts = []
         if _adaptive_chandelier_atr is not None:
             parts.append(f"chandelier_atr={_adaptive_chandelier_atr:.2f}")
@@ -502,6 +516,8 @@ def _load_adaptive_params():
             parts.append(f"exchange_weights={_adaptive_exchange_weights}")
         if _adaptive_kelly_cap is not None:
             parts.append(f"kelly_cap={_adaptive_kelly_cap:.2f}")
+        if _adaptive_entry_confidence:
+            parts.append(f"entry_confidence={_adaptive_entry_confidence}")
         if parts:
             sys.stderr.write(f"Bridge: loaded adaptive params: {', '.join(parts)}\n")
             sys.stderr.flush()
@@ -1281,6 +1297,22 @@ def process_tick(msg):
     if adaptive_floor is not None:
         effective_floor = max(leverage_conf_floor, adaptive_floor)
 
+    # P3.6: Thompson Sampler per-type confidence floors.
+    # VanguardSniper signals are classified as TypeA by Rust entry_engine.
+    # Apply TypeA's Thompson floor for VanguardSniper; for Orchestrator, use
+    # the min of all Thompson floors (Rust will apply the exact per-type floor
+    # at entry classification time using the dict passed in the signal).
+    _thompson_floor_vanguard = effective_floor
+    _thompson_floor_orchestrator = effective_floor
+    if _adaptive_entry_confidence:
+        type_a_floor = _adaptive_entry_confidence.get("TypeA")
+        if type_a_floor is not None:
+            _thompson_floor_vanguard = max(effective_floor, type_a_floor)
+        # For Orchestrator: use TypeB floor as default (volume anomaly = core alpha)
+        type_b_floor = _adaptive_entry_confidence.get("TypeB")
+        if type_b_floor is not None:
+            _thompson_floor_orchestrator = max(effective_floor, type_b_floor)
+
     # =========================================================================
     # FIX 10: Multi-timeframe confirmation before VanguardSniper
     # Require 5-second EMA, 1-minute EMA, and 5-minute EMA all trending same direction.
@@ -1326,7 +1358,7 @@ def process_tick(msg):
         eval_ticks = [{"last": b["close"], "high": b["high"], "low": b["low"],
                        "bid": b["close"], "ask": b["close"],
                        "volume": b["volume"]} for b in bars_5m] if bars_5m else ticks
-        result = vanguard_evaluate(eval_ticks, confidence_floor=effective_floor)
+        result = vanguard_evaluate(eval_ticks, confidence_floor=_thompson_floor_vanguard)
         if result is not None:
             # Run 12-factor Kelly sizing.
             total_trades = msg.get("total_trades", 0)
@@ -1383,6 +1415,11 @@ def process_tick(msg):
     if len(ticks) >= 5:
         try:
             intent = _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx)
+            if intent is not None:
+                # P3.6: Apply Thompson per-type floor to Orchestrator signals.
+                # Suppress orchestrator signals below the Thompson floor.
+                if intent.confidence < _thompson_floor_orchestrator:
+                    intent = None
             if intent is not None:
                 # Convert TradeIntent → signal dict (same format as VanguardSniper)
                 # Direction mapping: "long" → "Long", "inverse" → "Short"
@@ -1523,6 +1560,12 @@ def process_tick(msg):
             # VanguardSniper doesn't set entry_type in signal — Rust assigns it.
             # Pass the weights through so Rust can apply them at entry.
             best["adaptive_entry_weights"] = _adaptive_entry_weights
+
+        # P3.6: Pass Thompson per-type confidence floors to Rust for precise application.
+        # Bridge applies approximate floor (TypeA for VanguardSniper, TypeB for Orchestrator).
+        # Rust entry_engine applies the exact per-type floor after classification.
+        if _adaptive_entry_confidence:
+            best["adaptive_entry_confidence"] = _adaptive_entry_confidence
 
         # Plan 1 Phase 3: Apply adaptive exchange weight to Kelly sizing
         # Exchanges with negative PnL over last 5 sessions get 50% sizing

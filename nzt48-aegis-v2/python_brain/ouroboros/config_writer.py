@@ -918,6 +918,174 @@ def compute_adaptive_entry_type_weights(events: List[Dict[str, Any]]) -> Dict[st
     return weights
 
 
+# ---------------------------------------------------------------------------
+# Thompson Sampler-based adaptive entry type confidence floors
+# ---------------------------------------------------------------------------
+# Bounds for Thompson-based confidence — tighter than the existing Ouroboros
+# entry confidence bounds (ENTRY_CONF_MIN/MAX) since this is a separate layer.
+THOMPSON_CONF_MIN = 45.0
+THOMPSON_CONF_MAX = 100.0
+THOMPSON_LOOKBACK = 50  # Last N trades per entry type
+THOMPSON_MAX_STEP = 5.0  # Maximum ±5 per nightly cycle
+
+
+def compute_thompson_entry_confidence(
+    events: List[Dict[str, Any]],
+    prev_confidences: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
+    """Compute Thompson Sampler-based adaptive confidence floors per entry type.
+
+    For each entry type (TypeA-D):
+      1. Collect the last THOMPSON_LOOKBACK PositionClosed trades from WAL.
+      2. Count wins (pnl > 0) and losses (pnl < 0). Breakeven (pnl == 0) ignored.
+      3. Compute Thompson posterior: Beta(wins + 1, losses + 1).
+      4. Sample from the posterior to get expected WR for this type.
+      5. Adjust confidence floor based on expected WR:
+         - expected WR > 50%: LOWER floor (allow more trades from winning type)
+         - expected WR < 40%: RAISE floor (suppress losing type)
+         - expected WR < 30%: Set to 100 (effectively disable)
+      6. Adjust gradually: ±THOMPSON_MAX_STEP per cycle, clamp to [45, 100].
+
+    Args:
+        events: All WAL events (from load_todays_wal_events or similar).
+        prev_confidences: Previous cycle's Thompson confidences (for gradual adjustment).
+            If None, starts from ENTRY_CONF_DEFAULTS.
+
+    Returns:
+        {"TypeA": 70.0, "TypeB": 60.0, "TypeC": 72.0, "TypeD": 100.0}
+    """
+    import random
+
+    # Collect last THOMPSON_LOOKBACK trades per entry type from WAL
+    type_trades: Dict[str, List[float]] = {}
+    for event in events:
+        payload = event.get("payload", {})
+        if "PositionClosed" in payload:
+            pc = payload["PositionClosed"]
+            etype = pc.get("entry_type", "")
+            if etype not in ENTRY_CONF_DEFAULTS:
+                continue
+            pnl = pc.get("final_pnl", 0.0)
+            type_trades.setdefault(etype, []).append(pnl)
+
+    # Also enrich from persistent memory (has full trade history)
+    try:
+        from python_brain.ouroboros.persistent_memory import load_memory
+        mem = load_memory()
+        entry_stats = getattr(mem, 'entry_type_stats', {})
+        for etype, stats in entry_stats.items():
+            if etype in ENTRY_CONF_DEFAULTS:
+                mem_total = stats.get("total_trades", 0)
+                mem_wins = stats.get("wins", 0)
+                # If memory has more trades than WAL, use memory stats
+                wal_count = len(type_trades.get(etype, []))
+                if mem_total > wal_count:
+                    # Synthesize pnl list from memory stats for Thompson sampling
+                    # We only need wins/losses counts, so create a synthetic list
+                    mem_losses = mem_total - mem_wins
+                    type_trades[etype] = [1.0] * mem_wins + [-1.0] * mem_losses
+    except Exception:
+        pass
+
+    # Starting point: previous cycle's values, or base confidences
+    if prev_confidences is None:
+        prev_confidences = dict(ENTRY_CONF_DEFAULTS)
+
+    result: Dict[str, float] = {}
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        base_conf = ENTRY_CONF_DEFAULTS[etype]
+        prev_conf = prev_confidences.get(etype, base_conf)
+
+        # Take last THOMPSON_LOOKBACK trades for this type
+        all_pnls = type_trades.get(etype, [])
+        recent = all_pnls[-THOMPSON_LOOKBACK:]
+
+        if len(recent) < 5:
+            # Insufficient data — keep previous value (or base)
+            result[etype] = prev_conf
+            log.info("Thompson %s: insufficient data (%d trades), keeping %.1f",
+                     etype, len(recent), prev_conf)
+            continue
+
+        # Count wins and losses (ignore breakeven pnl == 0)
+        wins = sum(1 for p in recent if p > 0)
+        losses = sum(1 for p in recent if p < 0)
+
+        # Thompson posterior: Beta(wins + 1, losses + 1)
+        alpha = wins + 1
+        beta_param = losses + 1
+
+        # Sample from Beta posterior to get expected WR
+        # Use random.betavariate (stdlib — no numpy needed)
+        expected_wr = random.betavariate(alpha, beta_param)
+
+        # Determine target confidence based on expected WR
+        if expected_wr < 0.30:
+            # Very poor: effectively disable this type
+            target = 100.0
+        elif expected_wr < 0.40:
+            # Poor: raise floor to suppress
+            target = base_conf + 15.0
+        elif expected_wr > 0.50:
+            # Winning: lower floor to allow more trades
+            target = base_conf - 10.0
+        else:
+            # Neutral zone (40-50%): keep near base
+            target = base_conf
+
+        # Gradual adjustment: move prev_conf toward target by at most THOMPSON_MAX_STEP
+        delta = target - prev_conf
+        if abs(delta) > THOMPSON_MAX_STEP:
+            delta = THOMPSON_MAX_STEP if delta > 0 else -THOMPSON_MAX_STEP
+        new_conf = prev_conf + delta
+
+        # Clamp to bounds
+        new_conf = max(THOMPSON_CONF_MIN, min(THOMPSON_CONF_MAX, new_conf))
+        result[etype] = round(new_conf, 1)
+
+        log.info("Thompson %s: wins=%d losses=%d Beta(%d,%d) sample=%.3f "
+                 "target=%.1f prev=%.1f -> new=%.1f",
+                 etype, wins, losses, alpha, beta_param, expected_wr,
+                 target, prev_conf, new_conf)
+
+    return result
+
+
+def _load_prev_thompson_confidences() -> Optional[Dict[str, float]]:
+    """Load previous Thompson confidence values from dynamic_weights.toml.
+
+    Returns None if the section doesn't exist yet (first run).
+    """
+    dw_path = CONFIG_DIR / "dynamic_weights.toml"
+    if not dw_path.exists():
+        return None
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        with open(dw_path, "rb") as f:
+            data = tomllib.load(f)
+        section = data.get("adaptive_entry_confidence", {})
+        if not section:
+            return None
+        # Map TOML field names back to TypeX keys
+        field_to_type = {
+            "type_a_confidence": "TypeA",
+            "type_b_confidence": "TypeB",
+            "type_c_confidence": "TypeC",
+            "type_d_confidence": "TypeD",
+        }
+        result = {}
+        for field, etype in field_to_type.items():
+            if field in section:
+                result[etype] = float(section[field])
+        return result if result else None
+    except Exception as e:
+        log.warning("Failed to load previous Thompson confidences: %s", e)
+        return None
+
+
 def compute_adaptive_exchange_weights(history: List[Dict[str, Any]]) -> Dict[str, float]:
     """Compute per-exchange session weights based on recent performance.
 
@@ -1331,6 +1499,27 @@ def generate_dynamic_weights_toml(
     ]
     for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
         conf = entry_confs.get(etype, ENTRY_CONF_DEFAULTS[etype])
+        field = type_to_field[etype]
+        lines.append(f"{field} = {conf:.1f}")
+
+    # P3.6: Thompson Sampler-based adaptive entry type confidence floors.
+    # Reads last 50 trades per type from WAL, computes Beta(wins+1, losses+1)
+    # posterior, samples expected WR, adjusts confidence floor gradually (±5/cycle).
+    # Winning types get LOWER floors (more trades), losing types get HIGHER floors.
+    # This is separate from [entry_type_confidences] (Ouroboros WR-delta) — the
+    # bridge.py takes the MAX of both floors for each type.
+    prev_thompson = _load_prev_thompson_confidences()
+    thompson_confs = compute_thompson_entry_confidence(events, prev_thompson)
+    lines += [
+        f"",
+        f"[adaptive_entry_confidence]",
+        f"# Thompson Sampler-based per-type confidence floors (Plan 1 Phase 3.6)",
+        f"# Beta(wins+1, losses+1) posterior → expected WR → floor adjustment",
+        f"# WR > 50% → lower floor (more trades), WR < 30% → 100 (disable)",
+        f"# Bounds: [{THOMPSON_CONF_MIN}, {THOMPSON_CONF_MAX}], max ±{THOMPSON_MAX_STEP}/cycle",
+    ]
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        conf = thompson_confs.get(etype, ENTRY_CONF_DEFAULTS[etype])
         field = type_to_field[etype]
         lines.append(f"{field} = {conf:.1f}")
 
