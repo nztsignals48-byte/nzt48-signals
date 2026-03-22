@@ -247,6 +247,46 @@ open_position_always_tier1 = true    # Tickers with positions = permanent
 # Total unique tickers scanned per cycle: 50 permanent + 50 rotating × 5 cycles = 300
 total_scan_universe = 300
 
+# ── 80/20 Dynamic Ticker Scanning Architecture ──
+# IBKR hard limit: 100 concurrent reqMktData streams per client.
+# Split into CORE (session-aware, always-on) + DARK HORSE (unusual movers, rotated).
+# Core tickers provide stable signal generation on the most liquid instruments.
+# Dark horse tickers discover intraday outliers (gap openings, volume spikes, unusual moves).
+[scanner]
+# Total IBKR streaming slots (must match ibkr.max_simultaneous_lines)
+max_streams = 100
+# Core universe: always-on, session-aware, top liquid stocks
+core_slots = 80
+# Dark horse: unusual movers, rotated every 15 min
+dark_horse_slots = 20
+# Core rotation interval (seconds). Core 80 rotate every 2 hours to scan full universe.
+# Over 22 trading hours: 11 rotations × 80 = 880 slot-fills → ~200-300 unique tickers/day.
+core_rotation_secs = 7200
+# Dark horse rotation interval (seconds). Dark horse 20 rotate every 15 min.
+# Over 22 hours: 88 rotations × 20 = 1,760 slot-fills → ~100+ unique unusual movers/day.
+dark_horse_rotation_secs = 900
+# Dark horse detection criteria — ticker qualifies if ANY threshold is exceeded
+dark_horse_min_rvol = 3.0            # RVOL > 3x 20-day average to qualify as unusual
+dark_horse_min_gap_pct = 1.5         # Absolute gap > 1.5% vs prev close to qualify
+dark_horse_min_volume_rank = 0.9     # Top 10% volume for the day to qualify
+
+# Session-aware allocation of CORE slots (80 total).
+# During each exchange's session, that exchange gets more of the 80 core slots.
+# Tickers from closed exchanges still get off_session_reserve slots for pre-market scanning.
+# Actual allocation depends on which markets are open (may exceed per-exchange target).
+[scanner.session_allocation]
+TSE_during_asia = 25                 # 23:00-08:00 UTC
+HKEX_during_asia = 20
+SGX_during_asia = 5
+LSE_during_europe = 25               # 07:00-16:30 UTC (London local)
+XETRA_during_europe = 10
+EURONEXT_during_europe = 5
+US_during_us = 40                    # 13:30-21:00 UTC (NY local)
+US_during_overlap = 25               # 13:30-16:30 UTC (US + LSE both open)
+LSE_during_overlap = 20
+# Slots reserved for off-session tickers (pre-market scanning, overnight movers)
+off_session_reserve = 10
+
 # Static blacklist — tickers with proven negative edge from 59-day 65K-trade backfill.
 # These are blocked BEFORE signal generation (not just via dynamic Ouroboros blacklist).
 # Review quarterly — remove if spread/liquidity improves.

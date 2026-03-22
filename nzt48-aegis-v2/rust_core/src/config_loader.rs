@@ -62,6 +62,9 @@ struct RawConfig {
     /// Sprint 6: Risk arbiter hardening — previously hardcoded constants.
     #[serde(default)]
     hardening: RawHardening,
+    /// 80/20 dynamic ticker scanning architecture.
+    #[serde(default)]
+    scanner: ScannerConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,6 +266,105 @@ pub struct RotationConfig {
     pub full_apex_scan_mins: u32,
     pub open_position_always_tier1: bool,
 }
+
+/// 80/20 dynamic ticker scanning architecture.
+/// Core (80 slots): always-on, session-aware, top liquid stocks from Ouroboros ranking.
+/// Dark horse (20 slots): unusual movers (RVOL spike, gap, volume outlier), rotated every 15 min.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScannerConfig {
+    /// Total IBKR streaming slots (must equal ibkr.max_simultaneous_lines).
+    #[serde(default = "default_scanner_max_streams")]
+    pub max_streams: u32,
+    /// Core universe slots: always-on, session-aware.
+    #[serde(default = "default_scanner_core_slots")]
+    pub core_slots: u32,
+    /// Dark horse slots: unusual movers, rotated.
+    #[serde(default = "default_scanner_dh_slots")]
+    pub dark_horse_slots: u32,
+    /// Dark horse rotation interval in seconds.
+    #[serde(default = "default_scanner_dh_rotation")]
+    pub dark_horse_rotation_secs: u32,
+    /// RVOL threshold for dark horse qualification (vs 20-day average).
+    #[serde(default = "default_scanner_dh_rvol")]
+    pub dark_horse_min_rvol: f64,
+    /// Absolute gap % threshold for dark horse qualification.
+    #[serde(default = "default_scanner_dh_gap")]
+    pub dark_horse_min_gap_pct: f64,
+    /// Volume rank percentile threshold for dark horse (0.9 = top 10%).
+    #[serde(default = "default_scanner_dh_vol_rank")]
+    pub dark_horse_min_volume_rank: f64,
+    /// Session-aware allocation targets for core slots.
+    #[serde(default)]
+    pub session_allocation: SessionAllocationConfig,
+}
+
+impl Default for ScannerConfig {
+    fn default() -> Self {
+        Self {
+            max_streams: default_scanner_max_streams(),
+            core_slots: default_scanner_core_slots(),
+            dark_horse_slots: default_scanner_dh_slots(),
+            dark_horse_rotation_secs: default_scanner_dh_rotation(),
+            dark_horse_min_rvol: default_scanner_dh_rvol(),
+            dark_horse_min_gap_pct: default_scanner_dh_gap(),
+            dark_horse_min_volume_rank: default_scanner_dh_vol_rank(),
+            session_allocation: SessionAllocationConfig::default(),
+        }
+    }
+}
+
+fn default_scanner_max_streams() -> u32 { 100 }
+fn default_scanner_core_slots() -> u32 { 80 }
+fn default_scanner_dh_slots() -> u32 { 20 }
+fn default_scanner_dh_rotation() -> u32 { 900 }
+fn default_scanner_dh_rvol() -> f64 { 3.0 }
+fn default_scanner_dh_gap() -> f64 { 1.5 }
+fn default_scanner_dh_vol_rank() -> f64 { 0.9 }
+
+/// Session-aware allocation of core slots per exchange during their active session.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(non_snake_case)]
+pub struct SessionAllocationConfig {
+    #[serde(default = "default_sa_tse_asia")] pub TSE_during_asia: u32,
+    #[serde(default = "default_sa_hkex_asia")] pub HKEX_during_asia: u32,
+    #[serde(default = "default_sa_sgx_asia")] pub SGX_during_asia: u32,
+    #[serde(default = "default_sa_lse_europe")] pub LSE_during_europe: u32,
+    #[serde(default = "default_sa_xetra_europe")] pub XETRA_during_europe: u32,
+    #[serde(default = "default_sa_euronext_europe")] pub EURONEXT_during_europe: u32,
+    #[serde(default = "default_sa_us_us")] pub US_during_us: u32,
+    #[serde(default = "default_sa_us_overlap")] pub US_during_overlap: u32,
+    #[serde(default = "default_sa_lse_overlap")] pub LSE_during_overlap: u32,
+    #[serde(default = "default_sa_off_session")] pub off_session_reserve: u32,
+}
+
+#[allow(non_snake_case)]
+impl Default for SessionAllocationConfig {
+    fn default() -> Self {
+        Self {
+            TSE_during_asia: default_sa_tse_asia(),
+            HKEX_during_asia: default_sa_hkex_asia(),
+            SGX_during_asia: default_sa_sgx_asia(),
+            LSE_during_europe: default_sa_lse_europe(),
+            XETRA_during_europe: default_sa_xetra_europe(),
+            EURONEXT_during_europe: default_sa_euronext_europe(),
+            US_during_us: default_sa_us_us(),
+            US_during_overlap: default_sa_us_overlap(),
+            LSE_during_overlap: default_sa_lse_overlap(),
+            off_session_reserve: default_sa_off_session(),
+        }
+    }
+}
+
+fn default_sa_tse_asia() -> u32 { 25 }
+fn default_sa_hkex_asia() -> u32 { 20 }
+fn default_sa_sgx_asia() -> u32 { 5 }
+fn default_sa_lse_europe() -> u32 { 25 }
+fn default_sa_xetra_europe() -> u32 { 10 }
+fn default_sa_euronext_europe() -> u32 { 5 }
+fn default_sa_us_us() -> u32 { 40 }
+fn default_sa_us_overlap() -> u32 { 25 }
+fn default_sa_lse_overlap() -> u32 { 20 }
+fn default_sa_off_session() -> u32 { 10 }
 
 #[derive(Debug, Deserialize)]
 struct RawWal {
@@ -880,6 +982,8 @@ pub struct EngineConfig {
     pub hardening: RawHardening,
     /// Sprint 7: Per-exchange entry cutoffs (exchange → "HH:MM" local time).
     pub exchange_cutoffs: HashMap<String, String>,
+    /// 80/20 dynamic ticker scanning architecture config.
+    pub scanner: ScannerConfig,
 }
 
 impl EngineConfig {
@@ -967,6 +1071,7 @@ impl EngineConfig {
             entry_types: raw.entry_types,
             hardening: raw.hardening,
             exchange_cutoffs: raw.timing.exchange_cutoffs,
+            scanner: raw.scanner,
         })
     }
 

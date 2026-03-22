@@ -432,6 +432,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub watchlist_mtimes: HashMap<String, u64>,
     /// Last time we rotated subscriptions from watchlist (15-min cycle, nanoseconds).
     pub last_watchlist_rotation_ns: u64,
+    /// Last time dark horse slots were rotated (80/20 architecture, nanoseconds).
+    pub last_dark_horse_rotation_ns: u64,
     /// Monotonically incrementing counter for generating unique order IDs.
     pub order_counter: u64,
     /// P21-FX: Cached currency code per ticker (from broker contract map).
@@ -616,6 +618,7 @@ impl<B: BrokerAdapter> Engine<B> {
             current_trading_session: TradingSession::Closed,
             watchlist_mtimes: HashMap::new(),
             last_watchlist_rotation_ns: 0,
+            last_dark_horse_rotation_ns: 0,
             order_counter: 0,
             ticker_currencies: HashMap::new(),
             simulation_mode: is_simulation,
@@ -2426,10 +2429,19 @@ impl<B: BrokerAdapter> Engine<B> {
         // Hot-reload watchlist if ticker_selector has updated it.
         self.maybe_reload_watchlist();
 
-        // 15-minute periodic watchlist rotation (dynamic subscription refresh).
-        // Ouroboros ticker_selector updates active_watchlist.json every 15 min with
-        // the best-ranked tickers across ALL 6 markets. We re-read and rotate to match.
-        // IBKR paper limit: 100 simultaneous market data lines (the max).
+        // 80/20 Dynamic Ticker Scanning Architecture:
+        // - Core 80 slots: refreshed on watchlist file change (ticker_selector runs every 15 min).
+        //   Core tickers are session-aware top-ranked instruments that stay subscribed.
+        // - Dark horse 20 slots: rotated every dark_horse_rotation_secs (default 15 min).
+        //   Dark horses are unusual movers (RVOL spike, gap, volume outlier) from Python ranker.
+        //
+        // The full rotation (core + dark horse) happens on:
+        //   1. Watchlist file change (maybe_reload_watchlist detects mtime change)
+        //   2. Mode transitions (apply_mode_subscription_rotation)
+        //
+        // The dark-horse-only rotation happens on the dark_horse_rotation_secs timer.
+        let dh_rotation_ns = self.config.scanner.dark_horse_rotation_secs as u64 * 1_000_000_000;
+        // Full watchlist rotation on 15-min timer (keeps core stable, refreshes dark horses).
         const ROTATION_INTERVAL_NS: u64 = 15 * 60 * 1_000_000_000; // 15 minutes
         if self.now_ns >= self.last_watchlist_rotation_ns + ROTATION_INTERVAL_NS {
             let mode = self.session_mgr.mode();
@@ -2437,8 +2449,20 @@ impl<B: BrokerAdapter> Engine<B> {
             if matches!(mode, SessionMode::Active
                 | SessionMode::ModeA | SessionMode::ModeB
                 | SessionMode::ModeBPlus | SessionMode::ModeC) {
-                eprintln!("WATCHLIST_ROTATE: 15-min periodic refresh triggered (mode={})", mode);
+                eprintln!("SCANNER_80_20: full rotation triggered (mode={})", mode);
                 self.rotate_subscriptions_from_watchlist();
+            }
+        } else if dh_rotation_ns > 0
+            && self.now_ns >= self.last_dark_horse_rotation_ns + dh_rotation_ns
+        {
+            // Dark-horse-only rotation: swap just the 20 dark horse slots.
+            let mode = self.session_mgr.mode();
+            #[allow(deprecated)]
+            if matches!(mode, SessionMode::Active
+                | SessionMode::ModeA | SessionMode::ModeB
+                | SessionMode::ModeBPlus | SessionMode::ModeC) {
+                eprintln!("SCANNER_80_20: dark horse rotation triggered (mode={})", mode);
+                self.rotate_dark_horse_slots();
             }
         }
 
