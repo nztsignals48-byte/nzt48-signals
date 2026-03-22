@@ -83,8 +83,179 @@ def _load_cooldown_from_config():
     except Exception:
         return 60
 
-SIGNAL_COOLDOWN_TICKS = _load_cooldown_from_config()
+# SIM_MODE: Load cooldown as 0 to completely disable per-ticker signal suppression.
+_SIM_MODE = os.environ.get("AEGIS_SIM_MODE", "0") == "1"
+SIGNAL_COOLDOWN_TICKS = 0 if _SIM_MODE else _load_cooldown_from_config()
 _last_signal_tick = {}  # ticker_id → tick count when last signal was emitted
+
+# ============================================================================
+# T-01 (Sprint 5): Exchange cutoff blackout enforcement in Python.
+# Prevents wasting compute on signal generation after the per-exchange entry
+# cutoff. The Rust risk_arbiter already blocks entries, but generating signals
+# we know will be rejected wastes 100ms+ of indicator + strategy evaluation.
+# ============================================================================
+_exchange_cutoffs_loaded = False
+_exchange_cutoffs = {}  # exchange_key → (cutoff_hour, cutoff_minute)
+
+# Map contracts.toml exchange names → config.toml [timing.exchange_cutoffs] keys
+_EXCHANGE_KEY_MAP = {
+    "LSEETF": "LSE",
+    "LSE": "LSE",
+    "SMART": "US",
+    "HKEX": "HKEX",
+    "TSE": "TSE",
+    "XETRA": "XETRA",
+    "EURONEXT": "EURONEXT",
+    "SGX": "SGX",
+    "AEB": "EURONEXT",   # Amsterdam → EURONEXT cutoff
+    "HEX": "EURONEXT",   # Helsinki → EURONEXT cutoff
+    "XMAD": "EURONEXT",  # Madrid → EURONEXT cutoff
+}
+
+# Infer exchange from symbol suffix (fallback when contracts.toml unavailable)
+_SUFFIX_TO_EXCHANGE = {
+    ".L": "LSE",
+    ".T": "TSE",
+    ".HK": "HKEX",
+    ".SI": "SGX",
+}
+
+# Symbol → exchange mapping (built lazily from contracts.toml)
+_symbol_exchange_map_loaded = False
+_symbol_exchange_map = {}  # symbol → exchange key (e.g. "LSE", "US")
+
+# Approximate UTC offsets per exchange (Rust does authoritative DST-aware check).
+# This is a compute-saving early return, not a safety gate — fail-open is safe.
+_EXCHANGE_UTC_OFFSET = {
+    "LSE": 0,        # GMT (simplified; BST is +1 Mar-Oct)
+    "US": -5,         # EST (simplified; EDT is -4 Mar-Nov)
+    "HKEX": 8,        # HKT (no DST)
+    "TSE": 9,         # JST (no DST)
+    "XETRA": 1,       # CET (simplified; CEST is +2 Mar-Oct)
+    "EURONEXT": 1,     # CET (simplified; CEST is +2 Mar-Oct)
+    "SGX": 8,          # SGT (no DST)
+}
+
+
+def _load_exchange_cutoffs():
+    """Load per-exchange entry cutoffs from config.toml [timing.exchange_cutoffs]."""
+    global _exchange_cutoffs_loaded, _exchange_cutoffs
+    if _exchange_cutoffs_loaded:
+        return _exchange_cutoffs
+    _exchange_cutoffs_loaded = True
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = "/app/config/config.toml"
+        if not os.path.exists(cfg_path):
+            return _exchange_cutoffs
+        with open(cfg_path, "rb") as f:
+            data = tomllib.load(f)
+        cutoffs = data.get("timing", {}).get("exchange_cutoffs", {})
+        for exch, time_str in cutoffs.items():
+            parts = time_str.split(":")
+            if len(parts) == 2:
+                _exchange_cutoffs[exch] = (int(parts[0]), int(parts[1]))
+        if _exchange_cutoffs:
+            sys.stderr.write(
+                "Bridge: loaded exchange cutoffs: {}\n".format(
+                    ", ".join(f"{k}={v[0]:02d}:{v[1]:02d}" for k, v in sorted(_exchange_cutoffs.items()))
+                )
+            )
+            sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"Bridge: failed to load exchange cutoffs: {e}\n")
+        sys.stderr.flush()
+    return _exchange_cutoffs
+
+
+def _load_symbol_exchange_map():
+    """Build symbol -> exchange key mapping from contracts.toml (cached)."""
+    global _symbol_exchange_map_loaded, _symbol_exchange_map
+    if _symbol_exchange_map_loaded:
+        return _symbol_exchange_map
+    _symbol_exchange_map_loaded = True
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        contracts_path = "/app/config/contracts.toml"
+        if not os.path.exists(contracts_path):
+            return _symbol_exchange_map
+        with open(contracts_path, "rb") as f:
+            data = tomllib.load(f)
+        for c in data.get("contracts", []):
+            sym = c.get("symbol", "")
+            exch = c.get("exchange", "")
+            if sym and exch:
+                key = _EXCHANGE_KEY_MAP.get(exch, exch)
+                _symbol_exchange_map[sym] = key
+        if _symbol_exchange_map:
+            sys.stderr.write(
+                "Bridge: loaded symbol->exchange map ({} symbols)\n".format(len(_symbol_exchange_map))
+            )
+            sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"Bridge: failed to load symbol->exchange map: {e}\n")
+        sys.stderr.flush()
+    return _symbol_exchange_map
+
+
+def _get_exchange_for_symbol(symbol):
+    """Determine exchange key for a symbol. Returns None if unknown."""
+    # Try contracts.toml mapping first (authoritative)
+    exch_map = _load_symbol_exchange_map()
+    if symbol in exch_map:
+        return exch_map[symbol]
+    # Fallback: infer from suffix
+    for suffix, exch_key in _SUFFIX_TO_EXCHANGE.items():
+        if symbol.endswith(suffix):
+            return exch_key
+    return None
+
+
+def _is_in_blackout(ticker_id, timestamp_ns):
+    """Check if the current time is past the exchange entry cutoff for this ticker.
+
+    Returns True if in blackout (signal should be suppressed), False otherwise.
+    Fail-open: returns False if exchange or cutoff cannot be determined.
+    """
+    symbol = ticker_symbols.get(ticker_id, "")
+    if not symbol:
+        return False  # No symbol -> can't determine exchange -> fail-open
+
+    exchange = _get_exchange_for_symbol(symbol)
+    if not exchange:
+        return False  # Unknown exchange -> fail-open
+
+    cutoffs = _load_exchange_cutoffs()
+    cutoff = cutoffs.get(exchange)
+    if not cutoff:
+        return False  # No cutoff configured -> fail-open
+
+    cutoff_hour, cutoff_minute = cutoff
+
+    if timestamp_ns <= 0:
+        return False  # No timestamp -> can't check -> fail-open
+
+    from datetime import datetime, timezone, timedelta
+    utc_dt = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc)
+
+    offset_hours = _EXCHANGE_UTC_OFFSET.get(exchange, 0)
+    local_dt = utc_dt + timedelta(hours=offset_hours)
+
+    # Past cutoff = blackout
+    if local_dt.hour > cutoff_hour or (local_dt.hour == cutoff_hour and local_dt.minute >= cutoff_minute):
+        return True
+
+    return False
+
+# Blackout veto logging dedup — avoid logging every tick (once per ticker per day)
+_blackout_warned: set = set()
+_blackout_warned_date: str = ""
 
 # 5-minute bar aggregation cache — avoid recomputing OHLCV bars on every tick
 # when no new complete 5-min bar has formed.
@@ -254,6 +425,90 @@ def _load_adaptive_floor():
         return _adaptive_confidence_floor
     except Exception:
         return None
+
+
+# ============================================================================
+# Plan 1 Phase 3: Adaptive parameter loaders from dynamic_weights.toml
+# ============================================================================
+
+_adaptive_params_loaded = False
+_adaptive_chandelier_atr = None
+_adaptive_spread_veto = None
+_adaptive_entry_weights = {}
+_adaptive_exchange_weights = {}
+_adaptive_kelly_cap = None
+
+
+def _load_adaptive_params():
+    """Load all Plan 1 Phase 3 adaptive parameters from dynamic_weights.toml.
+
+    Loaded once at first tick and cached for process lifetime.
+    Sections: [adaptive_chandelier], [adaptive_spread], [adaptive_entry_weights],
+              [adaptive_exchange_weights], [adaptive_kelly].
+    """
+    global _adaptive_params_loaded
+    global _adaptive_chandelier_atr, _adaptive_spread_veto
+    global _adaptive_entry_weights, _adaptive_exchange_weights, _adaptive_kelly_cap
+    if _adaptive_params_loaded:
+        return
+    _adaptive_params_loaded = True
+
+    dw_path = "/app/config/dynamic_weights.toml"
+    if not os.path.exists(dw_path):
+        return
+
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        with open(dw_path, "rb") as f:
+            data = tomllib.load(f)
+
+        # Adaptive Chandelier ATR multiplier
+        ac = data.get("adaptive_chandelier", {})
+        if "atr_mult" in ac:
+            _adaptive_chandelier_atr = float(ac["atr_mult"])
+
+        # Adaptive spread veto threshold
+        asp = data.get("adaptive_spread", {})
+        if "spread_veto_pct" in asp:
+            _adaptive_spread_veto = float(asp["spread_veto_pct"])
+
+        # Adaptive entry type weights
+        aew = data.get("adaptive_entry_weights", {})
+        for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+            if etype in aew:
+                _adaptive_entry_weights[etype] = float(aew[etype])
+
+        # Adaptive per-exchange session weights
+        axw = data.get("adaptive_exchange_weights", {})
+        for exch, weight in axw.items():
+            _adaptive_exchange_weights[exch] = float(weight)
+
+        # Adaptive Kelly cap
+        ak = data.get("adaptive_kelly", {})
+        if "kelly_cap" in ak:
+            _adaptive_kelly_cap = float(ak["kelly_cap"])
+
+        parts = []
+        if _adaptive_chandelier_atr is not None:
+            parts.append(f"chandelier_atr={_adaptive_chandelier_atr:.2f}")
+        if _adaptive_spread_veto is not None:
+            parts.append(f"spread_veto={_adaptive_spread_veto*100:.1f}%")
+        if _adaptive_entry_weights:
+            parts.append(f"entry_weights={_adaptive_entry_weights}")
+        if _adaptive_exchange_weights:
+            parts.append(f"exchange_weights={_adaptive_exchange_weights}")
+        if _adaptive_kelly_cap is not None:
+            parts.append(f"kelly_cap={_adaptive_kelly_cap:.2f}")
+        if parts:
+            sys.stderr.write(f"Bridge: loaded adaptive params: {', '.join(parts)}\n")
+            sys.stderr.flush()
+
+    except Exception as e:
+        sys.stderr.write(f"Bridge: failed to load adaptive params: {e}\n")
+        sys.stderr.flush()
 
 
 # ============================================================================
@@ -614,6 +869,9 @@ def process_tick(msg):
     """
     ticker_id = msg["ticker_id"]
 
+    # Plan 1 Phase 3: Load adaptive parameters from dynamic_weights.toml (once)
+    _load_adaptive_params()
+
     # Track ticker_id → symbol mapping from msg (if provided by Rust side)
     if "symbol" in msg and msg["symbol"]:
         ticker_symbols[ticker_id] = msg["symbol"]
@@ -740,7 +998,8 @@ def process_tick(msg):
     # Suppress ALL signals before wasting compute on indicators.
     # BUILD NOW item N1c from IMPLEMENTATION_MASTER_PLAN v6.0.
     # =========================================================================
-    blacklist = _load_ticker_blacklist()
+    # SIM_MODE: skip blacklist to allow all tickers through for backtesting.
+    blacklist = set() if _SIM_MODE else _load_ticker_blacklist()
     sym = ticker_symbols.get(ticker_id, "")
     if sym and sym in blacklist:
         # Don't log every tick (too noisy) — just first occurrence per day
@@ -757,14 +1016,39 @@ def process_tick(msg):
         return no_signal_base
 
     # =========================================================================
+    # T-01 (Sprint 5): Blackout period enforcement — skip signal generation
+    # after per-exchange entry cutoff. Rust risk_arbiter is the authoritative
+    # gate, but this early return avoids wasting 100ms+ of compute per tick.
+    # SIM_MODE: skip blackout to allow all signals through for backtesting.
+    # =========================================================================
+    if not _SIM_MODE:
+        _ts_ns = msg.get("timestamp_ns", 0)
+        if _is_in_blackout(ticker_id, _ts_ns):
+            # Rate-limit logging: once per ticker per day
+            global _blackout_warned, _blackout_warned_date
+            import datetime as _dt_bo
+            _today_bo = _dt_bo.date.today().isoformat()
+            if _blackout_warned_date != _today_bo:
+                _blackout_warned = set()
+                _blackout_warned_date = _today_bo
+            _bo_sym = ticker_symbols.get(ticker_id, str(ticker_id))
+            if _bo_sym not in _blackout_warned:
+                _bo_exch = _get_exchange_for_symbol(_bo_sym) or "?"
+                sys.stderr.write(
+                    f"BLACKOUT_VETO: {_bo_sym} (tid={ticker_id}) past {_bo_exch} entry cutoff\n"
+                )
+                sys.stderr.flush()
+                _blackout_warned.add(_bo_sym)
+            return no_signal_base
+
+    # =========================================================================
     # FIX 2: Raise warm-up to 200 bars (= 16 min of 5-second data = 3+ 5-min bars)
     # Need at least 3 five-minute bars for any meaningful indicator reading.
     # =========================================================================
     # SIM_MODE reduces warmup for backtesting with larger-interval bars.
     # With 60m bars, each bar = 1 tick, so 200 ticks = 200 hours.
     # In sim mode, require only 10 bars (= 10 hours at 60m) for warmup.
-    _sim_mode = os.environ.get("AEGIS_SIM_MODE", "0") == "1"
-    MIN_WARMUP_BARS = 10 if _sim_mode else 200
+    MIN_WARMUP_BARS = 10 if _SIM_MODE else 200
     if len(ticks) < MIN_WARMUP_BARS:
         # Don't log warm-up vetoes (too noisy — every tick for first 16 min)
         return no_signal_base
@@ -782,7 +1066,8 @@ def process_tick(msg):
     # ---- Phase E: Indicator gates from Ouroboros indicator_intelligence ----
     # Apply discovered threshold rules that improve WR. Each gate is a
     # pre-signal filter: if the indicator violates the gate, suppress signal.
-    gates = _load_indicator_gates()
+    # SIM_MODE: skip indicator gates to allow all signals through for backtesting.
+    gates = [] if _SIM_MODE else _load_indicator_gates()
     indicator_values = {"adx": adx, "hurst": hurst, "rvol": rvol}
     for gate in gates:
         ind = gate.get("indicator", "")
@@ -874,7 +1159,8 @@ def process_tick(msg):
     structural_score = sum(sts_components.values())
 
     # Gate: suppress if structural score too low (< 30 = poor microstructure)
-    if structural_score < 30:
+    # SIM_MODE: skip structural gate to maximize signal count for backtesting.
+    if not _SIM_MODE and structural_score < 30:
         _log_gate_veto(ticker_id, "structural_tradability", msg["last"],
                        {**_ind, "structural_score": structural_score, **sts_components},
                        "STS={}/100 < 30 minimum".format(structural_score))
@@ -899,9 +1185,10 @@ def process_tick(msg):
     # FIX 4: VWAP pullback check — reject if buying extension
     # If price is >1.5% above VWAP, we're chasing. Wait for pullback.
     # =========================================================================
+    # SIM_MODE: skip VWAP extension gate to maximize signal count for backtesting.
     vwap_calc = vwap_calculators.get(ticker_id)
     _vwap_hist = vwap_calc.get_history() if vwap_calc else []
-    if _vwap_hist and len(ticks) > 60:
+    if not _SIM_MODE and _vwap_hist and len(ticks) > 60:
         last_vwap = _vwap_hist[-1]
         if last_vwap > 0:
             vwap_distance_pct = (msg["last"] - last_vwap) / last_vwap * 100
@@ -921,7 +1208,8 @@ def process_tick(msg):
     # Hurst > 0.55 on 5-min bars = trending. Momentum OK.
     # Hurst 0.45-0.55 = random. Reduce confidence.
     # =========================================================================
-    if n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
+    # SIM_MODE: skip hurst regime gate to allow all signals through for backtesting.
+    if not _SIM_MODE and n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
         if hurst < 0.40:
             # Strongly mean-reverting on 5-min timeframe — suppress momentum signals
             _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
@@ -936,8 +1224,9 @@ def process_tick(msg):
     # Flat/falling volume = noise move. Rising volume = real flow.
     # =========================================================================
     # Only gate on volume slope when we actually have volume data
+    # SIM_MODE: skip volume slope gate to allow all signals through.
     has_volume = any(b.get("volume", 0) > 0 for b in bars_5m[-5:]) if bars_5m else False
-    if n_5min_bars >= 5 and has_volume and vol_slope <= 0:
+    if not _SIM_MODE and n_5min_bars >= 5 and has_volume and vol_slope <= 0:
         # Volume not rising — suppress momentum signal
         # Only allow if very high confidence from other factors
         leverage_conf_floor = max(leverage_conf_floor, 75)
@@ -979,7 +1268,8 @@ def process_tick(msg):
         # All 3 must agree for momentum entry
         mtf_aligned = (trend_5s == trend_1m == trend_5m)
 
-    if not mtf_aligned:
+    # SIM_MODE: skip MTF alignment gate to allow all signals through for backtesting.
+    if not _SIM_MODE and not mtf_aligned:
         _log_gate_veto(ticker_id, "mtf_misaligned", msg["last"],
                        {**_ind, "trend_5s": trend_5s, "trend_1m": trend_1m, "trend_5m": trend_5m},
                        "5s={} 1m={} 5m={} (need all same)".format(
@@ -1144,13 +1434,16 @@ def process_tick(msg):
     # They suppress low-quality contexts that produce immediate stop-outs.
 
     # G1: Spread quality gate — reject if bid/ask spread too wide (Q-051: uses CostModel)
+    # SIM_MODE: skip spread gate — backtests use synthetic bid/ask anyway.
     bid = msg.get("bid", 0)
     ask = msg.get("ask", 0)
-    if bid > 0 and ask > 0:
+    if not _SIM_MODE and bid > 0 and ask > 0:
         spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
         # Leverage-aware spread limits derived from CostModel.spread_veto_pct
+        # Plan 1 Phase 3: Use adaptive spread veto if available (VIX-regime-aware)
         # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
-        _base_spread_gate = _cost_model.spread_veto_pct * 100  # 0.3% -> 0.3
+        _base_spread_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
+        _base_spread_gate = _base_spread_raw * 100  # 0.3% -> 0.3
         spread_limit = _base_spread_gate * 6.67 if leverage >= 3 else _base_spread_gate * 1.67
         if spread_pct > spread_limit:
             _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
@@ -1160,9 +1453,10 @@ def process_tick(msg):
 
     # G2: Extension filter — reject if price moved >3% from session VWAP
     # (buying extension = immediate adverse excursion)
+    # SIM_MODE: skip VWAP extension filter.
     vwap_calc = vwap_calculators.get(ticker_id)
     _g2_vwap_hist = vwap_calc.get_history() if vwap_calc else []
-    if _g2_vwap_hist and len(ticks) > 30:
+    if not _SIM_MODE and _g2_vwap_hist and len(ticks) > 30:
         last_vwap = _g2_vwap_hist[-1]
         if last_vwap > 0:
             extension = abs(msg["last"] - last_vwap) / last_vwap * 100
@@ -1176,7 +1470,7 @@ def process_tick(msg):
     # After emitting a signal for a ticker, suppress for COOLDOWN_TICKS ticks.
     # SIM_MODE: skip cooldown entirely to maximize signal count for backtesting.
     tick_count = _tick_counts.get(ticker_id, 0)
-    if not os.environ.get("AEGIS_SIM_MODE", "0") == "1":
+    if not _SIM_MODE:
         last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
         if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
             remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
@@ -1208,6 +1502,36 @@ def process_tick(msg):
             sts_penalty = min(4, (50 - structural_score) // 5)
             best["confidence"] = max(0, best["confidence"] - sts_penalty)
         best["structural_score"] = structural_score
+
+        # Plan 1 Phase 3: Apply adaptive entry type weight to Kelly sizing
+        # Entry types with poor WR get reduced sizing (0.5x), strong ones boosted (1.5x)
+        if _adaptive_entry_weights:
+            entry_type = best.get("entry_type", "")
+            # VanguardSniper doesn't set entry_type in signal — Rust assigns it.
+            # Pass the weights through so Rust can apply them at entry.
+            best["adaptive_entry_weights"] = _adaptive_entry_weights
+
+        # Plan 1 Phase 3: Apply adaptive exchange weight to Kelly sizing
+        # Exchanges with negative PnL over last 5 sessions get 50% sizing
+        if _adaptive_exchange_weights:
+            exchange = msg.get("exchange", "")
+            if exchange and exchange in _adaptive_exchange_weights:
+                exch_weight = _adaptive_exchange_weights[exchange]
+                if exch_weight < 1.0:
+                    best["kelly_fraction"] = best["kelly_fraction"] * exch_weight
+                    best["shares"] = max(1, int(best["shares"] * exch_weight))
+            # Also pass full weights for Rust-side application
+            best["adaptive_exchange_weights"] = _adaptive_exchange_weights
+
+        # Plan 1 Phase 3: Apply adaptive Kelly cap (drawdown-aware)
+        # Overrides the static clamp_max from config.toml during drawdown
+        if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.20:
+            if best["kelly_fraction"] > _adaptive_kelly_cap:
+                best["kelly_fraction"] = _adaptive_kelly_cap
+                equity = msg.get("equity", 10000.0)
+                price = max(msg["last"], 1e-9)
+                best["shares"] = max(1, int(_adaptive_kelly_cap * equity / price))
+            best["adaptive_kelly_cap"] = _adaptive_kelly_cap
 
         # Record cooldown timestamp
         _last_signal_tick[ticker_id] = tick_count

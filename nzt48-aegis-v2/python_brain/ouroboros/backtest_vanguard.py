@@ -73,7 +73,8 @@ INITIAL_STOP_ATR = 2.0     # Match config.toml initial_stop_atr_mult = 2.0
 ROUND_TRIP_FEE = 0.003     # Q-051 unified cost
 
 # Risk parameters
-MAX_DAILY_TRADES = 3
+# SIMULATION: No daily trade cap — backtesting needs unrestricted signals.
+MAX_DAILY_TRADES = 999999
 STOP_LOSS_PCT = 0.05       # Emergency 5% stop (beyond Chandelier)
 MAX_HOLD_BARS = 96          # 8 hours at 5-min bars
 
@@ -320,12 +321,10 @@ def generate_signals(
     vwap = compute_vwap(closes, volumes)
 
     signals = []
-    last_signal_bar = -300  # Cooldown tracking
+    # SIMULATION: No signal cooldown — backtesting needs every valid signal.
+    last_signal_bar = -1
 
     for i in range(MIN_WARMUP_BARS, n):
-        # Cooldown: minimum 60 bars (5 hours) between signals per ticker
-        if i - last_signal_bar < 60:
-            continue
 
         # EMA crossover: fast crosses above slow
         if not (ema_fast[i] > ema_slow[i] and ema_fast[i - 1] <= ema_slow[i - 1]):

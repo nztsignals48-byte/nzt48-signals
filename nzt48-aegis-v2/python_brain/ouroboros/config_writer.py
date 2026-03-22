@@ -753,6 +753,253 @@ def compute_entry_type_confidences(
 
 
 # ---------------------------------------------------------------------------
+# Adaptive parameter computation (Plan 1 Phase 3: Make Everything Adaptive)
+# ---------------------------------------------------------------------------
+
+def compute_adaptive_chandelier_atr(events: List[Dict[str, Any]], recs: Dict[str, Any]) -> float:
+    """Compute VIX-regime-aware Chandelier ATR multiplier.
+
+    VIX > 35 → 3.0 (crisis: wide stops to survive volatility)
+    VIX > 25 → 2.5 (elevated: moderately wider stops)
+    VIX <= 25 → 2.0 (normal: tight stops to capture profit)
+
+    Falls back to nightly recommendations if no VIX data available.
+    """
+    # Try to get VIX from the most recent RiskStateChange or tick context
+    latest_vix = None
+    for event in reversed(events):
+        payload = event.get("payload", {})
+        # VIX may be in tick context or risk state
+        if "TickContext" in payload:
+            vix = payload["TickContext"].get("vix")
+            if vix is not None and vix > 0:
+                latest_vix = vix
+                break
+        if "RiskStateChange" in payload:
+            vix = payload["RiskStateChange"].get("vix")
+            if vix is not None and vix > 0:
+                latest_vix = vix
+                break
+
+    # Also check persistent memory for last known VIX
+    if latest_vix is None:
+        try:
+            from python_brain.ouroboros.persistent_memory import load_memory
+            mem = load_memory()
+            latest_vix = getattr(mem, 'last_vix', None)
+        except Exception:
+            pass
+
+    if latest_vix is not None:
+        if latest_vix > 35:
+            atr_mult = 3.0
+        elif latest_vix > 25:
+            atr_mult = 2.5
+        else:
+            atr_mult = 2.0
+        log.info("Adaptive Chandelier ATR: VIX=%.1f → mult=%.1f", latest_vix, atr_mult)
+        return atr_mult
+
+    # Fallback: use nightly recommendations value
+    fallback = recs.get("chandelier_atr_mult", 2.0)
+    log.info("Adaptive Chandelier ATR: no VIX data, using recs value=%.2f", fallback)
+    return fallback if fallback is not None else 2.0
+
+
+def compute_adaptive_spread_veto(events: List[Dict[str, Any]]) -> float:
+    """Compute regime-aware spread veto threshold (percentage).
+
+    Low volatility (VIX < 18)  → 0.2% (tighter: spreads should be narrow)
+    Normal (18 <= VIX <= 25)   → 0.3% (default)
+    High volatility (VIX > 25) → 0.5% (wider: accept wider spreads in vol)
+
+    Returns spread_veto_pct as a decimal fraction (e.g. 0.003 for 0.3%).
+    """
+    latest_vix = None
+    for event in reversed(events):
+        payload = event.get("payload", {})
+        if "TickContext" in payload:
+            vix = payload["TickContext"].get("vix")
+            if vix is not None and vix > 0:
+                latest_vix = vix
+                break
+        if "RiskStateChange" in payload:
+            vix = payload["RiskStateChange"].get("vix")
+            if vix is not None and vix > 0:
+                latest_vix = vix
+                break
+
+    if latest_vix is None:
+        try:
+            from python_brain.ouroboros.persistent_memory import load_memory
+            mem = load_memory()
+            latest_vix = getattr(mem, 'last_vix', None)
+        except Exception:
+            pass
+
+    if latest_vix is not None:
+        if latest_vix < 18:
+            spread_veto = 0.002  # 0.2%
+        elif latest_vix > 25:
+            spread_veto = 0.005  # 0.5%
+        else:
+            spread_veto = 0.003  # 0.3%
+        log.info("Adaptive spread veto: VIX=%.1f → %.1f%%", latest_vix, spread_veto * 100)
+        return spread_veto
+
+    log.info("Adaptive spread veto: no VIX data, using default 0.3%%")
+    return 0.003  # default 0.3%
+
+
+def compute_adaptive_entry_type_weights(events: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Compute adaptive entry type weights based on recent trade performance.
+
+    Looks at the last 20 PositionClosed events per entry type.
+    If TypeD WR < 35% → reduce weight to 0.5x
+    If TypeB WR > 45% → boost weight to 1.5x
+    All others default to 1.0x.
+
+    Returns {"TypeA": 1.0, "TypeB": 1.5, ...}
+    """
+    type_wins: Dict[str, int] = {}
+    type_total: Dict[str, int] = {}
+    # Collect recent trades per type (scan all events, take last 20 per type)
+    type_trades: Dict[str, List[float]] = {}
+
+    for event in events:
+        payload = event.get("payload", {})
+        if "PositionClosed" in payload:
+            pc = payload["PositionClosed"]
+            etype = pc.get("entry_type", "")
+            if etype not in ENTRY_CONF_DEFAULTS:
+                continue
+            pnl = pc.get("final_pnl", 0.0)
+            type_trades.setdefault(etype, []).append(pnl)
+
+    # Also enrich from persistent memory
+    try:
+        from python_brain.ouroboros.persistent_memory import load_memory
+        mem = load_memory()
+        entry_stats = getattr(mem, 'entry_type_stats', {})
+        for etype, stats in entry_stats.items():
+            if etype in ENTRY_CONF_DEFAULTS:
+                mem_total = stats.get("total_trades", 0)
+                mem_wins = stats.get("wins", 0)
+                if mem_total > len(type_trades.get(etype, [])):
+                    type_total[etype] = mem_total
+                    type_wins[etype] = mem_wins
+    except Exception:
+        pass
+
+    # Override with WAL data if we have enough (last 20 trades per type)
+    for etype, pnls in type_trades.items():
+        recent = pnls[-20:]  # last 20
+        if len(recent) >= 10:
+            type_total[etype] = len(recent)
+            type_wins[etype] = sum(1 for p in recent if p > 0)
+
+    weights: Dict[str, float] = {}
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        total = type_total.get(etype, 0)
+        wins = type_wins.get(etype, 0)
+        if total >= 10:
+            wr = wins / total
+            if etype == "TypeD" and wr < 0.35:
+                weights[etype] = 0.5
+                log.info("Entry type weight %s: WR=%.0f%% < 35%% → 0.5x", etype, wr * 100)
+            elif etype == "TypeB" and wr > 0.45:
+                weights[etype] = 1.5
+                log.info("Entry type weight %s: WR=%.0f%% > 45%% → 1.5x", etype, wr * 100)
+            else:
+                weights[etype] = 1.0
+        else:
+            weights[etype] = 1.0
+
+    return weights
+
+
+def compute_adaptive_exchange_weights(history: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Compute per-exchange session weights based on recent performance.
+
+    If an exchange has negative PnL over last 5 sessions → weight = 0.5 (50% size).
+    Otherwise → weight = 1.0 (full size).
+
+    Reads per_exchange data from the last 5 daily metrics files.
+    Returns {"LSE": 1.0, "US": 0.5, ...}
+    """
+    # Accumulate per-exchange PnL from last 5 days of metrics
+    exchange_pnl: Dict[str, float] = {}
+    exchange_sessions: Dict[str, int] = {}
+
+    recent_5 = history[-5:] if len(history) >= 5 else history
+    for daily in recent_5:
+        per_exchange = daily.get("per_exchange", {})
+        for exch, data in per_exchange.items():
+            if isinstance(data, dict):
+                pnl = data.get("total_pnl", 0.0)
+                exchange_pnl[exch] = exchange_pnl.get(exch, 0.0) + pnl
+                exchange_sessions[exch] = exchange_sessions.get(exch, 0) + 1
+
+    weights: Dict[str, float] = {}
+    for exch, total_pnl in exchange_pnl.items():
+        sessions = exchange_sessions.get(exch, 0)
+        if sessions >= 3 and total_pnl < 0:
+            weights[exch] = 0.5
+            log.info("Exchange weight %s: PnL=%.2f over %d sessions → 0.5x",
+                     exch, total_pnl, sessions)
+        else:
+            weights[exch] = 1.0
+
+    return weights
+
+
+def compute_adaptive_kelly_cap(history: List[Dict[str, Any]], metrics: Dict[str, Any]) -> float:
+    """Compute drawdown-aware Kelly fraction cap.
+
+    Portfolio drawdown > 10% → cap = 0.05 (very conservative)
+    Portfolio drawdown > 5%  → cap = 0.10 (conservative)
+    Otherwise                → cap = 0.20 (default from config.toml)
+
+    Uses persistent memory peak drawdown if available, falls back to
+    recent metrics.
+    """
+    peak_drawdown_pct = 0.0
+
+    # Try persistent memory first (most accurate — tracks all-time HWM)
+    try:
+        from python_brain.ouroboros.persistent_memory import load_memory
+        mem = load_memory()
+        peak_dd = getattr(mem, 'peak_drawdown_pct', 0.0)
+        if peak_dd > 0:
+            peak_drawdown_pct = peak_dd
+    except Exception:
+        pass
+
+    # Fallback: compute from recent daily metrics
+    if peak_drawdown_pct == 0.0 and history:
+        cumulative_pnl = 0.0
+        hwm = 0.0
+        for daily in history:
+            pnl = daily.get("total_pnl", 0.0)
+            cumulative_pnl += pnl
+            hwm = max(hwm, cumulative_pnl)
+            dd = (hwm - cumulative_pnl) / max(hwm, 1.0) if hwm > 0 else 0.0
+            peak_drawdown_pct = max(peak_drawdown_pct, dd * 100)
+
+    if peak_drawdown_pct > 10.0:
+        cap = 0.05
+        log.info("Adaptive Kelly cap: drawdown=%.1f%% > 10%% → cap=%.2f", peak_drawdown_pct, cap)
+    elif peak_drawdown_pct > 5.0:
+        cap = 0.10
+        log.info("Adaptive Kelly cap: drawdown=%.1f%% > 5%% → cap=%.2f", peak_drawdown_pct, cap)
+    else:
+        cap = 0.20
+        log.info("Adaptive Kelly cap: drawdown=%.1f%% → cap=%.2f (default)", peak_drawdown_pct, cap)
+
+    return cap
+
+
+# ---------------------------------------------------------------------------
 # TOML generators
 # ---------------------------------------------------------------------------
 def generate_dynamic_weights_toml(
@@ -807,7 +1054,10 @@ def generate_dynamic_weights_toml(
     }
 
     # --- Exit section ---
-    chandelier_atr = recs.get("chandelier_atr_mult", 3.0)
+    # Plan 1 Phase 3: Use VIX-regime-aware ATR multiplier for Chandelier exit.
+    # The adaptive value overrides nightly recommendations when VIX data is available.
+    adaptive_atr = compute_adaptive_chandelier_atr(events, recs)
+    chandelier_atr = adaptive_atr
     if chandelier_atr is None:
         chandelier_atr = 3.0
     avg_rung = metrics.get("avg_rung", 0.0)
@@ -998,6 +1248,66 @@ def generate_dynamic_weights_toml(
         lines.append(f'direction = "{gate["direction"]}"')
         lines.append(f'threshold = {gate["threshold"]}')
         lines.append(f'lift_pct = {gate["lift_pct"]}')
+
+    # --- Plan 1 Phase 3: Adaptive parameters (regime-aware) ---
+
+    # P3.1: Adaptive Chandelier ATR multiplier (VIX-regime-aware)
+    adaptive_atr = compute_adaptive_chandelier_atr(events, recs)
+    # Override the exit section's chandelier_atr_mult with adaptive value
+    # Keep the nightly-recommended value as base, but VIX regime takes precedence
+    lines += [
+        f"",
+        f"[adaptive_chandelier]",
+        f"# VIX-regime-aware ATR multiplier (Plan 1 Phase 3)",
+        f"# VIX > 35 → 3.0, VIX > 25 → 2.5, normal → 2.0",
+        f"atr_mult = {adaptive_atr:.2f}",
+    ]
+
+    # P3.2: Adaptive spread veto threshold (VIX-regime-aware)
+    adaptive_spread = compute_adaptive_spread_veto(events)
+    lines += [
+        f"",
+        f"[adaptive_spread]",
+        f"# VIX-regime-aware spread veto (Plan 1 Phase 3)",
+        f"# Low vol → 0.2%, normal → 0.3%, high vol → 0.5%",
+        f"spread_veto_pct = {adaptive_spread:.4f}",
+    ]
+
+    # P3.3: Adaptive entry type weights (performance-based)
+    entry_weights = compute_adaptive_entry_type_weights(events)
+    lines += [
+        f"",
+        f"[adaptive_entry_weights]",
+        f"# Performance-based entry type sizing weights (Plan 1 Phase 3)",
+        f"# TypeD WR < 35% → 0.5x, TypeB WR > 45% → 1.5x, else 1.0x",
+    ]
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        weight = entry_weights.get(etype, 1.0)
+        lines.append(f"{etype} = {weight:.2f}")
+
+    # P3.4: Adaptive per-exchange session weights (PnL-based)
+    exchange_weights = compute_adaptive_exchange_weights(history)
+    lines += [
+        f"",
+        f"[adaptive_exchange_weights]",
+        f"# Per-exchange sizing weights (Plan 1 Phase 3)",
+        f"# Negative PnL over last 5 sessions → 0.5x, else 1.0x",
+    ]
+    if exchange_weights:
+        for exch in sorted(exchange_weights.keys()):
+            lines.append(f'{exch} = {exchange_weights[exch]:.2f}')
+    else:
+        lines.append(f"# No exchange data yet — all default 1.0x")
+
+    # P3.5: Adaptive Kelly cap (drawdown-aware)
+    adaptive_kelly_cap = compute_adaptive_kelly_cap(history, metrics)
+    lines += [
+        f"",
+        f"[adaptive_kelly]",
+        f"# Drawdown-aware Kelly fraction cap (Plan 1 Phase 3)",
+        f"# Drawdown > 10% → 0.05, > 5% → 0.10, else 0.20",
+        f"kelly_cap = {adaptive_kelly_cap:.2f}",
+    ]
 
     # Item 49 + P3.2: Per-entry-type confidence tuning
     # Reads backfill_feedback.json deltas and WAL trade data to adjust

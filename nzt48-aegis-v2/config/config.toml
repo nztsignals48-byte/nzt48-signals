@@ -408,6 +408,28 @@ cold_start_stop_pct = 0.05
 kelly_notional_floor_gbp = 100.0
 kelly_notional_cap_pct = 0.25
 
+# ============================================================================
+# [simulation] — Override values when AEGIS_SIM_MODE=1 (backtesting/sim only).
+# These values are ONLY used by Python backtesting scripts. Rust engine reads
+# from [risk]/[position]/[hardening] directly; see Rust limits doc below.
+# When running production_backtest.py or backfill_simulator.py with
+# AEGIS_SIM_MODE=1, these values override the equivalent live settings.
+# ============================================================================
+[simulation]
+max_daily_trades = 999999            # No daily trade cap in sim
+max_simultaneous_positions = 999     # No position cap in sim
+signal_cooldown_ticks = 0            # No per-ticker cooldown in sim
+system_velocity_max = 999999         # No system-wide velocity cap in sim
+per_ticker_velocity_max = 999999     # No per-ticker velocity cap in sim
+consecutive_loss_halt = 999999       # Never halt on consecutive losses in sim
+daily_drawdown_pct = 100.0           # Never halt on daily drawdown in sim
+weekly_drawdown_pct = 100.0          # Never halt on weekly drawdown in sim
+peak_drawdown_halt_pct = 100.0       # Never halt on peak drawdown in sim
+portfolio_heat_limit_pct = 100.0     # No portfolio heat limit in sim
+sector_heat_cap_pct = 100.0          # No sector heat limit in sim
+cash_buffer_pct = 0.0                # No cash buffer requirement in sim
+entry_cooldown_bars = 0              # No between-entry cooldown in backfill_simulator
+
 [crucible]
 # Crucible phase overrides (Days 1-30)
 # AUDIT-FIX: Was 20, which allows unrealistic over-deployment at £10k equity.

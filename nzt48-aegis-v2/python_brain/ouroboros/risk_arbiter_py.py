@@ -487,11 +487,14 @@ class RiskArbiterPy:
             return False, vetoes
 
         # ── CHECK 6: Max Positions (H34) ──
-        # ALWAYS enforced, including simulation mode.
-        if portfolio.total_position_count() >= self.config.max_positions:
+        # In simulation mode, use relaxed max_positions from [simulation] config.
+        _effective_max_pos = self.config.max_positions
+        if self.simulation_mode:
+            _effective_max_pos = 999  # No effective limit in sim mode
+        if portfolio.total_position_count() >= _effective_max_pos:
             vetoes.append(
                 f"CHECK_6: max positions reached "
-                f"({portfolio.total_position_count()} >= {self.config.max_positions})"
+                f"({portfolio.total_position_count()} >= {_effective_max_pos})"
             )
             return False, vetoes
 
@@ -551,11 +554,14 @@ class RiskArbiterPy:
                 return False, vetoes
 
         # ── CHECK 28: Daily Trade Limit (N0a) ──
-        # ALWAYS enforced, including simulation mode.
-        if portfolio.daily_trade_count >= self.config.daily_trade_limit:
+        # In simulation mode, no daily trade limit.
+        _effective_daily_limit = self.config.daily_trade_limit
+        if self.simulation_mode:
+            _effective_daily_limit = 999999  # No effective limit in sim mode
+        if portfolio.daily_trade_count >= _effective_daily_limit:
             vetoes.append(
                 f"CHECK_28: daily trade limit reached "
-                f"({portfolio.daily_trade_count} >= {self.config.daily_trade_limit})"
+                f"({portfolio.daily_trade_count} >= {_effective_daily_limit})"
             )
             return False, vetoes
 
@@ -647,30 +653,32 @@ class RiskArbiterPy:
                 return False, vetoes
 
         # ── CHECK 19: Per-Ticker Velocity (H37) ──
-        self._prune_velocity(ts)
-        per_ticker_recent = sum(
-            1 for (t, _) in self._velocity_log if t == ticker
-        )
-        if per_ticker_recent >= self.config.velocity_check_max_intents:
-            vetoes.append(
-                f"CHECK_19: per-ticker velocity — "
-                f"{per_ticker_recent} intents for {ticker} "
-                f">= max {self.config.velocity_check_max_intents}"
+        # In simulation mode, skip velocity checks entirely.
+        if not self.simulation_mode:
+            self._prune_velocity(ts)
+            per_ticker_recent = sum(
+                1 for (t, _) in self._velocity_log if t == ticker
             )
-            return False, vetoes
+            if per_ticker_recent >= self.config.velocity_check_max_intents:
+                vetoes.append(
+                    f"CHECK_19: per-ticker velocity — "
+                    f"{per_ticker_recent} intents for {ticker} "
+                    f">= max {self.config.velocity_check_max_intents}"
+                )
+                return False, vetoes
 
-        # ── CHECK 19b: System-wide velocity ──
-        system_cutoff = max(0, ts - self.VELOCITY_WINDOW_5MIN_NS)
-        system_recent = sum(
-            1 for (_, t) in self._velocity_log if t >= system_cutoff
-        )
-        if system_recent >= self.config.system_velocity_max:
-            vetoes.append(
-                f"CHECK_19b: system velocity — "
-                f"{system_recent} intents in 5min "
-                f">= max {self.config.system_velocity_max}"
+            # ── CHECK 19b: System-wide velocity ──
+            system_cutoff = max(0, ts - self.VELOCITY_WINDOW_5MIN_NS)
+            system_recent = sum(
+                1 for (_, t) in self._velocity_log if t >= system_cutoff
             )
-            return False, vetoes
+            if system_recent >= self.config.system_velocity_max:
+                vetoes.append(
+                    f"CHECK_19b: system velocity — "
+                    f"{system_recent} intents in 5min "
+                    f">= max {self.config.system_velocity_max}"
+                )
+                return False, vetoes
 
         # ── CHECK 20: Macro Regime Escalation (Phase 9) ──
         macro_veto = self._evaluate_macro_escalation(ctx)
@@ -679,7 +687,8 @@ class RiskArbiterPy:
             return False, vetoes
 
         # ── CHECK 21: Consecutive Loss Breaker (H38) ──
-        if portfolio.consecutive_stop_losses >= self.config.consecutive_loss_halt:
+        # In simulation mode, never halt on consecutive losses.
+        if not self.simulation_mode and portfolio.consecutive_stop_losses >= self.config.consecutive_loss_halt:
             self.regime = RiskRegime.Halt
             vetoes.append(
                 f"CHECK_21: consecutive loss breaker — "

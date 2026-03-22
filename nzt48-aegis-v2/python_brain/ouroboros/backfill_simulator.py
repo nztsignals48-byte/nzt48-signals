@@ -191,9 +191,26 @@ def classify_entries(
         ema20[i] = alpha * closes[i] + (1 - alpha) * ema20[i - 1]
 
     # Scan for entries (skip first 21 bars for indicator warmup)
-    last_entry_bar = -10  # Cooldown: min 5 bars between entries
+    # SIM_MODE: Load entry cooldown from config.toml [simulation] section.
+    # Default 0 = no cooldown between entries for maximum signal generation.
+    _entry_cooldown = 0
+    try:
+        try:
+            import tomllib as _tl
+        except ImportError:
+            import tomli as _tl
+        _cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
+        if not _cfg_path.exists():
+            _cfg_path = _PROJECT_ROOT / "config" / "config.toml"
+        if _cfg_path.exists():
+            with open(_cfg_path, "rb") as _f:
+                _sim_cfg = _tl.load(_f).get("simulation", {})
+                _entry_cooldown = int(_sim_cfg.get("entry_cooldown_bars", 0))
+    except Exception:
+        pass
+    last_entry_bar = -(_entry_cooldown + 1)
     for i in range(21, n - 5):  # Leave room for exit simulation
-        if i - last_entry_bar < 5:
+        if _entry_cooldown > 0 and i - last_entry_bar < _entry_cooldown:
             continue
         if np.isnan(rsi[i]) or np.isnan(rvol_arr[i]):
             continue
