@@ -507,40 +507,60 @@ def call_claude(prompt: str, is_evening: bool = False) -> Optional[str]:
 
     # Extract briefing text from Claude response
     if isinstance(result, dict):
-        # Direct briefing_text key
+        # Direct briefing_text key (ideal case)
         text = result.get("briefing_text", "")
         if text:
             return text
 
         # Claude helper returns {"text": "...", "raw": True} when response isn't pure JSON
-        # The text may contain embedded JSON with briefing_text inside it
         raw_text = result.get("text", "")
         if raw_text:
-            # Try to find {"briefing_text": "..."} embedded in the text
+            # Strategy 1: Find embedded JSON with briefing_text key
             import re
-            match = re.search(r'\{"briefing_text"\s*:\s*"', raw_text)
+            match = re.search(r'\{[^{]*"briefing_text"\s*:', raw_text)
             if match:
-                # Extract from the JSON object start
                 json_start = match.start()
-                try:
-                    # Find the complete JSON object
-                    embedded = raw_text[json_start:]
-                    parsed = json.loads(embedded)
-                    if isinstance(parsed, dict) and "briefing_text" in parsed:
-                        return parsed["briefing_text"]
-                except json.JSONDecodeError:
-                    # Try with escaped newlines
-                    pass
+                # Try progressively larger substrings to find valid JSON
+                embedded = raw_text[json_start:]
+                # Find matching closing brace by counting braces
+                depth = 0
+                end_pos = 0
+                for i, ch in enumerate(embedded):
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = i + 1
+                            break
+                if end_pos > 0:
+                    try:
+                        parsed = json.loads(embedded[:end_pos])
+                        if isinstance(parsed, dict) and "briefing_text" in parsed:
+                            briefing = parsed["briefing_text"]
+                            # Unescape any double-escaped newlines
+                            briefing = briefing.replace("\\n", "\n")
+                            return briefing
+                    except json.JSONDecodeError:
+                        pass
 
-            # If no embedded JSON found, use the raw text as the briefing
-            # Strip any leading "thinking" text before the actual briefing
+            # Strategy 2: Find HTML content starting with <b> tag
             if "<b>" in raw_text:
-                # Find where the HTML briefing starts
                 html_start = raw_text.find("<b>")
-                return raw_text[html_start:]
+                # Take everything from first <b> tag
+                extracted = raw_text[html_start:]
+                # Remove any trailing JSON/metadata after the briefing
+                # Look for patterns like "}", "stop_reason", etc at the end
+                for end_marker in ['"}', "stop_reason", '"type"']:
+                    marker_pos = extracted.rfind(end_marker)
+                    if marker_pos > 0 and marker_pos > len(extracted) * 0.8:
+                        extracted = extracted[:marker_pos].rstrip().rstrip('"').rstrip(',').rstrip()
+                return extracted
+
+            # Strategy 3: Return raw text as-is
             return raw_text
 
-        # Fallback: if the response was the briefing itself as some other structure
+        # Fallback: structured response without briefing_text
         if "executive_summary" in result or "summary" in result:
             return json.dumps(result, indent=2)
 
@@ -680,12 +700,34 @@ def run_briefing(
 
     # Send via Telegram
     if send_tg:
-        # Try HTML first, fall back to plain text if HTML parsing fails
-        success = send_telegram(briefing, parse_mode="HTML")
+        import re
+
+        def _sanitize_telegram_html(text: str) -> str:
+            """Escape < and > that aren't valid Telegram HTML tags.
+
+            Telegram only supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a>.
+            Everything else with < > must be escaped.
+            """
+            allowed_tags = r'</?(?:b|i|u|s|code|pre|a(?:\s[^>]*)?)>'
+            parts = []
+            last_end = 0
+            for m in re.finditer(allowed_tags, text):
+                # Escape any < > between last match and this one
+                between = text[last_end:m.start()]
+                between = between.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                parts.append(between)
+                parts.append(m.group())  # Keep valid tag as-is
+                last_end = m.end()
+            # Escape remaining text after last tag
+            remaining = text[last_end:]
+            remaining = remaining.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            parts.append(remaining)
+            return "".join(parts)
+
+        sanitized = _sanitize_telegram_html(briefing)
+        success = send_telegram(sanitized, parse_mode="HTML")
         if not success:
             log.info("HTML parse failed, retrying as plain text")
-            # Strip HTML tags for plain text fallback
-            import re
             plain = re.sub(r'<[^>]+>', '', briefing)
             success = send_telegram(plain, parse_mode=None)
         if success:
