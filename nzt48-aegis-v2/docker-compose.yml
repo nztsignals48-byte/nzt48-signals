@@ -43,6 +43,7 @@ services:
       - aegis-events:/app/events
       - aegis-data:/app/data
       - aegis-logs:/var/log          # Sprint 8B: Persist Ouroboros/cron logs across restarts
+      - claude-auth:/root/.claude    # Sprint S03: Persist Claude CLI auth across rebuilds
     # SC-01a: Graceful shutdown grace period (flatten positions + wait fills)
     stop_grace_period: 60s
     # SC-16: Shared memory for IPC
@@ -50,7 +51,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 2048M   # Increased for Node.js + Claude CLI (Sprint S03)
     logging:
       driver: json-file
       options:
@@ -130,6 +131,7 @@ volumes:
   aegis-data:
   aegis-logs:
   aegis-redis-data:
+  claude-auth:            # Sprint S03: Persist Claude auth token
 
 networks:
   aegis-net:

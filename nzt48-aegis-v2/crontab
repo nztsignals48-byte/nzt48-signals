@@ -10,18 +10,10 @@
 # N10c: Log Rotation — 04:45 UTC daily (before nightly learning, keeps 7 days)
 45 4 * * * cd /app && python3 -m python_brain.ouroboros.log_rotate >> /var/log/log_rotate.log 2>&1
 
-# Ouroboros v6.0 Nightly Learning Loop — 23:50 ET = 04:50 UTC (EST) Mon-Fri
-# MUST run during DARK window (21:00-23:00 London = 21:00-23:00 UTC GMT / 22:00-00:00 BST)
-50 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.nightly_v6 >> /var/log/ouroboros.log 2>&1
-
-# Ouroboros Config Writer — 04:51 UTC Mon-Fri (right after nightly_v6, writes dynamic_weights.toml)
-51 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.config_writer >> /var/log/config_writer.log 2>&1
-
-# N4b: Win/Loss Indicator Delta — 04:52 UTC Mon-Fri (after nightly_v6, feeds Win_Loss_Delta tab)
-52 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.win_loss_delta --push-sheets >> /var/log/win_loss_delta.log 2>&1
-
-# N6a: Claude Nightly Review — 04:53 UTC Mon-Fri (after nightly_v6 + config_writer + delta, read-only)
-53 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_review --send-telegram >> /var/log/claude_review.log 2>&1
+# Sprint S05 (H1): Sequential Nightly Pipeline — replaces individual entries
+# Order: nightly_v6 → config_writer → win_loss_delta → claude_review → challenger → approval_gate
+# flock prevents parallel execution. set -euo pipefail aborts on critical failures.
+50 4 * * 1-5 flock -n /tmp/nightly.lock /app/scripts/nightly_pipeline.sh >> /var/log/nightly_pipeline.log 2>&1
 
 # N6b: Claude Morning Briefing — 07:45 UTC Mon-Fri (before European session, uses N6a output)
 45 7 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_briefing --send-telegram >> /var/log/claude_briefing.log 2>&1
@@ -108,3 +100,21 @@
 # P2-7: Write FTT Registry — 04:52 UTC Mon-Fri (after nightly_v6, before config_writer next day)
 # Only needs to run once; config_fixes writes transaction_tax_registry.toml atomically
 52 4 * * 1 cd /app && python3 -m python_brain.ouroboros.config_fixes --write-ftt >> /var/log/config_fixes.log 2>&1
+
+# === PLAN 2 CLAUDE INTELLIGENCE ROLES (Sprint S11-S19) ===
+
+# S12: Evening Briefing — 21:30 UTC Mon-Fri (after US close)
+30 21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_briefing --evening --send-telegram >> /var/log/claude_briefing.log 2>&1
+
+# S13: Universe Curation Shadow — every 2h during trading hours (shadow mode)
+0 23 * * 0-4 cd /app && python3 -m python_brain.ouroboros.claude_curation >> /var/log/claude_curation.log 2>&1
+0 1,3,5,7,9,11,13,15,17,19,21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_curation >> /var/log/claude_curation.log 2>&1
+
+# S14: Weekly Gate Calibration — Friday 22:00 UTC
+0 22 * * 5 cd /app && python3 -m python_brain.ouroboros.claude_rejected_review --send-telegram >> /var/log/claude_rejected_review.log 2>&1
+
+# S18: Operator Psych Audit (H6) — Sunday 23:00 UTC
+0 23 * * 0 cd /app && python3 -m python_brain.ouroboros.claude_psych_audit --send-telegram >> /var/log/claude_psych_audit.log 2>&1
+
+# S19: SEC/RNS Filing Scanner (H7) — daily 06:00 UTC Mon-Fri (shadow mode)
+0 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_filing_scanner >> /var/log/claude_filing_scanner.log 2>&1

@@ -1,0 +1,7 @@
+{
+  "events": [
+    {"date": "2026-03-25", "time_utc": "18:00", "type": "FOMC", "description": "Federal Reserve Rate Decision"},
+    {"date": "2026-04-04", "time_utc": "12:30", "type": "NFP", "description": "Non-Farm Payrolls March 2026"},
+    {"date": "2026-04-10", "time_utc": "12:30", "type": "CPI", "description": "Consumer Price Index March 2026"}
+  ]
+}

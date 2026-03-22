@@ -5,6 +5,13 @@ set -e
 IBKR_HOST=${IBKR_HOST:-ib-gateway}
 IBKR_PORT=${IBKR_PORT:-4003}
 
+# Sprint S02: Initialize Claude cold-path directories
+echo "Initializing data governance directories..."
+mkdir -p /app/data/claude/{reviews,briefings,challenges,curation,rejected_reviews,anomalies,macro}
+mkdir -p /app/data/curation_comparison
+mkdir -p /app/data/sde_tests
+mkdir -p /app/prompts
+
 echo "Starting Ouroboros cron (supercronic)..."
 supercronic /app/crontab &
 

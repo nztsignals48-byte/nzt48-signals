@@ -9,6 +9,12 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && rustup default stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Sprint S03: Node.js 22 + Claude Code CLI ($0/month via Max subscription)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g @anthropic-ai/claude-code \
+    && node --version && claude --version
+
 # Supercronic for Ouroboros nightly cron (no syslog needed)
 ARG SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64
 ARG SUPERCRONIC_SHA=feefa310da569c81b99e1027b86b27b51e6ee9ab647747b49099645120cfc671

@@ -90,8 +90,25 @@ log = logging.getLogger("config_writer")
 # Utility: atomic file write
 # ---------------------------------------------------------------------------
 def atomic_write(path: Path, content: str) -> None:
-    """Write content to path atomically via tmp + rename."""
+    """Write content to path atomically via tmp + rename.
+
+    Sprint S06 (H3): TOML files are syntax-validated before writing.
+    If validation fails, the write is aborted and the previous file is preserved.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # H3: Validate TOML syntax before writing (prevents corrupt SIGHUP)
+    if path.suffix == ".toml":
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib
+            tomllib.loads(content)
+        except Exception as e:
+            log.critical("H3 TOML VALIDATION FAILED for %s: %s — write ABORTED, previous file preserved", path, e)
+            return  # Do NOT write corrupt TOML
+
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp_path.write_text(content, encoding="utf-8")
