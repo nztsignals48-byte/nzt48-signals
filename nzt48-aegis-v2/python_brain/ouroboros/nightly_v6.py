@@ -467,8 +467,9 @@ def optimize_parameters(metrics: DailyMetrics, *, mem=None) -> Dict[str, Any]:
             elif rtrades >= 5:
                 # Insufficient data: log but use neutral scale
                 regime_scales[regime_name] = 1.0
+                rwr = rstats.get('win_rate', 0.5)
                 recs["adjustments"].append(
-                    f"Regime '{regime_name}' scale={scale:.2f} (WR={rwr:.0%} over {rtrades} trades)"
+                    f"Regime '{regime_name}' scale=1.00 (WR={rwr:.0%} over {rtrades} trades, <{MIN_REGIME_TRADES} min)"
                 )
         if regime_scales:
             recs["regime_scales"] = regime_scales
