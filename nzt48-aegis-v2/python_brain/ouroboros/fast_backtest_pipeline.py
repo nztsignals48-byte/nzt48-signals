@@ -41,10 +41,14 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from python_brain.ouroboros.backfill_simulator import (
     SimTrade,
-    fetch_historical_data,
     simulate_ticker,
     STARTING_EQUITY,
 )
+# Handle renamed function (agent a665f97 renamed to parallel version)
+try:
+    from python_brain.ouroboros.backfill_simulator import fetch_historical_data_parallel as fetch_historical_data
+except ImportError:
+    from python_brain.ouroboros.backfill_simulator import fetch_historical_data
 from python_brain.ouroboros.risk_arbiter_py import (
     Direction,
     EvalContext,

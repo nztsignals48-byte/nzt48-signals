@@ -1100,9 +1100,10 @@ def main():
     args = parser.parse_args()
 
     # Allow runtime override of concurrency settings
-    global DOWNLOAD_WORKERS, CHUNK_SIZE
-    DOWNLOAD_WORKERS = args.workers
-    CHUNK_SIZE = args.chunk_size
+    # Note: We modify the module-level variables directly for downstream functions
+    import python_brain.ouroboros.backfill_simulator as _self_mod
+    _self_mod.DOWNLOAD_WORKERS = args.workers
+    _self_mod.CHUNK_SIZE = args.chunk_size
 
     # Enforce yfinance limits
     max_days = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59,
