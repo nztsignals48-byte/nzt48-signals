@@ -380,6 +380,14 @@ type_d_rsi_low = 20.0
 type_d_rsi_high = 40.0
 # Confidence decay
 confidence_decay_rate_per_hour = 2.1
+# Type E thresholds (IBS Mean Reversion — Sprint B)
+type_e_confidence = 70.0
+type_e_ibs_threshold = 0.10
+type_e_rvol_threshold = 1.0
+# Type F thresholds (OBV Divergence — Sprint E)
+type_f_confidence = 68.0
+type_f_obv_rsi_threshold = 30.0
+type_f_rvol_threshold = 0.7
 
 # Sprint 6: Risk arbiter hardening — thresholds previously hardcoded as constants.
 [hardening]

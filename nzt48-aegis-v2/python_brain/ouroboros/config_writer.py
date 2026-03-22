@@ -62,6 +62,8 @@ ENTRY_CONF_DEFAULTS = {
     "TypeB": 82.0,
     "TypeC": 72.0,
     "TypeD": 80.0,
+    "TypeE": 70.0,
+    "TypeF": 68.0,
 }
 
 # WIRED (Sprint 7A): PRIMARY_TICKERS removed — dynamic loading from contracts.toml.
@@ -645,7 +647,7 @@ def load_backfill_feedback() -> Dict[str, float]:
         deltas: Dict[str, float] = {}
 
         # Handle top-level dict where keys are entry types
-        for key in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+        for key in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
             entry = data.get(key, {})
             if isinstance(entry, dict) and "strategy_confidence_delta" in entry:
                 deltas[key] = float(entry["strategy_confidence_delta"])
@@ -899,7 +901,7 @@ def compute_adaptive_entry_type_weights(events: List[Dict[str, Any]]) -> Dict[st
             type_wins[etype] = sum(1 for p in recent if p > 0)
 
     weights: Dict[str, float] = {}
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         total = type_total.get(etype, 0)
         wins = type_wins.get(etype, 0)
         if total >= 10:
@@ -992,7 +994,7 @@ def compute_thompson_entry_confidence(
         prev_confidences = dict(ENTRY_CONF_DEFAULTS)
 
     result: Dict[str, float] = {}
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
         base_conf = ENTRY_CONF_DEFAULTS[etype]
         prev_conf = prev_confidences.get(etype, base_conf)
 
@@ -1075,6 +1077,8 @@ def _load_prev_thompson_confidences() -> Optional[Dict[str, float]]:
             "type_b_confidence": "TypeB",
             "type_c_confidence": "TypeC",
             "type_d_confidence": "TypeD",
+            "type_e_confidence": "TypeE",
+            "type_f_confidence": "TypeF",
         }
         result = {}
         for field, etype in field_to_type.items():

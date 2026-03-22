@@ -305,6 +305,34 @@ exit_stop_pct = [1.0, 3.0]
 base_confidence = [50.0, 75.0]
 
 # ============================================================================
+# Type E: IBS MEAN REVERSION (Sprint B)
+# ============================================================================
+# Buy when IBS < 0.10 in mean-reverting regime with elevated RVOL.
+# IBS = (Close - Low) / (High - Low). Near-zero IBS signals extreme selling.
+
+[strategy.ibs_mean_reversion]
+enabled = true
+priority = 3
+family = "mean_reversion"
+base_confidence = 70.0
+regime_eligible = ["mean_reverting"]
+sizing_mult = 0.8
+
+# ============================================================================
+# Type F: OBV DIVERGENCE (Sprint E)
+# ============================================================================
+# Buy when OBV-RSI(5) < 30 with moderate RVOL, indicating volume-weighted
+# selling pressure diverging from price. Accumulation signal.
+
+[strategy.obv_divergence]
+enabled = true
+priority = 4
+family = "mean_reversion"
+base_confidence = 68.0
+regime_eligible = ["mean_reverting", "random"]
+sizing_mult = 0.7
+
+# ============================================================================
 # BLACKOUT WINDOWS (Global — applies to ALL strategies)
 # ============================================================================
 
