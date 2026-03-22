@@ -24,7 +24,7 @@ schema_version = 1
 # Fund manager: "At £10k, concentration is your friend. Run 2 strategies only."
 max_active_strategies = 2
 # Minimum confidence floor — raised from 45 per risk audit: "45 is barely above coin-flip"
-confidence_floor = 55.0
+confidence_floor = 65.0
 # Strategy priority ranking (1 = highest priority, evaluated first)
 # Fund manager consensus: Cross-Market Momentum primary, VWAP DipBuy secondary.
 # S18 Gap Fade: demoted to disabled (audit: "weakest link, barely covers costs")

@@ -86,7 +86,7 @@ impl Default for EntryTypeConfig {
             type_a_confidence: 65.0,
             type_b_confidence: 82.0,
             type_c_confidence: 72.0,
-            type_d_confidence: 70.0,
+            type_d_confidence: 80.0,
             type_a_rsi_oversold: 40.0,
             type_a_volume_spike_mult: 1.8,
             type_a_drop_atr_mult: 2.0,

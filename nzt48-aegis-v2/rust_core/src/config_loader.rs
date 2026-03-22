@@ -308,7 +308,7 @@ impl Default for RawChandelier {
 }
 
 fn default_rung_pct() -> Vec<f64> { vec![0.0, 0.008, 0.015, 0.025, 0.040] }
-fn default_initial_stop_atr() -> f64 { 1.5 }
+fn default_initial_stop_atr() -> f64 { 2.0 }
 fn default_rung3_trail() -> f64 { 1.0 }
 fn default_rung4_trail() -> f64 { 0.75 }
 fn default_rung5_trail() -> f64 { 0.5 }
@@ -438,7 +438,7 @@ impl Default for RawEntryTypes {
 fn default_type_a_conf() -> f64 { 65.0 }
 fn default_type_b_conf() -> f64 { 82.0 }
 fn default_type_c_conf() -> f64 { 72.0 }
-fn default_type_d_conf() -> f64 { 70.0 }
+fn default_type_d_conf() -> f64 { 80.0 }
 fn default_type_a_rsi() -> f64 { 40.0 }
 fn default_type_a_vol() -> f64 { 1.8 }
 fn default_type_a_drop() -> f64 { 2.0 }

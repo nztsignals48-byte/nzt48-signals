@@ -56,7 +56,7 @@ TICKER_ID_MAP = {sym: i for i, sym in enumerate(PRIMARY_TICKERS)}
 
 # Guardrails
 KELLY_MIN = 0.15
-KELLY_MAX = 0.30
+KELLY_MAX = 0.20  # Must match config.toml [kelly] clamp_max = 0.20
 CHANDELIER_ATR_MIN = 1.5
 CHANDELIER_ATR_MAX = 4.0
 MAX_DRIFT_PCT = 15.0  # No parameter can drift >15% from baseline in one night

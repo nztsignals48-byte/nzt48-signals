@@ -760,7 +760,11 @@ def process_tick(msg):
     # FIX 2: Raise warm-up to 200 bars (= 16 min of 5-second data = 3+ 5-min bars)
     # Need at least 3 five-minute bars for any meaningful indicator reading.
     # =========================================================================
-    MIN_WARMUP_BARS = 200  # Was 50. Now 200 = 16 min = 3+ five-minute bars
+    # SIM_MODE reduces warmup for backtesting with larger-interval bars.
+    # With 60m bars, each bar = 1 tick, so 200 ticks = 200 hours.
+    # In sim mode, require only 10 bars (= 10 hours at 60m) for warmup.
+    _sim_mode = os.environ.get("AEGIS_SIM_MODE", "0") == "1"
+    MIN_WARMUP_BARS = 10 if _sim_mode else 200
     if len(ticks) < MIN_WARMUP_BARS:
         # Don't log warm-up vetoes (too noisy — every tick for first 16 min)
         return no_signal_base
@@ -1170,13 +1174,15 @@ def process_tick(msg):
 
     # ---- Per-ticker signal cooldown (prevent NVD3.L-style spam) ----
     # After emitting a signal for a ticker, suppress for COOLDOWN_TICKS ticks.
+    # SIM_MODE: skip cooldown entirely to maximize signal count for backtesting.
     tick_count = _tick_counts.get(ticker_id, 0)
-    last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
-    if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
-        remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
-        _log_gate_veto(ticker_id, "cooldown", msg["last"], _ind,
-                       "{}s remaining".format(remaining * 5))
-        return no_signal_base
+    if not os.environ.get("AEGIS_SIM_MODE", "0") == "1":
+        last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
+        if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
+            remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
+            _log_gate_veto(ticker_id, "cooldown", msg["last"], _ind,
+                           "{}s remaining".format(remaining * 5))
+            return no_signal_base
 
     # ---- Select best signal (highest confidence wins) ----
     best = None

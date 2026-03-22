@@ -147,16 +147,19 @@ class BridgeProcess:
 
     def start(self):
         bridge_path = str(_PROJECT_ROOT / "python_brain" / "bridge.py")
+        env = os.environ.copy()
+        env["AEGIS_SIM_MODE"] = "1"  # Reduce warmup, remove cooldown/trade limits
         self.proc = subprocess.Popen(
             ["python3", bridge_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(_PROJECT_ROOT),
+            env=env,
             text=True,
             bufsize=1,
         )
-        log.info("Bridge subprocess started (PID=%d)", self.proc.pid)
+        log.info("Bridge subprocess started (PID=%d) in SIM_MODE", self.proc.pid)
 
     def stop(self):
         if self.proc:
@@ -486,6 +489,7 @@ def main():
     parser.add_argument("--interval", type=str, default="5m", help="Bar interval (5m, 60m, 1h)")
     parser.add_argument("--ticker", type=str, help="Single ticker")
     parser.add_argument("--expanded", action="store_true", help="Use expanded_universe.json")
+    parser.add_argument("--universe", type=str, help="Path to universe file (one ticker per line)")
     parser.add_argument("--chunk", type=int, default=0, help="Chunk index (0-based) for parallel execution")
     parser.add_argument("--chunks", type=int, default=1, help="Total number of chunks")
     args = parser.parse_args()
@@ -493,6 +497,18 @@ def main():
     # Load tickers
     if args.ticker:
         tickers = [args.ticker]
+    elif args.universe:
+        universe_path = Path(args.universe)
+        if not universe_path.exists():
+            # Try relative to project root
+            universe_path = _PROJECT_ROOT / args.universe
+        if universe_path.exists():
+            with open(universe_path) as f:
+                tickers = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            log.info("Loaded %d tickers from %s", len(tickers), universe_path)
+        else:
+            log.error("Universe file not found: %s", args.universe)
+            sys.exit(1)
     elif args.expanded:
         universe_path = DATA_DIR / "expanded_universe.json"
         if universe_path.exists():

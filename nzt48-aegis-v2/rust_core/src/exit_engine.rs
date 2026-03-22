@@ -77,7 +77,7 @@ impl Default for ChandelierStrategy {
             rung4_trail_atr: 0.75,   // Rung 4: 0.75x ATR below peak
             rung5_trail_atr: 0.5,    // Rung 5+: 0.5x ATR below peak (tightest)
             round_trip_fee_pct: 0.003, // 0.3% round-trip (conservative for LSE 3x ETPs)
-            initial_stop_atr_mult: 1.5,
+            initial_stop_atr_mult: 2.0,
             atr_floor_pct: 0.005,
         }
     }

@@ -69,7 +69,7 @@ RUNG_THRESHOLDS = [0.0, 0.008, 0.015, 0.025, 0.040]  # % gain for each rung
 RUNG3_TRAIL_ATR = 1.0
 RUNG4_TRAIL_ATR = 0.75
 RUNG5_TRAIL_ATR = 0.5
-INITIAL_STOP_ATR = 1.5     # Rung 1 stop distance
+INITIAL_STOP_ATR = 2.0     # Match config.toml initial_stop_atr_mult = 2.0
 ROUND_TRIP_FEE = 0.003     # Q-051 unified cost
 
 # Risk parameters
