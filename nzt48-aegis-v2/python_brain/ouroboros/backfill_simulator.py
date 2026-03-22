@@ -214,12 +214,12 @@ def compute_rsi(prices: np.ndarray, period: int = RSI_PERIOD) -> np.ndarray:
     gains = np.where(deltas > 0, deltas, 0.0)
     losses = np.where(deltas < 0, -deltas, 0.0)
 
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
+    avg_gain = float(np.mean(gains[:period]))
+    avg_loss = float(np.mean(losses[:period]))
 
     for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        avg_gain = (avg_gain * (period - 1) + float(gains[i])) / period
+        avg_loss = (avg_loss * (period - 1) + float(losses[i])) / period
         if avg_loss < 1e-10:
             rsi[i + 1] = 100.0
         else:
