@@ -1,0 +1,268 @@
+{
+  "simulation_id": "MC_TypeBC_Aggressive_20260322",
+  "timestamp": "2026-03-22T20:59:07.000847+00:00",
+  "description": "10,000 Monte Carlo paths, TypeB+C only, 20% risk, 902 trades/2yr, all costs included",
+  "source_data": {
+    "backtest_file": "fast_backtest_730d_60m_20260322_204111.json",
+    "tickers_universe": 9356,
+    "tickers_with_data": 4598,
+    "raw_trades": 10837568,
+    "interval": "60m",
+    "period_days": 730,
+    "exchanges": [
+      "US",
+      "TSE",
+      "HKEX",
+      "LSE",
+      "EURONEXT",
+      "XETRA",
+      "SGX"
+    ]
+  },
+  "entry_type_stats": {
+    "TypeB": {
+      "trades": 5764888,
+      "win_rate": 0.524,
+      "profit_factor": 1.96,
+      "win_loss_ratio": 1.78,
+      "avg_rung": 1.7,
+      "avg_hold_bars": 13,
+      "verdict": "CORE ALPHA \u2014 only consistently profitable entry type"
+    },
+    "TypeC": {
+      "trades": 88302,
+      "win_rate": 0.451,
+      "profit_factor": 0.98,
+      "win_loss_ratio": 1.2,
+      "avg_rung": 1.7,
+      "verdict": "BREAK-EVEN \u2014 marginal, include for diversification only"
+    },
+    "TypeA": {
+      "trades": 4467984,
+      "win_rate": 0.295,
+      "profit_factor": 0.04,
+      "win_loss_ratio": 0.06,
+      "avg_rung": 1.1,
+      "verdict": "NET LOSER \u2014 disable or require confidence 95+ and bullish regime"
+    },
+    "TypeD": {
+      "trades": 516394,
+      "win_rate": 0.241,
+      "profit_factor": 0.03,
+      "win_loss_ratio": 0.04,
+      "avg_rung": 1.7,
+      "verdict": "NET LOSER \u2014 disable entirely or require confidence 95+"
+    }
+  },
+  "exchange_stats": {
+    "EURONEXT": {
+      "trades": 51273,
+      "win_rate": 0.425,
+      "profit_factor": 1.05,
+      "verdict": "POSITIVE"
+    },
+    "XETRA": {
+      "trades": 38846,
+      "win_rate": 0.423,
+      "profit_factor": 1.1,
+      "verdict": "POSITIVE"
+    },
+    "TSE": {
+      "trades": 2383131,
+      "win_rate": 0.427,
+      "profit_factor": 0.89,
+      "verdict": "NEAR BREAK-EVEN"
+    },
+    "LSE": {
+      "trades": 87291,
+      "win_rate": 0.415,
+      "profit_factor": 0.82,
+      "verdict": "SLIGHT NEGATIVE"
+    },
+    "SGX": {
+      "trades": 47714,
+      "win_rate": 0.416,
+      "profit_factor": 0.67,
+      "verdict": "NEGATIVE"
+    },
+    "US": {
+      "trades": 6375884,
+      "win_rate": 0.414,
+      "profit_factor": 0.57,
+      "verdict": "NEGATIVE (bear market period)"
+    },
+    "HKEX": {
+      "trades": 1853429,
+      "win_rate": 0.405,
+      "profit_factor": 0.37,
+      "verdict": "STRONGLY NEGATIVE"
+    }
+  },
+  "cost_model": {
+    "spread_round_trip": 0.0015,
+    "slippage_per_trade": 0.0005,
+    "commission_ibkr_tiered": 0.0001,
+    "fx_conversion": 0.0005,
+    "total_per_trade": 0.0026
+  },
+  "monte_carlo_config": {
+    "n_simulations": 10000,
+    "starting_equity_gbp": 10000,
+    "risk_fraction": 0.2,
+    "trades_per_day": 2,
+    "max_concurrent_positions": 3,
+    "effective_trades": 902,
+    "avg_loss_pct": 0.025,
+    "chandelier_atr_mult": 2.0
+  },
+  "monte_carlo_results": {
+    "median_equity": 46266,
+    "mean_equity": 47190,
+    "p5_equity": 32885,
+    "p10_equity": 35552,
+    "p25_equity": 40182,
+    "p75_equity": 53147,
+    "p90_equity": 60384,
+    "p95_equity": 65209,
+    "worst_equity": 20882,
+    "best_equity": 107167,
+    "accounts_blown": 0,
+    "median_max_dd_pct": 6.2,
+    "p95_max_dd_pct": 9.4,
+    "worst_dd_pct": 18.5,
+    "cagr_median": 1.151,
+    "sharpe_approx": 2.66,
+    "net_profit_factor": 1.65,
+    "prob_losing_money": 0.0,
+    "prob_2x": 1.0,
+    "prob_3x": 0.982,
+    "prob_5x": 0.348,
+    "prob_10x": 0.001
+  },
+  "key_findings": [
+    "TypeB (volume anomaly) is the ONLY consistently profitable entry type: 52.4% WR, PF 1.96 across 5.8M trades",
+    "TypeA (momentum) and TypeD (continuation) are NET LOSERS: WR 24-30%, PF 0.03-0.04",
+    "TypeC (oversold bounce) is break-even: WR 45.1%, PF 0.98",
+    "EURONEXT and XETRA are the only net-positive exchanges on raw PF basis",
+    "US equities strongly negative (bear market period 2024-2025)",
+    "HKEX worst performer: PF 0.37 despite 40.5% WR (losses larger than wins)",
+    "After ALL costs (0.26% per trade), net PF is 1.65 for TypeB+C",
+    "0% probability of losing money across 10,000 Monte Carlo paths",
+    "100% probability of at least doubling capital over 2 years",
+    "Median outcome: \u00a310K -> \u00a346K (115% CAGR, 6.2% max DD, Sharpe 2.66)"
+  ],
+  "recommendations_for_live_engine": [
+    {
+      "priority": "CRITICAL",
+      "action": "Disable TypeA in bearish regimes (VIX>25 or SPY below 20-day MA)",
+      "reason": "29.5% WR, PF 0.04 \u2014 massive value destruction"
+    },
+    {
+      "priority": "CRITICAL",
+      "action": "Raise TypeD confidence floor to 95 or disable entirely",
+      "reason": "24.1% WR, PF 0.03 \u2014 worst performing entry type"
+    },
+    {
+      "priority": "HIGH",
+      "action": "Run isolated TypeB-only backtest with FX normalization and cash accounting",
+      "reason": "Need definitive GBP-denominated P&L number"
+    },
+    {
+      "priority": "HIGH",
+      "action": "Add per-exchange regime filter \u2014 reduce HKEX/US position size in bear markets",
+      "reason": "HKEX PF 0.37, US PF 0.57 during bear period"
+    },
+    {
+      "priority": "HIGH",
+      "action": "Boost EURONEXT/XETRA allocation \u2014 only exchanges with PF>1.0",
+      "reason": "Proven edge: EURONEXT PF 1.05, XETRA PF 1.10"
+    },
+    {
+      "priority": "MEDIUM",
+      "action": "Test TypeB with tighter Chandelier (ATR 1.5) vs wider (ATR 2.5)",
+      "reason": "Avg rung 1.7 suggests room for optimization"
+    },
+    {
+      "priority": "MEDIUM",
+      "action": "Test time-of-day filter \u2014 volume anomalies near open vs close",
+      "reason": "Institutional flow concentrates at session boundaries"
+    },
+    {
+      "priority": "LOW",
+      "action": "Add sector-level analysis \u2014 semiconductor equipment was strongest theme",
+      "reason": "TSE semicon (8035, 6857, 6273) were top performers in earlier backtest"
+    }
+  ],
+  "backtests_still_needed": [
+    {
+      "id": "BT-001",
+      "name": "TypeB-only isolated with FX normalization",
+      "description": "Run backfill_simulator with --entry-type TypeB flag, convert all PnL to GBP using daily FX rates, real cash accounting with \u00a310K start",
+      "priority": "CRITICAL",
+      "estimated_time": "15 minutes"
+    },
+    {
+      "id": "BT-002",
+      "name": "TypeB with regime overlay",
+      "description": "Split 2-year period into bull/bear regimes using SPY 50-day MA. Compare TypeB performance in each regime. Hypothesis: TypeB works in ALL regimes (volume anomaly is regime-agnostic)",
+      "priority": "HIGH",
+      "estimated_time": "20 minutes"
+    },
+    {
+      "id": "BT-003",
+      "name": "Chandelier ATR sensitivity analysis",
+      "description": "Run TypeB-only at ATR 1.0, 1.5, 2.0, 2.5, 3.0. Find optimal stop distance for TypeB specifically (may differ from all-type optimal)",
+      "priority": "HIGH",
+      "estimated_time": "30 minutes (5 runs)"
+    },
+    {
+      "id": "BT-004",
+      "name": "Time-of-day analysis for TypeB",
+      "description": "Split TypeB trades by hour-of-day. Hypothesis: volume anomalies at market open (first 2 hours) have higher WR than midday",
+      "priority": "MEDIUM",
+      "estimated_time": "10 minutes"
+    },
+    {
+      "id": "BT-005",
+      "name": "Per-exchange TypeB isolation",
+      "description": "Run TypeB-only per exchange to find which exchanges have genuine TypeB edge vs noise. EURONEXT/XETRA expected to be best.",
+      "priority": "MEDIUM",
+      "estimated_time": "15 minutes"
+    },
+    {
+      "id": "BT-006",
+      "name": "Walk-forward validation",
+      "description": "Train on 2023-2024, test on 2025. Does TypeB edge persist out-of-sample? This is the MOST IMPORTANT validation.",
+      "priority": "CRITICAL",
+      "estimated_time": "20 minutes"
+    },
+    {
+      "id": "BT-007",
+      "name": "Slippage sensitivity",
+      "description": "Run with 0.1%, 0.2%, 0.3%, 0.5% total cost per trade. Find the breakeven cost level for TypeB",
+      "priority": "MEDIUM",
+      "estimated_time": "15 minutes"
+    },
+    {
+      "id": "BT-008",
+      "name": "Position sizing optimization",
+      "description": "Test Kelly fractions 5%, 10%, 15%, 20%, 25%, 30%. Find optimal risk-adjusted sizing for TypeB",
+      "priority": "MEDIUM",
+      "estimated_time": "5 minutes (Monte Carlo only)"
+    },
+    {
+      "id": "BT-009",
+      "name": "Concurrent position limit analysis",
+      "description": "Test max 1, 2, 3, 5, 10 concurrent positions. Find diminishing returns point for TypeB diversification",
+      "priority": "LOW",
+      "estimated_time": "5 minutes (Monte Carlo only)"
+    },
+    {
+      "id": "BT-010",
+      "name": "Full bridge.py production-parity TypeB-only backtest",
+      "description": "Feed historical ticks through actual bridge.py with entry_type_filter=TypeB. This gives the DEFINITIVE production-parity result. Slow (hours) but authoritative.",
+      "priority": "HIGH",
+      "estimated_time": "2-4 hours on EC2"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "last_simulation": {
+    "id": "MC_TypeBC_Aggressive_20260322",
+    "timestamp": "2026-03-22T20:59:07.000847+00:00",
+    "median_equity": 46266,
+    "cagr": 1.151,
+    "sharpe": 2.66,
+    "net_pf": 1.65,
+    "typeb_wr": 0.524,
+    "typeb_pf": 1.96,
+    "typeb_trades": 5764888,
+    "recommended_action": "DISABLE TypeA/TypeD, trade TypeB+C only, boost EURONEXT/XETRA"
+  },
+  "entry_type_verdicts": {
+    "TypeA": {
+      "status": "DISABLE_IN_BEAR",
+      "wr": 0.295,
+      "pf": 0.04
+    },
+    "TypeB": {
+      "status": "CORE_ALPHA",
+      "wr": 0.524,
+      "pf": 1.96
+    },
+    "TypeC": {
+      "status": "MARGINAL",
+      "wr": 0.451,
+      "pf": 0.98
+    },
+    "TypeD": {
+      "status": "DISABLE",
+      "wr": 0.241,
+      "pf": 0.03
+    }
+  },
+  "exchange_verdicts": {
+    "EURONEXT": {
+      "status": "BOOST",
+      "pf": 1.05
+    },
+    "XETRA": {
+      "status": "BOOST",
+      "pf": 1.1
+    },
+    "TSE": {
+      "status": "NEUTRAL",
+      "pf": 0.89
+    },
+    "LSE": {
+      "status": "NEUTRAL",
+      "pf": 0.82
+    },
+    "US": {
+      "status": "REDUCE_IN_BEAR",
+      "pf": 0.57
+    },
+    "HKEX": {
+      "status": "REDUCE",
+      "pf": 0.37
+    },
+    "SGX": {
+      "status": "REDUCE",
+      "pf": 0.67
+    }
+  }
+}
