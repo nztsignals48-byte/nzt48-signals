@@ -1469,7 +1469,7 @@ def process_tick(msg):
         # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
         _base_spread_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
         _base_spread_gate = _base_spread_raw * 100  # 0.3% -> 0.3
-        spread_limit = _base_spread_gate * 6.67 if leverage >= 3 else _base_spread_gate * 1.67
+        spread_limit = _base_spread_gate * 15.0 if leverage >= 3 else _base_spread_gate * 5.0  # Widened for paper validation
         if spread_pct > spread_limit:
             _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
                            {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},
