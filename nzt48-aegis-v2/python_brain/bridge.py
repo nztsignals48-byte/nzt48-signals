@@ -1170,7 +1170,7 @@ def process_tick(msg):
     # SIM_MODE reduces warmup for backtesting with larger-interval bars.
     # With 60m bars, each bar = 1 tick, so 200 ticks = 200 hours.
     # In sim mode, require only 10 bars (= 10 hours at 60m) for warmup.
-    MIN_WARMUP_BARS = 10 if _SIM_MODE else 200
+    MIN_WARMUP_BARS = 10 if _SIM_MODE else 50  # Lowered from 200 for paper: 50 ticks = ~4 min warmup
     if len(ticks) < MIN_WARMUP_BARS:
         # Don't log warm-up vetoes (too noisy — every tick for first 16 min)
         return no_signal_base
@@ -1297,11 +1297,11 @@ def process_tick(msg):
     # =========================================================================
     leverage = msg.get("leverage", 1)
     if leverage >= 5:
-        leverage_conf_floor = 80
+        leverage_conf_floor = 70  # Was 80 — let Rust CHECK 10 do final gating
     elif leverage >= 3:
-        leverage_conf_floor = 65
+        leverage_conf_floor = 50  # Was 65 — let Rust CHECK 10 do final gating
     else:
-        leverage_conf_floor = 45  # Unleveraged: lower bar OK
+        leverage_conf_floor = 40  # Was 45 — let Rust CHECK 10 do final gating
 
     # =========================================================================
     # FIX 4: VWAP pullback check — reject if buying extension
@@ -1332,10 +1332,10 @@ def process_tick(msg):
     # =========================================================================
     # SIM_MODE: skip hurst regime gate to allow all signals through for backtesting.
     if not _SIM_MODE and n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
-        if hurst < 0.20:  # Lowered from 0.40 for paper data collection
-            # Strongly mean-reverting on 5-min timeframe — suppress momentum signals
+        if hurst < 0.10:  # Lowered from 0.20 — only block extreme mean-reversion
+            # Extremely mean-reverting on 5-min timeframe — suppress momentum signals
             _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
-                           "hurst={:.3f} < 0.20 (mean-reverting regime)".format(hurst))
+                           "hurst={:.3f} < 0.10 (extreme mean-reverting)".format(hurst))
             return no_signal_base
         elif hurst < 0.50:
             # Weakly mean-reverting / random — reduce confidence by 15
@@ -1732,7 +1732,7 @@ def process_tick(msg):
         # After 100+ shadow verdicts, nightly_v6 analyses: does Claude rejection
         # correlate with trade losses? If yes, promote to hard gate.
         # =====================================================================
-        if best.get("confidence", 0) >= 70 and not _SIM_MODE:
+        if best.get("confidence", 0) >= 55 and not _SIM_MODE:  # Was 70 — evaluate more signals in shadow
             try:
                 from python_brain.ouroboros.claude_curator import evaluate_signal
                 claude_result = evaluate_signal(

@@ -417,32 +417,32 @@ mega_runner_range = [1.0, 2.0]        # Max 2x trail width for runners
 
 # Sprint 6: Entry type base confidences — Ouroboros tunes nightly based on rolling Wilson score.
 [entry_types]
-type_a_confidence = 65.0              # DipRecovery — base (Ouroboros nightly adjusts via adaptive_entry_confidence)
-type_b_confidence = 82.0              # EarlyRunner — CORE ALPHA (52.4% WR, PF 1.96)
-type_c_confidence = 72.0              # OverboughtFade — base (Ouroboros nightly adjusts)
-type_d_confidence = 80.0              # SupportBounce — base (Ouroboros nightly adjusts)
-# Type A thresholds
-type_a_rsi_oversold = 40.0
-type_a_volume_spike_mult = 1.8
-type_a_drop_atr_mult = 2.0
+type_a_confidence = 68.0              # DipRecovery — TIGHTENED thresholds (was WR=39%, need more selective entries)
+type_b_confidence = 85.0              # EarlyRunner — TIGHTENED (WR=46% PF=2.6, walk-forward unstable)
+type_c_confidence = 68.0              # OverboughtFade — TIGHTENED thresholds (was WR=39%, need more extreme RSI)
+type_d_confidence = 68.0              # SupportBounce — TIGHTENED thresholds (was WR=39%, need tighter proximity)
+# Type A thresholds — TIGHTENED: deeper dip + stronger volume for higher conviction
+type_a_rsi_oversold = 30.0            # Was 40 — require deeper oversold for genuine dip
+type_a_volume_spike_mult = 2.5        # Was 1.8 — require stronger panic volume
+type_a_drop_atr_mult = 2.5            # Was 2.0 — require larger price drop from recent high
 # Type B thresholds
 type_b_rsi_low = 30.0
 type_b_rsi_high = 70.0
 type_b_momentum_bars = 3
-# Type C thresholds
-type_c_rsi_overbought = 75.0
-# Type D thresholds
-type_d_price_proximity_pct = 1.0
-type_d_rsi_low = 20.0
-type_d_rsi_high = 40.0
+# Type C thresholds — TIGHTENED: more extreme overbought for higher conviction fade
+type_c_rsi_overbought = 80.0          # Was 75 — require more extreme overbought
+# Type D thresholds — TIGHTENED: closer to daily low + narrower RSI band
+type_d_price_proximity_pct = 0.5      # Was 1.0 — must be within 0.5% of daily low (right at support)
+type_d_rsi_low = 25.0                 # Was 20 — narrower band
+type_d_rsi_high = 35.0                # Was 40 — narrower band, more oversold required
 # Confidence decay
 confidence_decay_rate_per_hour = 2.1
-# Type E thresholds (IBS Mean Reversion — Sprint B)
-type_e_confidence = 70.0
+# Type E thresholds (IBS Mean Reversion — WR=52% PF=8.8, walk-forward STABLE)
+type_e_confidence = 72.0              # SHADOW PROMOTE — above 65 floor, will generate signals
 type_e_ibs_threshold = 0.10
 type_e_rvol_threshold = 1.0
-# Type F thresholds (OBV Divergence — Sprint E)
-type_f_confidence = 68.0
+# Type F thresholds (OBV Divergence — WR=72% PF=33.3, walk-forward IMPROVES OOS)
+type_f_confidence = 75.0              # SHADOW PROMOTE — strongest signal in backtest
 type_f_obv_rsi_threshold = 30.0
 type_f_rvol_threshold = 0.7
 
@@ -451,7 +451,7 @@ type_f_rvol_threshold = 0.7
 # System-wide velocity: max entries per 5-minute window across ALL tickers.
 system_velocity_max = 10
 # Kelly ramp: number of trades before full Kelly applied.
-kelly_ramp_target = 250
+kelly_ramp_target = 50                # Was 250 — faster ramp for paper validation (reach full Kelly at 50 trades)
 kelly_ramp_clamp_min = 0.1
 kelly_ramp_clamp_max = 1.0
 # VIX hysteresis deadband (enter/exit thresholds with 3-5 point gap).
