@@ -497,7 +497,8 @@ def _get_recurring_winners(max_winners: int = 40) -> List[str]:
     """Load tickers with proven recurring TypeB edge from system_memory.json.
 
     These tickers have generated profitable trades consistently over multiple
-    sessions. They get PERMANENT core slots — never rotated out.
+    sessions. They get PRIORITY in core slots but are NOT locked — if their
+    WR decays below threshold on the next nightly run, they drop out naturally.
 
     Logic:
     1. Read system_memory.json → per-ticker trade history
@@ -1051,9 +1052,10 @@ def scan_core_universe(
     all_symbols = {c["symbol"] for c in all_contracts}
 
     # 3-SOURCE CORE ALLOCATION:
-    # 1. Memory-locked recurring winners (40 slots, never rotated)
-    # 2. IBKR scanner top performers (60 slots, from live scanner_results.json)
-    # 3. Gemini strategic picks (60 slots, from LLM curation)
+    # 1. Memory winners: highest priority but NOT locked — dropped if WR decays
+    # 2. IBKR scanner: live data, top performers from exchange-wide scans
+    # 3. Gemini: strategic intelligence, catalyst/sector awareness
+    # All 160 are competitive — best tickers across all 3 sources win slots.
     recurring = _get_recurring_winners(max_winners=min(40, core_slots // 4))
     reserved_count = len(recurring)
 
