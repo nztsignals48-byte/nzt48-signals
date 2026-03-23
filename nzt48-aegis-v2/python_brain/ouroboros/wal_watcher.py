@@ -137,16 +137,21 @@ def process_wal_event(event: dict) -> None:
         if side in ("Sell", "SLD"):
             return
         ticker = data.get("symbol") or resolve_ticker(data.get("ticker_id", 0))
+        qty = int(data.get("qty", 0))
+        approved_size = data.get("approved_size", 0)
+        currency = data.get("currency", "GBP")
+        # Estimate entry price from notional / qty (GBP-converted price)
+        est_price = approved_size / qty if qty > 0 else 0
         send_trade_entry(
             ticker=ticker,
             direction=side,
-            price=0,  # price not in routed order
+            price=est_price,
             confidence=data.get("confidence", 0),
             kelly=data.get("kelly_fraction", 0),
-            shares=int(data.get("approved_size", 0)),
+            shares=qty,
             strategy=data.get("strategy", ""),
         )
-        log.info("Sent trade entry alert: %s %s", ticker, side)
+        log.info("Sent trade entry alert: %s %s @ %.4f %s x%d", ticker, side, est_price, currency, qty)
 
     elif "FillEvent" in payload:
         data = payload["FillEvent"]
@@ -164,17 +169,21 @@ def process_wal_event(event: dict) -> None:
         # Use symbol from event directly (more reliable than ticker_id map)
         ticker = data.get("symbol") or resolve_ticker(data.get("ticker_id", 0))
         pnl = data.get("final_pnl", 0.0)
+        entry_price = data.get("entry_price", 0.0)
+        exit_price = data.get("exit_price", 0.0)
+        # Compute PnL% from entry/exit prices if available
+        pnl_pct = ((exit_price - entry_price) / entry_price * 100.0) if entry_price > 0 else 0.0
         send_trade_exit(
             ticker=ticker,
             direction="Long",
-            entry_price=0,  # not in WAL event
-            exit_price=0,   # not in WAL event
-            pnl_pct=0,      # not in WAL event (only absolute GBP)
+            entry_price=entry_price,
+            exit_price=exit_price,
+            pnl_pct=pnl_pct,
             pnl_gbp=pnl,
-            reason=data.get("strategy", ""),  # use strategy as exit context
+            reason=data.get("strategy", ""),
             rung_achieved=data.get("highest_rung", 0),
         )
-        log.info("Sent trade exit alert: %s (P&L: %.2f)", ticker, pnl)
+        log.info("Sent trade exit alert: %s (P&L: %.2f, entry=%.4f, exit=%.4f)", ticker, pnl, entry_price, exit_price)
 
     elif "RegimeChange" in payload:
         data = payload["RegimeChange"]
