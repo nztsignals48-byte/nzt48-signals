@@ -1437,8 +1437,37 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             "orb_low": round(orb_low, 4), **common_fields,
                         }
 
+    # Strategy: Gap Fade — liquidity gaps tend to fill
+    # Academic basis: Gaps >1% in large-cap stocks fill ~65% of the time within the session.
+    # Only fade LIQUIDITY gaps (RVOL < 2.0 at open = low institutional participation).
+    # Information gaps (RVOL > 5.0) are news-driven and tend to continue — don't fade those.
+    gap_signal = None
+    gap_pct = msg.get("gap_pct", 0.0)
+    if abs(gap_pct) > 1.0 and ind["rvol"] < 2.0 and len(bars_5m) >= 3:
+        from brain.gap_detector import classify_gap
+        gap_type = classify_gap(ind["rvol"])
+        if gap_type == "liquidity":
+            # Fade the gap: if gap up, go short (but we're ISA long-only, so skip gap-up fades)
+            # If gap down > 1%, go long (buying the dip on a liquidity gap)
+            if gap_pct < -1.0:
+                gf_conf = 58.0
+                if gap_pct < -2.0:
+                    gf_conf += 10.0  # Larger gap = higher fill probability
+                if ind["ibs"] < 0.3:
+                    gf_conf += 7.0   # Close near low confirms gap-down exhaustion
+                gf_conf = min(gf_conf, 90.0)
+                if gf_conf >= conf_floor:
+                    kelly = _kelly_for(gf_conf)
+                    gap_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": gf_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "GapFade", "gap_pct": round(gap_pct, 3),
+                        "gap_type": gap_type, **common_fields,
+                    }
+
     # Collect all signals, return the best two for downstream comparison
-    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal] if s]
+    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal] if s]
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
 
     best1 = all_signals[0] if len(all_signals) >= 1 else None

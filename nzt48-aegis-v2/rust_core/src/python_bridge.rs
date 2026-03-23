@@ -404,10 +404,14 @@ impl PythonBridge {
         if resp_type != "signal" {
             // P2-3.5: Track consecutive empty (no-signal) responses for crash gap detection.
             self.consecutive_empty += 1;
-            if self.consecutive_empty >= 10 && self.consecutive_empty % 10 == 0 {
+            // Only warn at escalating intervals: 1000, 5000, 10000, then every 10000.
+            // During off-market hours 0 signals is normal — avoid log pollution.
+            // At 5s/tick with 100 tickers, 1000 empties ≈ 50 seconds of market data.
+            let n = self.consecutive_empty;
+            if n == 1000 || n == 5000 || (n >= 10000 && n % 10000 == 0) {
                 eprintln!(
-                    "CRITICAL: Python bridge returned 0 signals for {} consecutive ticks — possible crash",
-                    self.consecutive_empty
+                    "WARN: Python bridge returned 0 signals for {} consecutive ticks (may be off-market)",
+                    n
                 );
             }
             return None;
