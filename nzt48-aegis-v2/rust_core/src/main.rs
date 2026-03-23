@@ -972,6 +972,9 @@ fn main() {
                                             vol_slope: 0.0,
                                             vwap_dist_pct: 0.0,
                                             structural_score: 0.0,
+                                            entry_type: String::new(),
+                                            rsi: 0.0,
+                                            ibs: 0.0,
                                         };
                                         let ticker_id = t.ticker_id;
                                         engine.process_tick_with_signal(t, Some(brain_signal));

@@ -47,6 +47,15 @@ pub struct BrainSignal {
     /// N3a: Structural Tradability Score (0-100) computed by bridge.py.
     #[pyo3(get)]
     pub structural_score: f64,
+    /// TypeA-F entry classification from bridge.py classify_entry_type().
+    #[pyo3(get)]
+    pub entry_type: String,
+    /// RSI(14) at signal time for WAL enrichment.
+    #[pyo3(get)]
+    pub rsi: f64,
+    /// IBS (Internal Bar Strength) at signal time.
+    #[pyo3(get)]
+    pub ibs: f64,
 }
 
 #[pymethods]
@@ -78,6 +87,9 @@ impl BrainSignal {
             vol_slope,
             vwap_dist_pct,
             structural_score,
+            entry_type: String::new(),
+            rsi: 0.0,
+            ibs: 0.0,
         }
     }
 }
@@ -413,6 +425,9 @@ impl PythonBridge {
             vol_slope: resp.get("vol_slope").and_then(|v| v.as_f64()).unwrap_or(0.0),
             vwap_dist_pct: resp.get("vwap_dist_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
             structural_score: resp.get("structural_score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            entry_type: resp.get("entry_type").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            rsi: resp.get("rsi").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            ibs: resp.get("ibs").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -497,6 +512,9 @@ impl PythonBridge {
             vol_slope: resp.get("vol_slope").and_then(|v| v.as_f64()).unwrap_or(0.0),
             vwap_dist_pct: resp.get("vwap_dist_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
             structural_score: resp.get("structural_score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            entry_type: resp.get("entry_type").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            rsi: resp.get("rsi").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            ibs: resp.get("ibs").and_then(|v| v.as_f64()).unwrap_or(0.0),
         })
     }
 
@@ -602,8 +620,12 @@ mod tests {
             vol_slope: 0.5,
             vwap_dist_pct: 0.3,
             structural_score: 72.0,
+            entry_type: "TypeB".into(),
+            rsi: 45.0,
+            ibs: 0.3,
         };
         assert_eq!(signal.shares, 50);
         assert_eq!(signal.confidence, 78.5);
+        assert_eq!(signal.entry_type, "TypeB");
     }
 }

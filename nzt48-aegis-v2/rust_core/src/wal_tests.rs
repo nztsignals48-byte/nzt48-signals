@@ -32,6 +32,8 @@ mod tests {
             vol_slope: 0.0,
             spread_pct: 0.0,
             mtf_score: 0.0,
+            entry_type: String::new(),
+            ibs: 0.0,
         }
     }
 

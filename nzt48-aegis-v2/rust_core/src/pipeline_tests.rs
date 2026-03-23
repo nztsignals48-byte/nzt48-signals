@@ -109,6 +109,7 @@ mod tests {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: String::new(),
         };
         let engine = ExitEngine::with_default_chandelier();
         // No exit at current price
@@ -282,6 +283,7 @@ mod tests {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: String::new(),
         };
         assert!(
             engine

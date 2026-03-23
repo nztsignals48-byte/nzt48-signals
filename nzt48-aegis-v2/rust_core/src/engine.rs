@@ -1182,6 +1182,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     let exit_price_gbp = tick.last;
                     let pos_mae = pos.mae;
                     let pos_mfe = pos.mfe;
+                    let pos_entry_type = pos.entry_type.clone();
                     // N0e: Capture cost fields for PositionClosed event.
                     let gross_pnl = pos.unrealized_pnl;  // Before commission
                     let total_commission = pos.total_commission;
@@ -1234,6 +1235,8 @@ impl<B: BrokerAdapter> Engine<B> {
                         vol_slope: 0.0,
                         spread_pct: 0.0,
                         mtf_score: 0.0,
+                        entry_type: String::new(),
+                        ibs: 0.0,
                     });
                     self.tracked_orders.push(exit_order_id.clone());
 
@@ -1332,6 +1335,7 @@ impl<B: BrokerAdapter> Engine<B> {
                         vix_at_entry: self.macro_regime.indicator().vix,
                         vol_slope_at_entry: e_vol_slope,
                         trade_class: String::new(),   // Assigned by nightly trade taxonomy
+                        entry_type: pos_entry_type,
                     });
                     self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
                     self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
@@ -1635,6 +1639,7 @@ impl<B: BrokerAdapter> Engine<B> {
         let confidence = sig.confidence;
         let kelly_fraction = sig.kelly_fraction;
         let strategy_name = sig.strategy.clone();
+        let entry_type = sig.entry_type.clone();
         let shares_hint = sig.shares;
 
         // Risk arbiter evaluation with real time and spread
@@ -1859,12 +1864,14 @@ impl<B: BrokerAdapter> Engine<B> {
             entry_rvol: sig.rvol,
             entry_hurst: sig.hurst,
             entry_adx: sig.adx,
-            rsi: 0.0,
+            rsi: sig.rsi,
             vwap_dist_pct: sig.vwap_dist_pct,
             atr: 0.0,
             vol_slope: sig.vol_slope,
-            spread_pct: 0.0,
-            mtf_score: 0.0,
+            spread_pct: if tick.ask > 0.0 && tick.bid > 0.0 { ((tick.ask - tick.bid) / tick.ask) * 100.0 } else { 0.0 },
+            mtf_score: sig.structural_score,
+            entry_type: entry_type.clone(),
+            ibs: sig.ibs,
         });
         self.tracked_orders.push(order_id.clone());
 
@@ -1944,6 +1951,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: entry_type.clone(),
             });
 
             self.simulated_trades.push(sim_trade);
@@ -1984,6 +1992,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: entry_type.clone(),
             };
             self.portfolio.add_position(pos_copy);
 
@@ -2622,26 +2631,9 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
-        // Only prepend ISA core leveraged ETPs when LSE is actually open (08:00-16:30 London).
-        // When LSE is closed, all 100 IBKR slots go to exchanges that are actually trading.
-        let london_secs = self.london_time_secs();
-        let lse_open = crate::clock::Clock::is_lse_open(london_secs);
-        if lse_open {
-            let isa_core: Vec<(String, String, String)> = self.market_config.lse.iter()
-                .map(|s| (s.clone(), "LSEETF".to_string(), "GBP".to_string()))
-                .collect();
-            let existing_symbols: std::collections::HashSet<String> =
-                watchlist_tickers.iter().map(|(s, _, _)| s.clone()).collect();
-            let mut prepend = Vec::new();
-            for core in isa_core {
-                if !existing_symbols.contains(&core.0) {
-                    prepend.push(core);
-                }
-            }
-            // Insert ISA core at front, then remaining ranked tickers
-            prepend.extend(watchlist_tickers);
-            watchlist_tickers = prepend;
-        }
+        // ISA core priority REMOVED (2026-03-23): All tickers ranked equally by ticker_selector.
+        // Previously prepended ISA core ETPs during LSE hours. Now we scan all tickers
+        // without bias — ticker_selector's scoring handles prioritization.
 
         // Truncate to IBKR max (100 lines)
         watchlist_tickers.truncate(max_tickers);
@@ -3025,6 +3017,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: String::new(),  // Not available during WAL replay
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

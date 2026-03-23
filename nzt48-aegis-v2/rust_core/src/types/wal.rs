@@ -80,6 +80,12 @@ pub enum WalPayload {
         /// Multi-timeframe confirmation score at entry (P1-2.8: full indicator snapshot for Ouroboros learning).
         #[serde(default)]
         mtf_score: f64,
+        /// TypeA-F entry classification from bridge.py classify_entry_type().
+        #[serde(default)]
+        entry_type: String,
+        /// IBS (Internal Bar Strength) at entry.
+        #[serde(default)]
+        ibs: f64,
     },
     BrokerAck {
         order_id: String,
@@ -196,6 +202,9 @@ pub enum WalPayload {
         /// flash_crash, corr_break.
         #[serde(default)]
         trade_class: String,
+        /// TypeA-F entry classification (from bridge.py at entry time).
+        #[serde(default)]
+        entry_type: String,
     },
     RiskStateChange {
         from: String,

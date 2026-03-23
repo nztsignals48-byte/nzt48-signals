@@ -128,6 +128,9 @@ pub struct PositionState {
     /// N0a: Which trade number this was in the day (1st, 2nd, 3rd...).
     #[pyo3(get)]
     pub daily_trade_number: u32,
+    /// TypeA-F entry classification from bridge.py.
+    #[pyo3(get)]
+    pub entry_type: String,
 }
 
 #[pymethods]
@@ -160,6 +163,7 @@ impl PositionState {
             mfe: 0.0,
             spread_at_entry_pct: 0.0,
             daily_trade_number: 0,
+            entry_type: String::new(),
         }
     }
 }
@@ -277,6 +281,7 @@ mod tests {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: String::new(),
         };
         assert!(pos.highest_high >= pos.avg_entry);
         assert_eq!(pos.trailing_rung, 0);

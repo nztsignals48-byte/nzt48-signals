@@ -555,6 +555,103 @@ def _load_adaptive_params():
 _hour_weights_loaded = False
 _hour_weights = {}  # UTC hour (int 0-23) → confidence multiplier (float)
 
+# Per-ticker RVOL history for TypeB 3-bar rising detection
+_rvol_history = {}  # ticker_id → deque(maxlen=3) of RVOL values
+
+# Entry type config thresholds (loaded once from config.toml)
+_entry_type_cfg_loaded = False
+_entry_type_cfg = {}
+
+
+def _load_entry_type_cfg():
+    """Load TypeA-F thresholds from config.toml [entry_types]."""
+    global _entry_type_cfg_loaded, _entry_type_cfg
+    if _entry_type_cfg_loaded:
+        return _entry_type_cfg
+    _entry_type_cfg_loaded = True
+    defaults = {
+        "type_a_rsi_oversold": 30.0, "type_a_volume_spike_mult": 2.5, "type_a_drop_atr_mult": 2.5,
+        "type_b_rsi_low": 30.0, "type_b_rsi_high": 70.0, "type_b_momentum_bars": 3,
+        "type_c_rsi_overbought": 80.0,
+        "type_d_price_proximity_pct": 0.5, "type_d_rsi_low": 25.0, "type_d_rsi_high": 35.0,
+        "type_e_ibs_threshold": 0.10, "type_e_rvol_threshold": 1.0,
+        "type_f_obv_rsi_threshold": 30.0, "type_f_rvol_threshold": 0.7,
+    }
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = "/app/config/config.toml"
+        if not os.path.exists(cfg_path):
+            cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config", "config.toml")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            et = cfg.get("entry_types", {})
+            for k in defaults:
+                if k in et:
+                    defaults[k] = float(et[k])
+    except Exception:
+        pass
+    _entry_type_cfg = defaults
+    return defaults
+
+
+def classify_entry_type(rsi_14, ibs, rvol, ticker_id, prices, volumes, vol_div):
+    """Classify signal into TypeA-F matching Rust entry_engine.rs logic.
+
+    Uses indicators already computed by bridge.py. Returns the entry type string.
+    Priority order: F, E, B, C, A, D (highest-WR first from backtest).
+    """
+    from collections import deque
+    cfg = _load_entry_type_cfg()
+
+    # Track RVOL history for TypeB (3-bar rising detection)
+    if ticker_id not in _rvol_history:
+        _rvol_history[ticker_id] = deque(maxlen=3)
+    _rvol_history[ticker_id].append(rvol)
+
+    # TypeF (OBVDivergence): OBV-RSI(5) < 30 + RVOL > 0.7
+    # Simplified: use volume_divergence as proxy for OBV-RSI declining
+    if vol_div < -0.5 and rvol > cfg["type_f_rvol_threshold"]:
+        return "TypeF"
+
+    # TypeE (IBSMeanReversion): IBS < 0.10 + RVOL > 1.0
+    if ibs < cfg["type_e_ibs_threshold"] and rvol > cfg["type_e_rvol_threshold"]:
+        return "TypeE"
+
+    # TypeB (EarlyRunner): RVOL rising for 3 consecutive bars + RSI in [30, 70]
+    rvol_hist = list(_rvol_history[ticker_id])
+    if (len(rvol_hist) >= 3
+            and rvol_hist[-3] < rvol_hist[-2] < rvol_hist[-1]
+            and rsi_14 is not None
+            and cfg["type_b_rsi_low"] <= rsi_14 <= cfg["type_b_rsi_high"]):
+        return "TypeB"
+
+    # TypeC (OverboughtFade): RSI > 80 + price rising + volume declining
+    if (rsi_14 is not None and rsi_14 > cfg["type_c_rsi_overbought"]
+            and len(prices) >= 2 and prices[-1] > prices[-2]
+            and len(volumes) >= 2 and volumes[-1] < volumes[-2]):
+        return "TypeC"
+
+    # TypeA (DipRecovery): RSI < 30 + RVOL > vol_ma20 * 2.5
+    # Simplified: use RVOL > spike_mult as proxy (vol_ma20 normalization already in RVOL)
+    if rsi_14 is not None and rsi_14 < cfg["type_a_rsi_oversold"] and rvol > cfg["type_a_volume_spike_mult"]:
+        return "TypeA"
+
+    # TypeD (SupportBounce): price within 0.5% of daily low + RSI 25-35
+    if (rsi_14 is not None
+            and cfg["type_d_rsi_low"] <= rsi_14 <= cfg["type_d_rsi_high"]
+            and len(prices) >= 10):
+        daily_low = min(prices[-min(len(prices), 100):])  # Approximate daily low from recent prices
+        if daily_low > 0:
+            pct_above = ((prices[-1] - daily_low) / daily_low) * 100
+            if pct_above <= cfg["type_d_price_proximity_pct"]:
+                return "TypeD"
+
+    return "Unclassified"
+
 
 def _load_hour_weights():
     """Load hour-of-day confidence weights from config.toml [timing.hour_weights].
@@ -839,11 +936,12 @@ def _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx):
     if last_price > 0:
         spread_bps = ((ask - bid) / last_price) * 10000.0
 
-    # Compute RSI(2) from close prices
+    # Compute RSI(2) and RSI(14) from close prices
     prices = [t["last"] for t in ticks]
     rsi_2 = calculate_rsi(prices, period=2)
     if rsi_2 is None:
         rsi_2 = 50.0
+    rsi_14 = calculate_rsi(prices, period=14)  # For TypeA-F classification
 
     # Compute IBS from latest bar
     latest = ticks[-1]
@@ -1683,12 +1781,25 @@ def process_tick(msg):
             best["confidence"] = max(0, best["confidence"] - sts_penalty)
         best["structural_score"] = structural_score
 
+        # TypeA-F classification: classify the signal based on indicator values
+        # This replaces the dead Rust entry_engine.rs detectors with live Python classification.
+        volumes = [t.get("volume", 0) for t in ticks]
+        entry_type = classify_entry_type(
+            rsi_14=rsi_14, ibs=ibs, rvol=rvol, ticker_id=ticker_id,
+            prices=prices, volumes=volumes, vol_div=vol_div,
+        )
+        best["entry_type"] = entry_type
+        best["rsi"] = rsi_14 if rsi_14 is not None else 0.0
+        best["ibs"] = ibs
+
         # Plan 1 Phase 3: Apply adaptive entry type weight to Kelly sizing
         # Entry types with poor WR get reduced sizing (0.5x), strong ones boosted (1.5x)
         if _adaptive_entry_weights:
-            entry_type = best.get("entry_type", "")
-            # VanguardSniper doesn't set entry_type in signal — Rust assigns it.
-            # Pass the weights through so Rust can apply them at entry.
+            if entry_type in _adaptive_entry_weights:
+                ew = _adaptive_entry_weights[entry_type]
+                if ew < 1.0:
+                    best["kelly_fraction"] = best["kelly_fraction"] * ew
+                    best["shares"] = max(1, int(best["shares"] * ew))
             best["adaptive_entry_weights"] = _adaptive_entry_weights
 
         # P3.6: Pass Thompson per-type confidence floors to Rust for precise application.

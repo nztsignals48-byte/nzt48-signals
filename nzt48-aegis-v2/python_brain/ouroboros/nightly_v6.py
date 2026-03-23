@@ -204,7 +204,7 @@ def load_todays_trades(date_str: str) -> List[TradeRecord]:
                             exit_price=pc.get("exit_price", 0.0),
                             entry_time_ns=pc.get("entry_time_ns", 0),
                             exit_time_ns=pc.get("exit_time_ns", 0),
-                            entry_type=pc.get("entry_type", "TypeA"),
+                            entry_type=pc.get("entry_type", "Unclassified"),
                             # Read strategy/regime/confidence/rung from enriched WAL fields
                             strategy=pc.get("strategy", "VanguardSniper"),
                             regime_at_entry=pc.get("regime_at_entry", pc.get("regime", "unknown")),

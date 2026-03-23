@@ -80,6 +80,7 @@ mod tests {
                 mfe: 0.0,
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
+                entry_type: String::new(),
                 };
                 portfolio.add_position(pos);
             }

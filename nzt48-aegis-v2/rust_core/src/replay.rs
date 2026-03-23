@@ -178,6 +178,7 @@ impl ReplayEngine {
                     spread_at_entry_pct: 0.0,
                     spread_at_exit_pct: 0.0,
                     daily_trade_number: 0,
+                entry_type: String::new(),
                     symbol: close_sym,
                     qty: close_qty,
                     regime_at_entry: String::new(),
@@ -272,6 +273,8 @@ impl ReplayEngine {
             vol_slope: 0.0,
             spread_pct: 0.0,
             mtf_score: 0.0,
+            entry_type: String::new(),
+            ibs: 0.0,
         });
 
         // 7. Submit + fill
@@ -336,6 +339,7 @@ impl ReplayEngine {
                         mfe: 0.0,
                         spread_at_entry_pct: 0.0,
                         daily_trade_number: 0,
+                entry_type: String::new(),
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);
