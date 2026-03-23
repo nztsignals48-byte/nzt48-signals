@@ -4312,7 +4312,7 @@ sector = "Single_Stock"
 inverse_of = ""
 
 [[contracts]]
-symbol = "BP.L"
+symbol = "BP..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4322,7 +4322,7 @@ sector = "Energy"
 inverse_of = ""
 
 [[contracts]]
-symbol = "SHEL.L"
+symbol = "RDSB.L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4498,7 +4498,7 @@ sector = "Media"
 inverse_of = ""
 
 [[contracts]]
-symbol = "AV.L"
+symbol = "AV..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4518,7 +4518,7 @@ sector = "Pharma"
 inverse_of = ""
 
 [[contracts]]
-symbol = "BA.L"
+symbol = "BA..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4848,7 +4848,7 @@ sector = "Travel_Leisure"
 inverse_of = ""
 
 [[contracts]]
-symbol = "ICG.L"
+symbol = "ICP.L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4928,7 +4928,7 @@ sector = "Services"
 inverse_of = ""
 
 [[contracts]]
-symbol = "JD.L"
+symbol = "JD..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -4988,7 +4988,7 @@ sector = "REITs"
 inverse_of = ""
 
 [[contracts]]
-symbol = "LSEG.L"
+symbol = "LSE.L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5048,7 +5048,7 @@ sector = "Utilities"
 inverse_of = ""
 
 [[contracts]]
-symbol = "NG.L"
+symbol = "NG..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5138,7 +5138,7 @@ sector = "Mining"
 inverse_of = ""
 
 [[contracts]]
-symbol = "RKT.L"
+symbol = "RB..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5158,7 +5158,7 @@ sector = "Media"
 inverse_of = ""
 
 [[contracts]]
-symbol = "RR.L"
+symbol = "RR..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5238,7 +5238,7 @@ sector = "Industrials"
 inverse_of = ""
 
 [[contracts]]
-symbol = "SN.L"
+symbol = "SN..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5308,7 +5308,7 @@ sector = "Consumer_Goods"
 inverse_of = ""
 
 [[contracts]]
-symbol = "UU.L"
+symbol = "UU..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -5402,7 +5402,7 @@ sector = "Automotive"
 inverse_of = ""
 
 [[contracts]]
-symbol = "AO.L"
+symbol = "AO..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -6602,7 +6602,7 @@ sector = "Finance"
 inverse_of = ""
 
 [[contracts]]
-symbol = "QQ.L"
+symbol = "QQ..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
@@ -6942,7 +6942,7 @@ sector = "Technology"
 inverse_of = ""
 
 [[contracts]]
-symbol = "TW.L"
+symbol = "TW..L"
 con_id = 0
 exchange = "LSE"
 sec_type = "STK"
