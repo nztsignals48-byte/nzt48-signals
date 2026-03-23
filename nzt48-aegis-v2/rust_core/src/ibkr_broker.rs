@@ -526,12 +526,12 @@ impl IbkrBroker {
         let mut ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
         ticker_ids.sort_by(|a, b| {
             let a_lse = self.contract_map.get(a)
-                .map(|m| m.exchange == "LSEETF")
+                .map(|m| m.exchange == "LSEETF" || m.exchange == "LSE")
                 .unwrap_or(false);
             let b_lse = self.contract_map.get(b)
-                .map(|m| m.exchange == "LSEETF")
+                .map(|m| m.exchange == "LSEETF" || m.exchange == "LSE")
                 .unwrap_or(false);
-            // LSEETF first (true > false when reversed)
+            // LSE/LSEETF first (true > false when reversed)
             b_lse.cmp(&a_lse).then(a.0.cmp(&b.0))
         });
 
