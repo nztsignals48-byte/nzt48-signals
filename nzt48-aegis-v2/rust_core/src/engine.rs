@@ -2760,10 +2760,12 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // P4-B: Watchdog expiry check (no ticks for >120s → HALT)
-        // FIX: Only escalate to HALT when a market session is open. During Closed
-        // sessions no ticks are expected, so the watchdog should reset silently.
+        // PAPER VALIDATION: Skip watchdog halt in simulation mode — bridge timeouts
+        // from Claude curator latency should not halt the engine.
         if self.tick_watchdog.is_expired(self.now_ns) {
-            if self.current_trading_session == TradingSession::Closed {
+            if self.simulation_mode {
+                self.tick_watchdog.feed(self.now_ns);
+            } else if self.current_trading_session == TradingSession::Closed {
                 // Market closed — no ticks expected. Feed the watchdog to prevent
                 // spurious expirations and avoid permanent HALT during off-hours.
                 self.tick_watchdog.feed(self.now_ns);

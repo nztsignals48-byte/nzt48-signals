@@ -175,17 +175,17 @@ impl RiskArbiter {
         }
 
         // CHECK 6: Max Positions — filled + pending >= max (H34)
-        // ALWAYS enforced, including simulation mode. Without this gate,
-        // simulation accumulates unlimited positions (59 observed vs max 3),
-        // producing unrealistic paper-trade results that cannot transfer to live.
-        // P3.3 item 11: Regime-scaled — Reduce halves capacity, Flatten blocks all.
-        let max_positions = match self.regime {
-            RiskRegime::Reduce => (self.config.max_positions / 2).max(1),
-            RiskRegime::Flatten | RiskRegime::Halt => 0,
-            RiskRegime::Normal => self.config.max_positions,
-        };
-        if portfolio.total_position_count() >= max_positions {
-            return self.reject(VetoReason::MaxPositionsReached, ts);
+        // PAPER VALIDATION: Skip position limit entirely in simulation mode.
+        // This maximises trade data for Ouroboros learning. Revert for live.
+        if !self.simulation_mode {
+            let max_positions = match self.regime {
+                RiskRegime::Reduce => (self.config.max_positions / 2).max(1),
+                RiskRegime::Flatten | RiskRegime::Halt => 0,
+                RiskRegime::Normal => self.config.max_positions,
+            };
+            if portfolio.total_position_count() >= max_positions {
+                return self.reject(VetoReason::MaxPositionsReached, ts);
+            }
         }
 
         // CHECK 7: Data Staleness — > 120s → HALT

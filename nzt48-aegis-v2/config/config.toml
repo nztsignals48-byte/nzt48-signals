@@ -15,7 +15,7 @@ velocity_check_max_intents = 5
 # AUDIT-ADJUSTED (2026-03-18): Max 3 at £10k equity.
 # Fund manager: "Max 2-3 at £10k. £9,000 committed = 90% is suicidal."
 # Risk officer: "committed capital must never exceed 75% of equity"
-max_simultaneous_positions = 15   # PAPER VALIDATION: Maximise trade data for Ouroboros learning. Revert to 3 for live.
+max_simultaneous_positions = 999  # PAPER VALIDATION: No position limit. Revert to 3 for live.
 # Portfolio heat = sum((entry_price - stop_price) * qty / total_equity)
 portfolio_heat_limit_pct = 50.0   # PAPER VALIDATION: Relaxed for data collection. Revert to 10 for live.
 sector_heat_cap_pct = 80.0        # PAPER VALIDATION: Relaxed. Revert to 33 for live.
