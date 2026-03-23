@@ -1332,7 +1332,7 @@ def process_tick(msg):
     # =========================================================================
     # SIM_MODE: skip hurst regime gate to allow all signals through for backtesting.
     if not _SIM_MODE and n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
-        if hurst < 0.40:
+        if hurst < 0.20:  # Lowered from 0.40 for data collection mode
             # Strongly mean-reverting on 5-min timeframe — suppress momentum signals
             _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
                            "hurst={:.3f} < 0.40 (mean-reverting regime)".format(hurst))
@@ -1457,7 +1457,7 @@ def process_tick(msg):
     # Hurst regime gating on 5-MINUTE bars (already computed above).
     # The earlier regime gate (FIX 6) already blocks hurst < 0.40.
     # This gate is a softer check: require trending or random for VanguardSniper.
-    if hurst >= 0.40 or hurst_regime in ("trending", "random"):
+    if hurst >= 0.20 or hurst_regime in ("trending", "random"):  # Lowered from 0.40
         # FIX 1: Pass 5-minute bars to VanguardSniper if available, else raw ticks
         eval_ticks = [{"last": b["close"], "high": b["high"], "low": b["low"],
                        "bid": b["close"], "ask": b["close"],

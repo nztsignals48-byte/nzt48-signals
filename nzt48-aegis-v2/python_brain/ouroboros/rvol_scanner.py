@@ -1139,13 +1139,24 @@ class RVOLScanner:
         return self._universe
 
     def _load_volume_cache(self) -> Dict[str, float]:
-        """Load and cache the volume cache. Build from yfinance if missing."""
+        """Load and cache the volume cache. Build from yfinance if missing.
+
+        In simulation mode, generates a mock cache to avoid slow yfinance downloads.
+        """
         if self._volume_cache is None:
             self._volume_cache = load_volume_cache(self._cache_path)
             if not self._volume_cache:
-                log.warning("Volume cache empty -- building from yfinance (this may take a while)...")
-                universe = self._load_universe()
-                self._volume_cache = build_volume_cache(universe, self._cache_path)
+                if self._sim_mode:
+                    log.info("Simulation mode -- generating mock volume cache")
+                    universe = self._load_universe()
+                    all_tickers = []
+                    for tickers in universe.values():
+                        all_tickers.extend(tickers)
+                    self._volume_cache = _generate_sim_volume_cache(all_tickers)
+                else:
+                    log.warning("Volume cache empty -- building from yfinance (this may take a while)...")
+                    universe = self._load_universe()
+                    self._volume_cache = build_volume_cache(universe, self._cache_path)
         return self._volume_cache
 
     def _connect(self) -> bool:
