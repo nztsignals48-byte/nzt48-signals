@@ -156,8 +156,8 @@ Volume exhaustion: When RVOL > 10x, tighten to 0.5x ATR.
 | IBS_MeanReversion | ACTIVE | TypeE | ~57% (academic) | New 2026-03-23 |
 | VolExpansion | ACTIVE | TypeB (refined) | ~55% (expected) | New 2026-03-23 |
 | ORB_Breakout | ACTIVE | Unclassified | ~52% (academic) | US session only |
-| TypeA (DipRecovery) | **DISABLED** | TypeA | 29.5% | Net loser |
-| TypeD (SupportBounce) | **DISABLED** | TypeD | 24.1% | Net loser |
+| TypeA (DipRecovery) | ACTIVE (monitored) | TypeA | 29.5% (backtest) | Collecting live data |
+| TypeD (SupportBounce) | ACTIVE (monitored) | TypeD | 24.1% (backtest) | Collecting live data |
 
 ---
 
