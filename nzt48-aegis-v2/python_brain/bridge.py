@@ -1527,11 +1527,10 @@ def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal
     )
     best["entry_type"] = entry_type
 
-    # BT-010: Disable TypeA/D — backtest proved NET LOSERS (29.5%/24.1% WR, PF 0.04/0.03).
-    # These entry types destroy capital. Block them at classification, not at risk arbiter,
-    # so they never consume a cooldown slot or waste Rust evaluation cycles.
-    if entry_type in ("TypeA", "TypeD"):
-        return None
+    # BT-010: TypeA/D were NET LOSERS in 10.8M-trade backtest (29.5%/24.1% WR, PF 0.04/0.03).
+    # KEEPING ACTIVE for paper validation to collect live data and potentially rehabilitate.
+    # Ouroboros nightly will track per-type WR and auto-downweight via adaptive_entry_weights.
+    # If still losing after 100 live trades, disable them in config.toml [entry_types].
 
     if entry_type != "Unclassified":
         best["strategy"] = entry_type
