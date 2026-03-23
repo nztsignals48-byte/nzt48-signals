@@ -96,6 +96,14 @@
 # PHASE_8 #6: Ouroboros Monitor — 05:10 UTC Mon-Fri (20 min after nightly, checks TOML health + staleness)
 10 5 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ouroboros_monitor --all --send-telegram >> /var/log/ouroboros_monitor.log 2>&1
 
+# Daily Universe Updater — 05:30 UTC Mon-Fri (re-scrape Wikipedia indices → universe.json)
+# Runs after nightly analysis + ouroboros monitor, before ISA universe refresh (06:00)
+30 5 * * 1-5 cd /app && python3 scripts/update_universe.py --scrape-only >> /var/log/update_universe.log 2>&1
+
+# Daily Universe Sync — 05:35 UTC Mon-Fri (sync universe.json → contracts.toml)
+# Runs after update_universe scrape completes. Appends new tickers, never removes existing.
+35 5 * * 1-5 cd /app && python3 scripts/sync_universe.py --apply >> /var/log/sync_universe.log 2>&1
+
 # v19-P2-15: Parquet Orphan Cleanup — 04:40 UTC daily (before nightly, prevents disk fill)
 40 4 * * * cd /app && python3 -m python_brain.ouroboros.maintenance --cleanup >> /var/log/maintenance.log 2>&1
 

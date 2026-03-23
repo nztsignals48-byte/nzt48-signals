@@ -63,6 +63,7 @@ CONFIG_DIR = Path(os.environ.get("AEGIS_CONFIG_DIR", _PROJECT_ROOT / "config"))
 DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", _PROJECT_ROOT / "data"))
 CACHE_DIR = DATA_DIR / "universe_cache"
 MASTER_FILE = CONFIG_DIR / "isa_universe_master.json"
+UNIVERSE_FILE = CONFIG_DIR / "universe.json"
 WATCHLIST_FILE = CONFIG_DIR / "active_watchlist.json"
 CONTRACTS_FILE = CONFIG_DIR / "contracts.toml"
 PRICE_CACHE_FILE = CACHE_DIR / "price_cache.json"
@@ -148,6 +149,99 @@ def load_contract_symbols() -> set:
     except Exception as e:
         logging.getLogger("ticker_selector").warning("Failed to load contracts.toml: %s", e)
         return set()
+
+# ---------------------------------------------------------------------------
+# universe.json loader — merges curated index tickers into the selection pool
+# ---------------------------------------------------------------------------
+
+# Map universe.json index field → isa_universe_master.json source field
+_UNIVERSE_INDEX_TO_SOURCE = {
+    "FTSE100": "FTSE 100",
+    "FTSE250": "FTSE 250",
+    "SP500": "S&P 500",
+    "NDX100": "NASDAQ 100",
+}
+
+# Tier 1 indices (blue-chip, most liquid)
+_TIER1_INDICES = {"FTSE100", "SP500"}
+# Tier 2 indices (mid-cap / growth)
+_TIER2_INDICES = {"FTSE250", "NDX100"}
+
+
+def load_universe_json() -> List[Dict[str, Any]]:
+    """Load tickers from universe.json and convert to master-format dicts.
+
+    universe.json is organized by exchange:
+        {"exchanges": {"LSE": {"tickers": [...]}, "NYSE": {...}, ...}}
+
+    Each ticker has: symbol, ibkr_symbol, ibkr_exchange, name, sector, index, currency.
+
+    We convert each into the same dict shape that isa_universe_master.json uses,
+    mapping the `index` field to a `source` value that classify_into_tiers()
+    recognizes as a major index.
+
+    Returns empty list if universe.json doesn't exist or fails to parse.
+    """
+    if not UNIVERSE_FILE.exists():
+        return []
+
+    try:
+        with open(UNIVERSE_FILE) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logging.getLogger("ticker_selector").warning(
+            "Failed to load universe.json: %s", e
+        )
+        return []
+
+    result = []
+    exchanges = data.get("exchanges", {})
+    for exch_name, exch_data in exchanges.items():
+        for t in exch_data.get("tickers", []):
+            symbol = t.get("symbol", "")
+            if not symbol:
+                continue
+
+            # Map index field to source (for classify_into_tiers major_index_sources)
+            raw_index = t.get("index", "")
+            # Handle comma-separated indices like "SP500,NDX100"
+            indices = [idx.strip() for idx in raw_index.split(",") if idx.strip()]
+            # Pick the best source: prefer Tier 1 over Tier 2
+            source = ""
+            for idx in indices:
+                mapped = _UNIVERSE_INDEX_TO_SOURCE.get(idx, "")
+                if mapped:
+                    source = mapped
+                    if idx in _TIER1_INDICES:
+                        break  # Tier 1 wins, stop looking
+
+            # Determine exchange for the engine (use ibkr_exchange if available,
+            # fall back to the top-level exchange key)
+            exchange = t.get("ibkr_exchange", exch_name)
+            # Normalize ISLAND → NASDAQ for exchange-hours matching
+            if exchange == "ISLAND":
+                exchange = "NASDAQ"
+
+            result.append({
+                "symbol": symbol,
+                "exchange": exchange,
+                "name": t.get("name", ""),
+                "type": "stock",
+                "sector": t.get("sector", "Unknown"),
+                "currency": t.get("currency", "USD"),
+                "isa_eligible": True,
+                "leveraged": False,
+                "inverse": False,
+                "leverage_factor": 1,
+                "market_cap_usd": 0,
+                "avg_daily_volume": 0,
+                "validated": True,  # Index constituents are validated by definition
+                "source": source,
+                "_from_universe": True,  # Tag for dedup/debug
+            })
+
+    return result
+
 
 # Exchange-to-market-hours mapping: LOCAL hours + timezone.
 # DST-aware: pytz handles summer/winter time shifts automatically.
@@ -821,7 +915,7 @@ def classify_into_tiers(all_tickers: List[Dict[str, Any]]) -> Tuple[
     rest = []
 
     major_index_sources = {
-        "S&P 500", "NASDAQ 100", "FTSE 100", "FTSE All-Share",
+        "S&P 500", "NASDAQ 100", "FTSE 100", "FTSE 250", "FTSE All-Share",
         "Russell 2000", "DAX 40", "CAC 40", "Nikkei 225",
         "Hang Seng", "ASX 200", "Euro Stoxx 50",
     }
@@ -1123,14 +1217,32 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
     log.info("=" * 60)
 
     # Step 1: Load master universe
-    if not MASTER_FILE.exists():
-        log.error("Master file not found: %s", MASTER_FILE)
-        return 1
-
-    with open(MASTER_FILE) as f:
-        master = json.load(f)
+    master = {"tickers": []}
+    if MASTER_FILE.exists():
+        with open(MASTER_FILE) as f:
+            master = json.load(f)
+        log.info("Step 1: Loaded isa_universe_master.json (%d tickers)",
+                 len(master.get("tickers", [])))
+    else:
+        log.warning("Master file not found: %s — will use universe.json only", MASTER_FILE)
 
     all_tickers = [t for t in master.get("tickers", []) if not t.get("delisted")]
+
+    # Step 1a: Merge tickers from universe.json (curated index constituents)
+    universe_tickers = load_universe_json()
+    if universe_tickers:
+        existing_symbols = {t["symbol"] for t in all_tickers}
+        merged_count = 0
+        for ut in universe_tickers:
+            if ut["symbol"] not in existing_symbols:
+                all_tickers.append(ut)
+                existing_symbols.add(ut["symbol"])
+                merged_count += 1
+        log.info("Step 1a: Merged %d new tickers from universe.json (%d total in universe.json, %d already present)",
+                 merged_count, len(universe_tickers), len(universe_tickers) - merged_count)
+    elif not all_tickers:
+        log.error("No tickers from isa_universe_master.json or universe.json — cannot proceed")
+        return 1
 
     # Market-hours-aware filtering: only include tickers from exchanges that are
     # currently OPEN. This maximises the value of each IBKR data line.
