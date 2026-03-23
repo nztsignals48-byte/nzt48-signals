@@ -1059,83 +1059,11 @@ def _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx):
     return intents[0]
 
 
-def process_tick(msg):
-    """Process a tick message, return a response dict.
-
-    Evaluates BOTH VanguardSniper (momentum) and the Autonomous Orchestrator
-    (S17-S20: VWAP dip buy, gap fade, RSI/IBS, cross-market momentum).
-    Returns the signal with the highest confidence. If neither fires, returns
-    no_signal.
-    """
-    ticker_id = msg["ticker_id"]
-
-    # Plan 1 Phase 3: Load adaptive parameters from dynamic_weights.toml (once)
-    _load_adaptive_params()
-
-    # Track ticker_id → symbol mapping from msg (if provided by Rust side)
-    if "symbol" in msg and msg["symbol"]:
-        ticker_symbols[ticker_id] = msg["symbol"]
-
-    bar_history[ticker_id].append({
-        "last": msg["last"],
-        "bid": msg.get("bid", msg["last"]),
-        "ask": msg.get("ask", msg["last"]),
-        "high": msg.get("high", msg["last"]),
-        "low": msg.get("low", msg["last"]),
-        "volume": msg.get("volume", 0),
-        "timestamp_ns": msg.get("timestamp_ns", 0),
-    })
-
-    ticks = list(bar_history[ticker_id])
-
-    # Sprint 7: VWAP session reset — detect date change and reset VWAP calculator.
-    ts_ns = msg.get("timestamp_ns", 0)
-    if ts_ns > 0:
-        from datetime import datetime, timezone
-        _tick_dt = datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=timezone.utc)
-        _tick_date = _tick_dt.strftime("%Y-%m-%d")
-        _prev_date = _last_vwap_date.get(ticker_id)
-        if _prev_date is not None and _tick_date != _prev_date:
-            vwap_calculators[ticker_id].reset()
-        _last_vwap_date[ticker_id] = _tick_date
-
-    # =========================================================================
-    # T-01 (Sprint 5): Blackout period enforcement — skip signal generation
-    # after per-exchange entry cutoff. Placed BEFORE indicator computation
-    # to avoid wasting 100ms+ of compute per tick. Rust risk_arbiter is the
-    # authoritative safety gate; this is purely a compute-saving early return.
-    # SIM_MODE: skip blackout to allow all signals through for backtesting.
-    # =========================================================================
-    if not _SIM_MODE:
-        _ts_ns = msg.get("timestamp_ns", 0)
-        if _is_in_blackout(ticker_id, _ts_ns):
-            # Rate-limit logging: once per ticker per day
-            global _blackout_warned, _blackout_warned_date
-            import datetime as _dt_bo
-            _today_bo = _dt_bo.date.today().isoformat()
-            if _blackout_warned_date != _today_bo:
-                _blackout_warned = set()
-                _blackout_warned_date = _today_bo
-            _bo_sym = ticker_symbols.get(ticker_id, str(ticker_id))
-            if _bo_sym not in _blackout_warned:
-                _bo_exch = _get_exchange_for_symbol(_bo_sym) or "?"
-                sys.stderr.write(
-                    f"BLACKOUT_VETO: {_bo_sym} (tid={ticker_id}) past {_bo_exch} entry cutoff\n"
-                )
-                sys.stderr.flush()
-                _blackout_warned.add(_bo_sym)
-            # Return minimal no_signal (indicators not yet computed — skip them)
-            return {"type": "no_signal", "ticker_id": ticker_id}
-
-    # =========================================================================
-    # FIX 1: Aggregate 5-second bars into 5-MINUTE bars for indicator computation.
-    # Raw 5-second bars produce meaningless indicators (ADX=99, Hurst=1.0).
-    # 5-minute bars give proper trend/regime readings.
-    # =========================================================================
-    BARS_PER_5MIN = 60  # 60 × 5s = 5 minutes
+def _compute_indicators(ticker_id, ticks, msg):
+    """Stage 1: Compute all indicators from tick data. Returns a dict."""
+    # Aggregate into 5-minute OHLCV bars (cached)
+    BARS_PER_5MIN = 60
     n_5min_bars = len(ticks) // BARS_PER_5MIN
-
-    # Aggregate into 5-minute OHLCV bars (cached — only recompute when new bar forms)
     cached = _bar_cache.get(ticker_id)
     if cached and cached[0] == n_5min_bars:
         bars_5m = cached[1]
@@ -1143,46 +1071,35 @@ def process_tick(msg):
         bars_5m = []
         for i in range(n_5min_bars):
             chunk = ticks[i * BARS_PER_5MIN : (i + 1) * BARS_PER_5MIN]
-            bar = {
-                "open": chunk[0]["last"],
-                "high": max(t["last"] for t in chunk),
-                "low": min(t["last"] for t in chunk),
-                "close": chunk[-1]["last"],
-                "volume": sum(t["volume"] for t in chunk),
-                "last": chunk[-1]["last"],
-            }
-            bars_5m.append(bar)
+            bars_5m.append({
+                "open": chunk[0]["last"], "high": max(t["last"] for t in chunk),
+                "low": min(t["last"] for t in chunk), "close": chunk[-1]["last"],
+                "volume": sum(t["volume"] for t in chunk), "last": chunk[-1]["last"],
+            })
         _bar_cache[ticker_id] = (n_5min_bars, bars_5m)
 
-    # Compute indicators on 5-MINUTE bars (not 5-second)
+    # Compute indicators on 5-MINUTE bars (preferred) or raw ticks (fallback)
     if bars_5m:
         prices_5m = [b["close"] for b in bars_5m]
         volumes_5m = [b["volume"] for b in bars_5m]
         rvol = calculate_rvol(volumes_5m, window=20) if len(volumes_5m) >= 20 else 1.0
         hurst = estimate_hurst(prices_5m, max_lag=min(20, len(prices_5m) - 1)) if len(prices_5m) >= 5 else 0.5
-        hurst_regime = classify_regime(hurst)
         vol_div = volume_divergence(prices_5m, volumes_5m, window=10) if len(prices_5m) >= 10 else 0.0
-        adx = _compute_adx([{"last": b["close"], "high": b["high"], "low": b["low"],
-                             "volume": b["volume"]} for b in bars_5m])
+        adx = _compute_adx([{"last": b["close"], "high": b["high"], "low": b["low"], "volume": b["volume"]} for b in bars_5m])
     else:
-        # Not enough data for 5-min bars yet — use raw but mark as unreliable
         volumes = [t["volume"] for t in ticks]
         prices = [t["last"] for t in ticks]
         rvol = calculate_rvol(volumes, window=20)
         hurst = estimate_hurst(prices, max_lag=20)
-        hurst_regime = classify_regime(hurst)
         vol_div = volume_divergence(prices, volumes, window=10)
         adx = _compute_adx(ticks)
+    hurst_regime = classify_regime(hurst)
 
-    # =========================================================================
-    # FIX 7: Volume trend slope (replaces static RVOL threshold)
-    # Rising volume = real momentum building. Flat/falling volume = noise.
-    # =========================================================================
+    # Volume trend slope
     vol_slope = 0.0
     if len(bars_5m) >= 5:
         recent_vols = [b["volume"] for b in bars_5m[-10:]]
         if len(recent_vols) >= 3:
-            # Simple linear regression slope of volume
             n = len(recent_vols)
             x_mean = (n - 1) / 2.0
             y_mean = sum(recent_vols) / n
@@ -1190,708 +1107,489 @@ def process_tick(msg):
             den = sum((i - x_mean) ** 2 for i in range(n))
             vol_slope = num / den if den > 0 else 0.0
 
-    # =========================================================================
-    # Sprint D: VPIN shadow filter — compute but do NOT gate on it.
-    # VPIN (Volume-Synchronized Probability of Informed Trading) uses BVC
-    # to classify buy/sell volume, then measures order flow imbalance.
-    # High VPIN = high informed flow = potential adverse selection.
-    # SHADOW MODE: log values for Ouroboros analysis, never block signals.
-    # =========================================================================
-    _vpin_value = 0.0
+    # VPIN (shadow — never gates)
+    vpin = 0.0
     if bars_5m and len(bars_5m) >= 20:
-        _bar_closes = [b.get("close", b.get("last", 0)) for b in bars_5m[-50:]]
-        _bar_volumes = [b.get("volume", 0) for b in bars_5m[-50:]]
         try:
-            _buy_v, _sell_v = classify_volume_bvc(_bar_closes, _bar_volumes)
-            _vpin_value = calculate_vpin(_buy_v, _sell_v, n_buckets=min(20, len(_bar_closes)))
+            bc = [b.get("close", b.get("last", 0)) for b in bars_5m[-50:]]
+            bv = [b.get("volume", 0) for b in bars_5m[-50:]]
+            buy_v, sell_v = classify_volume_bvc(bc, bv)
+            vpin = calculate_vpin(buy_v, sell_v, n_buckets=min(20, len(bc)))
         except Exception:
-            _vpin_value = 0.0
+            pass
 
-    no_signal_base = {
-        "type": "no_signal",
-        "ticker_id": ticker_id,
-        "rvol": rvol,
-        "hurst": hurst,
-        "hurst_regime": hurst_regime,
-        "volume_divergence": vol_div,
-    }
+    # IBS from latest tick
+    latest = ticks[-1]
+    high = latest.get("high", latest["last"])
+    low = latest.get("low", latest["last"])
+    ibs = calculate_ibs(high, low, latest["last"])
+    if ibs is None:
+        ibs = 0.5
 
-    # Common indicator dict for gate veto logging — captures EVERYTHING an LLM needs
+    # VWAP update
+    vwap_calc = vwap_calculators[ticker_id]
+    vwap_bar = VWAPBar(high=high, low=low, close=latest["last"], volume=float(latest.get("volume", 0)))
+    vwap_result = vwap_calc.update(vwap_bar)
+    vwap_sigma, vwap_slope, vwap_price = 0.0, 0.0, latest["last"]
+    if vwap_result is not None:
+        vwap_sigma = vwap_result.sigma_position
+        vwap_slope = vwap_result.slope
+        vwap_price = vwap_result.vwap
+
+    # VWAP distance
     bid = msg.get("bid", 0)
     ask = msg.get("ask", 0)
-    spread_pct_raw = ((ask - bid) / ((ask + bid) / 2) * 100) if bid > 0 and ask > 0 else 0
-    vwap_dist_raw = 0.0
-    _vc = vwap_calculators.get(ticker_id)
-    if _vc:
-        _vh = _vc.get_history()
-        if _vh:
-            _lv = _vh[-1]
-            if _lv > 0:
-                vwap_dist_raw = (msg["last"] - _lv) / _lv * 100
-    _ind = {
-        "hurst": hurst, "adx": adx, "rvol": rvol, "vol_slope": vol_slope,
-        "n_5min_bars": n_5min_bars, "n_ticks": len(ticks), "hurst_regime": hurst_regime,
-        "spread_pct": spread_pct_raw, "vwap_dist_pct": vwap_dist_raw,
-        "bid": bid, "ask": ask, "leverage": msg.get("leverage", 1),
-        "session_mode": msg.get("session_mode", "?"),
-        "volume": msg.get("volume", 0),
-        "vpin": _vpin_value,  # Sprint D: VPIN shadow (informational only)
+    spread_pct = ((ask - bid) / ((ask + bid) / 2) * 100) if bid > 0 and ask > 0 else 0
+    vwap_dist_pct = 0.0
+    vc = vwap_calculators.get(ticker_id)
+    if vc:
+        vh = vc.get_history()
+        if vh and vh[-1] > 0:
+            vwap_dist_pct = (msg["last"] - vh[-1]) / vh[-1] * 100
+
+    # Structural Tradability Score (0-100)
+    sts = {}
+    if bid > 0 and ask > 0:
+        sts["spread"] = max(0, min(25, int(25 - spread_pct * 8.3)))
+    else:
+        sts["spread"] = 10
+    sts["regime_clarity"] = min(25, int(abs(hurst - 0.5) / 0.5 * 25)) if hurst > 0.01 else 0
+    vs = (10 if rvol > 1.0 else 5 if rvol > 0.7 else 0) + (10 if vol_slope > 0 else 3 if vol_slope == 0 else 0)
+    sts["volume"] = min(20, vs)
+    sts["adx_strength"] = 15 if adx >= 30 else 10 if adx >= 20 else 5 if adx >= 12 else 0
+    nb = len(ticks)
+    sts["data_quality"] = 15 if nb >= 500 else 10 if nb >= 300 else 5 if nb >= 200 else 2
+    structural_score = sum(sts.values())
+
+    return {
+        "bars_5m": bars_5m, "n_5min_bars": n_5min_bars,
+        "rvol": rvol, "hurst": hurst, "hurst_regime": hurst_regime,
+        "vol_div": vol_div, "adx": adx, "vol_slope": vol_slope,
+        "vpin": vpin, "ibs": ibs,
+        "vwap_price": vwap_price, "vwap_sigma": vwap_sigma, "vwap_slope": vwap_slope,
+        "vwap_dist_pct": vwap_dist_pct,
+        "bid": bid, "ask": ask, "spread_pct": spread_pct,
+        "structural_score": structural_score, "sts_components": sts,
     }
 
-    # =========================================================================
-    # N1c: Ticker blacklist enforcement (from Ouroboros learning)
-    # Tickers with WR < 30% over 10+ trades are blacklisted in dynamic_weights.toml.
-    # Suppress ALL signals before wasting compute on indicators.
-    # BUILD NOW item N1c from IMPLEMENTATION_MASTER_PLAN v6.0.
-    # =========================================================================
-    # SIM_MODE: skip blacklist to allow all tickers through for backtesting.
-    blacklist = set() if _SIM_MODE else _load_ticker_blacklist()
-    sym = ticker_symbols.get(ticker_id, "")
-    if sym and sym in blacklist:
-        # Don't log every tick (too noisy) — just first occurrence per day
-        global _blacklist_warned, _blacklist_warned_date
-        import datetime as _dt
-        _today = _dt.date.today().isoformat()
-        if _blacklist_warned_date != _today:
-            _blacklist_warned = set()
-            _blacklist_warned_date = _today
-        if sym not in _blacklist_warned:
-            sys.stderr.write(f"BLACKLIST_VETO: {sym} (tid={ticker_id}) suppressed by Ouroboros blacklist\n")
-            sys.stderr.flush()
-            _blacklist_warned.add(sym)
-        return no_signal_base
 
-    # =========================================================================
-    # FIX 2: Raise warm-up to 200 bars (= 16 min of 5-second data = 3+ 5-min bars)
-    # Need at least 3 five-minute bars for any meaningful indicator reading.
-    # =========================================================================
-    # SIM_MODE reduces warmup for backtesting with larger-interval bars.
-    # With 60m bars, each bar = 1 tick, so 200 ticks = 200 hours.
-    # In sim mode, require only 10 bars (= 10 hours at 60m) for warmup.
-    MIN_WARMUP_BARS = 10 if _SIM_MODE else 50  # Lowered from 200 for paper: 50 ticks = ~4 min warmup
-    if len(ticks) < MIN_WARMUP_BARS:
-        # Don't log warm-up vetoes (too noisy — every tick for first 16 min)
-        return no_signal_base
+def _check_quality_gates(ticker_id, msg, ticks, ind):
+    """Stage 2: Quality gates. Returns (pass, reason) tuple."""
+    leverage = msg.get("leverage", 1)
 
-    # ---- Diagnostic logging (every 500th tick per ticker) ----
-    _tick_counts[ticker_id] = _tick_counts.get(ticker_id, 0) + 1
-    if _tick_counts[ticker_id] % 500 == 1:
-        sys.stderr.write(
-            f"BRIDGE_DIAG: tid={ticker_id} bars={len(ticks)} "
-            f"hurst={hurst:.3f}({hurst_regime}) adx={adx:.1f} rvol={rvol:.2f} "
-            f"price={msg['last']:.4f} vol={msg.get('volume', 0)}\n"
-        )
-        sys.stderr.flush()
+    # G1: Spread gate (skip in SIM_MODE)
+    if not _SIM_MODE and ind["bid"] > 0 and ind["ask"] > 0:
+        base_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
+        base_gate = base_raw * 100
+        spread_limit = base_gate * 15.0 if leverage >= 3 else base_gate * 5.0
+        if ind["spread_pct"] > spread_limit:
+            return False, "spread_too_wide", "spread={:.2f}% > {:.1f}%".format(ind["spread_pct"], spread_limit)
 
-    # ---- Phase E: Indicator gates from Ouroboros indicator_intelligence ----
-    # Apply discovered threshold rules that improve WR. Each gate is a
-    # pre-signal filter: if the indicator violates the gate, suppress signal.
-    # SIM_MODE: skip indicator gates to allow all signals through for backtesting.
+    # G2: VWAP extension (absolute, both directions)
+    vc = vwap_calculators.get(ticker_id)
+    vh = vc.get_history() if vc else []
+    if not _SIM_MODE and vh and len(ticks) > 30:
+        lv = vh[-1]
+        if lv > 0:
+            ext = abs(msg["last"] - lv) / lv * 100
+            if ext > 15.0:
+                return False, "vwap_extension_5pct", "extension={:.1f}% from VWAP (max 15%)".format(ext)
+
+    # G3: VWAP directional extension (long-only chasing check)
+    if not _SIM_MODE and vh and len(ticks) > 60:
+        lv = vh[-1]
+        if lv > 0:
+            vd = (msg["last"] - lv) / lv * 100
+            if vd > 10.0:
+                return False, "vwap_extension", "price {:.1f}% above VWAP (max 10.0%)".format(vd)
+
+    # G4: Structural tradability minimum
+    if not _SIM_MODE and ind["structural_score"] < 15:
+        return False, "structural_tradability", "STS={}/100 < 15 minimum".format(ind["structural_score"])
+
+    # G5: Hurst extreme mean-reversion
+    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and ind["hurst"] > 0.01 and ind["hurst"] < 0.10:
+        return False, "hurst_mean_reverting", "hurst={:.3f} < 0.10".format(ind["hurst"])
+
+    # G6: Ouroboros indicator gates
     gates = [] if _SIM_MODE else _load_indicator_gates()
-    indicator_values = {"adx": adx, "hurst": hurst, "rvol": rvol}
+    indicator_values = {"adx": ind["adx"], "hurst": ind["hurst"], "rvol": ind["rvol"]}
     for gate in gates:
-        ind = gate.get("indicator", "")
+        g_ind = gate.get("indicator", "")
         direction = gate.get("direction", "above")
         threshold = gate.get("threshold", 0)
-        val = indicator_values.get(ind)
+        val = indicator_values.get(g_ind)
         if val is not None:
             if direction == "above" and val < threshold:
-                _log_gate_veto(ticker_id, "indicator_gate", msg["last"], _ind,
-                               "{} {:.2f} < {:.2f} required".format(ind, val, threshold))
-                return no_signal_base
+                return False, "indicator_gate", "{} {:.2f} < {:.2f} required".format(g_ind, val, threshold)
             elif direction == "below" and val > threshold:
-                _log_gate_veto(ticker_id, "indicator_gate", msg["last"], _ind,
-                               "{} {:.2f} > {:.2f} limit".format(ind, val, threshold))
-                return no_signal_base
+                return False, "indicator_gate", "{} {:.2f} > {:.2f} limit".format(g_ind, val, threshold)
 
-    # =========================================================================
-    # N3a: Structural Tradability Score (0-100)
-    # Pre-entry quality score assessing market microstructure conditions.
-    # Score < 30 = suppress signal. Score > 70 = confidence boost.
-    # Components: spread quality, regime clarity, volume, MTF alignment, ADX.
-    # BUILD NOW item N3a from IMPLEMENTATION_MASTER_PLAN v6.0.
-    # =========================================================================
-    sts_components = {}
+    return True, None, None
 
-    # Component 1: Spread quality (0-25 pts)
-    # Tighter spread → higher score. Leveraged ETPs have structural wider spreads.
-    _bid = msg.get("bid", 0)
-    _ask = msg.get("ask", 0)
-    if _bid > 0 and _ask > 0:
-        _sprd = (_ask - _bid) / ((_ask + _bid) / 2) * 100
-        # 0% spread = 25pts, 1% = 15pts, 2% = 5pts, >3% = 0pts
-        sts_components["spread"] = max(0, min(25, int(25 - _sprd * 8.3)))
-    else:
-        sts_components["spread"] = 10  # No quote data → middling score
 
-    # Component 2: Regime clarity (0-25 pts)
-    # Clear trending or clear mean-reverting = high clarity.
-    # Random walk = low clarity → low score.
-    if hurst > 0.01:
-        # |H - 0.5| = deviation from random walk. 0.0 = pure random, 0.5 = pure trending/reverting
-        clarity = abs(hurst - 0.5) / 0.5  # 0.0 to 1.0
-        sts_components["regime_clarity"] = min(25, int(clarity * 25))
-    else:
-        sts_components["regime_clarity"] = 0
-
-    # Component 3: Volume quality (0-20 pts)
-    # Rising volume + decent RVOL = good. Flat volume + low RVOL = bad.
-    # FIXED (Sprint 5, T-05): Lowered RVOL thresholds — LSE ETPs average RVOL 0.8-1.2.
-    # Old threshold (1.5) killed 40%+ of valid signals.
-    # TODO(Sprint 6): Make configurable, per-session baselines from Ouroboros.
-    vol_score = 0
-    if rvol > 1.0:
-        vol_score += 10
-    elif rvol > 0.7:
-        vol_score += 5
-    if vol_slope > 0:
-        vol_score += 10
-    elif vol_slope == 0:
-        vol_score += 3
-    sts_components["volume"] = min(20, vol_score)
-
-    # Component 4: ADX trend strength (0-15 pts)
-    # FIXED (Sprint 5, T-04): Lowered thresholds — LSE ETPs average ADX 18-22.
-    # Old thresholds (25/35) were killing 30%+ of valid signals.
-    # New: ADX > 20 = strong, ADX > 30 = very strong, ADX > 12 = some trend
-    # TODO(Sprint 6): Make configurable from config.toml, per-regime adaptive.
-    if adx >= 30:
-        sts_components["adx_strength"] = 15
-    elif adx >= 20:
-        sts_components["adx_strength"] = 10
-    elif adx >= 12:
-        sts_components["adx_strength"] = 5
-    else:
-        sts_components["adx_strength"] = 0
-
-    # Component 5: Data quality (0-15 pts)
-    # More bars = more reliable indicators. >500 bars = full confidence.
-    data_bars = len(ticks)
-    if data_bars >= 500:
-        sts_components["data_quality"] = 15
-    elif data_bars >= 300:
-        sts_components["data_quality"] = 10
-    elif data_bars >= 200:
-        sts_components["data_quality"] = 5
-    else:
-        sts_components["data_quality"] = 2
-
-    structural_score = sum(sts_components.values())
-
-    # Gate: suppress if structural score too low (< 15 = poor microstructure)
-    # Lowered from 30→15 for paper validation: allows signals during warmup when
-    # hurst/adx haven't stabilized (read 0.0, drag STS down). Revert to 30 for live.
-    # SIM_MODE: skip structural gate entirely.
-    if not _SIM_MODE and structural_score < 15:
-        _log_gate_veto(ticker_id, "structural_tradability", msg["last"],
-                       {**_ind, "structural_score": structural_score, **sts_components},
-                       "STS={}/100 < 15 minimum".format(structural_score))
-        return no_signal_base
-
-    # Add structural score to indicator dict for downstream logging
-    _ind["structural_score"] = structural_score
-
-    # =========================================================================
-    # FIX 3: Leverage-aware confidence floor (65 for 3x, 80 for 5x)
-    # Low-confidence trades on leveraged products are noise, not edge.
-    # =========================================================================
+def _compute_confidence_floor(msg, ind):
+    """Compute effective confidence floor from leverage, adaptive params, and regime."""
     leverage = msg.get("leverage", 1)
     if leverage >= 5:
-        leverage_conf_floor = 70  # Was 80 — let Rust CHECK 10 do final gating
+        floor = 70
     elif leverage >= 3:
-        leverage_conf_floor = 50  # Was 65 — let Rust CHECK 10 do final gating
+        floor = 50
     else:
-        leverage_conf_floor = 40  # Was 45 — let Rust CHECK 10 do final gating
+        floor = 40
 
-    # =========================================================================
-    # FIX 4: VWAP pullback check — reject if buying extension
-    # If price is >1.5% above VWAP, we're chasing. Wait for pullback.
-    # =========================================================================
-    # SIM_MODE: skip VWAP extension gate to maximize signal count for backtesting.
-    vwap_calc = vwap_calculators.get(ticker_id)
-    _vwap_hist = vwap_calc.get_history() if vwap_calc else []
-    if not _SIM_MODE and _vwap_hist and len(ticks) > 60:
-        last_vwap = _vwap_hist[-1]
-        if last_vwap > 0:
-            vwap_distance_pct = (msg["last"] - last_vwap) / last_vwap * 100
-            # For LONG entries: reject if price too far ABOVE VWAP (chasing)
-            if vwap_distance_pct > 10.0:  # Was 3.0% — widened for paper validation (opening gaps cause stale VWAP)
-                _log_gate_veto(ticker_id, "vwap_extension", msg["last"],
-                               {**_ind, "vwap": last_vwap, "vwap_dist_pct": vwap_distance_pct},
-                               "price {:.1f}% above VWAP (max 10.0%)".format(vwap_distance_pct))
-                return no_signal_base
-            # For pullback buy: ideal entry is price near VWAP (within ±0.5%)
-            # Boost confidence if price is pulling back to VWAP from above
-            is_vwap_pullback = 0.0 <= vwap_distance_pct <= 0.5
-
-    # =========================================================================
-    # FIX 6: Regime gate on 5-minute Hurst — block momentum on mean-reverting
-    # Hurst < 0.45 on 5-min bars = mean-reverting. Don't run momentum.
-    # Hurst > 0.55 on 5-min bars = trending. Momentum OK.
-    # Hurst 0.45-0.55 = random. Reduce confidence.
-    # =========================================================================
-    # SIM_MODE: skip hurst regime gate to allow all signals through for backtesting.
-    if not _SIM_MODE and n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
-        if hurst < 0.10:  # Lowered from 0.20 — only block extreme mean-reversion
-            # Extremely mean-reverting on 5-min timeframe — suppress momentum signals
-            _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
-                           "hurst={:.3f} < 0.10 (extreme mean-reverting)".format(hurst))
-            return no_signal_base
-        elif hurst < 0.50:
-            # Weakly mean-reverting / random — reduce confidence by 15
-            leverage_conf_floor = max(leverage_conf_floor, 70)
-
-    # =========================================================================
-    # FIX 9: Volume trend gate — require rising volume for momentum entry
-    # Flat/falling volume = noise move. Rising volume = real flow.
-    # =========================================================================
-    # Only gate on volume slope when we actually have volume data
-    # SIM_MODE: skip volume slope gate to allow all signals through.
-    has_volume = any(b.get("volume", 0) > 0 for b in bars_5m[-5:]) if bars_5m else False
-    if not _SIM_MODE and n_5min_bars >= 5 and has_volume and vol_slope <= 0:
-        # Volume not rising — suppress momentum signal
-        # Only allow if very high confidence from other factors
-        leverage_conf_floor = max(leverage_conf_floor, 75)
-
-    # =========================================================================
-    # T-03 (Sprint 5): Phase G gates MOVED HERE from post-signal-generation.
-    # These don't depend on signal data — only bid/ask/VWAP which are already
-    # computed. Running them before signal eval avoids wasting 100ms+ of
-    # VanguardSniper + Orchestrator compute on ticks that will be vetoed anyway.
-    # =========================================================================
-
-    # G1: Spread quality gate — reject if bid/ask spread too wide (Q-051: uses CostModel)
-    # SIM_MODE: skip spread gate — backtests use synthetic bid/ask anyway.
-    if not _SIM_MODE and bid > 0 and ask > 0:
-        spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
-        # Leverage-aware spread limits derived from CostModel.spread_veto_pct
-        # Plan 1 Phase 3: Use adaptive spread veto if available (VIX-regime-aware)
-        # Leveraged ETPs (3x+) get ~6.7x the base spread gate (structural wider spreads)
-        _base_spread_raw = _adaptive_spread_veto if _adaptive_spread_veto is not None else _cost_model.spread_veto_pct
-        _base_spread_gate = _base_spread_raw * 100  # 0.3% -> 0.3
-        spread_limit = _base_spread_gate * 15.0 if leverage >= 3 else _base_spread_gate * 5.0  # Widened for paper validation
-        if spread_pct > spread_limit:
-            _log_gate_veto(ticker_id, "spread_too_wide", msg["last"],
-                           {**_ind, "spread_pct": spread_pct, "bid": bid, "ask": ask},
-                           "spread={:.2f}% > {:.1f}%".format(spread_pct, spread_limit))
-            return no_signal_base
-
-    # G2: Extension filter — reject if price moved >3% from session VWAP
-    # (buying extension = immediate adverse excursion)
-    # SIM_MODE: skip VWAP extension filter.
-    _g2_vwap_calc = vwap_calculators.get(ticker_id)
-    _g2_vwap_hist = _g2_vwap_calc.get_history() if _g2_vwap_calc else []
-    if not _SIM_MODE and _g2_vwap_hist and len(ticks) > 30:
-        last_vwap = _g2_vwap_hist[-1]
-        if last_vwap > 0:
-            extension = abs(msg["last"] - last_vwap) / last_vwap * 100
-            if extension > 15.0:  # Was 5.0% — widened for paper validation (opening gaps cause stale VWAP)
-                _log_gate_veto(ticker_id, "vwap_extension_5pct", msg["last"],
-                               {**_ind, "extension_pct": extension, "vwap": last_vwap},
-                               "extension={:.1f}% from VWAP (max 15%)".format(extension))
-                return no_signal_base
-
-    # ---- Evaluate VanguardSniper (momentum + any non-reverting regime) ----
-    vanguard_signal = None
-
-    # Phase E: Apply adaptive confidence floor — use the HIGHER of adaptive and leverage floors
-    # Passed as parameter to vanguard_evaluate() — no global config mutation.
     adaptive_floor = _load_adaptive_floor()
-    effective_floor = leverage_conf_floor
     if adaptive_floor is not None:
-        effective_floor = max(leverage_conf_floor, adaptive_floor)
+        floor = max(floor, adaptive_floor)
 
-    # P3.6: Thompson Sampler per-type confidence floors.
-    # VanguardSniper signals are classified as TypeA by Rust entry_engine.
-    # Apply TypeA's Thompson floor for VanguardSniper; for Orchestrator, use
-    # the min of all Thompson floors (Rust will apply the exact per-type floor
-    # at entry classification time using the dict passed in the signal).
-    _thompson_floor_vanguard = effective_floor
-    _thompson_floor_orchestrator = effective_floor
+    # Weakly mean-reverting → raise floor
+    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and 0.01 < ind["hurst"] < 0.50:
+        floor = max(floor, 70)
+
+    # Falling volume → raise floor
+    has_volume = any(b.get("volume", 0) > 0 for b in ind["bars_5m"][-5:]) if ind["bars_5m"] else False
+    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and has_volume and ind["vol_slope"] <= 0:
+        floor = max(floor, 75)
+
+    return floor
+
+
+def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
+    """Stage 3: Generate signals from VanguardSniper + Orchestrator. Returns (vanguard, orchestrator)."""
+    hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
+    bars_5m = ind["bars_5m"]
+    common_fields = {
+        "rvol": ind["rvol"], "hurst": hurst, "hurst_regime": hurst_regime,
+        "volume_divergence": ind["vol_div"], "adx": ind["adx"],
+        "vol_slope": ind["vol_slope"], "vwap_dist_pct": ind["vwap_dist_pct"],
+        "structural_score": ind["structural_score"],
+    }
+
+    # Thompson per-type floors
+    vanguard_floor, orchestrator_floor = conf_floor, conf_floor
     if _adaptive_entry_confidence:
-        type_a_floor = _adaptive_entry_confidence.get("TypeA")
-        if type_a_floor is not None:
-            _thompson_floor_vanguard = max(effective_floor, type_a_floor)
-        # For Orchestrator: use TypeB floor as default (volume anomaly = core alpha)
-        type_b_floor = _adaptive_entry_confidence.get("TypeB")
-        if type_b_floor is not None:
-            _thompson_floor_orchestrator = max(effective_floor, type_b_floor)
+        ta = _adaptive_entry_confidence.get("TypeA")
+        if ta is not None:
+            vanguard_floor = max(conf_floor, ta)
+        tb = _adaptive_entry_confidence.get("TypeB")
+        if tb is not None:
+            orchestrator_floor = max(conf_floor, tb)
 
-    # =========================================================================
-    # FIX 10: Multi-timeframe confirmation before VanguardSniper
-    # Require 5-second EMA, 1-minute EMA, and 5-minute EMA all trending same direction.
-    # This prevents whipsaw entries where fast timeframe disagrees with slow.
-    # =========================================================================
-    mtf_aligned = True  # Default pass if not enough data
-    if len(ticks) >= 60 and len(bars_5m) >= 3:
-        # 5-second EMA (last 20 ticks)
-        ema_5s = sum(t["last"] for t in ticks[-20:]) / 20
-        ema_5s_prev = sum(t["last"] for t in ticks[-40:-20]) / 20 if len(ticks) >= 40 else ema_5s
-        trend_5s = 1 if ema_5s > ema_5s_prev else -1
-
-        # 1-minute EMA (last 12 five-second bars)
-        last_12 = ticks[-12:] if len(ticks) >= 12 else ticks
-        prev_12 = ticks[-24:-12] if len(ticks) >= 24 else last_12
-        ema_1m = sum(t["last"] for t in last_12) / len(last_12)
-        ema_1m_prev = sum(t["last"] for t in prev_12) / len(prev_12)
-        trend_1m = 1 if ema_1m > ema_1m_prev else -1
-
-        # 5-minute EMA (last 3 five-minute bars)
-        ema_5m = sum(b["close"] for b in bars_5m[-3:]) / min(3, len(bars_5m))
-        ema_5m_prev = sum(b["close"] for b in bars_5m[-6:-3]) / min(3, len(bars_5m)) if len(bars_5m) >= 6 else ema_5m
-        trend_5m = 1 if ema_5m > ema_5m_prev else -1
-
-        # Require 2/3 timeframes to agree (relaxed from 3/3 which blocked 75% of signals)
-        # 3/3 agreement is too restrictive — different timeframes have different noise.
-        # 2/3 still provides directional conviction while allowing reasonable signal flow.
-        agreement_count = sum(1 for t in [trend_5s, trend_1m, trend_5m] if t == trend_1m)
-        mtf_aligned = (agreement_count >= 2)
-
-    # SIM_MODE: skip MTF alignment gate entirely.
-    # PAPER_VALIDATION: disabled — was #1 signal killer (27K vetoes, blocking valid trades)
-    if False and not _SIM_MODE and not mtf_aligned:
-        _log_gate_veto(ticker_id, "mtf_misaligned", msg["last"],
-                       {**_ind, "trend_5s": trend_5s, "trend_1m": trend_1m, "trend_5m": trend_5m},
-                       "5s={} 1m={} 5m={} (need 2/3 same)".format(
-                           "up" if trend_5s > 0 else "down",
-                           "up" if trend_1m > 0 else "down",
-                           "up" if trend_5m > 0 else "down"))
-        return no_signal_base
-
-    # Hurst regime gating on 5-MINUTE bars (already computed above).
-    # The earlier regime gate (FIX 6) already blocks hurst < 0.40.
-    # This gate is a softer check: require trending or random for VanguardSniper.
-    if hurst < 0.01 or hurst >= 0.20 or hurst_regime in ("trending", "random"):  # hurst=0 means insufficient data, allow through
-        # FIX 1: Pass 5-minute bars to VanguardSniper if available, else raw ticks
+    # VanguardSniper (momentum, non-mean-reverting regimes)
+    vanguard_signal = None
+    if hurst < 0.01 or hurst >= 0.20 or hurst_regime in ("trending", "random"):
         eval_ticks = [{"last": b["close"], "high": b["high"], "low": b["low"],
-                       "bid": b["close"], "ask": b["close"],
-                       "volume": b["volume"]} for b in bars_5m] if bars_5m else ticks
-        result = vanguard_evaluate(eval_ticks, confidence_floor=_thompson_floor_vanguard)
+                       "bid": b["close"], "ask": b["close"], "volume": b["volume"]}
+                      for b in bars_5m] if bars_5m else ticks
+        result = vanguard_evaluate(eval_ticks, confidence_floor=vanguard_floor)
         if result is not None:
-            # Run 12-factor Kelly sizing.
             total_trades = msg.get("total_trades", 0)
             kelly = kelly_12factor(
-                win_rate_raw=msg.get("win_rate", 0.5),
-                total_trades=total_trades,
-                avg_win=msg.get("avg_win", 0.02),
-                avg_loss=msg.get("avg_loss", 0.02),
-                leverage_factor=msg.get("leverage", 3),
-                realized_vol_annual=msg.get("realized_vol", 0.30),
+                win_rate_raw=msg.get("win_rate", 0.5), total_trades=total_trades,
+                avg_win=msg.get("avg_win", 0.02), avg_loss=msg.get("avg_loss", 0.02),
+                leverage_factor=msg.get("leverage", 3), realized_vol_annual=msg.get("realized_vol", 0.30),
                 correlation_to_portfolio=msg.get("correlation", 0.0),
                 current_drawdown_pct=msg.get("drawdown_pct", 0.0),
                 amihud_illiq=msg.get("amihud", 0.0),
                 regime=hurst_regime if hurst_regime != "random" else msg.get("regime", "normal"),
-                spread_pct=msg.get("spread_pct", 0.1),
-                time_of_day_fraction=msg.get("time_fraction", 0.5),
-                confidence=result["confidence"],
-                portfolio_heat_pct=msg.get("heat_pct", 0.0),
-                equity=msg.get("equity", 10000.0),
-                price=msg["last"],
+                spread_pct=msg.get("spread_pct", 0.1), time_of_day_fraction=msg.get("time_fraction", 0.5),
+                confidence=result["confidence"], portfolio_heat_pct=msg.get("heat_pct", 0.0),
+                equity=msg.get("equity", 10000.0), price=msg["last"],
             )
-
-            # Paper bootstrap floor
             if total_trades < 50:
-                preliminary_kelly = result["kelly_fraction"]
-                if kelly["kelly_fraction"] < preliminary_kelly:
-                    equity = msg.get("equity", 10000.0)
-                    price = max(msg["last"], 1e-9)
-                    kelly["kelly_fraction"] = preliminary_kelly
-                    kelly["shares"] = max(int(preliminary_kelly * equity / price), 1)
-
+                pk = result["kelly_fraction"]
+                if kelly["kelly_fraction"] < pk:
+                    eq = msg.get("equity", 10000.0)
+                    kelly["kelly_fraction"] = pk
+                    kelly["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
             vanguard_signal = {
-                "type": "signal",
-                "ticker_id": ticker_id,
-                "direction": "Long",
+                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                 "confidence": result["confidence"],
-                "kelly_fraction": kelly["kelly_fraction"],
-                "shares": kelly["shares"],
-                "strategy": "Momentum",
-                "rvol": rvol,
-                "hurst": hurst,
-                "hurst_regime": hurst_regime,
-                "volume_divergence": vol_div,
-                "adx": adx,
-                "vol_slope": vol_slope,
-                "vwap_dist_pct": vwap_dist_raw,
-                "structural_score": structural_score,
+                "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                "strategy": "Momentum", **common_fields,
             }
 
-    # ---- Evaluate Autonomous Orchestrator (S17-S20, all regimes) ----
+    # Orchestrator (all regimes)
     orchestrator_signal = None
-
-    # Orchestrator needs at least a few bars of history to be meaningful
     if len(ticks) >= 5:
         try:
-            intent = _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx)
+            intent = _evaluate_orchestrator(msg, ticks, ind["rvol"], hurst, hurst_regime, ind["adx"])
+            if intent is not None and intent.confidence < orchestrator_floor:
+                intent = None
             if intent is not None:
-                # P3.6: Apply Thompson per-type floor to Orchestrator signals.
-                # Suppress orchestrator signals below the Thompson floor.
-                if intent.confidence < _thompson_floor_orchestrator:
-                    intent = None
-            if intent is not None:
-                # Convert TradeIntent → signal dict (same format as VanguardSniper)
-                # Direction mapping: "long" → "Long", "inverse" → "Short"
                 direction = "Long" if intent.direction == "long" else "Short"
-
-                # Kelly fraction from orchestrator: use sizing_mult * confidence / 1000
-                # (preliminary sizing, same approach as VanguardSniper)
-                orch_kelly = min(intent.confidence * intent.sizing_mult / 1000.0, 0.05)  # BT-008: Kelly 5%
-
-                # Compute shares from Kelly fraction
-                equity = msg.get("equity", 10000.0)
-                price = max(msg["last"], 1e-9)
-                orch_shares = max(int(orch_kelly * equity / price), 1) if orch_kelly > 0 else 0
-
+                ok = min(intent.confidence * intent.sizing_mult / 1000.0, 0.05)
+                eq = msg.get("equity", 10000.0)
+                pr = max(msg["last"], 1e-9)
                 orchestrator_signal = {
-                    "type": "signal",
-                    "ticker_id": ticker_id,
-                    "direction": direction,
+                    "type": "signal", "ticker_id": ticker_id, "direction": direction,
                     "confidence": intent.confidence,
-                    "kelly_fraction": orch_kelly,
-                    "shares": orch_shares,
-                    "strategy": f"Orchestrator_{intent.strategy_name}",
-                    "rvol": rvol,
-                    "hurst": hurst,
-                    "hurst_regime": hurst_regime,
-                    "volume_divergence": vol_div,
-                    "adx": adx,
-                    "vol_slope": vol_slope,
-                    "vwap_dist_pct": vwap_dist_raw,
-                    "structural_score": structural_score,
+                    "kelly_fraction": ok, "shares": max(int(ok * eq / pr), 1) if ok > 0 else 0,
+                    "strategy": f"Orchestrator_{intent.strategy_name}", **common_fields,
                 }
         except Exception as e:
-            # Orchestrator failure must never block VanguardSniper.
-            # Log and continue — VanguardSniper result (if any) is still valid.
             sys.stderr.write(f"Bridge: orchestrator error (non-fatal): {e}\n")
             sys.stderr.flush()
 
-    # ---- LSE Leveraged ETP Boost during LSE hours ----
-    # During LSE hours (08:00-16:30 London), boost LSE leveraged ETPs by +20 confidence
-    # so they are preferred over raw US equities (NVD3.L preferred over NVDA etc.)
-    from python_brain.ouroboros.contract_loader import load_lse_symbols
-    lse_symbols = set(load_lse_symbols())
-    LSE_LEVERAGED_TICKERS = set(range(len(lse_symbols)))  # Ticker IDs for LSE ETPs
-    symbol = ticker_symbols.get(ticker_id, "")
-    is_lse_leveraged = ticker_id in LSE_LEVERAGED_TICKERS or symbol in lse_symbols
+    return vanguard_signal, orchestrator_signal
 
-    if is_lse_leveraged:
-        london_secs = msg.get("london_time_secs", 0)
-        lse_open = 8 * 3600    # 08:00
-        lse_close = 16 * 3600 + 30 * 60  # 16:30
-        if lse_open <= london_secs < lse_close:
-            # Boost confidence for LSE leveraged ETPs during LSE hours
+
+def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal):
+    """Stage 4: Apply confidence adjustments, select best, classify, size."""
+    hurst_regime = ind["hurst_regime"]
+
+    # LSE boost during LSE hours
+    from python_brain.ouroboros.contract_loader import load_lse_symbols
+    lse_syms = set(load_lse_symbols())
+    symbol = ticker_symbols.get(ticker_id, "")
+    is_lse = ticker_id < len(lse_syms) or symbol in lse_syms
+    if is_lse:
+        ls = msg.get("london_time_secs", 0)
+        if 28800 <= ls < 59400:  # 08:00-16:30
             if vanguard_signal:
                 vanguard_signal["confidence"] = min(vanguard_signal["confidence"] + 20, 100)
             if orchestrator_signal:
                 orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + 20, 100)
 
-    # ---- Portfolio-level regime filter ----
-    # When the portfolio is in drawdown:
-    #   - PENALIZE long signals (momentum-long bias compounds losses in selloffs)
-    #   - BOOST inverse/short signals (inverse ETPs have positive edge in drawdowns)
-    # Evidence: 59-day backfill shows 3NVD.L (short NVDA) PF 1.60 while NVD3.L (long) lost.
-    drawdown_pct = msg.get("drawdown_pct", 0.0)
-    symbol = ticker_symbols.get(ticker_id, "")
+    # Drawdown regime filter
+    dd = msg.get("drawdown_pct", 0.0)
     is_inverse = (symbol.startswith("3S") or symbol.startswith("5S") or
-                  symbol.endswith("S.L") and len(symbol) <= 7 or
-                  symbol in ("QQQS.L", "3USS.L", "3STS.L", "3SAM.L", "3SNV.L",
-                             "3SAP.L", "3SMS.L", "3SEM.L"))
+                  (symbol.endswith("S.L") and len(symbol) <= 7) or
+                  symbol in ("QQQS.L", "3USS.L", "3STS.L", "3SAM.L", "3SNV.L", "3SAP.L", "3SMS.L", "3SEM.L"))
+    if dd > 0.02:
+        penalty = min(int(dd * 500), 20)
+        boost = min(int(dd * 300), 15) if is_inverse else 0
+        for sig in (vanguard_signal, orchestrator_signal):
+            if sig:
+                if is_inverse:
+                    sig["confidence"] = min(sig["confidence"] + boost, 100)
+                else:
+                    sig["confidence"] = max(sig["confidence"] - penalty, 0)
 
-    if drawdown_pct > 0.02:  # >2% drawdown from HWM
-        drawdown_penalty = min(int(drawdown_pct * 500), 20)  # 2%→10pts, 4%→20pts max
-
-        if is_inverse:
-            # BOOST inverse signals during drawdown (they profit from falling market)
-            inverse_boost = min(int(drawdown_pct * 300), 15)  # 2%→6pts, 5%→15pts max
-            if vanguard_signal:
-                vanguard_signal["confidence"] = min(vanguard_signal["confidence"] + inverse_boost, 100)
-            if orchestrator_signal:
-                orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + inverse_boost, 100)
-        else:
-            # PENALIZE long signals during drawdown
-            if vanguard_signal:
-                vanguard_signal["confidence"] = max(vanguard_signal["confidence"] - drawdown_penalty, 0)
-            if orchestrator_signal:
-                orchestrator_signal["confidence"] = max(orchestrator_signal["confidence"] - drawdown_penalty, 0)
-
-    # Phase G gates (G1 spread, G2 VWAP extension) moved BEFORE signal eval
-    # by T-03 (Sprint 5) — see above. No longer duplicated here.
-
-    # ---- BT-004: Apply hour-of-day confidence weights ----
-    # Multiply signal confidence by the UTC-hour weight BEFORE best-signal
-    # selection so that low-edge hours (e.g. 01:00 UTC) are naturally
-    # demoted relative to high-edge hours (e.g. 02:00 UTC).
-    hour_weights = _load_hour_weights()
-    if hour_weights:
-        _ts_ns_hw = msg.get("timestamp_ns", 0)
-        if _ts_ns_hw > 0:
+    # Hour-of-day weights
+    hw = _load_hour_weights()
+    if hw:
+        ts_ns = msg.get("timestamp_ns", 0)
+        if ts_ns > 0:
             from datetime import datetime as _dt_hw, timezone as _tz_hw
-            _utc_hour = _dt_hw.fromtimestamp(
-                _ts_ns_hw / 1_000_000_000, tz=_tz_hw.utc
-            ).hour
-            hw = hour_weights.get(_utc_hour, 1.0)
-            if hw != 1.0:
-                if vanguard_signal:
-                    vanguard_signal["confidence"] = max(
-                        0, min(100, int(vanguard_signal["confidence"] * hw))
-                    )
-                if orchestrator_signal:
-                    orchestrator_signal["confidence"] = max(
-                        0, min(100, int(orchestrator_signal["confidence"] * hw))
-                    )
+            utc_hour = _dt_hw.fromtimestamp(ts_ns / 1_000_000_000, tz=_tz_hw.utc).hour
+            w = hw.get(utc_hour, 1.0)
+            if w != 1.0:
+                for sig in (vanguard_signal, orchestrator_signal):
+                    if sig:
+                        sig["confidence"] = max(0, min(100, int(sig["confidence"] * w)))
 
-    # ---- Select best signal (highest confidence wins) ----
-    best = None
+    # Select best signal
     if vanguard_signal and orchestrator_signal:
         best = orchestrator_signal if orchestrator_signal["confidence"] > vanguard_signal["confidence"] else vanguard_signal
     elif vanguard_signal:
         best = vanguard_signal
     elif orchestrator_signal:
         best = orchestrator_signal
+    else:
+        return None
 
-    # =========================================================================
-    # T-06 (Sprint 5): Per-ticker cooldown AFTER best signal selection.
-    # Previously checked BEFORE signal generation, which blocked TypeB signals
-    # at t=0 that would have been better than the TypeA at t=1 that passed.
-    # Now we let both strategies evaluate, pick the best, THEN check cooldown.
-    # SIM_MODE: skip cooldown entirely to maximize signal count for backtesting.
-    # =========================================================================
+    # Per-ticker cooldown
     tick_count = _tick_counts.get(ticker_id, 0)
-    if best and not _SIM_MODE:
+    if not _SIM_MODE:
         last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
         if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
-            remaining = SIGNAL_COOLDOWN_TICKS - (tick_count - last_sig)
-            _log_gate_veto(ticker_id, "cooldown", msg["last"], _ind,
-                           "{}s remaining (best was {} conf={})".format(
-                               remaining * 5,
-                               best.get("strategy", "?"),
-                               best.get("confidence", 0)))
-            return no_signal_base
+            return None  # Cooldown active
 
+    # STS confidence adjustment
+    best["strategy_confidence"] = best["confidence"]
+    ss = ind["structural_score"]
+    if ss > 70:
+        best["confidence"] = min(100, best["confidence"] + min(6, (ss - 70) // 5))
+    elif ss < 50:
+        best["confidence"] = max(0, best["confidence"] - min(4, (50 - ss) // 5))
+    best["structural_score"] = ss
+
+    # TypeA-F classification (all variables local — no scope bugs)
+    cls_prices = [t["last"] for t in list(bar_history[ticker_id])]
+    cls_volumes = [t.get("volume", 0) for t in list(bar_history[ticker_id])]
+    cls_rsi = calculate_rsi(cls_prices, period=14) if len(cls_prices) >= 14 else None
+    entry_type = classify_entry_type(
+        rsi_14=cls_rsi, ibs=ind["ibs"], rvol=ind["rvol"], ticker_id=ticker_id,
+        prices=cls_prices, volumes=cls_volumes, vol_div=ind["vol_div"],
+    )
+    best["entry_type"] = entry_type
+    if entry_type != "Unclassified":
+        best["strategy"] = entry_type
+    best["rsi"] = cls_rsi if cls_rsi is not None else 0.0
+    best["ibs"] = ind["ibs"]
+
+    # Adaptive entry type weight → Kelly sizing
+    if _adaptive_entry_weights:
+        if entry_type in _adaptive_entry_weights:
+            ew = _adaptive_entry_weights[entry_type]
+            if ew < 1.0:
+                best["kelly_fraction"] = best["kelly_fraction"] * ew
+                best["shares"] = max(1, int(best["shares"] * ew))
+        best["adaptive_entry_weights"] = _adaptive_entry_weights
+
+    if _adaptive_entry_confidence:
+        best["adaptive_entry_confidence"] = _adaptive_entry_confidence
+
+    # Adaptive exchange weight → Kelly sizing
+    if _adaptive_exchange_weights:
+        exchange = msg.get("exchange", "")
+        if exchange and exchange in _adaptive_exchange_weights:
+            exw = _adaptive_exchange_weights[exchange]
+            if exw < 1.0:
+                best["kelly_fraction"] = best["kelly_fraction"] * exw
+                best["shares"] = max(1, int(best["shares"] * exw))
+        best["adaptive_exchange_weights"] = _adaptive_exchange_weights
+
+    # Adaptive Kelly cap (drawdown-aware)
+    if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.05:
+        if best["kelly_fraction"] > _adaptive_kelly_cap:
+            best["kelly_fraction"] = _adaptive_kelly_cap
+            eq = msg.get("equity", 10000.0)
+            pr = max(msg["last"], 1e-9)
+            best["shares"] = max(1, int(_adaptive_kelly_cap * eq / pr))
+        best["adaptive_kelly_cap"] = _adaptive_kelly_cap
+
+    # VPIN shadow fields
+    best["vpin"] = round(ind["vpin"], 4)
+    best["vpin_would_block"] = bool(ind["vpin"] < 0.3 and ind["rvol"] > 2.5)
+
+    # Claude curator (shadow mode, non-blocking)
+    if best.get("confidence", 0) >= 55 and not _SIM_MODE:
+        try:
+            from python_brain.ouroboros.claude_curator import evaluate_signal
+            cr = evaluate_signal(
+                signal_dict=best,
+                market_context={
+                    "regime": hurst_regime, "drawdown_pct": msg.get("drawdown_pct", 0),
+                    "vix": msg.get("vix", 20), "equity": msg.get("equity", 10000),
+                    "exchange": msg.get("exchange", ""), "open_positions": msg.get("open_positions", 0),
+                    "trades_today": msg.get("trades_today", 0),
+                }
+            )
+            if cr.get("claude_verdict") == "reject":
+                best["claude_rejected"] = True
+                best["claude_reasoning"] = cr.get("reasoning", "")[:200]
+            elif cr.get("adjusted_confidence"):
+                best["claude_adjusted_confidence"] = cr["adjusted_confidence"]
+            best["claude_verdict"] = cr.get("claude_verdict", "no_response")
+        except Exception as e:
+            best["claude_error"] = str(e)[:200]
+
+    # Record cooldown
+    _last_signal_tick[ticker_id] = tick_count
+    return best
+
+
+def process_tick(msg):
+    """Process a tick message through 5 stages: ingest → indicators → gates → signals → output."""
+    ticker_id = msg["ticker_id"]
+    _load_adaptive_params()
+
+    # Track symbol mapping
+    if "symbol" in msg and msg["symbol"]:
+        ticker_symbols[ticker_id] = msg["symbol"]
+
+    # Ingest tick
+    bar_history[ticker_id].append({
+        "last": msg["last"], "bid": msg.get("bid", msg["last"]),
+        "ask": msg.get("ask", msg["last"]), "high": msg.get("high", msg["last"]),
+        "low": msg.get("low", msg["last"]), "volume": msg.get("volume", 0),
+        "timestamp_ns": msg.get("timestamp_ns", 0),
+    })
+    ticks = list(bar_history[ticker_id])
+
+    # VWAP session reset on date change
+    ts_ns = msg.get("timestamp_ns", 0)
+    if ts_ns > 0:
+        from datetime import datetime, timezone
+        td = datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=timezone.utc).strftime("%Y-%m-%d")
+        prev = _last_vwap_date.get(ticker_id)
+        if prev is not None and td != prev:
+            vwap_calculators[ticker_id].reset()
+        _last_vwap_date[ticker_id] = td
+
+    no_signal = {"type": "no_signal", "ticker_id": ticker_id}
+
+    # Early exit: blackout period
+    if not _SIM_MODE:
+        if _is_in_blackout(ticker_id, msg.get("timestamp_ns", 0)):
+            global _blackout_warned, _blackout_warned_date
+            import datetime as _dt_bo
+            today = _dt_bo.date.today().isoformat()
+            if _blackout_warned_date != today:
+                _blackout_warned = set()
+                _blackout_warned_date = today
+            sym = ticker_symbols.get(ticker_id, str(ticker_id))
+            if sym not in _blackout_warned:
+                exch = _get_exchange_for_symbol(sym) or "?"
+                sys.stderr.write(f"BLACKOUT_VETO: {sym} (tid={ticker_id}) past {exch} entry cutoff\n")
+                sys.stderr.flush()
+                _blackout_warned.add(sym)
+            return no_signal
+
+    # Early exit: blacklist
+    blacklist = set() if _SIM_MODE else _load_ticker_blacklist()
+    sym = ticker_symbols.get(ticker_id, "")
+    if sym and sym in blacklist:
+        global _blacklist_warned, _blacklist_warned_date
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        if _blacklist_warned_date != today:
+            _blacklist_warned = set()
+            _blacklist_warned_date = today
+        if sym not in _blacklist_warned:
+            sys.stderr.write(f"BLACKLIST_VETO: {sym} (tid={ticker_id}) suppressed by Ouroboros blacklist\n")
+            sys.stderr.flush()
+            _blacklist_warned.add(sym)
+        return no_signal
+
+    # Early exit: warmup
+    MIN_WARMUP = 10 if _SIM_MODE else 50
+    if len(ticks) < MIN_WARMUP:
+        return no_signal
+
+    # Diagnostic logging (every 500th tick)
+    _tick_counts[ticker_id] = _tick_counts.get(ticker_id, 0) + 1
+    if _tick_counts[ticker_id] % 500 == 1:
+        sys.stderr.write(f"BRIDGE_DIAG: tid={ticker_id} bars={len(ticks)} price={msg['last']:.4f} vol={msg.get('volume', 0)}\n")
+        sys.stderr.flush()
+
+    # Stage 1: Compute indicators
+    ind = _compute_indicators(ticker_id, ticks, msg)
+
+    # Build indicator dict for gate veto logging
+    _ind = {
+        "hurst": ind["hurst"], "adx": ind["adx"], "rvol": ind["rvol"],
+        "vol_slope": ind["vol_slope"], "n_5min_bars": ind["n_5min_bars"],
+        "n_ticks": len(ticks), "hurst_regime": ind["hurst_regime"],
+        "spread_pct": ind["spread_pct"], "vwap_dist_pct": ind["vwap_dist_pct"],
+        "bid": ind["bid"], "ask": ind["ask"], "leverage": msg.get("leverage", 1),
+        "session_mode": msg.get("session_mode", "?"), "volume": msg.get("volume", 0),
+        "vpin": ind["vpin"], "structural_score": ind["structural_score"],
+    }
+
+    # Enrich no_signal with indicators for Rust telemetry
+    no_signal.update({"rvol": ind["rvol"], "hurst": ind["hurst"],
+                      "hurst_regime": ind["hurst_regime"], "volume_divergence": ind["vol_div"]})
+
+    # Stage 2: Quality gates
+    gate_pass, gate_name, gate_detail = _check_quality_gates(ticker_id, msg, ticks, ind)
+    if not gate_pass:
+        _log_gate_veto(ticker_id, gate_name, msg["last"], _ind, gate_detail)
+        return no_signal
+
+    # Stage 3: Generate signals
+    conf_floor = _compute_confidence_floor(msg, ind)
+    vanguard_signal, orchestrator_signal = _generate_signals(ticker_id, msg, ticks, ind, conf_floor)
+
+    # Stage 4: Adjust, select, classify, size
+    best = _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal)
+
+    # Stage 5: Output
     if best:
-        # N3a: Structural tradability score — FIXED (Sprint 5, SK-03).
-        # Preserve raw strategy_confidence for risk gate CHECK 10 (unmodified).
-        # Adjusted confidence is for logging/telemetry only.
-        best["strategy_confidence"] = best["confidence"]  # Raw, unmodified
-        # Score > 70: boost adjusted confidence by (score - 70) / 5 (max +6)
-        # Score 50-70: no adjustment
-        # Score 30-50: penalize adjusted confidence by (50 - score) / 5 (max -4)
-        if structural_score > 70:
-            sts_boost = min(6, (structural_score - 70) // 5)
-            best["confidence"] = min(100, best["confidence"] + sts_boost)
-        elif structural_score < 50:
-            sts_penalty = min(4, (50 - structural_score) // 5)
-            best["confidence"] = max(0, best["confidence"] - sts_penalty)
-        best["structural_score"] = structural_score
-
-        # TypeA-F classification
-        _cls_volumes = [t.get("volume", 0) for t in ticks]
-        _cls_prices = [t["last"] for t in ticks]
-        _cls_rsi = calculate_rsi(_cls_prices, period=14) if len(_cls_prices) >= 14 else None
-        try:
-            _cls_ibs = ibs
-        except NameError:
-            _cls_ibs = 0.5
-        try:
-            _cls_rvol = rvol
-        except NameError:
-            _cls_rvol = 1.0
-        try:
-            _cls_vol_div = vol_div
-        except NameError:
-            _cls_vol_div = 0.0
-        entry_type = classify_entry_type(
-            rsi_14=_cls_rsi, ibs=_cls_ibs, rvol=_cls_rvol, ticker_id=ticker_id,
-            prices=_cls_prices, volumes=_cls_volumes, vol_div=_cls_vol_div,
-        )
-        best["entry_type"] = entry_type
-        # Strategy = TypeA-F classification (not generic "Momentum")
-        if entry_type != "Unclassified":
-            best["strategy"] = entry_type
-        best["rsi"] = _cls_rsi if _cls_rsi is not None else 0.0
-        best["ibs"] = _cls_ibs
-
-        # Plan 1 Phase 3: Apply adaptive entry type weight to Kelly sizing
-        # Entry types with poor WR get reduced sizing (0.5x), strong ones boosted (1.5x)
-        if _adaptive_entry_weights:
-            if entry_type in _adaptive_entry_weights:
-                ew = _adaptive_entry_weights[entry_type]
-                if ew < 1.0:
-                    best["kelly_fraction"] = best["kelly_fraction"] * ew
-                    best["shares"] = max(1, int(best["shares"] * ew))
-            best["adaptive_entry_weights"] = _adaptive_entry_weights
-
-        # P3.6: Pass Thompson per-type confidence floors to Rust for precise application.
-        # Bridge applies approximate floor (TypeA for VanguardSniper, TypeB for Orchestrator).
-        # Rust entry_engine applies the exact per-type floor after classification.
-        if _adaptive_entry_confidence:
-            best["adaptive_entry_confidence"] = _adaptive_entry_confidence
-
-        # Plan 1 Phase 3: Apply adaptive exchange weight to Kelly sizing
-        # Exchanges with negative PnL over last 5 sessions get 50% sizing
-        if _adaptive_exchange_weights:
-            exchange = msg.get("exchange", "")
-            if exchange and exchange in _adaptive_exchange_weights:
-                exch_weight = _adaptive_exchange_weights[exchange]
-                if exch_weight < 1.0:
-                    best["kelly_fraction"] = best["kelly_fraction"] * exch_weight
-                    best["shares"] = max(1, int(best["shares"] * exch_weight))
-            # Also pass full weights for Rust-side application
-            best["adaptive_exchange_weights"] = _adaptive_exchange_weights
-
-        # Plan 1 Phase 3: Apply adaptive Kelly cap (drawdown-aware)
-        # Overrides the static clamp_max from config.toml during drawdown
-        if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.05:  # BT-008: Kelly 5%
-            if best["kelly_fraction"] > _adaptive_kelly_cap:
-                best["kelly_fraction"] = _adaptive_kelly_cap
-                equity = msg.get("equity", 10000.0)
-                price = max(msg["last"], 1e-9)
-                best["shares"] = max(1, int(_adaptive_kelly_cap * equity / price))
-            best["adaptive_kelly_cap"] = _adaptive_kelly_cap
-
-        # Sprint D: VPIN shadow fields — informational only, never gates.
-        # Ouroboros will analyse these to determine if VPIN adds predictive value
-        # before promoting to a real gate in a future sprint.
-        best["vpin"] = round(_vpin_value, 4)
-        best["vpin_would_block"] = bool(_vpin_value < 0.3 and rvol > 2.5)
-
-        # =====================================================================
-        # TIER 3: Claude signal challenge (cold path, 5-30s latency)
-        # Only challenge signals above confidence threshold to avoid latency on
-        # weak signals. Runs in SHADOW MODE: logs verdict but does NOT block.
-        # After 100+ shadow verdicts, nightly_v6 analyses: does Claude rejection
-        # correlate with trade losses? If yes, promote to hard gate.
-        # =====================================================================
-        if best.get("confidence", 0) >= 55 and not _SIM_MODE:  # Was 70 — evaluate more signals in shadow
-            try:
-                from python_brain.ouroboros.claude_curator import evaluate_signal
-                claude_result = evaluate_signal(
-                    signal_dict=best,
-                    market_context={
-                        "regime": hurst_regime,
-                        "drawdown_pct": msg.get("drawdown_pct", 0),
-                        "vix": msg.get("vix", 20),
-                        "equity": msg.get("equity", 10000),
-                        "exchange": msg.get("exchange", ""),
-                        "open_positions": msg.get("open_positions", 0),
-                        "trades_today": msg.get("trades_today", 0),
-                    }
-                )
-                if claude_result.get("claude_verdict") == "reject":
-                    # SHADOW MODE: log rejection but DON'T block the trade
-                    best["claude_rejected"] = True
-                    best["claude_reasoning"] = claude_result.get("reasoning", "")[:200]
-                elif claude_result.get("adjusted_confidence"):
-                    best["claude_adjusted_confidence"] = claude_result["adjusted_confidence"]
-                best["claude_verdict"] = claude_result.get("claude_verdict", "no_response")
-            except Exception as e:
-                best["claude_error"] = str(e)[:200]
-
-        # Record cooldown timestamp
-        _last_signal_tick[ticker_id] = tick_count
         return best
-    else:
-        return no_signal_base
+    return no_signal
 
 
 def process_apex_snapshot(msg):
