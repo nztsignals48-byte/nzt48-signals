@@ -520,20 +520,34 @@ impl IbkrBroker {
         // reqMktData works with both real-time and delayed data.
         const MAX_SUBSCRIPTIONS: usize = 100;
 
-        // CRITICAL FIX: Prioritize LSEETF (ISA core ETPs) first, then other exchanges.
-        // HashMap iteration order is non-deterministic — without sorting, LSE ETPs
-        // may be skipped when the 100-line cap is hit.
-        let mut ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
-        ticker_ids.sort_by(|a, b| {
-            let a_lse = self.contract_map.get(a)
-                .map(|m| m.exchange == "LSEETF" || m.exchange == "LSE")
-                .unwrap_or(false);
-            let b_lse = self.contract_map.get(b)
-                .map(|m| m.exchange == "LSEETF" || m.exchange == "LSE")
-                .unwrap_or(false);
-            // LSE/LSEETF first (true > false when reversed)
-            b_lse.cmp(&a_lse).then(a.0.cmp(&b.0))
-        });
+        // Multi-exchange distribution: allocate slots proportionally across exchanges.
+        // Without this, LSE fills all 100 slots and US/HK/TSE get nothing.
+        let mut by_exchange: std::collections::HashMap<String, Vec<TickerId>> = std::collections::HashMap::new();
+        for (&tid, mapping) in &self.contract_map {
+            by_exchange.entry(mapping.exchange.clone()).or_default().push(tid);
+        }
+        // Sort each exchange's tickers by ticker_id for determinism
+        for tids in by_exchange.values_mut() {
+            tids.sort_by_key(|t| t.0);
+        }
+        // Allocate slots: LSEETF gets priority (core ETPs), then proportional across rest
+        let mut ticker_ids: Vec<TickerId> = Vec::with_capacity(MAX_SUBSCRIPTIONS);
+        // Phase 1: All LSEETF (core leveraged ETPs, ~52)
+        if let Some(lseetf) = by_exchange.get("LSEETF") {
+            ticker_ids.extend(lseetf.iter().take(52));
+        }
+        // Phase 2: Fill remaining slots round-robin across other exchanges
+        let remaining = MAX_SUBSCRIPTIONS.saturating_sub(ticker_ids.len());
+        let other_exchanges: Vec<&str> = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX"]
+            .iter().copied().filter(|e| *e != "LSEETF").collect();
+        let per_exchange = if !other_exchanges.is_empty() { remaining / other_exchanges.len() } else { 0 };
+        let mut extra = remaining - per_exchange * other_exchanges.len();
+        for exch in &other_exchanges {
+            if let Some(tids) = by_exchange.get(*exch) {
+                let slots = per_exchange + if extra > 0 { extra -= 1; 1 } else { 0 };
+                ticker_ids.extend(tids.iter().take(slots));
+            }
+        }
 
         let mut mkt_count = 0u32;
         let mut skipped = 0u32;
