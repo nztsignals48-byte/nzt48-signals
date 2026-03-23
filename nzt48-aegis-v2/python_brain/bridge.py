@@ -1560,7 +1560,7 @@ def process_tick(msg):
     # Hurst regime gating on 5-MINUTE bars (already computed above).
     # The earlier regime gate (FIX 6) already blocks hurst < 0.40.
     # This gate is a softer check: require trending or random for VanguardSniper.
-    if hurst >= 0.20 or hurst_regime in ("trending", "random"):  # Lowered from 0.40
+    if hurst < 0.01 or hurst >= 0.20 or hurst_regime in ("trending", "random"):  # hurst=0 means insufficient data, allow through
         # FIX 1: Pass 5-minute bars to VanguardSniper if available, else raw ticks
         eval_ticks = [{"last": b["close"], "high": b["high"], "low": b["low"],
                        "bid": b["close"], "ask": b["close"],
