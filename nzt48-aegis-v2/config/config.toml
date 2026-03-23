@@ -229,7 +229,7 @@ reconnect_backoff_secs = [1, 2, 4, 8, 16, 32, 60]
 rate_limit_msgs_per_sec = 50
 reqmktdata_pacing_ms = 10
 historical_data_max_per_10min = 60
-max_simultaneous_lines = 100        # IBKR reqMktData limit per client (100 concurrent)
+max_simultaneous_lines = 200        # Upgraded from 100        # IBKR reqMktData limit per client (100 concurrent)
 
 [rotation]
 # Dynamic subscription rotation — 100 IBKR lines across 300 tickers.
@@ -254,11 +254,11 @@ total_scan_universe = 300
 # Dark horse tickers discover intraday outliers (gap openings, volume spikes, unusual moves).
 [scanner]
 # Total IBKR streaming slots (must match ibkr.max_simultaneous_lines)
-max_streams = 100
+max_streams = 200
 # Core universe: always-on, session-aware, top liquid stocks
-core_slots = 80
+core_slots = 160
 # Dark horse: unusual movers, rotated every 15 min
-dark_horse_slots = 20
+dark_horse_slots = 40
 # Core rotation interval (seconds). Core 80 rotate every 2 hours to scan full universe.
 # Over 22 trading hours: 11 rotations × 80 = 880 slot-fills → ~200-300 unique tickers/day.
 core_rotation_secs = 7200
@@ -275,17 +275,19 @@ dark_horse_min_volume_rank = 0.9     # Top 10% volume for the day to qualify
 # Tickers from closed exchanges still get off_session_reserve slots for pre-market scanning.
 # Actual allocation depends on which markets are open (may exceed per-exchange target).
 [scanner.session_allocation]
-TSE_during_asia = 25                 # 23:00-08:00 UTC
-HKEX_during_asia = 20
-SGX_during_asia = 5
-LSE_during_europe = 25               # 07:00-16:30 UTC (London local)
-XETRA_during_europe = 10
-EURONEXT_during_europe = 5
-US_during_us = 40                    # 13:30-21:00 UTC (NY local)
-US_during_overlap = 25               # 13:30-16:30 UTC (US + LSE both open)
-LSE_during_overlap = 20
+TSE_during_asia = 50                 # 23:00-08:00 UTC — doubled from 25
+HKEX_during_asia = 40                # doubled from 20
+SGX_during_asia = 10                 # doubled from 5
+KRX_during_asia = 10                 # NEW — Korean market
+ASX_during_asia = 10                 # NEW — Australian market
+LSE_during_europe = 50               # 07:00-16:30 UTC — doubled from 25
+XETRA_during_europe = 20             # doubled from 10
+EURONEXT_during_europe = 15          # tripled from 5
+US_during_us = 80                    # 13:30-21:00 UTC — doubled from 40
+US_during_overlap = 50               # 13:30-16:30 UTC (US + LSE both open)
+LSE_during_overlap = 40              # doubled from 20
 # Slots reserved for off-session tickers (pre-market scanning, overnight movers)
-off_session_reserve = 10
+off_session_reserve = 20             # doubled — more pre-market coverage
 
 # IBKR Market Scanner — real-time reqScannerSubscription to discover dark horse candidates.
 # Runs as a standalone Python daemon (client_id=103) alongside the Rust engine.

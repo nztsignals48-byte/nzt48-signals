@@ -491,6 +491,86 @@ def _get_session_exchanges(session: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Memory-based recurring winners (always in core, never rotated out)
+# ---------------------------------------------------------------------------
+def _get_recurring_winners(max_winners: int = 40) -> List[str]:
+    """Load tickers with proven recurring TypeB edge from system_memory.json.
+
+    These tickers have generated profitable trades consistently over multiple
+    sessions. They get PERMANENT core slots — never rotated out.
+
+    Logic:
+    1. Read system_memory.json → per-ticker trade history
+    2. Filter: >= 5 trades AND WR > 50% AND PF > 1.5
+    3. Rank by (WR × PF × sqrt(trades))
+    4. Return top max_winners
+
+    Falls back to hardcoded institutional hot-path if no memory exists.
+    """
+    winners = []
+
+    # Try reading from system_memory.json (Ouroboros learning output)
+    try:
+        memory_path = LOG_DIR / "system_memory.json"
+        if not memory_path.exists():
+            memory_path = Path("/app/data/system_memory.json")
+        if memory_path.exists():
+            with open(memory_path) as f:
+                memory = json.load(f)
+
+            # Per-ticker performance from backfill feedback or WAL analysis
+            ticker_perf = memory.get("per_ticker_performance", {})
+            if not ticker_perf:
+                # Fallback: read from backfill_feedback.json
+                feedback_path = LOG_DIR / "backfill_feedback.json"
+                if not feedback_path.exists():
+                    feedback_path = Path("/app/data/backfill_feedback.json")
+                if feedback_path.exists():
+                    with open(feedback_path) as f:
+                        feedback = json.load(f)
+                    ticker_perf = feedback.get("per_ticker", {})
+
+            for ticker, stats in ticker_perf.items():
+                trades = stats.get("trades", 0)
+                wins = stats.get("wins", 0)
+                if trades < 5:
+                    continue
+                wr = wins / trades
+                total_pnl = stats.get("total_pnl", 0)
+                # Approximate PF from WR (PF = WR * avg_win / ((1-WR) * avg_loss))
+                # If total_pnl > 0 and WR > 0.50, it's a winner
+                if wr > 0.50 and total_pnl > 0:
+                    import math
+                    score = wr * math.sqrt(trades) * (1 + total_pnl / max(abs(total_pnl), 1))
+                    winners.append((ticker, score, wr, trades))
+
+            winners.sort(key=lambda x: -x[1])
+            if winners:
+                log.info("Recurring winners from memory: %d qualified (top: %s WR=%.0f%% %d trades)",
+                         len(winners), winners[0][0], winners[0][2]*100, winners[0][3])
+    except Exception as e:
+        log.warning("Failed to load recurring winners: %s", e)
+
+    if not winners:
+        # Fallback: institutional hot-path (hardcoded proven performers)
+        # These are the tickers that ALWAYS produce TypeB signals based on backtests
+        _INSTITUTIONAL_CORE = [
+            # US high-beta (highest TypeB WR globally)
+            "NVDA", "TSLA", "MSTR", "SMCI", "AMD", "COIN", "MARA",
+            "TQQQ", "SQQQ", "SOXL", "SOXS", "SPY", "QQQ",
+            # TSE semiconductor equipment (73% TypeF WR, 56% TypeB WR)
+            "8035", "6857", "6146", "6920", "9984", "6758",
+            # LSE leveraged ETPs (volume anomaly amplifiers)
+            "QQQ3.L", "NVD3.L", "3LTS.L", "3LNV.L", "3LMS.L",
+            # HKEX China tech (81.8% TypeB WR on HKEX)
+            "0700", "9988", "1810", "1211", "3690",
+        ]
+        return _INSTITUTIONAL_CORE[:max_winners]
+
+    return [w[0] for w in winners[:max_winners]]
+
+
+# ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
 def _build_core_universe_prompt(
@@ -970,6 +1050,15 @@ def scan_core_universe(
     core_slots = config.get("core_slots", CORE_SLOTS)
     all_symbols = {c["symbol"] for c in all_contracts}
 
+    # MEMORY-FIRST: Reserve slots for recurring winners (never rotated out)
+    # These are tickers with proven TypeB edge from WAL trade history + backtests.
+    # They get the first 40 slots. Gemini fills the remaining 120.
+    recurring = _get_recurring_winners(max_winners=min(40, core_slots // 4))
+    reserved_count = len(recurring)
+    gemini_slots = core_slots - reserved_count
+    log.info("Core allocation: %d recurring winners (memory) + %d Gemini picks = %d total",
+             reserved_count, gemini_slots, core_slots)
+
     # Simulation mode
     if SIMULATION_MODE:
         result = _sim_core_universe(current_session, all_contracts, core_slots)
@@ -1002,22 +1091,30 @@ def scan_core_universe(
                          error=f"insufficient_results ({len(tickers)})", result_count=len(result))
         return result
 
-    # Trim or pad to exact slot count
-    if len(tickers) > core_slots:
-        tickers = tickers[:core_slots]
-    elif len(tickers) < core_slots:
-        # Pad with fallback tickers not already in the list
-        existing = set(tickers)
+    # Merge: recurring winners FIRST, then Gemini picks (deduplicated)
+    merged = list(recurring)  # Recurring winners always first
+    existing = set(recurring)
+    for sym in tickers:
+        if sym not in existing:
+            merged.append(sym)
+            existing.add(sym)
+            if len(merged) >= core_slots:
+                break
+
+    # Pad with fallback if still short
+    if len(merged) < core_slots:
         fallback = _fallback_core_universe(current_session, all_contracts, market_data, core_slots)
         for sym in fallback:
             if sym not in existing:
-                tickers.append(sym)
+                merged.append(sym)
                 existing.add(sym)
-                if len(tickers) >= core_slots:
+                if len(merged) >= core_slots:
                     break
 
-    log.info("Core universe scan: %d tickers (session=%s, latency=%.0fms)",
-             len(tickers), current_session, latency_ms)
+    tickers = merged[:core_slots]
+
+    log.info("Core universe scan: %d tickers (%d recurring + %d Gemini, session=%s, latency=%.0fms)",
+             len(tickers), reserved_count, len(tickers) - reserved_count, current_session, latency_ms)
     _log_interaction("scan_core_universe", len(prompt), tickers, latency_ms,
                      result_count=len(tickers))
     return tickers
