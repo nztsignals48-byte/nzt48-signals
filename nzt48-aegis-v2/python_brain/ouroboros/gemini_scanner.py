@@ -1050,14 +1050,44 @@ def scan_core_universe(
     core_slots = config.get("core_slots", CORE_SLOTS)
     all_symbols = {c["symbol"] for c in all_contracts}
 
-    # MEMORY-FIRST: Reserve slots for recurring winners (never rotated out)
-    # These are tickers with proven TypeB edge from WAL trade history + backtests.
-    # They get the first 40 slots. Gemini fills the remaining 120.
+    # 3-SOURCE CORE ALLOCATION:
+    # 1. Memory-locked recurring winners (40 slots, never rotated)
+    # 2. IBKR scanner top performers (60 slots, from live scanner_results.json)
+    # 3. Gemini strategic picks (60 slots, from LLM curation)
     recurring = _get_recurring_winners(max_winners=min(40, core_slots // 4))
     reserved_count = len(recurring)
-    gemini_slots = core_slots - reserved_count
-    log.info("Core allocation: %d recurring winners (memory) + %d Gemini picks = %d total",
-             reserved_count, gemini_slots, core_slots)
+
+    # Read IBKR scanner results for additional high-RVOL tickers
+    ibkr_picks: List[str] = []
+    try:
+        scanner_path = LOG_DIR / "scanner_results.json"
+        if not scanner_path.exists():
+            scanner_path = Path("/app/data/scanner_results.json")
+        if scanner_path.exists():
+            import time as _time_mod
+            scanner_age = _time_mod.time() - scanner_path.stat().st_mtime
+            if scanner_age < 1800:  # Only use if < 30 min old
+                with open(scanner_path) as f:
+                    scanner_data = json.load(f)
+                # Collect all unique tickers across all scanner types
+                seen_ibkr = set(recurring)
+                for scan_name, scan_info in scanner_data.get("scanners", {}).items():
+                    for result in scan_info.get("results", []):
+                        sym = result.get("symbol", "")
+                        if sym and sym not in seen_ibkr:
+                            ibkr_picks.append(sym)
+                            seen_ibkr.add(sym)
+                            if len(ibkr_picks) >= 60:
+                                break
+                    if len(ibkr_picks) >= 60:
+                        break
+                log.info("IBKR scanner contributed %d tickers to core", len(ibkr_picks))
+    except Exception as e:
+        log.warning("Failed to read IBKR scanner results: %s", e)
+
+    gemini_slots = core_slots - reserved_count - len(ibkr_picks)
+    log.info("Core allocation: %d memory + %d IBKR scanner + %d Gemini = %d total",
+             reserved_count, len(ibkr_picks), gemini_slots, core_slots)
 
     # Simulation mode
     if SIMULATION_MODE:
@@ -1091,9 +1121,13 @@ def scan_core_universe(
                          error=f"insufficient_results ({len(tickers)})", result_count=len(result))
         return result
 
-    # Merge: recurring winners FIRST, then Gemini picks (deduplicated)
-    merged = list(recurring)  # Recurring winners always first
+    # Merge: recurring winners FIRST, then IBKR scanner, then Gemini picks (deduplicated)
+    merged = list(recurring)  # Recurring winners always first (memory-locked)
     existing = set(recurring)
+    for sym in ibkr_picks:  # IBKR scanner picks second (live data)
+        if sym not in existing:
+            merged.append(sym)
+            existing.add(sym)
     for sym in tickers:
         if sym not in existing:
             merged.append(sym)
