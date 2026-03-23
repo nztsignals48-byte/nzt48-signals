@@ -106,6 +106,141 @@ log = logging.getLogger("backfill_sim")
 
 
 # ---------------------------------------------------------------------------
+# Entry type config (loaded from config.toml [entry_types])
+# ---------------------------------------------------------------------------
+def _load_entry_type_config() -> Dict[str, Any]:
+    """Load entry type thresholds from config.toml. Falls back to defaults."""
+    defaults = {
+        "type_a_confidence": 65.0,
+        "type_a_rsi_oversold": 40.0,
+        "type_a_volume_spike_mult": 1.8,
+        "type_a_drop_atr_mult": 2.0,
+        "type_b_confidence": 82.0,
+        "type_b_rsi_low": 30.0,
+        "type_b_rsi_high": 70.0,
+        "type_b_momentum_bars": 3,
+        "type_c_confidence": 72.0,
+        "type_c_rsi_overbought": 75.0,
+        "type_d_confidence": 80.0,
+        "type_d_price_proximity_pct": 1.0,
+        "type_d_rsi_low": 20.0,
+        "type_d_rsi_high": 40.0,
+        "type_e_confidence": 70.0,
+        "type_e_ibs_threshold": 0.10,
+        "type_e_rvol_threshold": 1.0,
+        "type_f_confidence": 68.0,
+        "type_f_obv_rsi_threshold": 30.0,
+        "type_f_rvol_threshold": 0.7,
+    }
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
+        if not cfg_path.exists():
+            cfg_path = _PROJECT_ROOT / "config" / "config.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            et = cfg.get("entry_types", {})
+            for key in defaults:
+                if key in et:
+                    defaults[key] = float(et[key])
+            log.info("Entry type config loaded from %s", cfg_path)
+    except Exception as e:
+        log.warning("Failed to load entry type config: %s (using defaults)", e)
+    return defaults
+
+
+ENTRY_TYPE_CONFIG = _load_entry_type_config()
+
+
+# ---------------------------------------------------------------------------
+# Cost model (loaded from config.toml [costs])
+# ---------------------------------------------------------------------------
+# Per-exchange round-trip costs (spread + commission + clearing)
+COSTS_PER_EXCHANGE: Dict[str, float] = {
+    "LSE": 0.0035, "US": 0.0015, "TSE": 0.0025,
+    "HKEX": 0.0030, "XETRA": 0.0020, "Euronext": 0.0020, "SGX": 0.0025,
+}
+FX_CONVERSION_COST = 0.002  # 0.2% for cross-currency (non-GBP on LSE)
+
+# FX rates to GBP (approximate, acceptable for backtest)
+FX_TO_GBP: Dict[str, float] = {
+    "GBP": 1.0, "USD": 0.79, "EUR": 0.85, "JPY": 0.0042,
+    "HKD": 0.10, "SGD": 0.59, "AUD": 0.52, "KRW": 0.00058,
+}
+
+# Currency map: ticker -> trading currency (loaded from contracts.toml)
+_CURRENCY_MAP: Optional[Dict[str, str]] = None
+
+
+def _load_currency_map() -> Dict[str, str]:
+    """Load ticker->currency mapping from contracts.toml."""
+    global _CURRENCY_MAP
+    if _CURRENCY_MAP is not None:
+        return _CURRENCY_MAP
+    _CURRENCY_MAP = {}
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "contracts.toml"
+        if not cfg_path.exists():
+            cfg_path = _PROJECT_ROOT / "config" / "contracts.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                contracts = tomllib.load(f)
+            for region_data in contracts.values():
+                if not isinstance(region_data, dict):
+                    continue
+                tickers = region_data.get("tickers", [])
+                if isinstance(tickers, list):
+                    for entry in tickers:
+                        if isinstance(entry, dict):
+                            sym = entry.get("yf_symbol") or entry.get("symbol", "")
+                            ccy = entry.get("currency", "USD")
+                            if sym:
+                                _CURRENCY_MAP[sym] = ccy
+    except Exception as e:
+        log.warning("Failed to load currency map from contracts.toml: %s", e)
+    return _CURRENCY_MAP
+
+
+def _load_costs_from_config() -> None:
+    """Override per-exchange costs from config.toml [costs.per_exchange] if available."""
+    global COSTS_PER_EXCHANGE, FX_CONVERSION_COST
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = Path(os.environ.get("AEGIS_CONFIG_DIR", "/app/config")) / "config.toml"
+        if not cfg_path.exists():
+            cfg_path = _PROJECT_ROOT / "config" / "config.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            costs = cfg.get("costs", {})
+            per_ex = costs.get("per_exchange", {})
+            for ex, cost_val in per_ex.items():
+                # Config stores as fraction (0.0035 = 0.35%), use directly
+                COSTS_PER_EXCHANGE[ex] = float(cost_val)
+            fx_val = costs.get("fx_conversion_pct")
+            if fx_val is not None:
+                # Config stores as fraction (0.002 = 0.2%), use directly
+                FX_CONVERSION_COST = float(fx_val)
+            log.info("Costs loaded: %s, FX=%.4f", {k: f"{v*100:.2f}%" for k, v in COSTS_PER_EXCHANGE.items()}, FX_CONVERSION_COST)
+    except Exception:
+        pass
+
+
+_load_costs_from_config()
+
+
+# ---------------------------------------------------------------------------
 # Exchange detection
 # ---------------------------------------------------------------------------
 def detect_exchange(ticker: str) -> str:
@@ -175,7 +310,7 @@ class SimTrade:
     """A simulated trade."""
     ticker: str
     date: str
-    entry_type: str  # TypeA/B/C/D
+    entry_type: str  # TypeA/B/C/D/E/F
     entry_price: float
     exit_price: float
     entry_bar: int
@@ -188,6 +323,12 @@ class SimTrade:
     exchange: str = "US"
     entry_hour: int = -1       # Hour of day (0-23) at entry
     entry_weekday: int = -1    # Day of week (0=Mon, 6=Sun) at entry
+    confidence: float = 0.0    # Base confidence from entry type config
+    cost_pct: float = 0.0      # Round-trip cost percentage applied
+    net_pnl: float = 0.0       # PnL after costs (per share)
+    net_pnl_pct: float = 0.0   # Net PnL percentage after costs
+    currency: str = "USD"      # Trading currency of the instrument
+    gbp_pnl: float = 0.0       # PnL normalized to GBP
 
 
 @dataclass
@@ -279,77 +420,147 @@ def classify_entries(
     regime: str,
     highs: Optional[np.ndarray] = None,
     lows: Optional[np.ndarray] = None,
+    atr: Optional[np.ndarray] = None,
+    dates: Optional[List[Any]] = None,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[int, str]]:
     """Identify entry signals and classify as Type A/B/C/D/E/F.
 
-    Type A: Momentum breakout (RSI > 50 + RVOL surge + trending regime)
-    Type B: Volume anomaly (RVOL > 2x + any regime)
-    Type C: Oversold bounce (RSI < 30 + mean_reverting regime)
-    Type D: Continuation (price above 20-bar EMA + trending regime)
-    Type E: IBS Mean Reversion (IBS < 0.1 + RVOL > 1.0 + mean_reverting)
-    Type F: OBV Divergence (OBV-RSI(5) < 30 + RVOL > 0.7)
+    CORRECTED to match Rust entry_engine.rs logic exactly:
+      Type A (DipRecovery): RSI < oversold + RVOL > vol_ma20 * spike_mult + drop >= atr_mult * ATR
+      Type B (EarlyRunner): RVOL rising for N consecutive bars + RSI in [low, high]
+      Type C (OverboughtFade): RSI > overbought + price up + volume < vol_ma20 (divergence)
+      Type D (SupportBounce): Price within proximity_pct of daily low + RSI in [low, high]
+      Type E (IBSMeanReversion): IBS < threshold + RVOL > threshold
+      Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
 
-    No cooldown between entries and no daily cap — simulator captures ALL
-    possible signals to provide maximum data for Ouroboros learning.
+    Each type is evaluated independently per bar (a bar can produce multiple signals).
+    No cooldown, no daily cap — captures ALL possible signals for Ouroboros learning.
 
     Returns list of (bar_index, entry_type).
     """
+    if cfg is None:
+        cfg = ENTRY_TYPE_CONFIG
+
     entries: List[Tuple[int, str]] = []
     n = len(closes)
-    if n < 21:
+    if n < 25:
         return entries
 
-    # 20-bar EMA
-    ema20 = np.full(n, np.nan)
-    ema20[0] = closes[0]
-    alpha = 2.0 / 21.0
-    for i in range(1, n):
-        ema20[i] = alpha * closes[i] + (1 - alpha) * ema20[i - 1]
+    # Config thresholds
+    a_rsi_oversold = cfg.get("type_a_rsi_oversold", 40.0)
+    a_vol_spike_mult = cfg.get("type_a_volume_spike_mult", 1.8)
+    a_drop_atr_mult = cfg.get("type_a_drop_atr_mult", 2.0)
+    b_rsi_low = cfg.get("type_b_rsi_low", 30.0)
+    b_rsi_high = cfg.get("type_b_rsi_high", 70.0)
+    b_momentum_bars = int(cfg.get("type_b_momentum_bars", 3))
+    c_rsi_overbought = cfg.get("type_c_rsi_overbought", 75.0)
+    d_proximity_pct = cfg.get("type_d_price_proximity_pct", 1.0)
+    d_rsi_low = cfg.get("type_d_rsi_low", 20.0)
+    d_rsi_high = cfg.get("type_d_rsi_high", 40.0)
+    e_ibs_threshold = cfg.get("type_e_ibs_threshold", 0.10)
+    e_rvol_threshold = cfg.get("type_e_rvol_threshold", 1.0)
+    f_obv_rsi_threshold = cfg.get("type_f_obv_rsi_threshold", 30.0)
+    f_rvol_threshold = cfg.get("type_f_rvol_threshold", 0.7)
+
+    # --- Precompute indicators for corrected entry logic ---
+
+    # 20-bar volume moving average (for Type A spike detection and Type C divergence)
+    vol_ma20 = np.full(n, np.nan)
+    for i in range(20, n):
+        vol_ma20[i] = np.mean(volumes[i - 20:i])
+
+    # 20-bar rolling max of highs (for Type A price drop calculation)
+    recent_high_20 = np.full(n, np.nan)
+    if highs is not None:
+        for i in range(20, n):
+            recent_high_20[i] = np.max(highs[i - 20:i])
 
     # Precompute OBV and OBV-RSI(5) for TypeF detection
     obv = _compute_obv(closes, volumes)
     obv_rsi5 = compute_rsi(obv, period=5)
 
-    # Scan for entries (skip first 21 bars for indicator warmup)
-    # No cooldown, no daily cap — capture every signal for maximum data
-    for i in range(21, n - 5):  # Leave room for exit simulation
+    # Daily low tracking for Type D (cumulative min of lows within each calendar day)
+    daily_low = np.full(n, np.nan)
+    if lows is not None and dates is not None:
+        current_day = None
+        current_day_low = float('inf')
+        for i in range(n):
+            try:
+                day = str(dates[i])[:10]
+            except Exception:
+                day = str(i)
+            if day != current_day:
+                current_day = day
+                current_day_low = lows[i]
+            else:
+                current_day_low = min(current_day_low, lows[i])
+            daily_low[i] = current_day_low
+
+    # --- Scan for entries ---
+    # Skip first 25 bars for indicator warmup; leave 5 bars for exit simulation
+    start_bar = max(25, b_momentum_bars + 1)
+    for i in range(start_bar, n - 5):
         if np.isnan(rsi[i]) or np.isnan(rvol_arr[i]):
             continue
 
-        # Type A: Momentum breakout
-        if rsi[i] > 50 and rvol_arr[i] > RVOL_ENTRY_THRESHOLD and regime == "trending":
-            entries.append((i, "TypeA"))
-            continue
+        # Type A (DipRecovery): RSI < oversold + raw_volume > vol_ma20 * spike_mult + price drop >= atr_mult * ATR
+        # Matches Rust entry_engine.rs detect_dip_recovery()
+        # Note: Rust `rvol` param is raw volume, not relative. vol_ma20 is 20-bar volume MA.
+        if (atr is not None and highs is not None
+                and not np.isnan(atr[i]) and atr[i] > 0
+                and not np.isnan(recent_high_20[i]) and not np.isnan(vol_ma20[i])):
+            if (rsi[i] < a_rsi_oversold
+                    and vol_ma20[i] > 0
+                    and volumes[i] > vol_ma20[i] * a_vol_spike_mult
+                    and (recent_high_20[i] - closes[i]) / atr[i] >= a_drop_atr_mult):
+                entries.append((i, "TypeA"))
 
-        # Type B: Volume anomaly
-        if rvol_arr[i] > VOLUME_SURGE_MULT:
-            entries.append((i, "TypeB"))
-            continue
+        # Type B (EarlyRunner): RVOL rising for N consecutive bars + RSI in range
+        # Matches Rust entry_engine.rs detect_early_runner()
+        if i >= b_momentum_bars and rsi[i] >= b_rsi_low and rsi[i] <= b_rsi_high:
+            rvol_rising = True
+            for j in range(1, b_momentum_bars):
+                if (np.isnan(rvol_arr[i - j]) or np.isnan(rvol_arr[i - j + 1])
+                        or rvol_arr[i - j] >= rvol_arr[i - j + 1]):
+                    # Check: rvol[i-2] < rvol[i-1] < rvol[i] for momentum_bars=3
+                    # Window is [i-2, i-1, i], check pairs: (i-2,i-1) and (i-1,i)
+                    rvol_rising = False
+                    break
+            # Also check the last pair: rvol[i-1] < rvol[i]
+            if rvol_rising and not np.isnan(rvol_arr[i - 1]) and rvol_arr[i - 1] < rvol_arr[i]:
+                entries.append((i, "TypeB"))
 
-        # Type C: Oversold bounce
-        if rsi[i] < RSI_OVERSOLD and regime == "mean_reverting":
+        # Type C (OverboughtFade): RSI > overbought + price rising + volume declining (divergence)
+        # Matches Rust entry_engine.rs detect_overbought_fade()
+        if (i > 0 and not np.isnan(vol_ma20[i])
+                and rsi[i] > c_rsi_overbought
+                and closes[i] > closes[i - 1]
+                and volumes[i] < vol_ma20[i]):
             entries.append((i, "TypeC"))
-            continue
 
-        # Type D: Continuation
-        if closes[i] > ema20[i] and regime == "trending" and rsi[i] > 40:
-            # Only trigger if price just crossed above EMA
-            if i > 0 and closes[i - 1] <= ema20[i - 1]:
+        # Type D (SupportBounce): Price within proximity_pct of daily low + RSI in range
+        # Matches Rust entry_engine.rs detect_support_bounce()
+        if (not np.isnan(daily_low[i]) and daily_low[i] > 0
+                and rsi[i] >= d_rsi_low and rsi[i] <= d_rsi_high):
+            pct_above_low = ((closes[i] - daily_low[i]) / daily_low[i]) * 100.0
+            if pct_above_low <= d_proximity_pct:
                 entries.append((i, "TypeD"))
-                continue
 
-        # Type E: IBS Mean Reversion (IBS < 0.1 + RVOL > 1.0 + mean_reverting)
+        # Type E (IBSMeanReversion): IBS < threshold + RVOL > threshold
+        # Matches Rust entry_engine.rs detect_ibs_mean_reversion()
+        # Note: Rust does NOT check regime internally
         if highs is not None and lows is not None:
-            if regime == "mean_reverting" and rvol_arr[i] > 1.0:
-                ibs_val = (closes[i] - lows[i]) / max(highs[i] - lows[i], 1e-9)
-                if ibs_val < 0.10:
+            bar_range = highs[i] - lows[i]
+            if bar_range > 1e-9 and rvol_arr[i] > e_rvol_threshold:
+                ibs_val = (closes[i] - lows[i]) / bar_range
+                if ibs_val < e_ibs_threshold:
                     entries.append((i, "TypeE"))
-                    continue
 
-        # Type F: OBV Divergence (OBV-RSI(5) < 30 + RVOL > 0.7)
-        if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < 30.0 and rvol_arr[i] > 0.7:
+        # Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
+        # Matches Rust entry_engine.rs detect_obv_divergence()
+        if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
             entries.append((i, "TypeF"))
-            continue
 
     return entries
 
@@ -513,20 +724,54 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     else:
         dates = [str(i) for i in range(len(df))]
 
-    # Classify entry signals (no cooldown, no daily cap)
-    entries = classify_entries(closes, volumes, rsi, rvol_arr, regime, highs=highs, lows=lows)
+    # Classify entry signals — corrected to match Rust entry_engine.rs
+    entries = classify_entries(
+        closes, volumes, rsi, rvol_arr, regime,
+        highs=highs, lows=lows, atr=atr, dates=dates,
+    )
+
+    # Cost model: determine per-exchange cost and currency
+    cost_pct = COSTS_PER_EXCHANGE.get(exchange, 0.003)
+    currency_map = _load_currency_map()
+    currency = currency_map.get(ticker, "USD")
+    # Add FX conversion cost for non-GBP instruments on LSE
+    fx_cost = FX_CONVERSION_COST if (exchange == "LSE" and currency != "GBP") else 0.0
+    total_cost_pct = cost_pct + fx_cost
+    fx_rate = FX_TO_GBP.get(currency, FX_TO_GBP.get("USD", 0.79))
+
+    # Confidence per entry type
+    confidence_map = {
+        "TypeA": ENTRY_TYPE_CONFIG.get("type_a_confidence", 65.0),
+        "TypeB": ENTRY_TYPE_CONFIG.get("type_b_confidence", 82.0),
+        "TypeC": ENTRY_TYPE_CONFIG.get("type_c_confidence", 72.0),
+        "TypeD": ENTRY_TYPE_CONFIG.get("type_d_confidence", 80.0),
+        "TypeE": ENTRY_TYPE_CONFIG.get("type_e_confidence", 70.0),
+        "TypeF": ENTRY_TYPE_CONFIG.get("type_f_confidence", 68.0),
+    }
 
     for entry_bar, entry_type in entries:
         entry_price = closes[entry_bar]
-        if entry_price <= 0:
+        if entry_price <= 0 or not np.isfinite(entry_price):
             continue
 
         exit_bar, exit_price, rung = simulate_chandelier_exit(
             closes, highs, lows, atr, entry_bar, entry_price,
         )
 
+        if not np.isfinite(exit_price):
+            continue
+
         pnl = exit_price - entry_price
         pnl_pct = pnl / entry_price * 100.0
+
+        # Apply cost model
+        net_pnl = pnl - (entry_price * total_cost_pct)
+        net_pnl_pct = pnl_pct - (total_cost_pct * 100.0)
+        gbp_pnl = net_pnl * fx_rate
+
+        # Guard against NaN/Inf propagation from extreme prices
+        if not (np.isfinite(net_pnl) and np.isfinite(net_pnl_pct) and np.isfinite(gbp_pnl)):
+            continue
 
         # Extract hour and weekday from index if available
         entry_hour = -1
@@ -555,6 +800,12 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
             exchange=exchange,
             entry_hour=entry_hour,
             entry_weekday=entry_weekday,
+            confidence=confidence_map.get(entry_type, 70.0),
+            cost_pct=total_cost_pct * 100.0,
+            net_pnl=net_pnl,
+            net_pnl_pct=net_pnl_pct,
+            currency=currency,
+            gbp_pnl=gbp_pnl,
         ))
 
     return trades

@@ -1332,10 +1332,10 @@ def process_tick(msg):
     # =========================================================================
     # SIM_MODE: skip hurst regime gate to allow all signals through for backtesting.
     if not _SIM_MODE and n_5min_bars >= 5 and hurst > 0.01:  # hurst=0.0 means insufficient data, not mean-reverting
-        if hurst < 0.20:  # Lowered from 0.40 for data collection mode
+        if hurst < 0.20:  # Lowered from 0.40 for paper data collection
             # Strongly mean-reverting on 5-min timeframe — suppress momentum signals
             _log_gate_veto(ticker_id, "hurst_mean_reverting", msg["last"], _ind,
-                           "hurst={:.3f} < 0.40 (mean-reverting regime)".format(hurst))
+                           "hurst={:.3f} < 0.20 (mean-reverting regime)".format(hurst))
             return no_signal_base
         elif hurst < 0.50:
             # Weakly mean-reverting / random — reduce confidence by 15
@@ -1441,14 +1441,17 @@ def process_tick(msg):
         ema_5m_prev = sum(b["close"] for b in bars_5m[-6:-3]) / min(3, len(bars_5m)) if len(bars_5m) >= 6 else ema_5m
         trend_5m = 1 if ema_5m > ema_5m_prev else -1
 
-        # All 3 must agree for momentum entry
-        mtf_aligned = (trend_5s == trend_1m == trend_5m)
+        # Require 2/3 timeframes to agree (relaxed from 3/3 which blocked 75% of signals)
+        # 3/3 agreement is too restrictive — different timeframes have different noise.
+        # 2/3 still provides directional conviction while allowing reasonable signal flow.
+        agreement_count = sum(1 for t in [trend_5s, trend_1m, trend_5m] if t == trend_1m)
+        mtf_aligned = (agreement_count >= 2)
 
-    # SIM_MODE: skip MTF alignment gate to allow all signals through for backtesting.
+    # SIM_MODE: skip MTF alignment gate entirely.
     if not _SIM_MODE and not mtf_aligned:
         _log_gate_veto(ticker_id, "mtf_misaligned", msg["last"],
                        {**_ind, "trend_5s": trend_5s, "trend_1m": trend_1m, "trend_5m": trend_5m},
-                       "5s={} 1m={} 5m={} (need all same)".format(
+                       "5s={} 1m={} 5m={} (need 2/3 same)".format(
                            "up" if trend_5s > 0 else "down",
                            "up" if trend_1m > 0 else "down",
                            "up" if trend_5m > 0 else "down"))

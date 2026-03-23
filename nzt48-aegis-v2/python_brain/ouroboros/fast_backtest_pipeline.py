@@ -288,12 +288,14 @@ def filter_trades_through_arbiter(
     """
     results: List[FilteredTrade] = []
 
-    # Entry type -> base confidence from config
+    # Entry type -> base confidence from config (all 6 types A-F)
     entry_type_confidence = {
-        "TypeA": arbiter.config.confidence_floor + 5.0,   # Above floor
+        "TypeA": arbiter.config.confidence_floor + 5.0,   # DipRecovery
         "TypeB": 82.0,   # EarlyRunner — strongest signal
         "TypeC": 72.0,   # OverboughtFade
         "TypeD": 80.0,   # SupportBounce
+        "TypeE": 70.0,   # IBSMeanReversion
+        "TypeF": 68.0,   # OBVDivergence
     }
 
     # Try to load entry type confidences from config.toml
@@ -311,6 +313,8 @@ def filter_trades_through_arbiter(
             entry_type_confidence["TypeB"] = float(et.get("type_b_confidence", entry_type_confidence["TypeB"]))
             entry_type_confidence["TypeC"] = float(et.get("type_c_confidence", entry_type_confidence["TypeC"]))
             entry_type_confidence["TypeD"] = float(et.get("type_d_confidence", entry_type_confidence["TypeD"]))
+            entry_type_confidence["TypeE"] = float(et.get("type_e_confidence", entry_type_confidence["TypeE"]))
+            entry_type_confidence["TypeF"] = float(et.get("type_f_confidence", entry_type_confidence["TypeF"]))
     except Exception:
         pass
 

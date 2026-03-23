@@ -2582,6 +2582,15 @@ impl<B: BrokerAdapter> Engine<B> {
     }
 
     /// Rotate subscriptions from the unified watchlist.
+    /// Rotate only the dark horse subscription slots (unusual movers: RVOL spike, gap, volume outlier).
+    /// Delegates to full watchlist rotation since the ranked watchlist already prioritizes dark horses.
+    /// The dark horse slots are the tail-end of the watchlist (beyond core slots).
+    fn rotate_dark_horse_slots(&mut self) {
+        eprintln!("SCANNER_80_20: dark horse slot rotation → delegating to full watchlist rotation");
+        self.last_dark_horse_rotation_ns = self.now_ns;
+        self.rotate_subscriptions_from_watchlist();
+    }
+
     /// Called on mode transitions and every 15 minutes during ACTIVE mode.
     /// Reads a single active_watchlist.json covering ALL 6 markets.
     /// IBKR paper trading max: 100 simultaneous market data lines.

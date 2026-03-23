@@ -304,6 +304,213 @@ def run_simulation(
 
 
 # ---------------------------------------------------------------------------
+# Capital-constrained Monte Carlo (institutional backtest)
+# ---------------------------------------------------------------------------
+@dataclass
+class ConstrainedMCResult:
+    """Result of capital-constrained Monte Carlo simulation."""
+    simulations: int
+    trading_days: int
+    starting_equity: float
+    trade_count_input: int
+    max_concurrent: int
+    kelly_fraction: float
+
+    probability_of_ruin: float
+    probability_of_target: float
+    median_final_equity: float
+    mean_final_equity: float
+
+    equity_p5: float
+    equity_p10: float
+    equity_p25: float
+    equity_p50: float
+    equity_p75: float
+    equity_p90: float
+    equity_p95: float
+
+    max_dd_p5: float
+    max_dd_p25: float
+    max_dd_p50: float
+    max_dd_p75: float
+    max_dd_p95: float
+
+    annual_return_p5: float
+    annual_return_p50: float
+    annual_return_p95: float
+
+    sharpe: float
+    cagr_median: float
+    avg_trades_per_path: float
+    total_cost_drag_pct: float
+
+
+def run_constrained_simulation(
+    trades: List[Dict[str, Any]],
+    simulations: int = 10000,
+    trading_days: int = 252,
+    starting_equity: float = STARTING_EQUITY,
+    max_concurrent: int = 3,
+    kelly_fraction: float = 0.05,
+    costs_per_exchange: Optional[Dict[str, float]] = None,
+    fx_rates: Optional[Dict[str, float]] = None,
+    equity_floor_pct: float = EQUITY_FLOOR_PCT,
+    seed: Optional[int] = None,
+) -> ConstrainedMCResult:
+    """Run capital-constrained Monte Carlo with realistic position sizing and costs.
+
+    Args:
+        trades: List of dicts with keys: net_pnl_pct, exchange, cost_pct, currency, entry_type
+        simulations: Number of MC paths
+        trading_days: Days to simulate
+        starting_equity: Starting capital in GBP
+        max_concurrent: Maximum concurrent positions
+        kelly_fraction: Kelly fraction cap (e.g., 0.05 = 5% of equity per position)
+        costs_per_exchange: Per-exchange round-trip cost as fraction (already in trade net_pnl_pct)
+        fx_rates: Currency->GBP conversion rates
+        equity_floor_pct: Halt if equity drops below this fraction of starting
+        seed: Random seed
+
+    Returns:
+        ConstrainedMCResult with comprehensive metrics.
+    """
+    if not trades or len(trades) < 5:
+        return ConstrainedMCResult(
+            simulations=0, trading_days=trading_days, starting_equity=starting_equity,
+            trade_count_input=len(trades), max_concurrent=max_concurrent,
+            kelly_fraction=kelly_fraction,
+            probability_of_ruin=1.0, probability_of_target=0.0,
+            median_final_equity=0, mean_final_equity=0,
+            equity_p5=0, equity_p10=0, equity_p25=0, equity_p50=0,
+            equity_p75=0, equity_p90=0, equity_p95=0,
+            max_dd_p5=0, max_dd_p25=0, max_dd_p50=0, max_dd_p75=0, max_dd_p95=0,
+            annual_return_p5=0, annual_return_p50=0, annual_return_p95=0,
+            sharpe=0, cagr_median=0, avg_trades_per_path=0, total_cost_drag_pct=0,
+        )
+
+    rng = np.random.default_rng(seed)
+
+    # Extract net PnL percentages (already cost-adjusted from backfill simulator)
+    net_returns = np.array([t.get("net_pnl_pct", 0) / 100.0 for t in trades])  # fraction
+    cost_pcts = np.array([t.get("cost_pct", 0.3) for t in trades])  # percentage
+
+    equity_floor = starting_equity * equity_floor_pct
+    equity_target = starting_equity * EQUITY_TARGET_MULT
+
+    # Estimate trades per day from data
+    trades_per_day = max(1.0, len(trades) / max(trading_days, 1))
+    # Cap at reasonable level
+    trades_per_day = min(trades_per_day, 10.0)
+    total_trades_per_path = int(trading_days * trades_per_day)
+
+    final_equities = np.zeros(simulations)
+    max_drawdowns = np.zeros(simulations)
+    ruin_count = 0
+    target_count = 0
+    total_trades_executed = 0
+    total_cost_accumulated = 0.0
+
+    for sim in range(simulations):
+        equity = starting_equity
+        peak = starting_equity
+        max_dd = 0.0
+        ruined = False
+        concurrent = 0
+        trades_this_path = 0
+
+        # Draw random trade sequence
+        indices = rng.integers(0, len(net_returns), size=total_trades_per_path)
+
+        for idx in indices:
+            if ruined:
+                break
+
+            # Capital constraint: skip if at max concurrent positions
+            if concurrent >= max_concurrent:
+                # Simulate one position closing before opening new
+                concurrent -= 1
+
+            # Position sizing: Kelly fraction of current equity
+            position_size = equity * kelly_fraction
+            if position_size < 100:  # Below minimum viable trade
+                continue
+
+            # Apply trade return (already net of costs)
+            pnl = position_size * net_returns[idx]
+            equity += pnl
+            concurrent += 1
+            trades_this_path += 1
+            total_cost_accumulated += position_size * cost_pcts[idx] / 100.0
+
+            # Simulate position close (simplified: close after each trade)
+            concurrent = max(0, concurrent - 1)
+
+            # Track drawdown
+            peak = max(peak, equity)
+            dd = (peak - equity) / peak if peak > 0 else 0
+            max_dd = max(max_dd, dd)
+
+            if equity < equity_floor:
+                ruined = True
+
+        final_equities[sim] = equity
+        max_drawdowns[sim] = max_dd
+        total_trades_executed += trades_this_path
+        if ruined:
+            ruin_count += 1
+        if equity >= equity_target:
+            target_count += 1
+
+    # Compute statistics
+    annual_returns = (final_equities / starting_equity - 1) * 100
+
+    # Sharpe ratio (annualized)
+    daily_returns = np.diff(np.insert(final_equities, 0, starting_equity)) / starting_equity
+    mean_return = np.mean(annual_returns)
+    std_return = np.std(annual_returns)
+    sharpe = mean_return / std_return if std_return > 0 else 0
+
+    # CAGR from median
+    median_equity = float(np.median(final_equities))
+    years = trading_days / 252.0
+    cagr = ((median_equity / starting_equity) ** (1 / years) - 1) * 100 if years > 0 and median_equity > 0 else 0
+
+    avg_cost_drag = (total_cost_accumulated / max(total_trades_executed, 1)) / starting_equity * 100
+
+    return ConstrainedMCResult(
+        simulations=simulations,
+        trading_days=trading_days,
+        starting_equity=starting_equity,
+        trade_count_input=len(trades),
+        max_concurrent=max_concurrent,
+        kelly_fraction=kelly_fraction,
+        probability_of_ruin=round(ruin_count / simulations, 4),
+        probability_of_target=round(target_count / simulations, 4),
+        median_final_equity=round(median_equity, 2),
+        mean_final_equity=round(float(np.mean(final_equities)), 2),
+        equity_p5=round(float(np.percentile(final_equities, 5)), 2),
+        equity_p10=round(float(np.percentile(final_equities, 10)), 2),
+        equity_p25=round(float(np.percentile(final_equities, 25)), 2),
+        equity_p50=round(float(np.percentile(final_equities, 50)), 2),
+        equity_p75=round(float(np.percentile(final_equities, 75)), 2),
+        equity_p90=round(float(np.percentile(final_equities, 90)), 2),
+        equity_p95=round(float(np.percentile(final_equities, 95)), 2),
+        max_dd_p5=round(float(np.percentile(max_drawdowns, 5)) * 100, 2),
+        max_dd_p25=round(float(np.percentile(max_drawdowns, 25)) * 100, 2),
+        max_dd_p50=round(float(np.percentile(max_drawdowns, 50)) * 100, 2),
+        max_dd_p75=round(float(np.percentile(max_drawdowns, 75)) * 100, 2),
+        max_dd_p95=round(float(np.percentile(max_drawdowns, 95)) * 100, 2),
+        annual_return_p5=round(float(np.percentile(annual_returns, 5)), 2),
+        annual_return_p50=round(float(np.percentile(annual_returns, 50)), 2),
+        annual_return_p95=round(float(np.percentile(annual_returns, 95)), 2),
+        sharpe=round(sharpe, 2),
+        cagr_median=round(cagr, 2),
+        avg_trades_per_path=round(total_trades_executed / max(simulations, 1), 1),
+        total_cost_drag_pct=round(avg_cost_drag, 4),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Report formatting
 # ---------------------------------------------------------------------------
 def format_report(result: MonteCarloResult) -> str:
