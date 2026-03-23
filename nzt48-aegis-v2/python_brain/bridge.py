@@ -1784,21 +1784,32 @@ def process_tick(msg):
             best["confidence"] = max(0, best["confidence"] - sts_penalty)
         best["structural_score"] = structural_score
 
-        # TypeA-F classification: classify the signal based on indicator values
-        # This replaces the dead Rust entry_engine.rs detectors with live Python classification.
+        # TypeA-F classification
         _cls_volumes = [t.get("volume", 0) for t in ticks]
         _cls_prices = [t["last"] for t in ticks]
         _cls_rsi = calculate_rsi(_cls_prices, period=14) if len(_cls_prices) >= 14 else None
+        try:
+            _cls_ibs = ibs
+        except NameError:
+            _cls_ibs = 0.5
+        try:
+            _cls_rvol = rvol
+        except NameError:
+            _cls_rvol = 1.0
+        try:
+            _cls_vol_div = vol_div
+        except NameError:
+            _cls_vol_div = 0.0
         entry_type = classify_entry_type(
-            rsi_14=_cls_rsi, ibs=ibs, rvol=rvol, ticker_id=ticker_id,
-            prices=_cls_prices, volumes=_cls_volumes, vol_div=vol_div,
+            rsi_14=_cls_rsi, ibs=_cls_ibs, rvol=_cls_rvol, ticker_id=ticker_id,
+            prices=_cls_prices, volumes=_cls_volumes, vol_div=_cls_vol_div,
         )
         best["entry_type"] = entry_type
         # Strategy = TypeA-F classification (not generic "Momentum")
         if entry_type != "Unclassified":
             best["strategy"] = entry_type
         best["rsi"] = _cls_rsi if _cls_rsi is not None else 0.0
-        best["ibs"] = ibs
+        best["ibs"] = _cls_ibs
 
         # Plan 1 Phase 3: Apply adaptive entry type weight to Kelly sizing
         # Entry types with poor WR get reduced sizing (0.5x), strong ones boosted (1.5x)
