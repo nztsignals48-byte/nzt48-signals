@@ -1415,10 +1415,10 @@ def process_tick(msg):
         if last_vwap > 0:
             vwap_distance_pct = (msg["last"] - last_vwap) / last_vwap * 100
             # For LONG entries: reject if price too far ABOVE VWAP (chasing)
-            if vwap_distance_pct > 3.0:  # Was 1.5% — too tight for 3x leveraged ETPs
+            if vwap_distance_pct > 10.0:  # Was 3.0% — widened for paper validation (opening gaps cause stale VWAP)
                 _log_gate_veto(ticker_id, "vwap_extension", msg["last"],
                                {**_ind, "vwap": last_vwap, "vwap_dist_pct": vwap_distance_pct},
-                               "price {:.1f}% above VWAP (max 3.0%)".format(vwap_distance_pct))
+                               "price {:.1f}% above VWAP (max 10.0%)".format(vwap_distance_pct))
                 return no_signal_base
             # For pullback buy: ideal entry is price near VWAP (within ±0.5%)
             # Boost confidence if price is pulling back to VWAP from above
@@ -1485,10 +1485,10 @@ def process_tick(msg):
         last_vwap = _g2_vwap_hist[-1]
         if last_vwap > 0:
             extension = abs(msg["last"] - last_vwap) / last_vwap * 100
-            if extension > 5.0:  # Was 3.0% — too tight for 3x leveraged ETPs (3% move = normal)
+            if extension > 15.0:  # Was 5.0% — widened for paper validation (opening gaps cause stale VWAP)
                 _log_gate_veto(ticker_id, "vwap_extension_5pct", msg["last"],
                                {**_ind, "extension_pct": extension, "vwap": last_vwap},
-                               "extension={:.1f}% from VWAP (max 5%)".format(extension))
+                               "extension={:.1f}% from VWAP (max 15%)".format(extension))
                 return no_signal_base
 
     # ---- Evaluate VanguardSniper (momentum + any non-reverting regime) ----
