@@ -613,7 +613,7 @@ mod tests {
             confidence: 78.5,
             kelly_fraction: 0.12,
             shares: 50,
-            strategy: "VanguardSniper".into(),
+            strategy: "TypeB".into(),
             rvol: 1.5,
             hurst: 0.55,
             adx: 25.0,

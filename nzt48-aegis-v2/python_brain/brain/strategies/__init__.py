@@ -1,1 +1,1 @@
-# Strategy modules: VanguardSniper + ApexScout + AutonomousOrchestrator (S17-S20).
+# Strategy modules: TypeA-F entry types + Orchestrator (S17-S20).

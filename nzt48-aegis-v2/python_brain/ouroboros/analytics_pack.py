@@ -420,7 +420,7 @@ def _load_trades_from_wal(date_str: str) -> List[Dict[str, Any]]:
                "qty", "exchange", "strategy", "entry_session_phase", "confidence",
                "mae", "mfe", "hold_time_mins", "highest_rung"]
     _DEFAULTS = {"symbol": "UNKNOWN", "ticker_id": -1, "qty": 1,
-                 "strategy": "VanguardSniper"}
+                 "strategy": "Unclassified"}
     trades: List[Dict[str, Any]] = []
     for wp in candidates:
         if not wp.exists():

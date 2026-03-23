@@ -426,7 +426,7 @@ def _load_enriched_trades(
             session_phase=_classify_session_phase(entry_time_ns),
             confidence=confidence,
             entry_type=pc.get("entry_type", "TypeA"),
-            strategy=pc.get("strategy", "VanguardSniper"),
+            strategy=pc.get("strategy", "Unclassified"),
             entry_rvol=indicators.get("entry_rvol"),
             entry_hurst=indicators.get("entry_hurst"),
             entry_adx=indicators.get("entry_adx"),

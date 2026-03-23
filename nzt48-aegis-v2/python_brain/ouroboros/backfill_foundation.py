@@ -82,7 +82,7 @@ RUNG_THRESHOLDS = [
 DEFAULT_QTY = 10
 
 # Strategies — we label all backfill trades with this
-BACKFILL_STRATEGY = "VanguardSniper"
+BACKFILL_STRATEGY = "Backfill"
 
 
 # ---------------------------------------------------------------------------

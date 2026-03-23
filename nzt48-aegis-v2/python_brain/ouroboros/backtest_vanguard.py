@@ -1,6 +1,6 @@
-"""N9a — VanguardSniper 30-Day Backtest Engine.
+"""N9a — TypeA-F 30-Day Backtest Engine.
 
-Historical backtest of the VanguardSniper momentum strategy using yfinance 5-min data.
+Historical backtest of the TypeA-F entry strategies using yfinance 5-min data.
 Simulates the full signal → Chandelier exit → P&L lifecycle on ISA leveraged ETPs.
 
 Outputs:
@@ -57,7 +57,7 @@ def _load_universe_from_contracts() -> List[str]:
     log.warning("Falling back to ISA_TICKERS (%d)", len(ISA_TICKERS))
     return ISA_TICKERS
 
-# Strategy parameters (mirror bridge.py VanguardSniper)
+# Strategy parameters (mirror bridge.py momentum signals)
 EMA_FAST = 5
 EMA_SLOW = 20
 MIN_WARMUP_BARS = 50       # Minimum 5-min bars before signals
@@ -295,7 +295,7 @@ def compute_rung(entry_price: float, current_price: float) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Signal generation (mirrors VanguardSniper from bridge.py)
+# Signal generation (mirrors TypeA-F momentum signals from bridge.py)
 # ---------------------------------------------------------------------------
 def generate_signals(
     closes: np.ndarray,
@@ -304,7 +304,7 @@ def generate_signals(
     volumes: np.ndarray,
     timestamps: list,
 ) -> List[Tuple[int, float]]:
-    """Generate VanguardSniper signals from 5-min bars.
+    """Generate TypeA-F momentum signals from 5-min bars.
 
     Returns list of (bar_index, confidence) for entry signals.
     """
@@ -732,7 +732,7 @@ def main():
     import argparse
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [Backtest] %(levelname)s %(message)s")
 
-    parser = argparse.ArgumentParser(description="VanguardSniper 30-Day Backtest (N9a)")
+    parser = argparse.ArgumentParser(description="TypeA-F 30-Day Backtest (N9a)")
     parser.add_argument("--days", type=int, default=30, help="Lookback days (max 59)")
     parser.add_argument("--ticker", type=str, help="Single ticker")
     parser.add_argument("--isa-only", action="store_true", help="Only test original 12 ISA ETPs")

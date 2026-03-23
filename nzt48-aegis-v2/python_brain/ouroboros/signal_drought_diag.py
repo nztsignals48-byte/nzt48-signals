@@ -677,12 +677,12 @@ def build_funnel(
             block_pct=0.0,
         ))
 
-    # Final: strategy evaluation (VanguardSniper + Orchestrator)
+    # Final: strategy evaluation (TypeA-F + Orchestrator)
     signals_generated = wal.routed_orders
     strategy_blocked = max(0, remaining - signals_generated)
     funnel.append(FunnelStage(
         stage=f"{len(funnel) + 1}_strategy_eval",
-        description="Strategy evaluation (VanguardSniper + Orchestrator — no signal generated)",
+        description="Strategy evaluation (TypeA-F + Orchestrator — no signal generated)",
         ticks_entering=remaining,
         ticks_blocked=strategy_blocked,
         ticks_passing=signals_generated,

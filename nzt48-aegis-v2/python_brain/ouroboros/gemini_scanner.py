@@ -1391,7 +1391,7 @@ def _test_cli():
     brief = morning_brief(
         market_regime="trending",
         recent_trades=[
-            {"symbol": "QQQ3.L", "pnl": 25.0, "confidence": 72, "strategy": "VanguardSniper", "direction": "Long"},
+            {"symbol": "QQQ3.L", "pnl": 25.0, "confidence": 72, "strategy": "TypeB", "direction": "Long"},
             {"symbol": "NVD3.L", "pnl": -15.0, "confidence": 65, "strategy": "Orchestrator", "direction": "Long"},
         ],
     )

@@ -148,7 +148,7 @@ pub enum WalPayload {
         /// Highest chandelier rung reached (1-5). For exit ladder calibration.
         #[serde(default)]
         highest_rung: u8,
-        /// Strategy name (e.g. "VanguardSniper"). For per-strategy analysis.
+        /// Strategy name (e.g. "TypeB", "TypeF"). For per-strategy analysis.
         #[serde(default)]
         strategy: String,
         /// Exchange MIC (e.g. "XLON"). For per-exchange analysis.

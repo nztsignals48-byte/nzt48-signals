@@ -55,7 +55,7 @@ Your role: Analyze today's trading performance and provide actionable insights.
 
 CONTEXT:
 - The system trades 3x/5x leveraged ETPs across LSE, US, HK, and other exchanges.
-- Strategies: VanguardSniper (momentum), Autonomous Orchestrator (VWAP/Gap/RSI/Momentum)
+- Strategies: TypeA-F (TypeA=dip recovery, TypeB=early runner, TypeC=exhaustion, TypeD=bounce, TypeE=capitulation, TypeF=OBV divergence), Orchestrator (VWAP/Gap/RSI/Momentum)
 - Exit: 5-rung Chandelier trailing stop (0.8%->1.5%->2.5%->4.0% gain thresholds)
 - Risk: 33-check arbiter, confidence floor, spread veto, max trades/day
 - Current phase: Paper trading (GBP 10,000 starting equity)

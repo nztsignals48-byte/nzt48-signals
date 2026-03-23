@@ -1604,7 +1604,7 @@ def process_tick(msg):
                 "confidence": result["confidence"],
                 "kelly_fraction": kelly["kelly_fraction"],
                 "shares": kelly["shares"],
-                "strategy": "VanguardSniper",
+                "strategy": "Momentum",
                 "rvol": rvol,
                 "hurst": hurst,
                 "hurst_regime": hurst_regime,
@@ -1791,6 +1791,9 @@ def process_tick(msg):
             prices=prices, volumes=volumes, vol_div=vol_div,
         )
         best["entry_type"] = entry_type
+        # Strategy = TypeA-F classification (not generic "VanguardSniper")
+        if entry_type != "Unclassified":
+            best["strategy"] = entry_type
         best["rsi"] = rsi_14 if rsi_14 is not None else 0.0
         best["ibs"] = ibs
 

@@ -17,7 +17,7 @@ mod tests {
             ticker_id,
             side: "Long".into(),
             confidence: 75.0,
-            strategy: "VanguardSniper".into(),
+            strategy: "TypeB".into(),
             kelly_fraction: 0.08,
             approved_size: 1000.0,
             symbol: format!("TEST{ticker_id}.L"),

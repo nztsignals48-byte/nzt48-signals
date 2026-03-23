@@ -341,7 +341,7 @@ AUTHORITY: Advisory only. You may downrank or reject. You cannot force trades or
 
 CONTEXT:
 - System trades 3x/5x leveraged ETPs across LSE, US, HK, TSE, XETRA, EURONEXT, SGX.
-- Strategies: VanguardSniper (momentum), Orchestrator (VWAP dip/Gap fade/RSI-IBS/Cross-market).
+- Strategies: TypeA-F (TypeA=dip recovery, TypeB=early runner, TypeC=exhaustion, TypeD=bounce, TypeE=capitulation, TypeF=OBV divergence), Orchestrator (VWAP dip/Gap fade/RSI-IBS/Cross-market).
 - Exit: 5-rung Chandelier trailing stop with adaptive ATR multipliers.
 - Risk: 33-check arbiter, confidence floor, spread veto, portfolio heat, ISA limits.
 - Phase: Paper trading, GBP 10,000 starting equity.
@@ -1030,7 +1030,7 @@ def _test_cli():
         "confidence": 72,
         "kelly_fraction": 0.15,
         "shares": 100,
-        "strategy": "VanguardSniper",
+        "strategy": "TypeB",
         "rvol": 2.3,
         "hurst": 0.62,
         "hurst_regime": "trending",
@@ -1058,7 +1058,7 @@ def _test_cli():
         "ticker": 42,
         "symbol": "NVD3.L",
         "direction": "Long",
-        "strategy": "VanguardSniper",
+        "strategy": "TypeB",
         "confidence": 72,
         "kelly_fraction": 0.15,
         "entry_price": 150.50,

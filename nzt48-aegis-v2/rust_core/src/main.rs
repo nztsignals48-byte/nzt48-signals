@@ -1067,7 +1067,7 @@ fn main() {
                 eprintln!(
                     "WARNING: SIGNAL_DROUGHT — {} ticks received but 0 signals generated and 0 vetoed. \
                      Python bridge is returning no_signal for every tick. \
-                     Check VanguardSniper thresholds, data quality, or bar history warmup.",
+                     Check signal thresholds, data quality, or bar history warmup.",
                     snap.ticks_received
                 );
             }
