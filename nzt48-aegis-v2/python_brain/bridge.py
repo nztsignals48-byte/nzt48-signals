@@ -1785,16 +1785,18 @@ def process_tick(msg):
 
         # TypeA-F classification: classify the signal based on indicator values
         # This replaces the dead Rust entry_engine.rs detectors with live Python classification.
-        volumes = [t.get("volume", 0) for t in ticks]
+        _cls_volumes = [t.get("volume", 0) for t in ticks]
+        _cls_prices = [t["last"] for t in ticks]
+        _cls_rsi = calculate_rsi(_cls_prices, period=14) if len(_cls_prices) >= 14 else None
         entry_type = classify_entry_type(
-            rsi_14=rsi_14, ibs=ibs, rvol=rvol, ticker_id=ticker_id,
-            prices=prices, volumes=volumes, vol_div=vol_div,
+            rsi_14=_cls_rsi, ibs=ibs, rvol=rvol, ticker_id=ticker_id,
+            prices=_cls_prices, volumes=_cls_volumes, vol_div=vol_div,
         )
         best["entry_type"] = entry_type
-        # Strategy = TypeA-F classification (not generic "VanguardSniper")
+        # Strategy = TypeA-F classification (not generic "Momentum")
         if entry_type != "Unclassified":
             best["strategy"] = entry_type
-        best["rsi"] = rsi_14 if rsi_14 is not None else 0.0
+        best["rsi"] = _cls_rsi if _cls_rsi is not None else 0.0
         best["ibs"] = ibs
 
         # Plan 1 Phase 3: Apply adaptive entry type weight to Kelly sizing
