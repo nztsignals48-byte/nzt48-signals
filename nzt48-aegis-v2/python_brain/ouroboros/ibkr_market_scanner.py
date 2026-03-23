@@ -149,13 +149,14 @@ SCANNER_CONFIGS: List[Dict[str, Any]] = [
 # IBKR scanner location codes per exchange region.
 # These are the literal strings IBKR's reqScannerSubscription accepts.
 EXCHANGE_LOCATIONS: Dict[str, str] = {
-    "US": "STK.US.MAJOR",
-    "TSE": "STK.JP.TSE",
-    "HKEX": "STK.HK.SEHK",
-    "LSE": "STK.EU.LSEETF",
-    "XETRA": "STK.EU.IBIS",
-    "EURONEXT": "STK.EU.SBF",
-    "SGX": "STK.SG.SGX",
+    "US": "STK.US.MAJOR",       # NYSE + NASDAQ major listings
+    "TSE": "STK.HK.TSE",        # Tokyo Stock Exchange (under HK region in IBKR)
+    "HKEX": "STK.HK.SEHK",     # Hong Kong Stock Exchange
+    "LSE": "STK.EU.LSE",        # London Stock Exchange (not LSEETF)
+    "XETRA": "STK.EU.IBIS",    # Frankfurt/XETRA
+    "EURONEXT": "STK.EU.SBF",  # Euronext Paris
+    "SGX": "STK.HK.SGX",       # Singapore Exchange (under HK region in IBKR)
+    "ASX": "STK.HK.ASX",       # Australian Securities Exchange
 }
 
 # Session windows (UTC hours). Markets that are open get scanner allocations.
