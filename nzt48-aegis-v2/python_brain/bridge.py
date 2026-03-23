@@ -1255,7 +1255,7 @@ def _compute_confidence_floor(msg, ind):
 
 
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
-    """Stage 3: Generate signals from VanguardSniper + Orchestrator. Returns (vanguard, orchestrator)."""
+    """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
     bars_5m = ind["bars_5m"]
     common_fields = {
@@ -1275,6 +1275,30 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         if tb is not None:
             orchestrator_floor = max(conf_floor, tb)
 
+    # Helper: compute Kelly for a given confidence
+    def _kelly_for(confidence):
+        total_trades = msg.get("total_trades", 0)
+        k = kelly_12factor(
+            win_rate_raw=msg.get("win_rate", 0.5), total_trades=total_trades,
+            avg_win=msg.get("avg_win", 0.02), avg_loss=msg.get("avg_loss", 0.02),
+            leverage_factor=msg.get("leverage", 3), realized_vol_annual=msg.get("realized_vol", 0.30),
+            correlation_to_portfolio=msg.get("correlation", 0.0),
+            current_drawdown_pct=msg.get("drawdown_pct", 0.0),
+            amihud_illiq=msg.get("amihud", 0.0),
+            regime=hurst_regime if hurst_regime != "random" else msg.get("regime", "normal"),
+            spread_pct=msg.get("spread_pct", 0.1), time_of_day_fraction=msg.get("time_fraction", 0.5),
+            confidence=confidence, portfolio_heat_pct=msg.get("heat_pct", 0.0),
+            equity=msg.get("equity", 10000.0), price=msg["last"],
+        )
+        # Early ramp: use preliminary Kelly if we have few trades
+        if total_trades < 50:
+            pk = min(confidence / 1000.0, 0.05)
+            if k["kelly_fraction"] < pk:
+                eq = msg.get("equity", 10000.0)
+                k["kelly_fraction"] = pk
+                k["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
+        return k
+
     # VanguardSniper (momentum, non-mean-reverting regimes)
     vanguard_signal = None
     if hurst < 0.01 or hurst >= 0.20 or hurst_regime in ("trending", "random"):
@@ -1283,25 +1307,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                       for b in bars_5m] if bars_5m else ticks
         result = vanguard_evaluate(eval_ticks, confidence_floor=vanguard_floor)
         if result is not None:
-            total_trades = msg.get("total_trades", 0)
-            kelly = kelly_12factor(
-                win_rate_raw=msg.get("win_rate", 0.5), total_trades=total_trades,
-                avg_win=msg.get("avg_win", 0.02), avg_loss=msg.get("avg_loss", 0.02),
-                leverage_factor=msg.get("leverage", 3), realized_vol_annual=msg.get("realized_vol", 0.30),
-                correlation_to_portfolio=msg.get("correlation", 0.0),
-                current_drawdown_pct=msg.get("drawdown_pct", 0.0),
-                amihud_illiq=msg.get("amihud", 0.0),
-                regime=hurst_regime if hurst_regime != "random" else msg.get("regime", "normal"),
-                spread_pct=msg.get("spread_pct", 0.1), time_of_day_fraction=msg.get("time_fraction", 0.5),
-                confidence=result["confidence"], portfolio_heat_pct=msg.get("heat_pct", 0.0),
-                equity=msg.get("equity", 10000.0), price=msg["last"],
-            )
-            if total_trades < 50:
-                pk = result["kelly_fraction"]
-                if kelly["kelly_fraction"] < pk:
-                    eq = msg.get("equity", 10000.0)
-                    kelly["kelly_fraction"] = pk
-                    kelly["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
+            kelly = _kelly_for(result["confidence"])
             vanguard_signal = {
                 "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                 "confidence": result["confidence"],
@@ -1331,7 +1337,113 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             sys.stderr.write(f"Bridge: orchestrator error (non-fatal): {e}\n")
             sys.stderr.flush()
 
-    return vanguard_signal, orchestrator_signal
+    # ── NEW STRATEGIES (Sprint C, 2026-03-23) ──
+
+    # Strategy: IBS Mean Reversion (Connors RSI-2 / IBS combo)
+    # Academic basis: Connors & Alvarez (2008). IBS < 0.2 + RSI(2) < 10 → ~57% WR.
+    # Fires in mean-reverting or random regimes (NOT trending — momentum owns those).
+    ibs_signal = None
+    if (hurst_regime in ("mean_reverting", "random") or hurst < 0.45) and len(bars_5m) >= 10:
+        ibs_val = ind["ibs"]
+        prices_for_rsi = [b["close"] for b in bars_5m]
+        rsi2 = calculate_rsi(prices_for_rsi, period=2)
+        if ibs_val is not None and rsi2 is not None and ibs_val < 0.20 and rsi2 < 15.0 and ind["rvol"] > 0.7:
+            # Graduated confidence: lower IBS + lower RSI = higher conviction
+            ibs_conf = 55.0
+            if ibs_val < 0.10:
+                ibs_conf += 15.0
+            if rsi2 < 5.0:
+                ibs_conf += 10.0
+            if ind["rvol"] > 1.5:
+                ibs_conf += 5.0
+            ibs_conf = min(ibs_conf, 95.0)
+            if ibs_conf >= conf_floor:
+                kelly = _kelly_for(ibs_conf)
+                ibs_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": ibs_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "IBS_MeanReversion", "ibs_entry": round(ibs_val, 4),
+                    "rsi2_entry": round(rsi2, 2), **common_fields,
+                }
+
+    # Strategy: Volume Expansion Continuation
+    # Entry: RVOL > 2.0 AND ADX > 20 AND price > EMA20 AND 3+ consecutive up bars.
+    # This is a higher-quality filter for TypeB momentum — captures institutional flow.
+    volexp_signal = None
+    if ind["rvol"] > 2.0 and ind["adx"] > 20.0 and len(bars_5m) >= 5:
+        # Check 3+ consecutive up bars
+        recent = bars_5m[-4:]
+        up_count = sum(1 for b in recent if b["close"] > b["open"])
+        if up_count >= 3:
+            # Check price > EMA20 (use simple check: price > mean of last 20 bars)
+            if len(bars_5m) >= 20:
+                ema20_approx = sum(b["close"] for b in bars_5m[-20:]) / 20
+                if bars_5m[-1]["close"] > ema20_approx:
+                    # Graduated confidence based on RVOL strength
+                    ve_conf = 60.0
+                    if ind["rvol"] > 3.0:
+                        ve_conf += 10.0
+                    if ind["adx"] > 30.0:
+                        ve_conf += 10.0
+                    if ind["vol_slope"] > 0:
+                        ve_conf += 5.0
+                    ve_conf = min(ve_conf, 95.0)
+                    if ve_conf >= conf_floor:
+                        kelly = _kelly_for(ve_conf)
+                        volexp_signal = {
+                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                            "confidence": ve_conf,
+                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                            "strategy": "VolExpansion", **common_fields,
+                        }
+
+    # Strategy: Opening Range Breakout (ORB) — US session only
+    # Entry: Price breaks the first-30-min high/low with volume confirmation.
+    # Time window: first 60 bars (5s each = 5min) after US cash open.
+    # For now, we detect via time_fraction (0.0=LSE open, higher=later in day).
+    orb_signal = None
+    ts_ns = msg.get("timestamp_ns", 0)
+    if ts_ns > 0 and len(bars_5m) >= 6:
+        from datetime import datetime, timezone
+        utc_dt = datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=timezone.utc)
+        utc_hour = utc_dt.hour
+        utc_min = utc_dt.minute
+        # US cash opens at 14:30 UTC. ORB window: 14:45-15:30 UTC (15-60 min after open)
+        if 14 <= utc_hour <= 15 and (utc_hour == 14 and utc_min >= 45 or utc_hour == 15 and utc_min <= 30):
+            # Find the opening range: first 3 five-minute bars of this session
+            # (bars_5m index 0 may not be session open, but we approximate with recent 6 bars)
+            exchange = _get_exchange_for_symbol(ticker_symbols.get(ticker_id, ""))
+            if exchange == "US":
+                range_bars = bars_5m[:min(3, len(bars_5m))]
+                orb_high = max(b["high"] for b in range_bars)
+                orb_low = min(b["low"] for b in range_bars)
+                current = bars_5m[-1]["close"]
+                # Breakout above ORB high with volume
+                if current > orb_high and ind["rvol"] > 1.5:
+                    orb_conf = 60.0
+                    if ind["rvol"] > 2.5:
+                        orb_conf += 10.0
+                    if ind["adx"] > 15.0:
+                        orb_conf += 10.0
+                    orb_conf = min(orb_conf, 90.0)
+                    if orb_conf >= conf_floor:
+                        kelly = _kelly_for(orb_conf)
+                        orb_signal = {
+                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                            "confidence": orb_conf,
+                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                            "strategy": "ORB_Breakout", "orb_high": round(orb_high, 4),
+                            "orb_low": round(orb_low, 4), **common_fields,
+                        }
+
+    # Collect all signals, return the best two for downstream comparison
+    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal] if s]
+    all_signals.sort(key=lambda s: s["confidence"], reverse=True)
+
+    best1 = all_signals[0] if len(all_signals) >= 1 else None
+    best2 = all_signals[1] if len(all_signals) >= 2 else None
+    return best1, best2
 
 
 def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal):
@@ -1414,6 +1526,13 @@ def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal
         prices=cls_prices, volumes=cls_volumes, vol_div=ind["vol_div"],
     )
     best["entry_type"] = entry_type
+
+    # BT-010: Disable TypeA/D — backtest proved NET LOSERS (29.5%/24.1% WR, PF 0.04/0.03).
+    # These entry types destroy capital. Block them at classification, not at risk arbiter,
+    # so they never consume a cooldown slot or waste Rust evaluation cycles.
+    if entry_type in ("TypeA", "TypeD"):
+        return None
+
     if entry_type != "Unclassified":
         best["strategy"] = entry_type
     best["rsi"] = cls_rsi if cls_rsi is not None else 0.0
