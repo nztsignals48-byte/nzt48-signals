@@ -1548,7 +1548,8 @@ def process_tick(msg):
         mtf_aligned = (agreement_count >= 2)
 
     # SIM_MODE: skip MTF alignment gate entirely.
-    if not _SIM_MODE and not mtf_aligned:
+    # PAPER_VALIDATION: disabled — was #1 signal killer (27K vetoes, blocking valid trades)
+    if False and not _SIM_MODE and not mtf_aligned:
         _log_gate_veto(ticker_id, "mtf_misaligned", msg["last"],
                        {**_ind, "trend_5s": trend_5s, "trend_1m": trend_1m, "trend_5m": trend_5m},
                        "5s={} 1m={} 5m={} (need 2/3 same)".format(
