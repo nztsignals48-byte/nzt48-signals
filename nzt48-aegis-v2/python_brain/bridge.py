@@ -1378,12 +1378,14 @@ def process_tick(msg):
 
     structural_score = sum(sts_components.values())
 
-    # Gate: suppress if structural score too low (< 30 = poor microstructure)
-    # SIM_MODE: skip structural gate to maximize signal count for backtesting.
-    if not _SIM_MODE and structural_score < 30:
+    # Gate: suppress if structural score too low (< 15 = poor microstructure)
+    # Lowered from 30→15 for paper validation: allows signals during warmup when
+    # hurst/adx haven't stabilized (read 0.0, drag STS down). Revert to 30 for live.
+    # SIM_MODE: skip structural gate entirely.
+    if not _SIM_MODE and structural_score < 15:
         _log_gate_veto(ticker_id, "structural_tradability", msg["last"],
                        {**_ind, "structural_score": structural_score, **sts_components},
-                       "STS={}/100 < 30 minimum".format(structural_score))
+                       "STS={}/100 < 15 minimum".format(structural_score))
         return no_signal_base
 
     # Add structural score to indicator dict for downstream logging
@@ -1413,10 +1415,10 @@ def process_tick(msg):
         if last_vwap > 0:
             vwap_distance_pct = (msg["last"] - last_vwap) / last_vwap * 100
             # For LONG entries: reject if price too far ABOVE VWAP (chasing)
-            if vwap_distance_pct > 1.5:
+            if vwap_distance_pct > 3.0:  # Was 1.5% — too tight for 3x leveraged ETPs
                 _log_gate_veto(ticker_id, "vwap_extension", msg["last"],
                                {**_ind, "vwap": last_vwap, "vwap_dist_pct": vwap_distance_pct},
-                               "price {:.1f}% above VWAP (max 1.5%)".format(vwap_distance_pct))
+                               "price {:.1f}% above VWAP (max 3.0%)".format(vwap_distance_pct))
                 return no_signal_base
             # For pullback buy: ideal entry is price near VWAP (within ±0.5%)
             # Boost confidence if price is pulling back to VWAP from above
@@ -1483,10 +1485,10 @@ def process_tick(msg):
         last_vwap = _g2_vwap_hist[-1]
         if last_vwap > 0:
             extension = abs(msg["last"] - last_vwap) / last_vwap * 100
-            if extension > 3.0:
-                _log_gate_veto(ticker_id, "vwap_extension_3pct", msg["last"],
+            if extension > 5.0:  # Was 3.0% — too tight for 3x leveraged ETPs (3% move = normal)
+                _log_gate_veto(ticker_id, "vwap_extension_5pct", msg["last"],
                                {**_ind, "extension_pct": extension, "vwap": last_vwap},
-                               "extension={:.1f}% from VWAP (max 3%)".format(extension))
+                               "extension={:.1f}% from VWAP (max 5%)".format(extension))
                 return no_signal_base
 
     # ---- Evaluate VanguardSniper (momentum + any non-reverting regime) ----
