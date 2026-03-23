@@ -1454,6 +1454,189 @@ def analyze_missed_winners(date_str: str, wal_candidates: List[Path]) -> Dict[st
 
 
 # ---------------------------------------------------------------------------
+# 5.11. 3-Tier Intelligence Effectiveness Analysis
+# ---------------------------------------------------------------------------
+def _analyze_intelligence_tiers(
+    date_str: str,
+    trades: List[TradeRecord],
+    wal_candidates: List[Path],
+) -> Dict[str, Any]:
+    """Analyze effectiveness of all 3 intelligence tiers for Ouroboros meta-learning.
+
+    Tier 1 (IBKR Scanner): What % of scanner-recommended tickers led to profitable trades?
+    Tier 2 (Gemini): What % improvement does Gemini curation add over random selection?
+    Tier 3 (Claude): Do Claude rejections correlate with trade losses?
+
+    Returns a dict of effectiveness metrics for system_memory.json.
+    """
+    result: Dict[str, Any] = {
+        "date": date_str,
+        "ibkr_scanner_hit_rate": 0.0,
+        "gemini_alpha_vs_random": 0.0,
+        "claude_rejection_accuracy": 0.0,
+        "sample_sizes": {},
+    }
+
+    traded_symbols = {t.ticker for t in trades}
+    winning_symbols = {t.ticker for t in trades if t.pnl > 0}
+
+    # --- Tier 1: IBKR Scanner effectiveness ---
+    # Read scanner_results.json — which scanner-recommended tickers actually traded?
+    try:
+        scanner_path = DATA_DIR / "scanner_results.json"
+        if scanner_path.exists():
+            with open(scanner_path) as f:
+                scanner_data = json.load(f)
+            scanner_tickers = set(scanner_data.get("tickers", []))
+            if scanner_tickers:
+                scanner_traded = scanner_tickers & traded_symbols
+                scanner_winners = scanner_tickers & winning_symbols
+                hit_rate = len(scanner_winners) / max(len(scanner_traded), 1)
+                result["ibkr_scanner_hit_rate"] = round(hit_rate, 4)
+                result["sample_sizes"]["ibkr_scanner"] = {
+                    "recommended": len(scanner_tickers),
+                    "traded": len(scanner_traded),
+                    "won": len(scanner_winners),
+                }
+                log.info("Tier 1 IBKR Scanner: %d recommended, %d traded, %d won (hit=%.0f%%)",
+                         len(scanner_tickers), len(scanner_traded), len(scanner_winners),
+                         hit_rate * 100)
+    except Exception as e:
+        log.warning("Tier 1 IBKR Scanner analysis failed: %s", e)
+
+    # --- Tier 2: Gemini curation effectiveness ---
+    # Read gemini_scanner.ndjson — which Gemini-recommended tickers performed best?
+    try:
+        gemini_core_path = DATA_DIR / "gemini" / "core_universe_latest.json"
+        if gemini_core_path.exists():
+            with open(gemini_core_path) as f:
+                gemini_data = json.load(f)
+            gemini_tickers = set(gemini_data.get("data", {}).get("tickers", []))
+            if gemini_tickers and trades:
+                gemini_traded = gemini_tickers & traded_symbols
+                gemini_winners = gemini_tickers & winning_symbols
+
+                # Gemini alpha = (gemini WR) - (overall WR)
+                gemini_wr = len(gemini_winners) / max(len(gemini_traded), 1) if gemini_traded else 0
+                overall_wr = len(winning_symbols) / max(len(traded_symbols), 1) if traded_symbols else 0
+                gemini_alpha = gemini_wr - overall_wr
+
+                result["gemini_alpha_vs_random"] = round(gemini_alpha, 4)
+                result["sample_sizes"]["gemini"] = {
+                    "recommended": len(gemini_tickers),
+                    "traded": len(gemini_traded),
+                    "won": len(gemini_winners),
+                    "gemini_wr": round(gemini_wr, 4),
+                    "overall_wr": round(overall_wr, 4),
+                }
+                log.info("Tier 2 Gemini: %d recommended, %d traded, %d won (WR=%.0f%% vs overall=%.0f%%, alpha=%+.1f%%)",
+                         len(gemini_tickers), len(gemini_traded), len(gemini_winners),
+                         gemini_wr * 100, overall_wr * 100, gemini_alpha * 100)
+    except Exception as e:
+        log.warning("Tier 2 Gemini analysis failed: %s", e)
+
+    # --- Tier 3: Claude challenge effectiveness ---
+    # Read claude_curator.ndjson — do Claude rejections correlate with losses?
+    try:
+        claude_log_path = DATA_DIR / "claude_curator.ndjson"
+        if claude_log_path.exists():
+            claude_verdicts = []
+            with open(claude_log_path) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("action") == "evaluate_signal":
+                            claude_verdicts.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+
+            # Also scan WAL PositionClosed events for claude_verdict field
+            rejection_outcomes = {"correct_reject": 0, "false_reject": 0,
+                                  "correct_approve": 0, "false_approve": 0}
+            for wal_path in wal_candidates:
+                if not wal_path.exists():
+                    continue
+                try:
+                    with open(wal_path) as f:
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            try:
+                                event = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            payload = event.get("payload", {})
+                            if "PositionClosed" not in payload:
+                                continue
+                            pc = payload["PositionClosed"]
+                            verdict = pc.get("claude_verdict", "")
+                            pnl = pc.get("final_pnl", 0.0)
+                            if verdict == "reject":
+                                if pnl < 0:
+                                    rejection_outcomes["correct_reject"] += 1
+                                else:
+                                    rejection_outcomes["false_reject"] += 1
+                            elif verdict in ("approve", "reduce"):
+                                if pnl > 0:
+                                    rejection_outcomes["correct_approve"] += 1
+                                else:
+                                    rejection_outcomes["false_approve"] += 1
+                except Exception:
+                    continue
+
+            total_rejections = rejection_outcomes["correct_reject"] + rejection_outcomes["false_reject"]
+            if total_rejections > 0:
+                accuracy = rejection_outcomes["correct_reject"] / total_rejections
+                result["claude_rejection_accuracy"] = round(accuracy, 4)
+            total_approvals = rejection_outcomes["correct_approve"] + rejection_outcomes["false_approve"]
+
+            result["sample_sizes"]["claude"] = {
+                "total_verdicts": len(claude_verdicts),
+                "correct_rejections": rejection_outcomes["correct_reject"],
+                "false_rejections": rejection_outcomes["false_reject"],
+                "correct_approvals": rejection_outcomes["correct_approve"],
+                "false_approvals": rejection_outcomes["false_approve"],
+            }
+
+            # Compute PnL saved by rejections (shadow mode — trades still happened)
+            # In shadow mode, claude_rejected trades still execute. We measure if
+            # Claude's rejections WOULD have saved money.
+            saved_pnl = 0.0
+            for wal_path in wal_candidates:
+                if not wal_path.exists():
+                    continue
+                try:
+                    with open(wal_path) as f:
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            try:
+                                event = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            payload = event.get("payload", {})
+                            if "PositionClosed" not in payload:
+                                continue
+                            pc = payload["PositionClosed"]
+                            if pc.get("claude_rejected") and pc.get("final_pnl", 0) < 0:
+                                saved_pnl += abs(pc["final_pnl"])
+                except Exception:
+                    continue
+            result["claude_rejection_saved_pnl"] = round(saved_pnl, 2)
+
+            log.info("Tier 3 Claude: %d verdicts, rejections=%d (accuracy=%.0f%%), would-save=GBP %.2f",
+                     len(claude_verdicts), total_rejections,
+                     result["claude_rejection_accuracy"] * 100,
+                     saved_pnl)
+    except Exception as e:
+        log.warning("Tier 3 Claude analysis failed: %s", e)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main Entry Point
 # ---------------------------------------------------------------------------
 def run_nightly() -> int:
@@ -1823,6 +2006,39 @@ def run_nightly() -> int:
                         incident.get("severity", "unknown"), incident.get("summary", ""))
     except Exception as e:
         log.warning("Research store/anomaly analysis failed (non-fatal): %s", e)
+
+    # Step 5.11: 3-Tier Intelligence Effectiveness Analysis
+    # Measure how well each intelligence tier (IBKR Scanner, Gemini, Claude) contributes.
+    # Results feed into system_memory.json so Ouroboros can adapt tier weighting.
+    try:
+        tier_effectiveness = _analyze_intelligence_tiers(today, trades, wal_candidates if 'wal_candidates' in dir() else _build_wal_candidates(today))
+        recommendations["tier_effectiveness"] = tier_effectiveness
+
+        # Write to system_memory.json for cross-session persistence
+        sys_mem_path = DATA_DIR / "system_memory.json"
+        sys_mem = {}
+        if sys_mem_path.exists():
+            try:
+                with open(sys_mem_path) as f:
+                    sys_mem = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                sys_mem = {}
+        sys_mem["tier_effectiveness"] = tier_effectiveness
+        sys_mem["tier_effectiveness_updated"] = datetime.now(timezone.utc).isoformat()
+        try:
+            tmp_path = sys_mem_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(sys_mem, indent=2), encoding="utf-8")
+            os.rename(str(tmp_path), str(sys_mem_path))
+            log.info("Tier effectiveness written to system_memory.json")
+        except Exception as e:
+            log.warning("Failed to write system_memory.json: %s", e)
+
+        log.info("3-Tier Intelligence: scanner_hit=%.0f%%, gemini_alpha=%.1f%%, claude_accuracy=%.0f%%",
+                 tier_effectiveness.get("ibkr_scanner_hit_rate", 0) * 100,
+                 tier_effectiveness.get("gemini_alpha_vs_random", 0) * 100,
+                 tier_effectiveness.get("claude_rejection_accuracy", 0) * 100)
+    except Exception as e:
+        log.warning("3-Tier intelligence analysis failed (non-fatal): %s", e)
 
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)

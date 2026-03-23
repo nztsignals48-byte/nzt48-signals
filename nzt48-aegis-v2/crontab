@@ -124,3 +124,14 @@
 
 # S19: SEC/RNS Filing Scanner (H7) — daily 06:00 UTC Mon-Fri (shadow mode)
 0 6 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_filing_scanner >> /var/log/claude_filing_scanner.log 2>&1
+
+# === TIER 2: GEMINI PRO — Universe Curation (Sprint Intelligence) ===
+
+# Gemini Core Universe Scan — every 2 hours Mon-Fri (aligned with ticker_selector, 5 min offset)
+# Recommends top 80 session-aware tickers for streaming. Output: /app/data/gemini/core_universe_latest.json
+5 23 * * 0-4 cd /app && GEMINI_API_KEY="${GEMINI_API_KEY}" python3 -m python_brain.ouroboros.gemini_scanner --core >> /app/data/gemini_scanner.log 2>&1
+5 1,3,5,7,9,11,13,15,17,19,21 * * 1-5 cd /app && GEMINI_API_KEY="${GEMINI_API_KEY}" python3 -m python_brain.ouroboros.gemini_scanner --core >> /app/data/gemini_scanner.log 2>&1
+
+# Gemini Morning Brief — 06:00 UTC Mon-Fri (before European session)
+# Pre-market analysis: focus tickers, avoids, regime assessment, strategy weights.
+0 6 * * 1-5 cd /app && GEMINI_API_KEY="${GEMINI_API_KEY}" python3 -m python_brain.ouroboros.gemini_scanner --brief >> /app/data/gemini_scanner.log 2>&1

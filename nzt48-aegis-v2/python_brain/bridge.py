@@ -1722,6 +1722,38 @@ def process_tick(msg):
         best["vpin"] = round(_vpin_value, 4)
         best["vpin_would_block"] = bool(_vpin_value < 0.3 and rvol > 2.5)
 
+        # =====================================================================
+        # TIER 3: Claude signal challenge (cold path, 5-30s latency)
+        # Only challenge signals above confidence threshold to avoid latency on
+        # weak signals. Runs in SHADOW MODE: logs verdict but does NOT block.
+        # After 100+ shadow verdicts, nightly_v6 analyses: does Claude rejection
+        # correlate with trade losses? If yes, promote to hard gate.
+        # =====================================================================
+        if best.get("confidence", 0) >= 70 and not _SIM_MODE:
+            try:
+                from python_brain.ouroboros.claude_curator import evaluate_signal
+                claude_result = evaluate_signal(
+                    signal_dict=best,
+                    market_context={
+                        "regime": hurst_regime,
+                        "drawdown_pct": msg.get("drawdown_pct", 0),
+                        "vix": msg.get("vix", 20),
+                        "equity": msg.get("equity", 10000),
+                        "exchange": msg.get("exchange", ""),
+                        "open_positions": msg.get("open_positions", 0),
+                        "trades_today": msg.get("trades_today", 0),
+                    }
+                )
+                if claude_result.get("claude_verdict") == "reject":
+                    # SHADOW MODE: log rejection but DON'T block the trade
+                    best["claude_rejected"] = True
+                    best["claude_reasoning"] = claude_result.get("reasoning", "")[:200]
+                elif claude_result.get("adjusted_confidence"):
+                    best["claude_adjusted_confidence"] = claude_result["adjusted_confidence"]
+                best["claude_verdict"] = claude_result.get("claude_verdict", "no_response")
+            except Exception as e:
+                best["claude_error"] = str(e)[:200]
+
         # Record cooldown timestamp
         _last_signal_tick[ticker_id] = tick_count
         return best

@@ -1760,6 +1760,43 @@ def run_config_writer() -> int:
     events = load_todays_wal_events(today)
     watchlist = load_watchlist()
 
+    # --- 0. Gemini core universe → active_watchlist.json (Tier 2 intelligence) ---
+    # Read Gemini's latest core universe recommendation and write to active_watchlist
+    # for the engine to consume. Gemini runs every 2 hours; config_writer runs nightly.
+    # Only overwrite watchlist if Gemini data is fresh (< 4 hours old).
+    try:
+        gemini_core_path = DATA_DIR / "gemini" / "core_universe_latest.json"
+        if gemini_core_path.exists():
+            gemini_mtime = gemini_core_path.stat().st_mtime
+            gemini_age_hours = (time.time() - gemini_mtime) / 3600.0
+            if gemini_age_hours < 4.0:
+                with open(gemini_core_path) as f:
+                    gemini_data = json.load(f)
+                gemini_tickers = gemini_data.get("data", {}).get("tickers", [])
+                if gemini_tickers:
+                    watchlist_payload = {
+                        "tickers": gemini_tickers[:80],
+                        "source": "gemini",
+                        "timestamp": gemini_data.get("timestamp"),
+                        "session": gemini_data.get("data", {}).get("session", "unknown"),
+                    }
+                    watchlist_path = CONFIG_DIR / "active_watchlist.json"
+                    tmp_path = watchlist_path.with_suffix(".json.tmp")
+                    tmp_path.write_text(json.dumps(watchlist_payload, indent=2), encoding="utf-8")
+                    os.rename(str(tmp_path), str(watchlist_path))
+                    log.info("Gemini → active_watchlist.json: %d tickers (%.1fh old, session=%s)",
+                             len(gemini_tickers[:80]), gemini_age_hours,
+                             watchlist_payload["session"])
+                else:
+                    log.info("Gemini core_universe_latest.json has no tickers, skipping watchlist update")
+            else:
+                log.info("Gemini core_universe_latest.json is stale (%.1fh old), skipping watchlist update",
+                         gemini_age_hours)
+        else:
+            log.info("Gemini core_universe_latest.json not found, skipping watchlist update")
+    except Exception as e:
+        log.warning("Gemini → watchlist integration failed (non-fatal): %s", e)
+
     # --- 1. dynamic_weights.toml (always written, even with defaults) ---
     try:
         dw_content = generate_dynamic_weights_toml(recs, metrics, history, events)

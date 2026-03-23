@@ -287,6 +287,21 @@ LSE_during_overlap = 20
 # Slots reserved for off-session tickers (pre-market scanning, overnight movers)
 off_session_reserve = 10
 
+# IBKR Market Scanner — real-time reqScannerSubscription to discover dark horse candidates.
+# Runs as a standalone Python daemon (client_id=103) alongside the Rust engine.
+# Writes scanner_results.json atomically; engine reads it for dark horse slot promotion.
+# See: python_brain/ouroboros/ibkr_market_scanner.py
+[scanner.ibkr]
+enabled = true
+client_id = 103                      # Dedicated scanner client (engine=101, analytics=102)
+max_scanners = 10                    # Max concurrent scanner subscriptions (IBKR limits ~10)
+results_per_scanner = 50             # Max results per scanner request
+rotation_secs = 300                  # Rotate exchange focus every 5 minutes within a session
+results_file = "/app/data/scanner_results.json"
+log_file = "/app/data/ibkr_market_scanner.ndjson"
+reconnect_backoff_secs = [1, 2, 4, 8, 16, 32, 60]
+connect_timeout_sec = 15
+
 # Static blacklist — tickers with proven negative edge from 59-day 65K-trade backfill.
 # These are blocked BEFORE signal generation (not just via dynamic Ouroboros blacklist).
 # Review quarterly — remove if spread/liquidity improves.
@@ -530,3 +545,33 @@ entry_cooldown_bars = 0              # No between-entry cooldown in backfill_sim
 max_positions_override = 15          # PAPER VALIDATION: Maximise trade data. Revert to 3 for live.
 paper_mode = true
 starting_equity_gbp = 10000
+
+# ============================================================================
+# [intelligence] — 3-Tier Intelligence Stack (Plan 2)
+# Tier 1: IBKR Scanner (fast, deterministic, free)
+# Tier 2: Gemini Pro (cold path, 2-hourly universe curation, ~$0/month free tier)
+# Tier 3: Claude (cold path, signal challenger, $0/month via Max subscription)
+# ============================================================================
+[intelligence]
+# Tier 1: IBKR Scanner
+ibkr_scanner_enabled = true
+ibkr_scanner_client_id = 102
+ibkr_scanner_results_file = "/app/data/scanner_results.json"
+
+# Tier 2: Gemini Pro
+gemini_enabled = true
+gemini_model = "gemini-2.5-pro"
+gemini_core_interval_secs = 7200       # 2-hour core universe scan
+gemini_brief_hour_utc = 6              # Morning brief at 06:00 UTC
+gemini_core_output = "/app/data/gemini/core_universe_latest.json"
+gemini_log_file = "/app/data/gemini_scanner.ndjson"
+
+# Tier 3: Claude
+claude_enabled = true
+claude_challenge_min_confidence = 70   # Only challenge signals >= this confidence
+claude_shadow_mode = true              # Log verdicts but don't block trades yet
+claude_promote_after_n = 100           # Promote to hard gate after 100 shadow verdicts
+claude_log_file = "/app/data/claude_curator.ndjson"
+
+# Meta-learning: tier effectiveness tracking
+tier_effectiveness_file = "/app/data/system_memory.json"
