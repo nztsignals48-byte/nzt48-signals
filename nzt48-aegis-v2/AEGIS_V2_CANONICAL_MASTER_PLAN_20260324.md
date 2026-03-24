@@ -1,337 +1,456 @@
-# AEGIS V2 — Canonical Master Plan + System Audit
-**Date**: 2026-03-24 (updated session 3 — Microstructure Sprint + Code Audit)
-**Status**: 22 sections + audit findings merged. S1+S2+S3 DONE. S4 next.
-**Supersedes**: All prior plans + standalone AEGIS_V2_SYSTEM_AUDIT_20260324.md
-**Source of truth hierarchy**: Code > Runtime > This plan > Old docs
+# AEGIS V2 — Canonical Master Plan
+**Date**: 2026-03-24 (updated end-of-day — S1+S2+S3+S4 DONE, all code-verified)
+**Status**: 21 sections. Source of truth for the entire system.
+**Supersedes**: All prior plans (PLAN_1, PLAN_2, MERGED_MASTER_PLAN — archived in docs/archive/)
+**Truth hierarchy**: Code > Runtime > This plan > Old docs
 
 ---
 
 ## 1. Executive Summary
 
-AEGIS V2 is a paper-trading system on EC2 (c7i-flex.large, 4GB RAM). Rust engine (32,603 LOC) + Python bridge (1,850 LOC). IS_LIVE=false — cannot place real orders.
+AEGIS V2 is a paper-trading system on EC2. Rust engine (32,603 LOC) processes ticks and enforces risk. Python bridge (1,850 LOC) generates signals. IS_LIVE=false is hardcoded in Rust — the system cannot place real orders.
 
-**Performance**: ~66 trades, 35.4% WR, -£6.79 P&L, ~0.77 PF. Below all validation gates.
+**Performance (2026-03-24)**: ~68 trades, 35.4% WR, -£6.79 cumulative P&L, ~0.77 PF. Every validation gate is failing. The system is not ready for live capital.
 
-**Audit finding (session 3)**: The system has **2 independent signal generators** (VanguardSniper + Orchestrator S17-S20) and a **classification layer (TypeA-F) that blocks more than it helps**. The "6 strategies" narrative is inaccurate — 4 inline generators (IBS_MR, VolExp, ORB, GapFade) generate signals that get immediately blocked by the TypeC/E/F shadow gate. TypeB classification is unreachable (3-bar rising RVOL never fires on 5s bars).
+**What was fixed today (S4)**: The classification layer was blocking signals that passed all quality checks. Shadow gates on TypeC/E/F removed. TypeB loosened to actually fire. TypeE threshold aligned. Startup clock fixed. First TypeE trade observed (GOOG Long). IBS_MeanReversion now live.
 
-**Capital doctrine**: VanguardSniper is the capital core. TypeB needs loosened classification to actually fire. TypeC/E/F shadow gate should be removed — risk arbiter (32 checks) provides real protection.
+**What remains broken**: 35.4% WR. LSEETF leveraged ETPs are the dominant loss source (0% WR, -£30 over 28 trades). Validation gates all failing. Ouroboros frozen at N=68 (needs N=300). 8 paper overrides not reverted. Zero cost injection in simulation.
 
-**Session 3 delivered**: Board lot sizing, L1 gate, unhalt grace, spoof calibration, EC2 live config. System trading: STAN.L and AI entries observed.
+**Capital doctrine**: VanguardSniper is the capital core (33+ trades, only strategy with production history). All other strategies are either newly unblocked (S4) or dormant awaiting their market conditions.
 
 ---
 
-## 2. Current Verified System State
+## 2. System Identity
 
-| Fact | Value | Evidence |
-|------|-------|----------|
-| Branch | `feat/tier-system-enhancements-full` | `git log` |
-| Containers | 3 healthy (aegis-v2, ib-gateway, redis) | `docker ps` |
-| Subscriptions | 100 reqMktData | Engine logs |
-| Python Bridge | Running | bridge_stderr.log |
-| Ouroboros | FROZEN (observe_only=true) | config.toml |
-| Signal generators | 2 real (Vanguard + Orchestrator) | bridge.py audit |
-| Signal producers | 1 (VanguardSniper: 33 trades) | WAL data |
-| Classification layer | TypeA-F (3 disabled, 2 shadow-blocked, 1 unreachable) | bridge.py:1582-1592 |
-| Equity | £10,000 | system_memory.json |
-| Validation gate | FAILING (35.4% WR, ~0.77 PF, 14 consec losses) | system_memory.json |
+| Fact | Value | Source |
+|------|-------|--------|
+| Branch | `feat/tier-system-enhancements-full` | git log |
+| GitHub | `nztsignals48-byte/nzt48-signals` (PRIVATE) | remote -v |
+| Engine | Rust 2024 edition (1.94.0) | Cargo.toml |
+| Rust LOC | 32,603 | tokei |
+| Python LOC | 1,850 | tokei |
+| IS_LIVE | false (hardcoded) | engine.rs |
+| Starting equity | £10,000 | system_memory.json |
+| Account type | UK ISA | — |
+| Containers | 3: aegis-v2, aegis-ib-gateway, aegis-redis | docker ps |
+| IB Gateway | port 4003, client_id=101 | docker-compose.yml |
+| Redis password | nzt48redis | docker-compose.yml |
 
 ---
 
 ## 3. Source-of-Truth Hierarchy
 
-| Rank | Source | What it governs |
-|------|--------|----------------|
+| Rank | Source | Governs |
+|------|--------|---------|
 | 1 | Rust code (`rust_core/src/`) | Execution, risk, exits, WAL, broker |
 | 2 | Python code (`python_brain/`) | Signals, sizing, classification, learning |
 | 3 | Config files (`config/`) | Parameters, thresholds, universe |
-| 4 | EC2 runtime state | What's actually deployed |
-| 5 | WAL events (`/app/events/`) | Trade history, P&L |
+| 4 | EC2 runtime state | What is actually deployed right now |
+| 5 | WAL events (`/app/events/`) | Trade history, P&L, crash recovery |
 | 6 | system_memory.json | Nightly-aggregated performance |
 | 7 | This plan | Architecture decisions, roadmap |
 
+If this plan contradicts code, the code is correct and this plan is wrong.
+
 ---
 
-## 4. Runtime Ownership Map
+## 4. Current Performance
 
-| Concern | Owner | Files |
-|---------|-------|-------|
-| Tick processing | Rust engine.rs | engine.rs:891 |
+| Metric | Value | Gate Threshold | Status |
+|--------|-------|----------------|--------|
+| Lifetime trades | ~68 | — | Growing (system trading today) |
+| Win rate | 35.4% | >= 40% | **FAILING** |
+| Profit factor | ~0.77 | >= 1.3 | **FAILING** |
+| Cumulative P&L | -£6.79 | — | Negative |
+| Max consecutive losses | 14 | < 8 | **FAILING** |
+| Strategy diversity | 1 with WR>35% | >= 2 | **FAILING** |
+
+**Dominant loss source**: LSEETF leveraged ETPs — 0% WR, -£30 over 28 trades. These are the single biggest drag on system performance.
+
+**Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades with cost injection (Sprint S7).
+
+---
+
+## 5. Runtime Ownership Map
+
+| Concern | Owner | Key Files |
+|---------|-------|-----------|
+| Tick processing | Rust engine.rs | engine.rs (~3200 lines) |
 | Entry gating (32 checks) | Rust risk_arbiter.rs | risk_arbiter.rs |
-| Exit decisions | Rust exit_engine.rs | exit_engine.rs (Chandelier 5-rung) |
-| Signal generation | Python bridge.py | 2 generators + TypeA-F classification |
-| Position sizing | Python kelly_12factor.py | 12-factor + sim costs |
+| Exit decisions | Rust exit_engine.rs | Chandelier 5-rung, time-stop |
+| Order routing | Rust ibkr_broker.rs | BrokerAdapter trait, L1 tracking |
+| Board lot sizing | Rust engine.rs | min_lot_for_exchange() in broker.rs |
+| Signal generation | Python bridge.py | VanguardSniper + Orchestrator + inline generators |
+| Signal classification | Python bridge.py:606-659 | TypeA-F labels |
+| Position sizing | Python kelly_12factor.py | 12-factor Kelly + sim costs |
 | Nightly learning | Python nightly_v6.py | FROZEN (observe_only) |
-| Universe curation | Python ticker_selector.py + Gemini | Rotation priority |
-| Signal challenge | Claude curator | Shadow only, non-blocking |
+| Persistent memory | Python persistent_memory.py | system_memory.json (cumulative stats) |
+| Config generation | Python config_writer.py | dynamic_weights.toml (FROZEN) |
+| Universe curation | Python ticker_selector.py + Gemini | Rotation priority, cron 2h |
+| Signal challenge | Python claude_curator.py | Shadow mode, advisory, non-blocking |
 
 ---
 
-## 5. Strategy Inventory (Audit-Corrected)
+## 6. What Is Actually Working (Code-Verified)
 
-**AUDIT FINDING**: The real signal topology is 2 generators + 1 classification layer, not "11 strategies."
-
-### Signal Generators (independent, produce signals)
-
-| Generator | Status | Trades | Logic | Verdict |
-|-----------|--------|--------|-------|---------|
-| VanguardSniper | **LIVE-PRODUCING** | 33 | ADX≥25 + Price>EMA20 + RVOL≥1.5 | **Capital core** |
-| Orchestrator S17 (VWAP Dip) | **LIVE-DORMANT** | 0 | Price >2σ below VWAP, ADX<25, Hurst<0.5 | Mean-reversion, regime-filtered |
-| Orchestrator S18 (Gap Fade) | **LIVE-DORMANT** | 0 | Gap 1.5-6%, RVOL<2 (liquidity only) | Event-driven, infrequent |
-| Orchestrator S19 (RSI/IBS) | **LIVE-DORMANT** | 0 | RSI(2)<5, IBS<0.20, above 200 SMA | Extreme oversold |
-| Orchestrator S20 (Cross-Mkt) | **LIVE-DORMANT** | 0 | SPY 15min move >0.3%, ADX>20, Hurst>0.5 | US macro momentum |
-| IBS_MeanReversion | **BLOCKED** (TypeE shadow) | 0 | IBS<0.30, RSI2<25. **Generates but shadow gate kills** | **FIX: remove shadow gate** |
-| VolExpansion | **LIVE-DORMANT** | 0 | RVOL>2.0, ADX>20, 3+ up bars | Escapes type gate (Unclassified) |
-| ORB_Breakout | **LIVE-DORMANT** | 0 | US session 14:45-15:30, price>ORB high, RVOL>1.5 | US-only window |
-| GapFade | **LIVE-DORMANT** | 0 | Gap down >1%, RVOL<2 (liquidity) | Event-driven |
-
-### Classification Layer (labels signals, does not generate)
-
-| Label | Status | Condition | Issue |
-|-------|--------|-----------|-------|
-| TypeA (DipRecovery) | **DISABLED** | RSI<30, RVOL>2.5 | 29.5% WR — correct to block |
-| TypeB (EarlyRunner) | **UNREACHABLE** | 3-bar rising RVOL + RSI [30,70] | **FIX: loosen to 2-bar, RSI [20,80]** |
-| TypeC (OverboughtFade) | **SHADOW-BLOCKED** | RSI>80 + price up + vol down | **FIX: remove shadow gate** |
-| TypeD (SupportBounce) | **DISABLED** | RSI 25-35, near daily low | 24.1% WR — correct to block |
-| TypeE (IBS) | **SHADOW-BLOCKED** | IBS<0.10, RVOL>1.0 | **FIX: align threshold to 0.30 (matches inline generator)** |
-| TypeF (OBVDivergence) | **SHADOW-BLOCKED** | vol_div<-0.5, RVOL>0.7 | **FIX: remove shadow gate** |
-
-### The Classification Bottleneck (Root Cause)
-
-```python
-# bridge.py:1582-1592 — THIS IS THE BOTTLENECK
-_DISABLED_TYPES = {"TypeA", "TypeD"}   # Correct — proven losers
-_SHADOW_TYPES = {"TypeC", "TypeE", "TypeF"}  # WRONG — kills signals that passed all quality checks
-```
-
-**The fix**: Remove TypeC/E/F from shadow gate. Risk arbiter (32 checks) provides real protection.
-
-**TypeE threshold bug**: Classifier uses `ibs < 0.10` (config.toml:445) but inline IBS_MR generator uses `ibs < 0.30` (bridge.py:1359). Mismatch means IBS signals fire but get caught as TypeE and blocked.
-
----
-
-## 6. Contradiction Register (Audit-Merged)
-
-| ID | Issue | Severity | Status |
-|----|-------|----------|--------|
-| C01 | Gemini table row still says BROKEN | LOW | Fix in manual |
-| C02 | TypeB "best but never fires" — it's an unreachable label, not a latent strategy | HIGH | **FIX: loosen TypeB classification** |
-| C03 | entry_engine.rs looks active but not used at runtime | MEDIUM | Quarantined, documented |
-| ~~C05~~ | Paper fills — CLOSED (S1 audit: ask/bid realistic) | CLOSED | S1 DONE |
-| ~~C06~~ | PF=0.0 — CLOSED (S2 fix) | CLOSED | S2 DONE |
-| X01 | "6 strategies" narrative is wrong — 2 generators + classification | HIGH | **FIX: plan corrected above** |
-| X03 | IBS_MR/VolExp/ORB/GapFade "LIVE" but shadow-blocked | MEDIUM | **FIX: remove shadow gate** |
-| X04 | Risk arbiter CHECK 26 dead (scanner score sentinel=-1, never triggers) | LOW | **FIX: delete CHECK 26** |
-| X07 | 8 paper overrides not reverted | CRITICAL (pre-live) | Sprint S6 |
-| X08 | Zero slippage/commission in sim | HIGH | Sprint S7 |
-
----
-
-## 7. Pre-Live Blockers
-
-| # | Blocker | Status |
-|---|---------|--------|
-| 1 | IS_LIVE=false hardcoded | OPEN — Rust rebuild needed |
-| 2 | 8 paper overrides in config.toml | OPEN — Sprint S6 |
-| ~~3~~ | ~~No time-stop~~ | **CLOSED** — deployed (45min, 0.3x ATR) |
-| 4 | WR 35.4% (need 40%) | OPEN — need more/better trades |
-| 5 | PF ~0.77 (need 1.3) | OPEN — need strategy improvement |
-| 6 | 14 consecutive losses (need <8) | OPEN — need better filtering |
-| ~~7~~ | ~~Paper fill realism~~ | **CLOSED** — S1 confirmed ask/bid |
-| 8 | Only 1 of 6 strategies producing | OPEN — **FIX: unblock shadow strategies** |
-| 9 | Ouroboros frozen on N=48 | OPEN — need N=300 |
-| 10 | EC2 4GB RAM | OPEN — Sprint S5 |
-
----
-
-## 8. What Is Actually Working (Audit Section B)
+Every item below has been verified against running code or runtime output.
 
 | Component | Status | Evidence |
 |-----------|--------|----------|
-| Rust engine tick processing | **WORKING** | 570k+ ticks, <1ms/tick |
-| Risk arbiter (32 checks) | **WORKING** | Deterministic, fail-closed |
-| Chandelier 5-rung exit | **WORKING** | Rung advancement in WAL, stops ratchet |
-| Time-stop (45min, 0.3x ATR) | **WORKING** | Halt-safe (active_trading_ticks) |
-| Board lot sizing | **WORKING** | TSE/HKEX/SGX = 100-share lots |
-| Spoof detector | **WORKING** | 25x + 2% floor, zero false positives |
-| Python bridge IPC | **WORKING** | JSON stdin/stdout, 5s timeout |
-| VanguardSniper | **WORKING** | 33 trades, Kelly sizing |
-| Orchestrator S17-S20 | **WORKING** | 4 evaluators from strategies.toml |
-| WAL logging | **WORKING** | Crash recovery source |
-| Nightly pipeline | **WORKING** | All stages run correctly |
-| Strategy registry | **WORKING** | Perfect alignment with bridge.py |
-| Docker deployment | **WORKING** | Preflight, graceful degradation |
-| Cron scheduler | **WORKING** | No zombies |
+| Rust engine tick processing | **WORKING** | 570k+ ticks processed, <1ms/tick |
+| Risk arbiter (32 checks) | **WORKING** | Deterministic, fail-closed, <1ms |
+| Chandelier 5-rung exit | **WORKING** | Rung advancement tracked in WAL, stops ratchet correctly |
+| Time-stop (45min, 0.3x ATR) | **WORKING** | Halt-safe — active_trading_ticks pauses during halts |
+| Unhalt grace period | **WORKING** | active_trading_ticks reset to 0 on halt lift |
+| Board lot sizing | **WORKING** | TSE/HKEX/SGX = 100-share lots, LOT_SKIP on sub-lot |
+| Spoof detector | **WORKING** | 25x multiplier + 2% absolute floor, zero false positives |
+| Python bridge IPC | **WORKING** | JSON over stdin/stdout, 5s timeout, reader thread |
+| VanguardSniper | **WORKING** | 33+ trades, confidence scoring, Kelly sizing |
+| Orchestrator S17-S20 | **WORKING** | 4 evaluators from strategies.toml, all enabled, functional |
+| WAL logging | **WORKING** | Crash recovery source, archive rotation on restart |
+| Nightly pipeline | **WORKING** | nightly_v6.py -> persistent_memory -> config_writer, all run correctly |
+| PF tracking | **WORKING** | cumulative_gross_wins/losses in persistent_memory.py (fixed S2) |
+| Startup clock | **WORKING** | Uses system UTC for initial trading mode (fixed S4D) |
+| Strategy registry | **WORKING** | config/strategy_registry.json, perfect alignment with bridge.py |
+| Docker deployment | **WORKING** | Preflight checks, graceful degradation |
+| Cron scheduler | **WORKING** | supercronic, no zombies, proper serialization |
 
 ---
 
-## 9. Complexity Register (Audit Section E)
+## 7. Signal Generators (Code-Verified from bridge.py)
 
-| Item | Files | Impact | Action |
-|------|-------|--------|--------|
-| ~~Shadow gate blocks IBS/TypeC/E/F~~ | bridge.py:1583 | ~~Kills valid signals~~ | **DONE S4A** — shadow gate removed |
-| ~~TypeB unreachable condition~~ | bridge.py:631 | ~~"Best strategy" never fires~~ | **DONE S4B** — loosened to 2-bar rising, RSI [20,80] |
-| ~~TypeE threshold mismatch~~ | config.toml:445 | ~~0.10 vs 0.30~~ | **DONE S4C** — aligned to 0.30 |
-| ~~Startup clock Dark mode~~ | engine.rs:813 | ~~Starts Dark during market hours~~ | **DONE** — uses system UTC clock at startup |
-| Dead CHECK 26 | risk_arbiter.rs:451 | Misleading, never triggers | **DELETE** (backlog) |
-| Dead Hurst returns | regime_detector.rs | Computed, never read | KEEP (future regime routing) |
-| Orphaned strategy_config.rs | strategy_config.rs | Loaded, never queried | KEEP (documents intent) |
-| Dead entry_engine.rs detectors | entry_engine.rs:88-500 | 500 LOC quarantined | KEEP (future option) |
+### Independent Signal Generators
+
+| # | Generator | Location | Status | Trades | Entry Logic | Notes |
+|---|-----------|----------|--------|--------|-------------|-------|
+| 1 | VanguardSniper | bridge.py:1302 | **LIVE-PRODUCING** | 33+ | ADX>=25 + Price>EMA20 + RVOL>=1.5 | Capital core. Only strategy with trade history. |
+| 2 | Orchestrator S17 VWAP Dip | autonomous_orchestrator.py + strategies.toml | **LIVE-DORMANT** | 0 | Price >2 sigma below VWAP, mean-reversion regime | Awaiting conditions |
+| 3 | Orchestrator S18 Gap Fade | autonomous_orchestrator.py + strategies.toml | **LIVE-DORMANT** | 0 | Gap 1.5-6%, RVOL<2 (liquidity only) | Event-driven, infrequent |
+| 4 | Orchestrator S19 RSI/IBS | autonomous_orchestrator.py + strategies.toml | **LIVE-DORMANT** | 0 | RSI(2)<5, IBS<0.20, above 200 SMA | Extreme oversold |
+| 5 | Orchestrator S20 Cross-Market Momentum | autonomous_orchestrator.py + strategies.toml | **LIVE-DORMANT** | 0 | SPY 15min >0.3%, ADX>20, Hurst>0.5 | US only |
+| 6 | IBS_MeanReversion | bridge.py:1354 | **NOW LIVE** (S4A+S4C) | 0->1 | IBS<0.30, RSI2<25 | Was blocked by TypeE shadow gate. First TypeE trade: GOOG Long. |
+| 7 | VolExpansion | bridge.py:1383 | **LIVE-DORMANT** | 0 | RVOL>2.0, ADX>20, 3+ up bars | Awaiting conditions |
+| 8 | ORB_Breakout | bridge.py:1413 | **LIVE-DORMANT** | 0 | US session only 14:45-15:30 UTC | Time-windowed |
+| 9 | GapFade | bridge.py:1453 | **LIVE-DORMANT** | 0 | Gap down >1%, RVOL<2 | Event-driven |
+
+### Classification Layer (TypeA-F) — bridge.py:606-659
+
+The classification layer labels signals after generation. It does NOT generate signals.
+
+| Label | Status | Condition | WR History |
+|-------|--------|-----------|------------|
+| TypeA (DipRecovery) | **DISABLED** | RSI<30, RVOL>2.5 | 29.5% — proven loser, correctly blocked |
+| TypeB (EarlyRunner) | **NOW REACHABLE** (S4B) | 2-bar rising RVOL + RSI [20,80] | Loosened from 3-bar/[30,70]. Can now fire. |
+| TypeC (OverboughtFade) | **NOW LIVE** (S4A) | RSI>80 + price up + vol down | Shadow gate removed. Risk arbiter provides protection. |
+| TypeD (SupportBounce) | **DISABLED** | RSI 25-35, near daily low | 24.1% — proven loser, correctly blocked |
+| TypeE (IBS) | **NOW LIVE** (S4A+S4C) | IBS<0.30, RVOL>1.0 | Shadow gate removed. Threshold aligned to 0.30 (was 0.10). First trade: GOOG Long. |
+| TypeF (OBVDivergence) | **NOW LIVE** (S4A) | vol_div<-0.5, RVOL>0.7 | Shadow gate removed. Risk arbiter provides protection. |
+
+TypeA and TypeD remain correctly disabled (proven losers with <30% WR).
 
 ---
 
-## 10. Chunked Implementation Sprints
+## 8. Completed Sprints
 
-### Sprint S1: Paper Fill Audit — COMPLETED 2026-03-24
-- Fills use ASK for entry, BID for exit (realistic). Zero slippage/commission in sim path.
+### Sprint S1: Paper Fill Audit — DONE 2026-03-24
+- Verified fills use ASK for entry, BID for exit (realistic).
+- Zero slippage/commission in simulation path (known, tracked for S7).
 
-### Sprint S2: Fix Profit Factor — COMPLETED 2026-03-24
-- Added cumulative_gross_wins/losses to persistent_memory.py.
+### Sprint S2: Profit Factor Tracking Fix — DONE 2026-03-24
+- Added cumulative_gross_wins and cumulative_gross_losses to persistent_memory.py.
+- PF now computes correctly across sessions.
 
-### Sprint S3: Microstructure Sprint — COMPLETED 2026-03-24
-- Board lots, L1 gate, unhalt grace, spoof calibration, EC2 live config.
+### Sprint S3: Microstructure Sprint — DONE 2026-03-24
+- Board lot sizing: TSE/HKEX/SGX = 100-share lots. engine.rs rounds before order. Sub-lot = LOT_SKIP.
+- L1 gate: subscribe_l1() succeeds at API level, async errors (10190/10189) handled via l1_subscribed_set removal on poll.
+- Unhalt grace period: active_trading_ticks reset to 0 on halt lift.
+- Spoof detector calibration: 25x multiplier + 2% absolute floor.
+- EC2 live config: terraform/variables.live.tfvars targets c7i.large (non-burstable).
 
-### Sprint S4: Unblock Strategies + Clock Fix — COMPLETED 2026-03-24
-- **S4A**: Removed TypeC/E/F shadow gate (bridge.py:1583). All types now live. Risk arbiter provides real protection.
-- **S4B**: Loosened TypeB classifier from 3-bar→2-bar rising RVOL, RSI [30,70]→[20,80].
-- **S4C**: Fixed TypeE threshold mismatch (config.toml: 0.10→0.30, aligned with bridge.py:1359).
-- **S4D**: Fixed startup clock: engine now uses system UTC for initial trading mode instead of starting in Dark.
-- **Part B (pending)**: Analyze 66+ trades — segment by ticker, session, rung attainment, P&L. Next priority.
+### Sprint S4: Strategy Unblock + Clock Fix — DONE 2026-03-24
+- **S4A**: Removed TypeC/E/F from shadow gate (bridge.py). All types now live. Risk arbiter (32 checks) provides real protection.
+- **S4B**: Loosened TypeB classifier: 3-bar -> 2-bar rising RVOL, RSI [30,70] -> [20,80]. TypeB is now reachable.
+- **S4C**: Fixed TypeE threshold mismatch: config.toml 0.10 -> 0.30, aligned with bridge.py:1359 IBS_MeanReversion generator.
+- **S4D**: Fixed startup clock: engine now uses system UTC for initial trading mode instead of starting in Dark during market hours.
+- First TypeE trade observed post-fix: GOOG Long.
 
-### Sprint S5: EC2 Instance Upgrade (15 min)
-- Upgrade to 8GB RAM. Pre-live MANDATORY.
+---
 
-### Sprint S6: Create config.live.toml (15 min)
-- Revert all 8 paper overrides. Pre-live MANDATORY.
+## 9. Remaining Sprints (S5-S12)
 
-### Sprint S7: Cost Injection into Ouroboros (1 hour)
-- Add slippage + commission to persistent_memory before Ouroboros learns.
+### Sprint S5: EC2 Instance Upgrade (~15 min)
+- Upgrade from c7i-flex.large (4GB) to c7i.large (8GB, non-burstable).
+- Use terraform/variables.live.tfvars.
+- **Pre-live MANDATORY.** System runs tight on 4GB during peak market hours.
 
-### Sprint S8: Friction-Aware Signal Ranking (1 hour)
-- Rank signals by net expected P&L when multiple strategies fire simultaneously.
+### Sprint S6: config.live.toml (~15 min)
+- Create config.live.toml that reverts all 8 paper overrides (see Section 15).
+- **Pre-live MANDATORY.** Running live with max_positions=999 would be catastrophic.
 
-### Sprint S9: Per-Strategy Asymmetric Exits (1 hour)
+### Sprint S7: Cost Injection into Ouroboros (~1 hour)
+- Add slippage (5bps) + IBKR commission (£1.50/trade) to persistent_memory calculations.
+- Ouroboros must learn from cost-adjusted P&L, not fantasy zero-cost fills.
+- Required before unfreezing Ouroboros at N=300.
+
+### Sprint S8: Friction-Aware Signal Ranking (~1 hour)
+- When multiple strategies fire on the same tick, rank by net expected P&L after costs.
+- Prevents commission-destruction from low-edge signals.
+
+### Sprint S9: Per-Strategy Asymmetric Exits (~1 hour)
 - Different Chandelier ATR multipliers per strategy family.
+- Mean-reversion strategies (IBS, VWAP Dip) need tighter exits than momentum (VanguardSniper).
 
-### Sprint S10: Regime + Session Enforcement (2 hours)
-- Wire strategy_registry.json regime/session metadata into runtime.
+### Sprint S10: Regime + Session Enforcement (~2 hours)
+- Wire strategy_registry.json regime and session metadata into runtime checks.
+- Prevent momentum strategies from firing in mean-reversion regimes and vice versa.
 
-### Sprint S11: Symbol-Quality Memory (1 hour)
-- Per-ticker quality scoring, net expectancy metrics.
+### Sprint S11: Symbol-Quality Memory (~1 hour)
+- Per-ticker quality scoring based on historical WR, spread, fills.
+- Auto-downrank tickers that consistently produce losses (e.g., LSEETF leveraged ETPs).
 
-### Sprint S12: Cost-Honest Backtests (1 hour)
-- Add IBKR commissions + slippage to fast_backtest_pipeline.py.
-
----
-
-## 11. Daily Operating Workflow
-
-| Time (UTC) | Action |
-|------------|--------|
-| 07:00 | Pre-market: check containers, overnight errors, 2FA if Monday |
-| 08:00 | LSE open: watch for signals |
-| 14:30 | US open: watch for ORB signals |
-| 16:25 | LSE close: EodFlatten fires |
-| 21:00 | Post-market: daily P&L check |
-| 04:50 | Nightly pipeline (cron) |
+### Sprint S12: Cost-Honest Backtests (~1 hour)
+- Add IBKR commissions + slippage model to fast_backtest_pipeline.py.
+- A backtest that ignores costs is a lie.
 
 ---
 
-## 12. Recovery Procedures
+## 10. Pre-Live Blockers
 
-```bash
-# Kill switch
-ssh EC2 'docker exec aegis-v2 touch /app/KILL'
-# Flatten + halt
-ssh EC2 'docker exec aegis-v2 touch /app/PAUSE'
-# Full stop
-ssh EC2 'cd ~/nzt48-aegis-v2 && docker compose down'
-# Restart
-ssh EC2 'docker exec aegis-v2 rm -f /app/KILL /app/PAUSE'
-ssh EC2 'cd ~/nzt48-aegis-v2 && docker compose up -d'
-# Rebuild (Python changes)
-git push && rsync ... && ssh EC2 'docker compose build aegis-v2 && docker compose up -d && docker image prune -f'
+| # | Blocker | Status | Sprint |
+|---|---------|--------|--------|
+| 1 | IS_LIVE=false hardcoded in Rust | OPEN | Rust rebuild + careful review |
+| 2 | 8 paper overrides in config.toml | OPEN | S6 |
+| 3 | WR 35.4% (gate requires >= 40%) | OPEN | Ongoing — need strategy improvement |
+| 4 | PF ~0.77 (gate requires >= 1.3) | OPEN | Ongoing — need better filtering |
+| 5 | 14 consecutive losses (gate requires < 8) | OPEN | Ongoing — LSEETF ETPs are primary cause |
+| 6 | Only 1 strategy producing trades (gate requires >= 2 with WR>35%) | OPEN | S4 unblocked strategies, now waiting for data |
+| 7 | Ouroboros frozen at N=68 (need N=300) | OPEN | S7 (cost injection first) |
+| 8 | EC2 only 4GB RAM | OPEN | S5 |
+| 9 | Zero cost injection in sim | OPEN | S7 |
+
+**Closed blockers (resolved):**
+- ~~Time-stop missing~~ — deployed (45min, 0.3x ATR, halt-safe)
+- ~~Paper fill realism~~ — S1 confirmed ask/bid fills
+- ~~PF tracking broken~~ — S2 fixed cumulative tracking
+- ~~Shadow gate blocking strategies~~ — S4 removed shadow gates
+- ~~Startup clock starting in Dark~~ — S4D fixed to use system UTC
+
+---
+
+## 11. Paper-vs-Live Override Analysis
+
+These 8 values in config.toml are set for paper experimentation and MUST be reverted before live trading.
+
+| Config key | Paper value | Safe live value | Risk if left |
+|------------|-------------|-----------------|--------------|
+| max_positions | 999 | 3 | **CRITICAL** — unlimited position count, unbounded exposure |
+| max_heat_pct | 50% | 10% | **CRITICAL** — half of equity at risk simultaneously |
+| daily_trade_limit | 999 | 5 | **HIGH** — commission death spiral on active days |
+| spread_veto_pct | 4.5% | 1.5% | **HIGH** — accepting terrible fills, spread drag |
+| minimum_entry_gbp | 20 | 1500 | **HIGH** — dust positions that cost more in commission than they can earn |
+| confidence_floor | 55 | 65 | **MEDIUM** — accepting weak signals |
+| cash_buffer_pct | 5% | 15% | **MEDIUM** — no margin reserve for adverse moves |
+| is_simulation | true | false | N/A — controls fill path |
+
+---
+
+## 12. Dead/Orphaned Code Register
+
+Code that exists in the repo but is not exercised at runtime. Keep documented, do not delete without explicit decision.
+
+| Item | Location | LOC | Status | Notes |
+|------|----------|-----|--------|-------|
+| TypeA-F detectors | entry_engine.rs:88-500 | ~500 | Quarantined | Not called at runtime. Superseded by Python classification. |
+| strategy_config.rs | strategy_config.rs | ~200 | Loaded, never queried | Struct is parsed from config but no runtime code reads the fields. |
+| Hurst exponent | regime_detector.rs | ~50 | Computed, only has_jump used | Full Hurst value returned but discarded by callers. Future regime routing. |
+| Risk arbiter CHECK 26 | risk_arbiter.rs:~451 | ~20 | Never triggers | Scanner score sentinel = -1.0, condition never met. Duplicates CHECK 10. |
+
+---
+
+## 13. Nightly Pipeline (04:50 UTC Mon-Fri)
+
+Runs via supercronic cron scheduler. No zombies, proper serialization.
+
+| Step | Script | Output | Notes |
+|------|--------|--------|-------|
+| 1 | nightly_v6.py | nightly_output.json | Analyzes trades: WR, PF, per-ticker, per-session, regime metrics |
+| 2 | config_writer.py | dynamic_weights.toml | Generate config recommendations. **FROZEN** (observe_only=true). |
+| 3 | persistent_memory.py | system_memory.json | Update cumulative stats (PF, WR, trade count, gross wins/losses) |
+| 4 | Claude review | /app/data/claude/reviews/ | Forensic analysis of day's trades. Shadow mode, advisory. |
+| 5 | Telegram report | — | Performance summary to Telegram |
+
+**Ouroboros (nightly_v6.py + config_writer.py)**: FROZEN. observe_only=true. Will not modify any parameters until N=300 trades with cost injection (S7). Current N=68.
+
+---
+
+## 14. AI Model Roles
+
+| Role | Model | Mechanism | Authority |
+|------|-------|-----------|-----------|
+| Signal challenge | Claude | claude_curator.py, shadow mode | Advisory only. Non-blocking. Cannot force or prevent trades. |
+| Universe curation | Gemini 2.5 Flash | ticker_selector.py, cron every 2h | Advisory only. API key is set and functional. |
+| Nightly analysis | Deterministic | nightly_v6.py | Analysis only. FROZEN. |
+| Config generation | Deterministic | config_writer.py | Analysis only. FROZEN. |
+
+**Neither AI model has trading authority.** All trade entries flow through the deterministic RiskArbiter (32 checks, fail-closed). AI models observe and advise. The system trades on math, not on AI opinions.
+
+---
+
+## 15. Artifact Flow Map
+
 ```
-
----
-
-## 13. AI Model-Role Matrix
-
-| Role | Model | Status | Authority |
-|------|-------|--------|-----------|
-| Signal challenge | Claude (claude_curator.py) | Shadow mode | Advisory |
-| Universe curation | Gemini 2.5 Flash | API key SET, cron 15min | Advisory |
-| Nightly learning | Deterministic (nightly_v6.py) | FROZEN | Analysis only |
-| Config generation | Deterministic (config_writer.py) | FROZEN | Analysis only |
-| Neither AI has trading authority. All entries go through deterministic RiskArbiter. |
-
----
-
-## 14. Artifact Flow Map
-
+IBKR Gateway (port 4003)
+  |
+  v
+Market Ticks --> Rust engine.rs (tick processing, <1ms)
+  |
+  +-- Exit evaluation
+  |     Chandelier 5-rung (rung advancement in WAL)
+  |     Time-stop (45min, 0.3x ATR, halt-safe)
+  |     Exhaustion detection
+  |
+  +-- Entry gate pre-checks (engine.rs)
+  |     Board lot sizing (TSE/HKEX/SGX = 100 shares)
+  |     L1 subscription gate
+  |     Spoof detection (25x + 2% floor)
+  |
+  +-- Python bridge (JSON stdin/stdout, 5s timeout)
+  |     VanguardSniper (ADX + EMA + RVOL)
+  |     Orchestrator S17-S20 (4 evaluators from strategies.toml)
+  |     IBS_MeanReversion, VolExpansion, ORB_Breakout, GapFade
+  |     TypeA-F classification (TypeA/D disabled, rest live)
+  |     Kelly 12-factor sizing
+  |
+  +-- Risk arbiter (32 deterministic checks, <1ms)
+  |     Fail-closed. If any check fails, trade is vetoed.
+  |
+  +-- Paper broker (simulation_mode: fills at ask/bid, no slippage)
+  |
+  +-- WAL events --> /app/events/current.ndjson
+        |
+        +-- Nightly pipeline (04:50 UTC)
+              nightly_v6.py -> persistent_memory.py -> config_writer.py (FROZEN)
 ```
-IBKR Gateway → Market ticks → Rust engine.rs
-  ├─ Exit evaluation (Chandelier, time-stop, exhaustion)
-  ├─ Entry gates (27 pre-signal checks)
-  ├─ Python bridge (VanguardSniper + Orchestrator + inline strategies)
-  │   └─ TypeA-F classification → shadow/disabled gates
-  ├─ Risk arbiter (32 checks)
-  └─ WAL events → Nightly pipeline → persistent_memory
-```
-
----
-
-## 15. Paper-vs-Live Override Analysis
-
-| Config key | Paper | Safe live | Risk if left |
-|------------|-------|-----------|--------------|
-| max_positions | 999 | 3 | **CRITICAL** — unlimited exposure |
-| max_heat_pct | 50% | 10% | **CRITICAL** — half equity at risk |
-| daily_trade_limit | 999 | 5 | HIGH — commission death |
-| spread_veto_pct | 4.5% | 1.5% | HIGH — terrible fills |
-| minimum_entry_gbp | 20 | 1500 | HIGH — dust positions |
-| confidence_floor | 55 | 65 | MEDIUM — weak signals |
-| cash_buffer_pct | 5% | 15% | MEDIUM — no reserve |
 
 ---
 
 ## 16. Validation Gate Methodology
 
-| Gate | Threshold | Current | Status |
-|------|-----------|---------|--------|
-| Win Rate | ≥ 40% | 35.4% | FAILING |
-| Profit Factor | ≥ 1.3 | ~0.77 | FAILING |
-| Max Consecutive Losses | < 8 | 14 | FAILING |
-| Strategy Diversity | ≥ 2 with WR>35% | 1 | FAILING |
+| Gate | Threshold | Current Value | Status | Notes |
+|------|-----------|---------------|--------|-------|
+| Win Rate | >= 40% | 35.4% | **FAILING** | LSEETF leveraged ETPs drag WR hard |
+| Profit Factor | >= 1.3 | ~0.77 | **FAILING** | More money lost than made |
+| Max Consecutive Losses | < 8 | 14 | **FAILING** | Streak driven by LSEETF run |
+| Strategy Diversity | >= 2 strategies with WR>35% | 1 | **FAILING** | Only VanguardSniper has trade history |
+| Trade Count | >= 200 | ~68 | **FAILING** | Need 3x more trades for statistical validity |
+
+**No gate is passing.** The system must not go live until all five gates pass simultaneously over a rolling 200-trade window.
 
 ---
 
 ## 17. Commission and Slippage Model
 
-**Current (sim)**: Zero commission, zero slippage, fills at exact ask/bid.
-**Live model**: IBKR £1.50/trade (£3.00 round trip), ~0.05-2% spread, ~5bps slippage.
-**Fix (Sprint S7)**: Inject 5bps slippage + IBKR commission before Ouroboros learns.
+| Dimension | Current (sim) | Live reality | Sprint |
+|-----------|---------------|--------------|--------|
+| Commission | £0.00 | £1.50/trade (£3.00 round trip) | S7 |
+| Slippage | 0 bps | ~5 bps (estimate) | S7 |
+| Spread | Fills at exact ask/bid | ~0.05-2% depending on instrument | — |
+| Fill model | simulation_mode: bypasses paper_broker.rs | paper_broker.rs with real IB fills | — |
+
+**The simulation lies about costs.** Every trade that shows +£0.10 profit would actually lose -£2.90 after round-trip commission. This is why S7 (cost injection) must happen before Ouroboros unfreezes.
 
 ---
 
 ## 18. EC2 Infrastructure
 
-| Resource | Current | Target |
-|----------|---------|--------|
-| Instance | c7i-flex.large (4GB) | c7i.large (non-burstable) for live |
-| Disk | 19GB (76% used) | Expand to 30GB+ |
-| Docker images | ~5GB each | Prune before builds |
-| Elastic IP | 3.230.44.22 | Keep |
+| Resource | Current | Live Target | Notes |
+|----------|---------|-------------|-------|
+| Instance | c7i-flex.large (4GB RAM, 2 vCPU) | c7i.large (8GB, non-burstable) | terraform/variables.live.tfvars |
+| Disk | 19GB (76% used) | 30GB+ | Docker images ~5GB each. Prune before every build. |
+| Elastic IP | 3.230.44.22 | Keep | — |
+| Containers | aegis-v2 + aegis-ib-gateway + aegis-redis | Same | All healthy |
+| IB Gateway | port 4003, client_id=101 | Same | 2FA re-auth required every Monday |
+| SSH | ssh -i ~/.ssh/nzt48-key.pem ubuntu@3.230.44.22 | Same | — |
+
+**Deployment sequence:**
+```bash
+git commit && git push
+rsync -avz --exclude target --exclude .git . ubuntu@3.230.44.22:~/nzt48-aegis-v2/
+ssh EC2 'cd ~/nzt48-aegis-v2 && docker image prune -f && docker compose build aegis-v2 && docker compose up -d && docker image prune -f'
+```
+
+Docker bakes Python into the image. Any Python change requires a full docker compose build. PyO3 linker fails on macOS — use `cargo check` locally, Docker build on EC2 for full compile.
+
+**Disk is tight at 19GB.** MUST run `docker image prune -f` before AND after builds.
 
 ---
 
-## 19. Brutal Final Verdict (Audit Section I)
+## 19. Recovery Procedures
 
-**The system has sound engineering and weak economics.**
+```bash
+# Kill switch — stops all new trades immediately
+ssh EC2 'docker exec aegis-v2 touch /app/KILL'
 
-The Rust engine is excellent — deterministic, fast, institutional-grade risk. The Python bridge works but the classification layer blocks signals unnecessarily. The deployment, cron, and pipeline are healthy.
+# Flatten + halt — closes positions and pauses
+ssh EC2 'docker exec aegis-v2 touch /app/PAUSE'
 
-**The core problem is 35.4% WR.** This must be investigated (is it ticker selection? exit calibration? entry timing?) before building more infrastructure.
+# Full stop — brings down all containers
+ssh EC2 'cd ~/nzt48-aegis-v2 && docker compose down'
 
-**The secondary problem is the shadow gate** killing signals that passed all quality checks. Removing it lets more strategies contribute trades, which gives us the data to answer the WR question.
+# Restart — clear kill/pause files, bring up
+ssh EC2 'docker exec aegis-v2 rm -f /app/KILL /app/PAUSE'
+ssh EC2 'cd ~/nzt48-aegis-v2 && docker compose up -d'
 
-**Next action**: Sprint S4 — unblock strategies + analyze trade losses.
+# View logs
+ssh EC2 'docker logs aegis-v2 --tail 50'
+
+# Check container health
+ssh EC2 'docker ps'
+```
+
+---
+
+## 20. Operational Gotchas
+
+| Gotcha | Detail |
+|--------|--------|
+| Monday 2FA | IB Gateway requires 2FA re-authentication every Monday morning |
+| KRX contracts | Do not work. Skip Korean exchange tickers. |
+| Redis password | nzt48redis (in docker-compose.yml) |
+| WAL archives | Engine rotates current.ndjson on restart. Nightly scans archive/*.ndjson. |
+| PyO3 macOS | Linker fails locally. Use `cargo check` on Mac, `docker compose build` on EC2. |
+| L1 subscribe | subscribe_l1() succeeds at API level but errors arrive async (10190/10189). l1_subscribed_set removes on poll. |
+| Board lot sub-lot | If requested shares < exchange lot size, engine emits LOT_SKIP and does not trade. |
+| Rust edition | 2024 (1.94.0). NEVER downgrade to 2021. |
+| Per-ticker cooldown | 5 minutes between entries on the same ticker |
+| System velocity | Max 10 trades per 5-minute window |
+| Disk usage | 19GB total, 76% used. Docker images ~5GB. Prune aggressively. |
+| simulation_mode | Bypasses paper_broker.rs. Fills at exact ask/bid. No slippage. Not realistic for cost modeling. |
+
+---
+
+## 21. Brutal Final Verdict
+
+**The system has institutional-grade engineering and losing economics.**
+
+The Rust engine is fast, deterministic, and correct. The risk arbiter is fail-closed with 32 checks. The exit engine ratchets properly. The deployment pipeline, cron, and nightly analysis all work. The microstructure handling (board lots, L1, unhalt grace, spoof detection) is production-ready.
+
+**The core problem is 35.4% WR.** This is below breakeven for any reasonable commission structure. The dominant loss source is LSEETF leveraged ETPs (0% WR, -£30 over 28 trades). Until these are either filtered out or the strategy adapted, the system will keep losing money.
+
+**The secondary problem is zero cost injection.** Every +£0.10 sim profit is actually a -£2.90 real loss after commission. The system has no concept of this. Ouroboros cannot learn from fantasy fills.
+
+**What S4 accomplished**: Unblocked TypeC/E/F strategies, loosened TypeB, fixed the startup clock. The system now has 9 signal generators and a clean classification layer. But more strategies producing trades at 35.4% WR just means more losing trades. The WR problem must be addressed through either better entry filters, ticker-quality filtering (kill the LSEETF ETPs), or exit calibration.
+
+**Path to live:**
+1. S7: Inject costs into Ouroboros. Stop lying about P&L.
+2. S11: Symbol-quality memory. Auto-downrank LSEETF leveraged ETPs.
+3. Accumulate 200+ trades with cost-adjusted metrics.
+4. All 5 validation gates passing simultaneously.
+5. S5 + S6: EC2 upgrade + config.live.toml.
+6. Remove IS_LIVE=false.
+
+**Estimated timeline to live**: Not before 200 cost-adjusted trades pass all gates. At current rate (~68 trades in several weeks), this is months away. Do not rush. Capital is real.
+
+---
+
+*End of canonical plan. Last updated 2026-03-24 end-of-day.*
