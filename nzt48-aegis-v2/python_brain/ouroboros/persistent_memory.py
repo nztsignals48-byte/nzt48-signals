@@ -139,6 +139,8 @@ class SystemMemory:
     total_wins: int = 0
     total_losses: int = 0
     cumulative_pnl: float = 0.0
+    cumulative_gross_wins: float = 0.0
+    cumulative_gross_losses: float = 0.0
     all_time_win_rate: float = 0.0
     all_time_profit_factor: float = 0.0
     peak_equity: float = 10000.0
@@ -177,8 +179,16 @@ class SystemMemory:
         else:
             self.total_losses += 1
         self.cumulative_pnl += pnl
+        if pnl > 0:
+            self.cumulative_gross_wins += pnl
+        elif pnl < 0:
+            self.cumulative_gross_losses += abs(pnl)
         if self.total_exits > 0:
             self.all_time_win_rate = self.total_wins / self.total_exits
+        if self.cumulative_gross_losses > 0:
+            self.all_time_profit_factor = self.cumulative_gross_wins / self.cumulative_gross_losses
+        elif self.cumulative_gross_wins > 0:
+            self.all_time_profit_factor = 99.0  # All winners, cap at 99
 
         # Per-ticker
         if symbol not in self.ticker_stats:
