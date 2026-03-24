@@ -1,6 +1,6 @@
-# AEGIS V2 — Canonical Master Plan v2.1
-**Date**: 2026-03-24 04:00 UTC (updated with deployment results + institutional critique response)
-**Status**: COMPLETE — 35 sections + appendix, evidence-bound, fixes deployed to EC2
+# AEGIS V2 — Canonical Master Plan v2.2
+**Date**: 2026-03-24 05:00 UTC (all post-fix truth, roadmap integrated)
+**Status**: COMPLETE — 35 sections + 2 appendices. All sections reflect POST-FIX state only.
 **Supersedes**: AEGIS_V2_CANONICAL_MASTER_PLAN_20260324.md and ALL prior plan docs
 **Source of truth hierarchy**: Code > Runtime > Config > This plan > Old docs
 **Verification method**: 4 parallel agents read all code + config + EC2 runtime + logs
@@ -789,3 +789,103 @@ An adversarial review was received from external LLM analysis (Gemini + ChatGPT)
 **Response**: 100% valid.
 
 **Action**: Pre-flight dependency checks added to entrypoint.sh. Critical failures (missing config, missing Redis password, disk >90%) now crash the container. Optional deps (Gemini, Telegram) produce loud warnings.
+
+---
+
+## Appendix B: Execution Roadmap (Institutional Syndicate + ChatGPT Integrated)
+
+### Build Now (Tier 1) — DONE or IN PROGRESS
+
+| # | Action | Status | Evidence |
+|---|--------|--------|----------|
+| 1 | Canonical strategy registry | **DONE** | `config/strategy_registry.json` created |
+| 2 | TypeB + VanguardSniper as only LIVE strategies | **DONE** | bridge.py enforces: TypeA/D disabled, TypeC/E/F shadow |
+| 3 | Hard-shadow non-core strategies | **DONE** | bridge.py returns None for disabled/shadow types |
+| 4 | Quarantine dead Rust entry_engine.rs | **DONE** | QUARANTINE NOTICE added, imports preserved for compilation |
+| 5 | Inject 4 academic frameworks into Claude prompts | **DONE** | López de Prado, Hasbrouck, Almgren/Chriss, Bollerslev injected |
+| 6 | Confidence floor fix (root cause in Python bridge) | **DONE** | Hurst threshold H<0.50→H<0.30, volume floor 75→60 |
+| 7 | Time-stop with halt-safe active-trading-ticks | **DONE** | exit_engine.rs uses tick counter, not wall clock |
+| 8 | Validation counter reset (clean post-patch) | **DONE** | system_memory zeroed, pre-patch archived |
+| 9 | Pre-flight dependency checks | **DONE** | entrypoint.sh crashes on missing deps |
+| 10 | Cron optimization (35→32 jobs) | **DONE** | Dead/duplicate crons disabled, frequency reduced |
+| 11 | Regime routing skeleton | **DONE** | strategy_registry.json has regime_allowed/blocked per strategy |
+| 12 | Session templates skeleton | **DONE** | strategy_registry.json has session_allowed/blocked per strategy |
+
+### Build Now (Tier 1) — REMAINING
+
+| # | Action | Priority | Effort |
+|---|--------|----------|--------|
+| 1 | Wire strategy_registry.json into nightly reporting | HIGH | 2h |
+| 2 | Sizing hardening (layered: regime × symbol × session × drawdown) | HIGH | 4h |
+| 3 | Symbol-quality memory (per-symbol spread/slippage/WR tracking) | HIGH | 4h |
+| 4 | Exit specialization by strategy family | MEDIUM | 3h |
+| 5 | Portfolio-level allocator (cluster/factor exposure caps) | MEDIUM | 4h |
+| 6 | Nightly trade packet upgrade (full WAL enrichment) | MEDIUM | 2h |
+
+### Shadow Now (Tier 2)
+
+| # | Action | Notes |
+|---|--------|-------|
+| 1 | TypeE/TypeF clean shadow path | Logged, not emitted. Require OOS proof. |
+| 2 | VPIN toxicity overlay | Log-only, measure impact on PF |
+| 3 | New intraday candidates | ORB, GapFade, VolExpansion — log signals only |
+| 4 | Claude/Gemini cold-path enhancements | Filing triage, anomaly grouping |
+| 5 | Execution-quality attribution | Track arrival vs fill price |
+
+### Delete Now
+
+| # | Action | Files |
+|---|--------|-------|
+| 1 | Dead Docker prune cron | crontab (DONE — disabled) |
+| 2 | Duplicate Claude forensic review cron | crontab (DONE — disabled) |
+| 3 | TypeA/D live trading path | bridge.py (DONE — returns None) |
+| 4 | Stale dynamic_weights WR=79.2% | Will self-correct after nightly on new trades |
+
+### Blocked Unless Proven
+
+| # | Action | Condition |
+|---|--------|-----------|
+| 1 | Model hot-path authority | Never — deterministic risk only |
+| 2 | More strategies for volume | Must prove orthogonality + positive PF after costs |
+| 3 | More venues | Must prove spread + fill quality first |
+| 4 | Full Kelly sizing | Requires PF > 1.5 sustained over 300+ trades |
+
+### Target Architecture State
+
+```
+                    DISCOVERY (broad)
+                         │
+                    ELIGIBILITY FILTER
+                         │
+                    NET-EDGE RANKING
+                         │
+              ┌─────────────────────────┐
+              │   REGIME/SESSION GATE    │
+              └─────────────────────────┘
+                         │
+              ┌─────────────────────────┐
+              │  SYMBOL-QUALITY FILTER   │
+              └─────────────────────────┘
+                         │
+              ┌─────────────────────────┐
+              │ EXECUTION-QUALITY FILTER │
+              │ (spread, fill prob, TTL) │
+              └─────────────────────────┘
+                         │
+              ┌─────────────────────────┐
+              │  PORTFOLIO ALLOCATOR     │
+              │ (heat, cluster, session) │
+              └─────────────────────────┘
+                         │
+              ┌─────────────────────────┐
+              │  DETERMINISTIC RISK      │
+              │  (27 CHECKs, Kelly cap)  │
+              └─────────────────────────┘
+                         │
+                    TRADE EXECUTION
+                         │
+                    EXIT ENGINE
+                    (strategy-specific)
+                         │
+                    POST-TRADE LEARNING
+```

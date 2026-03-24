@@ -1570,10 +1570,21 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     )
     best["entry_type"] = entry_type
 
-    # BT-010: TypeA/D were NET LOSERS in 10.8M-trade backtest (29.5%/24.1% WR, PF 0.04/0.03).
-    # KEEPING ACTIVE for paper validation to collect live data and potentially rehabilitate.
-    # Ouroboros nightly will track per-type WR and auto-downweight via adaptive_entry_weights.
-    # If still losing after 100 live trades, disable them in config.toml [entry_types].
+    # STRATEGY REGISTRY ENFORCEMENT (2026-03-24):
+    # TypeA/D DISABLED — net losers in 10.8M-trade backtest (29.5%/24.1% WR).
+    # TypeC/E/F SHADOW — logged for learning but signal suppressed.
+    # TypeB + VanguardSniper LIVE — only strategies allowed to deploy capital.
+    _DISABLED_TYPES = {"TypeA", "TypeD"}
+    _SHADOW_TYPES = {"TypeC", "TypeE", "TypeF"}
+    if entry_type in _DISABLED_TYPES:
+        # Block signal entirely — these strategies are proven losers
+        return None
+    if entry_type in _SHADOW_TYPES:
+        # Log for learning but do NOT emit signal to engine
+        import sys
+        sys.stderr.write(f"SHADOW_SIGNAL: {entry_type} tid={ticker_id} conf={best['confidence']} (logged, not emitted)\n")
+        sys.stderr.flush()
+        return None
 
     if entry_type != "Unclassified":
         best["strategy"] = entry_type
