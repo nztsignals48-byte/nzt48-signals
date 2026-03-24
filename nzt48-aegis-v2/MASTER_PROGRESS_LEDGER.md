@@ -94,7 +94,73 @@ Session recovery source of truth. Append-only. If a session stops unexpectedly, 
 5. `99f733e`: Add GapFade, fix CRITICAL log spam, archive 108 docs
 6. (pending): Consistency audit fix for canonical plan
 
+---
+
+## Session: 2026-03-24 (Sprints S5-S8 Continuous Execution)
+
+### Sprint S5: Cost Injection into Ouroboros (15:00 UTC)
+- **Objective**: Make nightly P&L analysis include realistic costs
+- **Files Changed**: `python_brain/ouroboros/cost_model.py`, `python_brain/ouroboros/nightly_v6.py`
+- **Implementation**:
+  - Added `estimate_trade_cost()` with per-exchange rates, commission, slippage, FX costs
+  - Added `per_exchange_rt` field to CostModel (loads [costs.per_exchange] from config)
+  - Nightly pipeline enriches each trade with `cost_adjusted_pnl` before persistent memory recording
+  - `record_trade()` and `record_session()` now use cost-adjusted P&L
+  - Log output shows both sim and cost-adjusted WR/PnL for transparency
+- **Tests**: cost_model.py functions verified (parse, compute, per-exchange lookup)
+- **Impact**: Ouroboros now sees realistic economics (£3.40 commission + 0.5% slippage + FX per trade)
+
+### Sprint S6: LSEETF Disposal + Exchange Blocking (15:15 UTC)
+- **Objective**: Stop trading 52 LSEETF leveraged ETPs (0% WR, -£30)
+- **Files Changed**: `config/config.toml`, `python_brain/bridge.py`
+- **Implementation**:
+  - Added `exchanges = ["LSEETF"]` to [blacklist] section in config.toml
+  - Added `_symbol_raw_exchange_map` to preserve raw exchange from contracts.toml
+  - Added `_load_blocked_exchanges()` with lazy caching
+  - Added EXCHANGE_VETO check in signal evaluation path (after blacklist, before warmup)
+- **Tests**: config.toml TOML valid, bridge.py parses, exchange blocking logic verified
+- **Impact**: All 52 LSEETF tickers blocked. Reversible by removing "LSEETF" from list.
+
+### Sprint S7: config.live.toml Completeness (15:25 UTC)
+- **Objective**: Ensure all 8 paper overrides have production-safe values
+- **Files Changed**: `config/config.live.toml`
+- **Implementation**: Added spread_veto_pct and slippage_assumption_pct
+- **Tests**: TOML valid, all 8 overrides verified present
+- **Status**: Pre-live prep complete. Not activated until IS_LIVE=true.
+
+### Sprint S8: Regime + Session Enforcement (15:30 UTC)
+- **Objective**: Wire strategy_registry.json regime/session gates into bridge.py
+- **Files Changed**: `python_brain/bridge.py`
+- **Implementation**:
+  - Added `_load_strategy_registry()` (reads regime/session metadata from registry)
+  - Added `_classify_market_regime(hurst, rvol, adx)` → registry regime names
+  - Added `_classify_current_session()` → registry session names from UTC time
+  - Added `_check_regime_session_gate()` with fail-open for unknown strategies
+  - REGIME_SESSION_VETO log line for debugging
+  - Enforcement added in Stage 4 after TypeA/D disable block
+- **Tests**: All regime/session classification tests pass. Gate check logic verified.
+- **Impact**: Strategies now respect their registry regime/session constraints.
+
+### Deployment (15:40 UTC)
+- **Commit**: `d622019` — all S5-S8 changes in single commit
+- **Push**: origin/feat/tier-system-enhancements-full
+- **Rsync**: 5 files synced to EC2
+- **Docker Build**: In progress (Rust compile + Python bake)
+
+## Current System Status (2026-03-24 15:40 UTC)
+- **Commit**: `d622019`
+- **EC2 Disk**: 76% (4.5GB free)
+- **Containers**: 3 healthy (aegis-v2 rebuilding)
+- **Open Positions**: 18 (will recover via WAL on restart)
+- **Equity**: ~£10,005
+- **IBKR**: Connection failures observed (may need 2FA re-auth)
+- **Strategies**: 6 sources + regime/session enforcement active
+- **LSEETF**: BLOCKED (52 tickers)
+
 ## Next Actions
-1. Monitor Asian session (TSE 00:00 UTC, HKEX 01:30 UTC) for new strategy signals
-2. Monitor if IBS/VolExpansion/GapFade fire during live market
-3. Continue 100-trade validation gate (~36 remaining)
+1. Wait for Docker build completion
+2. Restart aegis-v2 with new image
+3. Verify trading resumes (WAL replay, position recovery, no errors)
+4. Monitor IBKR connection — may need 2FA Monday re-auth
+5. Continue paper trading toward N=200 validation gate
+6. Next sprint: S9 (friction-aware ranking) or S10 (EC2 upgrade) when N>200

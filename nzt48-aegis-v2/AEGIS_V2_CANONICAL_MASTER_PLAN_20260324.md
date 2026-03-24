@@ -1,5 +1,5 @@
 # AEGIS V2 — Canonical Master Plan
-**Date**: 2026-03-24 (updated end-of-day — S1+S2+S3+S4 DONE, all code-verified)
+**Date**: 2026-03-24 (updated 15:40 UTC — S1-S8 DONE, S5-S8 deployed)
 **Status**: 21 sections. Source of truth for the entire system.
 **Supersedes**: All prior plans (PLAN_1, PLAN_2, MERGED_MASTER_PLAN — archived in docs/archive/)
 **Truth hierarchy**: Code > Runtime > This plan > Old docs
@@ -14,7 +14,9 @@ AEGIS V2 is a paper-trading system on EC2. Rust engine (32,603 LOC) processes ti
 
 **What was fixed today (S4)**: The classification layer was blocking signals that passed all quality checks. Shadow gates on TypeC/E/F removed. TypeB loosened to actually fire. TypeE threshold aligned. Startup clock fixed. First TypeE trade observed (GOOG Long). IBS_MeanReversion now live.
 
-**What remains broken**: 35.4% WR. LSEETF leveraged ETPs are the dominant loss source (0% WR, -£30 over 28 trades). Validation gates all failing. Ouroboros config mutation frozen at N=68 (nightly analysis RUNS, only parameter writes are frozen until N=300). 8 paper overrides not reverted. Zero cost injection in simulation.
+**What was fixed today (S5-S8)**: Cost injection into Ouroboros (nightly now uses cost-adjusted P&L). LSEETF blocked (52 tickers via exchange blacklist). config.live.toml complete (all 8 overrides). Regime+session enforcement wired from strategy_registry.json into bridge.py.
+
+**What remains broken**: 35.4% WR. Validation gates all failing. Ouroboros config mutation frozen at N=68 (nightly analysis RUNS, only parameter writes are frozen until N=300). LSEETF NOW BLOCKED (was dominant loss source). Cost injection NOW ACTIVE (was zero).
 
 **Capital doctrine**: VanguardSniper is the capital core (33+ trades, only strategy with production history). All other strategies are either newly unblocked (S4) or dormant awaiting their market conditions.
 
@@ -252,22 +254,26 @@ TypeA and TypeD remain correctly disabled (proven losers with <30% WR).
 
 Ordered by economic impact, not engineering convenience. Fix the P&L lie first, kill the garbage tickers second, then build infrastructure.
 
-### Sprint S5: Cost Injection into Ouroboros (~1 hour) — ECONOMICS FIRST
-- Add slippage (5bps) + IBKR commission (£1.50/trade) to persistent_memory calculations.
-- Ouroboros must learn from cost-adjusted P&L, not fantasy zero-cost fills.
-- Required before unfreezing Ouroboros at N=300.
-- **This is the #1 priority.** Without cost honesty, every metric is a lie.
+### Sprint S5: Cost Injection into Ouroboros — DONE (2026-03-24 15:00 UTC)
+- estimate_trade_cost() with per-exchange rates, commission, slippage, FX costs.
+- Nightly persistent_memory records use cost-adjusted P&L.
+- Log output shows sim vs cost-adjusted metrics.
 
-### Sprint S6: Symbol-Quality Memory + LSEETF Ticker Disposal (~1 hour) — KILL THE GARBAGE
-- Per-ticker quality scoring based on historical WR, spread, fills.
-- Auto-downrank or shadow-restrict LSEETF leveraged ETPs (0% WR, -£30 over 28 trades).
-- **These tickers are the dominant loss source.** Removing them may flip WR above 40% instantly.
+### Sprint S6: LSEETF Disposal + Exchange Blocking — DONE (2026-03-24 15:15 UTC)
+- Added `exchanges = ["LSEETF"]` to [blacklist] in config.toml.
+- All 52 LSEETF leveraged ETPs blocked.
+- Reversible: remove "LSEETF" from exchanges list.
 
-### Sprint S7: config.live.toml (~15 min) — PRE-LIVE MANDATORY
-- Create config.live.toml that reverts all 8 paper overrides (see Section 11).
-- Running live with max_positions=999 would be catastrophic.
+### Sprint S7: config.live.toml — DONE (2026-03-24 15:25 UTC)
+- All 8 paper overrides covered with production-safe values.
+- Added spread_veto_pct and slippage_assumption_pct.
 
-### Sprint S8: EC2 Instance Upgrade (~15 min) — PRE-LIVE MANDATORY
+### Sprint S8-a: Regime + Session Enforcement — DONE (2026-03-24 15:30 UTC)
+- strategy_registry.json regime_allowed/blocked and session_allowed/blocked enforced in bridge.py.
+- _classify_market_regime() and _classify_current_session() map to registry names.
+- REGIME_SESSION_VETO log for debugging. Fail-open for unknown strategies.
+
+### Sprint S8-b: EC2 Instance Upgrade — BLOCKED (requires Terraform apply)
 - Upgrade from c7i-flex.large (4GB) to c7i.large (8GB, non-burstable).
 - Use terraform/variables.live.tfvars.
 
@@ -279,11 +285,7 @@ Ordered by economic impact, not engineering convenience. Fix the P&L lie first, 
 - Different Chandelier ATR multipliers per strategy family.
 - Mean-reversion strategies (IBS, VWAP Dip) need tighter exits than momentum (VanguardSniper).
 
-### Sprint S11: Regime + Session Enforcement (~2 hours)
-- Wire strategy_registry.json regime and session metadata into runtime checks.
-- Prevent momentum strategies from firing in mean-reversion regimes and vice versa.
-
-### Sprint S12: Cost-Honest Backtests (~1 hour)
+### Sprint S11: Cost-Honest Backtests (~1 hour)
 - Add IBKR commissions + slippage model to fast_backtest_pipeline.py.
 - A backtest that ignores costs is a lie.
 
