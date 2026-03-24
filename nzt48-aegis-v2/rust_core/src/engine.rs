@@ -811,6 +811,16 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // Step 7: Write SystemReady to WAL
         self.now_ns = system_time_ns;
+        // Set initial trading mode from system clock — don't wait for first tick.
+        // Without this, engine starts in Dark mode even during market hours.
+        let startup_london_secs = self.clock.now_london_secs(system_time_ns);
+        self.current_mode = TradingMode::from_london_secs(startup_london_secs);
+        eprintln!(
+            "STARTUP: Initial trading mode = {:?} (London time {}:{:02})",
+            self.current_mode,
+            startup_london_secs / 3600,
+            (startup_london_secs % 3600) / 60,
+        );
         self.write_wal(WalPayload::SystemReady {
             wal_events_replayed: replay_result.events_replayed,
             positions_reconciled: recon_matches as u32,
