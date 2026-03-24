@@ -1769,8 +1769,10 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // L1 data quality gate: only enter positions on tickers with true tick-by-tick data.
         // MktData (250ms snapshot → 5s synthetic bar) is too coarse for signal validation.
-        // PaperBroker (simulation_mode) returns true for all tickers — gate only constrains live.
-        if !self.broker.is_l1_subscribed(&tid) {
+        // BYPASS in simulation_mode: paper accounts support only ~7 concurrent L1 streams
+        // (IBKR error 10190), but MktData is the primary data source for paper trading.
+        // This gate only constrains LIVE mode where we need continuous tape for execution.
+        if !self.simulation_mode && !self.broker.is_l1_subscribed(&tid) {
             eprintln!(
                 "L1_GATE: ticker={} signal approved but no L1 data — skipping entry",
                 tid.0,

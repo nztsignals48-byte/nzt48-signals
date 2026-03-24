@@ -10,7 +10,13 @@ const MAX_WINDOW: usize = 100;
 /// Number of recent spreads used to compute the median baseline.
 const MEDIAN_WINDOW: usize = 20;
 /// A live spread wider than `SPOOF_MULTIPLIER × median` triggers the spoof flag.
-const SPOOF_MULTIPLIER: f64 = 10.0;
+/// Raised from 10× to 25× — MktData (250ms snapshots on paper accounts) delivers
+/// noisy bid-ask with normal intraday variation that false-positives at 10×.
+const SPOOF_MULTIPLIER: f64 = 25.0;
+/// Minimum absolute spread (%) to even consider spoofing. Below this floor,
+/// the spread is normal market-making behavior, not liquidity withdrawal.
+/// Prevents micro-spread tickers (0.01% median) from triggering on 0.1% spikes.
+const SPOOF_MIN_SPREAD_PCT: f64 = 2.0;
 /// Spread is considered normalized when last N spreads are all within this multiplier of median.
 const NORMALIZE_MULTIPLIER: f64 = 3.0;
 /// Number of consecutive spreads that must be within `NORMALIZE_MULTIPLIER` for normalization.
@@ -130,7 +136,10 @@ impl QuoteImbalanceDetector {
             Some(m) if m > f64::EPSILON => m,
             _ => return false,
         };
-        latest.spread_pct >= median * SPOOF_MULTIPLIER
+        // Dual threshold: spread must exceed BOTH the relative multiplier AND the absolute floor.
+        // This prevents false positives on tight-spread tickers where normal fluctuation
+        // exceeds 10-25× of a tiny median (e.g., 0.01% median → 0.25% trigger is not spoofing).
+        latest.spread_pct >= median * SPOOF_MULTIPLIER && latest.spread_pct >= SPOOF_MIN_SPREAD_PCT
     }
 
     /// Compute the median spread_pct of the last `n` entries in `window`.
@@ -189,8 +198,9 @@ mod tests {
         let mut det = QuoteImbalanceDetector::new();
         // Baseline: mid=100.05, spread=0.10, spread_pct ≈ 0.0999%
         fill_baseline(&mut det, tid(1), 20, 100.0, 100.10);
-        // 9× wider spread should NOT trigger (threshold is 10×).
+        // 9× wider spread should NOT trigger (threshold is 25× AND ≥2% absolute).
         // 9 × 0.10 = 0.90 spread → bid=99.55, ask=100.45, mid=100, spread_pct≈0.9%
+        // Below both thresholds: 0.9% < 2.5% (25× median) and 0.9% < 2.0% (floor).
         det.record_quote(tid(1), 99.55, 100.45, 100_000_000);
         assert!(!det.is_spoofed(tid(1)));
     }
