@@ -16,6 +16,8 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 
 **Session 3 — Microstructure Sprint (2026-03-24)**: 4 commits, 3 Rust rebuilds, 3 EC2 deployments. Board lot sizing (TSE/HKEX/SGX=100-share lots). L1 data quality gate (bypassed in sim mode after discovering IBKR paper limits ~7 concurrent tick-by-tick streams). Unhalt grace period (active_trading_ticks reset on halt lift). Spoof detector calibrated (25x multiplier + 2% absolute floor — was killing 86% of signals as false positives). EC2 live config prepared (c7i.large non-burstable). System trading again: STAN.L and AI (Air Liquide) entries observed.
 
+**Capital doctrine**: VanguardSniper is the capital core — the only proven producer. All other strategies must justify coexistence against it. Primary objective is net expectancy per approved trade, not broader strategy count. TypeB (52.4% backtest WR) is the top engineering priority (Sprint S4) because it is the strongest documented non-core edge but has zero production signals.
+
 ---
 
 ## 2. Current Verified System State
@@ -75,20 +77,22 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 
 ## 5. Strategy Inventory
 
-| Strategy | Status | Python path | Rust path | Config | Observed | Trades | Verdict |
-|----------|--------|-------------|-----------|--------|----------|--------|---------|
-| VanguardSniper | **LIVE** | bridge.py:1302 | N/A | brain/config.py | YES | 33 | Core. Only proven producer. |
-| Orchestrator | **LIVE** | bridge.py:1318 | N/A | strategies.toml | NO | 0 | Needs strategies.toml (exists, 16KB) |
-| IBS_MeanReversion | **LIVE** | bridge.py:1342 | N/A | Inline thresholds | NO | 0 | Loosened 2026-03-24. Monitor. |
-| VolExpansion | **LIVE** | bridge.py:1370 | N/A | Inline thresholds | NO | 0 | Needs RVOL > 2.0 + ADX > 20. |
-| ORB_Breakout | **LIVE** | bridge.py:1401 | N/A | Inline thresholds | NO | 0 | US session only (14:45-15:30 UTC). |
-| GapFade | **LIVE** | bridge.py:1440 | N/A | Inline thresholds | NO | 0 | Needs gap-down > 1% + RVOL < 2. |
-| TypeA (DipRecovery) | **LIVE (monitored)** | bridge.py:638 | entry_engine.rs (ref) | config.toml:425 | NO | 0 | 29.5% backtest WR. Collecting data. |
-| TypeB (EarlyRunner) | **LIVE** | bridge.py:624 | entry_engine.rs (ref) | config.toml:429 | NO | 0 | 52.4% backtest WR. Best theoretical. |
-| TypeC (OverboughtFade) | **LIVE** | bridge.py:633 | entry_engine.rs (ref) | config.toml:433 | NO | 0 | Needs RSI > 80 (rare). |
-| TypeD (SupportBounce) | **LIVE (monitored)** | bridge.py:643 | entry_engine.rs (ref) | config.toml:435 | NO | 0 | 24.1% backtest WR. Collecting data. |
-| TypeE (IBS) | **LIVE** | bridge.py:621 | entry_engine.rs (ref) | config.toml:441 | YES | 3 | Observed. Classifier fires. |
-| TypeF (OBVDivergence) | **LIVE** | bridge.py:617 | entry_engine.rs (ref) | config.toml:445 | NO | 0 | Needs vol_div < -0.5. |
+**Status key**: LIVE-PRODUCING = generating trades. LIVE-DORMANT = code active, 0 trades. CLASSIFIER = classification label only (not an independent signal generator). DISABLED = blocked in strategy_registry.json. SHADOW = observing only, not trading.
+
+| Strategy | Status | Python path | Rust path | Config | Trades | Verdict |
+|----------|--------|-------------|-----------|--------|--------|---------|
+| VanguardSniper | **LIVE-PRODUCING** | bridge.py:1302 | N/A | brain/config.py | 33 | **Capital core.** Only proven producer. |
+| Orchestrator | **LIVE-DORMANT** | bridge.py:1318 | N/A | strategies.toml | 0 | Needs strategies.toml (exists, 16KB) |
+| IBS_MeanReversion | **LIVE-DORMANT** | bridge.py:1342 | N/A | Inline thresholds | 0 | Loosened 2026-03-24. Monitor. |
+| VolExpansion | **LIVE-DORMANT** | bridge.py:1370 | N/A | Inline thresholds | 0 | Needs RVOL > 2.0 + ADX > 20. |
+| ORB_Breakout | **LIVE-DORMANT** | bridge.py:1401 | N/A | Inline thresholds | 0 | US session only (14:45-15:30 UTC). |
+| GapFade | **LIVE-DORMANT** | bridge.py:1440 | N/A | Inline thresholds | 0 | Needs gap-down > 1% + RVOL < 2. |
+| TypeA (DipRecovery) | **DISABLED** | bridge.py:638 | entry_engine.rs (quarantined) | config.toml:425 | 0 | 29.5% backtest WR. Disabled in registry. |
+| TypeB (EarlyRunner) | **LIVE-DORMANT** | bridge.py:624 | entry_engine.rs (quarantined) | config.toml:429 | 0 | 52.4% backtest WR. **Top S4 priority.** |
+| TypeC (OverboughtFade) | **CLASSIFIER** | bridge.py:633 | entry_engine.rs (quarantined) | config.toml:433 | 0 | Classifier label. Needs RSI > 80 (rare). |
+| TypeD (SupportBounce) | **DISABLED** | bridge.py:643 | entry_engine.rs (quarantined) | config.toml:435 | 0 | 24.1% backtest WR. Disabled in registry. |
+| TypeE (IBS) | **CLASSIFIER** | bridge.py:621 | entry_engine.rs (quarantined) | config.toml:441 | 3 | Classifier fires. Not independent generator. |
+| TypeF (OBVDivergence) | **CLASSIFIER** | bridge.py:617 | entry_engine.rs (quarantined) | config.toml:445 | 0 | Classifier label. Needs vol_div < -0.5. |
 
 ---
 
@@ -111,11 +115,11 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 |---|---------|-----|--------|
 | 1 | IS_LIVE=false hardcoded | Cannot trade live without Rust recompile | Rust rebuild |
 | 2 | 8 paper overrides in config.toml | max_positions=999, heat=50%, etc. | Config revert |
-| 3 | No time-stop | Capital locked in sideways positions | Rust exit_engine change |
+| ~~3~~ | ~~No time-stop~~ | **CLOSED**: Time-stop deployed (45min, 0.3x ATR). exit_engine.rs:362-381. | Sprint S3 DONE |
 | 4 | WR 35.4% (need 40%) | Below validation gate | More trades needed |
 | 5 | PF ~0.77 (need 1.3) | Below validation gate | Strategy improvement |
 | 6 | 14 consecutive losses (need <8) | Below validation gate | Better entry filtering |
-| 7 | Paper fill realism unverified | May be trading against mid-point illusion | Audit paper_broker.rs |
+| ~~7~~ | ~~Paper fill realism unverified~~ | **CLOSED**: S1 audit confirmed ask/bid fills (realistic). Asian 100% WR = small-sample noise. | Sprint S1 DONE |
 | 8 | Only 1 of 6 strategies proven | Insufficient strategy diversification | Run 300+ trades |
 | 9 | Ouroboros on N=48 data | ML loop frozen, needs N=300 | Wait for trades |
 | 10 | EC2 4GB RAM | OOM risk under market stress | Upgrade to 8GB |
@@ -175,7 +179,8 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 - **Files**: `python_brain/bridge.py:624-630` (classify_entry_type)
 - **Hypothesis**: 3-bar rising RVOL is too strict on 5-min bars with synthetic tick data
 - **Test**: Log TypeB threshold checks to gate_vetoes.ndjson
-- **Pre-live**: HIGH priority
+- **Also**: Add signal approval rate by source + top veto reasons breakdown to nightly report. This tells us whether TypeB signals are generated but vetoed (arbiter problem) vs never generated (trigger problem).
+- **Pre-live**: HIGH priority — this is the highest-leverage work for improving trade flow
 
 ### Sprint S5: EC2 Instance Upgrade (15 min)
 - **Goal**: Upgrade to m7i-flex.large (8GB RAM, same 2 vCPU, free-tier compatible)
