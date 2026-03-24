@@ -97,7 +97,40 @@ If this plan contradicts code, the code is correct and this plan is wrong.
 | TypeE (IBS MeanReversion) | 3 | SAP, MBG, MC |
 | TypeC (OverboughtFade) | 1 | AI |
 
-First ever TypeC and TypeE trades in production. 3 classification types firing across 5 exchanges (XLON, XETR, XPAR, XNYS). All positions open, managed by Chandelier exit engine.
+**Later entries (Orchestrator S17 VWAP Dip — first ever Orchestrator trades):**
+
+| # | Symbol | Exchange | Qty | Entry (GBP) | Value | Strategy | Conf |
+|---|--------|----------|-----|-------------|-------|----------|------|
+| 12 | META | XNYS | 1 | £444.91 | £445 | **Orchestrator_vwap_dip_buy** | 54 |
+| 13 | NVDA | XNYS | 1 | £130.72 | £131 | **Orchestrator_vwap_dip_buy** | 54 |
+| 14 | BARC.L | XLON | 1 | £383.95 | £384 | **Orchestrator_vwap_dip_buy** | 54 |
+
+**Updated strategy diversity (4 strategy types now producing):**
+
+| Strategy | Trades | Tickers |
+|----------|--------|---------|
+| Momentum (VanguardSniper) | 7 | 5USL.L, GLEN.L, AAPL, MSFT, GOOG, SIE, SU |
+| TypeE (IBS MeanReversion) | 3 | SAP, MBG, MC |
+| TypeC (OverboughtFade) | 1 | AI |
+| Orchestrator_vwap_dip_buy (S17) | 3 | META, NVDA, BARC.L |
+
+First ever TypeC, TypeE, AND Orchestrator trades in production. 4 strategy types across 5 exchanges. 14 entries, 0 exits. Equity: £9,996.79, unrealised P&L: -£8.40.
+
+**Exit logging**: Exits fire via Chandelier/time-stop/EOD-flatten. Each exit writes ExitSignal + PositionClosed to WAL with full P&L, spread, commission, session data, and Telegram alert. No exits yet — positions within stop ranges.
+
+### Simulation-Truth Gaps (from ChatGPT simulation triage)
+
+| Metric | Status | Blocked by |
+|--------|--------|------------|
+| Cost-adjusted PF | NOT TRACKED — real PF likely <0.5 | Sprint S5 (cost injection) |
+| Cost-adjusted expectancy/trade | NOT TRACKED — many "wins" become losses after costs | Sprint S5 |
+| Loss concentration by ticker family | KNOWN manually (LSEETF 0% WR) — not automated | Sprint S6 (symbol quality) |
+| % of wins invalidated by costs | NOT TRACKED | Sprint S5 |
+| Per-strategy net expectancy | NOT TRACKED | Sprint S5 |
+| Instrument-class-aware friction | NOT TRACKED — leveraged ETPs treated same as equities | Sprint S6 |
+| Net-edge ranking when multiple signals compete | NOT IMPLEMENTED — uses raw confidence only | Sprint S9 |
+
+All blocked by Sprint S5 (cost injection) or S6 (symbol quality). These are correctly the top 2 remaining sprints.
 
 ---
 
