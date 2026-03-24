@@ -1243,14 +1243,16 @@ def _compute_confidence_floor(msg, ind):
     if adaptive_floor is not None:
         floor = max(floor, adaptive_floor)
 
-    # Weakly mean-reverting → raise floor
-    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and 0.01 < ind["hurst"] < 0.50:
-        floor = max(floor, 70)
+    # Strongly mean-reverting → raise floor (tightened from H<0.50 to H<0.30 for paper validation)
+    # H<0.50 was blocking ~80% of signals since random walk (0.45-0.55) was included.
+    # Only truly mean-reverting regimes (H<0.30) should raise the floor.
+    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and 0.01 < ind["hurst"] < 0.30:
+        floor = max(floor, 60)
 
-    # Falling volume → raise floor
+    # Falling volume → moderate floor raise (tightened from 75 to 60 for paper validation)
     has_volume = any(b.get("volume", 0) > 0 for b in ind["bars_5m"][-5:]) if ind["bars_5m"] else False
-    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and has_volume and ind["vol_slope"] <= 0:
-        floor = max(floor, 75)
+    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and has_volume and ind["vol_slope"] < -0.5:
+        floor = max(floor, 60)
 
     return floor
 

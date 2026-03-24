@@ -301,16 +301,9 @@ impl ExitEngine {
         signal_reversal: bool,
         is_carried: bool,
     ) -> Option<ExitResult> {
-        // S3: Compute hold time for time-stop evaluation
-        let now_ns = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let hold_minutes = if position.entry_timestamp_ns > 0 && now_ns > position.entry_timestamp_ns {
-            ((now_ns - position.entry_timestamp_ns) / 60_000_000_000) as u32
-        } else {
-            0
-        };
+        // S3: Active trading minutes from tick counter (halt-safe — pauses when no ticks arrive).
+        // Each update_tracking() call increments active_trading_ticks. At ~5s per tick, 12 ticks ≈ 1 minute.
+        let active_trading_minutes = position.active_trading_ticks / 12;
         let mut checks: Vec<ExitCheck> = Vec::new();
 
         // Priority 5: HALT/FLATTEN override — market sell immediately
@@ -370,7 +363,7 @@ impl ExitEngine {
         // tighten stop aggressively to force exit. Prevents capital lock in sideways trades.
         if self.config.time_stop_enabled
             && !is_carried
-            && hold_minutes >= self.config.time_stop_max_minutes_to_rung2
+            && active_trading_minutes >= self.config.time_stop_max_minutes_to_rung2
             && position.trailing_rung < 2
         {
             // Aggressive trailing stop: use tight ATR multiplier below highest high
@@ -443,6 +436,8 @@ impl ExitEngine {
     /// Returns Some((old_rung, new_rung)) if rung advanced, None otherwise.
     /// Caller should write RungAdvanced WAL event when Some is returned.
     pub fn update_tracking(&self, position: &mut PositionState, current_price: f64, atr: f64) -> Option<(u8, u8)> {
+        // S3: Increment active trading tick counter (halt-safe — only counts ticks that actually arrive)
+        position.active_trading_ticks = position.active_trading_ticks.saturating_add(1);
         // Update highest_high
         if current_price > position.highest_high {
             position.highest_high = current_price;

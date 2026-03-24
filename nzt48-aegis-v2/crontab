@@ -1,8 +1,9 @@
 # RT2: Bridge Health Monitor — every 15 min Mon-Fri during market hours (Telegram alert if unhealthy)
 */15 8-20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.bridge_health >> /var/log/bridge_health.log 2>&1
 
-# N10b: External Monitor — every 5 min Mon-Fri (deep health check: engine, disk, IBKR, Redis, cron)
-*/5 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.external_monitor --quiet >> /var/log/external_monitor.log 2>&1
+# N10b: External Monitor — every 10 min Mon-Fri (deep health check: engine, disk, IBKR, Redis, cron)
+# Reduced from */5 to */10 to lower CPU contention on 2-vCPU box.
+*/10 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.external_monitor --quiet >> /var/log/external_monitor.log 2>&1
 
 # N10b: Daily Health Report — 08:00 UTC Mon-Fri (Telegram summary)
 0 8 * * 1-5 cd /app && python3 -m python_brain.ouroboros.external_monitor --daily >> /var/log/external_monitor.log 2>&1
@@ -71,8 +72,9 @@
 # FX Rate Refresh — every 6 hours Mon-Fri (live yfinance rates → fx_rates.toml)
 0 0,6,12,18 * * 1-5 cd /app && python3 -m python_brain.ouroboros.fx_refresh >> /var/log/fx_refresh.log 2>&1
 
-# Google Sheets Sync — every 5 min Mon-Fri (drain Redis queue → spreadsheet)
-*/5 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.sheets_sync >> /var/log/sheets_sync.log 2>&1
+# Google Sheets Sync — every 15 min Mon-Fri (drain Redis queue → spreadsheet)
+# Reduced from */5 to */15: trades are rare (~5/day), no need for 5-min push frequency.
+*/15 * * * 1-5 cd /app && python3 -m python_brain.ouroboros.sheets_sync >> /var/log/sheets_sync.log 2>&1
 
 # Contract Expander — every 6 hours Mon-Fri (auto-grows contracts.toml from scored universe)
 # Runs after ticker_selector has scored the universe. Validates via yfinance, appends new
@@ -107,9 +109,9 @@
 # v19-P2-15: Parquet Orphan Cleanup — 04:40 UTC daily (before nightly, prevents disk fill)
 40 4 * * * cd /app && python3 -m python_brain.ouroboros.maintenance --cleanup >> /var/log/maintenance.log 2>&1
 
-# Docker prune — 04:30 UTC daily (reclaim old images/build cache, prevents disk-full on next deploy)
-# Runs inside container so uses docker CLI socket if available; otherwise no-op.
-30 4 * * * which docker >/dev/null 2>&1 && docker system prune -f >> /var/log/docker_prune.log 2>&1 || true
+# Docker prune — DISABLED: no-op inside container (no Docker socket).
+# Run on HOST instead: crontab -e → 30 4 * * * docker system prune -f
+# 30 4 * * * which docker >/dev/null 2>&1 && docker system prune -f >> /var/log/docker_prune.log 2>&1 || true
 
 # P2-7: Write FTT Registry — 04:52 UTC Mon-Fri (after nightly_v6, before config_writer next day)
 # Only needs to run once; config_fixes writes transaction_tax_registry.toml atomically
@@ -117,9 +119,9 @@
 
 # === PLAN 2 CLAUDE INTELLIGENCE ROLES (Sprint S11-S19) ===
 
-# S10: Claude Forensic Review — 04:53 UTC Mon-Fri (after nightly_v6, trade + veto classification)
-# flock: serialize behind nightly_pipeline to avoid WAL read race conditions
-53 4 * * 1-5 flock -x /tmp/nightly.lock cd /app && python3 -m python_brain.ouroboros.claude_forensic_review >> /var/log/claude_forensic.log 2>&1
+# S10: Claude Forensic Review — DISABLED: duplicates Step 4 of nightly_pipeline.sh (claude_review)
+# Both run the same forensic analysis on the same WAL data. Keep the pipeline version only.
+# 53 4 * * 1-5 flock -x /tmp/nightly.lock cd /app && python3 -m python_brain.ouroboros.claude_forensic_review >> /var/log/claude_forensic.log 2>&1
 
 # S12: Evening Briefing — 21:30 UTC Mon-Fri (after US close)
 30 21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.claude_briefing --evening --send-telegram >> /var/log/claude_briefing.log 2>&1

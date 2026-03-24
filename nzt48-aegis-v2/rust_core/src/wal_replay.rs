@@ -251,6 +251,7 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: String::new(),
+                active_trading_ticks: 0,
                     };
                     portfolio.add_position(pos);
                     let pending = portfolio

@@ -369,6 +369,7 @@ mod tests {
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: String::new(),
+                active_trading_ticks: 0,
         }
     }
 

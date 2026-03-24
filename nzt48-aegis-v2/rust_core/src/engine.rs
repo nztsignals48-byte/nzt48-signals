@@ -1955,6 +1955,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: entry_type.clone(),
+                active_trading_ticks: 0,
             });
 
             self.simulated_trades.push(sim_trade);
@@ -1996,6 +1997,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: entry_type.clone(),
+                active_trading_ticks: 0,
             };
             self.portfolio.add_position(pos_copy);
 
@@ -3023,6 +3025,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: String::new(),  // Not available during WAL replay
+                active_trading_ticks: 0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

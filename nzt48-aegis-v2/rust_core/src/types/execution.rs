@@ -131,6 +131,11 @@ pub struct PositionState {
     /// TypeA-F entry classification from bridge.py.
     #[pyo3(get)]
     pub entry_type: String,
+    /// S3: Active trading ticks since entry. Incremented by update_tracking() each tick.
+    /// Used for time-stop: active_trading_ticks / 12 ≈ active minutes (at ~5s tick interval).
+    /// Unlike wall-clock time, this pauses during exchange halts (no ticks = no increment).
+    #[pyo3(get)]
+    pub active_trading_ticks: u32,
 }
 
 #[pymethods]
@@ -164,6 +169,7 @@ impl PositionState {
             spread_at_entry_pct: 0.0,
             daily_trade_number: 0,
             entry_type: String::new(),
+            active_trading_ticks: 0,
         }
     }
 }
@@ -282,6 +288,7 @@ mod tests {
                 spread_at_entry_pct: 0.0,
                 daily_trade_number: 0,
                 entry_type: String::new(),
+                active_trading_ticks: 0,
         };
         assert!(pos.highest_high >= pos.avg_entry);
         assert_eq!(pos.trailing_rung, 0);
