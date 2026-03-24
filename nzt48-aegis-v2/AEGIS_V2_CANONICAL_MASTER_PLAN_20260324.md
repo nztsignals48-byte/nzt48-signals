@@ -65,7 +65,9 @@ If this plan contradicts code, the code is correct and this plan is wrong.
 | Max consecutive losses | 14 | < 8 | **FAILING** |
 | Strategy diversity | 1 with WR>35% | >= 2 | **FAILING** |
 
-**Dominant loss source**: LSEETF leveraged ETPs — 0% WR, -£30 over 28 trades. These are the single biggest drag on system performance.
+**Dominant loss source**: LSEETF leveraged ETPs — 0% WR, -£30 over 28 trades. These are the single biggest drag on system performance. Removing or shadow-only restricting these tickers would immediately improve WR and PF.
+
+**Cost-adjusted reality**: Every trade showing +£0.10 sim profit is actually -£2.90 after round-trip commission (£3.00). Current sim lies about economics. Cost-adjusted PF is likely below 0.5.
 
 **Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades with cost injection (Sprint S7).
 
@@ -176,37 +178,40 @@ TypeA and TypeD remain correctly disabled (proven losers with <30% WR).
 
 ---
 
-## 9. Remaining Sprints (S5-S12)
+## 9. Remaining Sprints — Money-First Priority Order
 
-### Sprint S5: EC2 Instance Upgrade (~15 min)
-- Upgrade from c7i-flex.large (4GB) to c7i.large (8GB, non-burstable).
-- Use terraform/variables.live.tfvars.
-- **Pre-live MANDATORY.** System runs tight on 4GB during peak market hours.
+Ordered by economic impact, not engineering convenience. Fix the P&L lie first, kill the garbage tickers second, then build infrastructure.
 
-### Sprint S6: config.live.toml (~15 min)
-- Create config.live.toml that reverts all 8 paper overrides (see Section 15).
-- **Pre-live MANDATORY.** Running live with max_positions=999 would be catastrophic.
-
-### Sprint S7: Cost Injection into Ouroboros (~1 hour)
+### Sprint S5: Cost Injection into Ouroboros (~1 hour) — ECONOMICS FIRST
 - Add slippage (5bps) + IBKR commission (£1.50/trade) to persistent_memory calculations.
 - Ouroboros must learn from cost-adjusted P&L, not fantasy zero-cost fills.
 - Required before unfreezing Ouroboros at N=300.
+- **This is the #1 priority.** Without cost honesty, every metric is a lie.
 
-### Sprint S8: Friction-Aware Signal Ranking (~1 hour)
+### Sprint S6: Symbol-Quality Memory + LSEETF Ticker Disposal (~1 hour) — KILL THE GARBAGE
+- Per-ticker quality scoring based on historical WR, spread, fills.
+- Auto-downrank or shadow-restrict LSEETF leveraged ETPs (0% WR, -£30 over 28 trades).
+- **These tickers are the dominant loss source.** Removing them may flip WR above 40% instantly.
+
+### Sprint S7: config.live.toml (~15 min) — PRE-LIVE MANDATORY
+- Create config.live.toml that reverts all 8 paper overrides (see Section 11).
+- Running live with max_positions=999 would be catastrophic.
+
+### Sprint S8: EC2 Instance Upgrade (~15 min) — PRE-LIVE MANDATORY
+- Upgrade from c7i-flex.large (4GB) to c7i.large (8GB, non-burstable).
+- Use terraform/variables.live.tfvars.
+
+### Sprint S9: Friction-Aware Signal Ranking (~1 hour)
 - When multiple strategies fire on the same tick, rank by net expected P&L after costs.
 - Prevents commission-destruction from low-edge signals.
 
-### Sprint S9: Per-Strategy Asymmetric Exits (~1 hour)
+### Sprint S10: Per-Strategy Asymmetric Exits (~1 hour)
 - Different Chandelier ATR multipliers per strategy family.
 - Mean-reversion strategies (IBS, VWAP Dip) need tighter exits than momentum (VanguardSniper).
 
-### Sprint S10: Regime + Session Enforcement (~2 hours)
+### Sprint S11: Regime + Session Enforcement (~2 hours)
 - Wire strategy_registry.json regime and session metadata into runtime checks.
 - Prevent momentum strategies from firing in mean-reversion regimes and vice versa.
-
-### Sprint S11: Symbol-Quality Memory (~1 hour)
-- Per-ticker quality scoring based on historical WR, spread, fills.
-- Auto-downrank tickers that consistently produce losses (e.g., LSEETF leveraged ETPs).
 
 ### Sprint S12: Cost-Honest Backtests (~1 hour)
 - Add IBKR commissions + slippage model to fast_backtest_pipeline.py.
