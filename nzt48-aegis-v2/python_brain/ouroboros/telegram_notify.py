@@ -297,6 +297,74 @@ def send_heartbeat() -> dict:
     )
 
 
+def send_hourly_pnl() -> dict:
+    """Send hourly trade count + P&L summary from WAL and system_memory."""
+    ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    # Read system_memory.json for cumulative stats
+    mem_path = Path("/app/data/system_memory.json")
+    cum_pnl = 0.0
+    cum_trades = 0
+    cum_wr = 0.0
+    cum_pf = 0.0
+    if mem_path.exists():
+        try:
+            mem = json.loads(mem_path.read_text())
+            cum_pnl = mem.get("cumulative_pnl", 0.0)
+            cum_trades = mem.get("total_trades", 0)
+            cum_wr = mem.get("win_rate", 0.0) * 100 if mem.get("win_rate", 0) <= 1.0 else mem.get("win_rate", 0.0)
+            cum_pf = mem.get("all_time_profit_factor", 0.0)
+        except Exception:
+            pass
+    # Count today's trades from WAL
+    today_trades = 0
+    today_pnl = 0.0
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    wal_path = Path("/app/events/current.ndjson")
+    if wal_path.exists():
+        try:
+            for line in wal_path.read_text().splitlines():
+                if "PositionClosed" in line:
+                    evt = json.loads(line)
+                    payload = evt.get("payload", {})
+                    if payload.get("type") == "PositionClosed":
+                        today_trades += 1
+                        today_pnl += payload.get("final_pnl", 0.0)
+        except Exception:
+            pass
+    # Count open positions from WAL (opened but not closed)
+    open_count = 0
+    opened_tickers = set()
+    closed_tickers = set()
+    if wal_path.exists():
+        try:
+            for line in wal_path.read_text().splitlines():
+                evt = json.loads(line)
+                payload = evt.get("payload", {})
+                tid = payload.get("ticker_id", -1)
+                if payload.get("type") == "SimulatedFill":
+                    opened_tickers.add(tid)
+                elif payload.get("type") == "PositionClosed":
+                    closed_tickers.add(tid)
+            open_count = len(opened_tickers - closed_tickers)
+        except Exception:
+            pass
+    # Format P&L with color emoji
+    pnl_emoji = "\U0001f7e2" if today_pnl >= 0 else "\U0001f534"
+    cum_emoji = "\U0001f7e2" if cum_pnl >= 0 else "\U0001f534"
+    msg = (
+        f"\U0001f4ca <b>AEGIS Hourly Update</b> {ts}\n"
+        f"\n"
+        f"<b>Today:</b>\n"
+        f"  Trades: {today_trades} | Open: {open_count}\n"
+        f"  {pnl_emoji} P&L: £{today_pnl:+.2f}\n"
+        f"\n"
+        f"<b>Cumulative:</b>\n"
+        f"  Trades: {cum_trades} | WR: {cum_wr:.1f}%\n"
+        f"  {cum_emoji} P&L: £{cum_pnl:+.2f} | PF: {cum_pf:.2f}\n"
+    )
+    return send_message(msg)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -308,6 +376,7 @@ def main():
     parser.add_argument("--session-start", type=str, choices=["asian", "european", "american"],
                         help="Send session start notification")
     parser.add_argument("--heartbeat", action="store_true", help="Send heartbeat")
+    parser.add_argument("--hourly-pnl", action="store_true", help="Send hourly trade+P&L summary")
     parser.add_argument("--send-pdf", type=str, help="Send a PDF file")
     parser.add_argument("--alert", type=str, help="Send an alert message")
     parser.add_argument("--severity", type=str, default="INFO",
@@ -341,6 +410,10 @@ def main():
 
     elif args.heartbeat:
         result = send_heartbeat()
+        print(json.dumps(result, indent=2))
+
+    elif args.hourly_pnl:
+        result = send_hourly_pnl()
         print(json.dumps(result, indent=2))
 
     elif args.send_pdf:

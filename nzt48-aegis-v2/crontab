@@ -69,6 +69,9 @@
 # Telegram heartbeat — every 4 hours during weekdays
 0 0,4,8,12,16,20 * * 1-5 cd /app && python3 -m python_brain.ouroboros.telegram_notify --heartbeat >> /var/log/telegram.log 2>&1
 
+# Hourly P&L + trade count update — every hour during market hours (07:00-21:00 UTC Mon-Fri)
+0 7-21 * * 1-5 cd /app && python3 -m python_brain.ouroboros.telegram_notify --hourly-pnl >> /var/log/telegram.log 2>&1
+
 # FX Rate Refresh — every 6 hours Mon-Fri (live yfinance rates → fx_rates.toml)
 0 0,6,12,18 * * 1-5 cd /app && python3 -m python_brain.ouroboros.fx_refresh >> /var/log/fx_refresh.log 2>&1
 
