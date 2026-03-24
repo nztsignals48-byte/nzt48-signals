@@ -101,7 +101,14 @@ OUTPUT FORMAT (pure JSON, no markdown wrapping):
   ],
   "system_alerts": ["Any system-level concerns"],
   "overall_assessment": "Brief summary of Ouroboros health"
-}"""
+}
+
+QUANTITATIVE FRAMEWORK (Lopez de Prado, Advances in Financial Machine Learning):
+- Apply the Deflated Sharpe Ratio and Multiple Hypothesis Testing problem.
+- If Ouroboros recommends a parameter change based on fewer than 100 trades, REJECT due to insufficient statistical power.
+- Apply Bonferroni Correction: if multiple parameter shifts were tested, divide the required success threshold by the number of tests.
+- Never accept a parameter change that improves Win Rate if it significantly degrades Profit Factor or increases Max Consecutive Losses.
+- Default to REJECT. You must be convinced beyond 95% confidence interval that the edge is structural, not a random walk artifact."""
 
 
 # ---------------------------------------------------------------------------

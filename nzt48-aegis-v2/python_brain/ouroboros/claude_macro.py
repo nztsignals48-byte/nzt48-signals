@@ -162,7 +162,14 @@ Return JSON:
   "overall_recommendation": "NORMAL|CAUTIOUS|DEFENSIVE|FLATTEN",
   "requires_operator_approval": true|false,
   "summary": "<1-2 sentence overall assessment>"
-}}"""
+}}
+
+REGIME FRAMEWORK (Campbell/Lo/MacKinlay, Bollerslev GARCH):
+Do NOT predict directional price impact of economic data. Estimate Volatility Shock Expansion only.
+1. Treat all Tier-1 events (FOMC, CPI, NFP, BOE) as volatility clustering triggers.
+2. Output a Velocity Cap Modifier (e.g., 0.5x to halve trading speed) and a Kelly Fraction Modifier (e.g., 0.25x to reduce sizing).
+3. Require system to wait for Volatility Crush (drop in VIX or asset-specific ATR) before returning Kelly to 1.0x.
+4. Do NOT recommend time-based blackouts. Recommend mathematical constraint multipliers."""
 
 
 def load_open_positions_summary() -> List[Dict[str, Any]]:

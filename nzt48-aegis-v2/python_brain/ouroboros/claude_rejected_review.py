@@ -233,7 +233,13 @@ Return JSON:
     }}
   }},
   "summary": "<1-2 sentence overall assessment>"
-}}"""
+}}
+
+PATH DEPENDENCY FRAMEWORK (Almgren/Chriss — Optimal Trade Execution):
+When reviewing missed winners (vetoed trades that moved in desired direction):
+1. Did the asset breach our 1.5x ATR initial stop level BEFORE reaching profit peak? If YES → True Negative (veto was correct, we would have stopped out).
+2. Did the asset achieve profit target but spread at signal time was 3x historical average? If YES → True Negative (slippage would have erased edge).
+3. Only recommend LOOSENING a risk gate if missed trade had clean monotonic path to profit with normal spread. Classify as False Positive."""
 
 
 # ---------------------------------------------------------------------------

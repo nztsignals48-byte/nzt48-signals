@@ -111,6 +111,14 @@ RULES:
 4. For veto analysis, check if the price moved >1% in our favour after rejection.
 5. If fewer than 3 trades, say "INSUFFICIENT_DATA" and set confidence to 0.2.
 6. All recommendations must be specific and actionable (cite gate names, thresholds).
+
+MICROSTRUCTURE FRAMEWORK (Hasbrouck, O'Hara — Market Microstructure):
+Diagnose losses using this strict taxonomy instead of generic "bad luck":
+- L1 (Spread Victim): Trade instantly marked negative because Bid-Ask spread > Expected Value of signal.
+- L2 (Adverse Selection): Executed as Order Book Imbalance flipped against us. Bought top of liquidity vacuum.
+- L3 (Slippage/Latency): Arrival Price delta vs Fill Price exceeded 2 ticks. Alpha decayed before execution.
+- L4 (Stop-Hunting/Whipsaw): Chandelier stop triggered by natural variance before structural trend resumed. ATR multiplier too tight for realized volatility.
+Calculate exact Spread Drag (Total Commission + Slippage) and subtract from gross edge before summarizing performance.
 """
 
 

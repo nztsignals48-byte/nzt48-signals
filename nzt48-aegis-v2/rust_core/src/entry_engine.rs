@@ -2,6 +2,31 @@
 //! Type A (40 LOC) + Type B (50 LOC) + Type C (40 LOC) + Type D (30 LOC)
 //! Tier routing + Confidence decay (20 LOC)
 
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║                          QUARANTINE NOTICE                               ║
+// ║                                                                          ║
+// ║  The TypeA-F detector structs in this file are DEAD CODE at runtime.     ║
+// ║  All entry classification is performed by Python bridge.py, which sends  ║
+// ║  pre-classified signals (TypeA-F) to the Rust engine. The Rust engine    ║
+// ║  never instantiates DipRecoveryDetector, EarlyRunnerDetector,            ║
+// ║  OverboughtFadeDetector, SupportBounceDetector, IBSMeanReversionDetector,║
+// ║  or OBVDivergenceDetector.                                               ║
+// ║                                                                          ║
+// ║  WHAT IS STILL USED:                                                     ║
+// ║    - EntryType enum          (referenced by types flowing from Python)    ║
+// ║    - EntrySignal struct      (data contract)                             ║
+// ║    - EntryTypeConfig         (config deserialization)                     ║
+// ║    - Tier enum               (imported by position_sizer.rs)             ║
+// ║    - apply_confidence_decay  (utility)                                   ║
+// ║    - select_entry_types_by_tier (utility)                                ║
+// ║                                                                          ║
+// ║  DO NOT DELETE — the module is imported by lib.rs and position_sizer.rs. ║
+// ║  The file must remain compilable. The detectors are kept for potential    ║
+// ║  future Rust-native signal generation (S3+).                             ║
+// ║                                                                          ║
+// ║  Quarantined: 2026-03-24                                                 ║
+// ╚════════════════════════════════════════════════════════════════════════════╝
+
 use crate::types::{Direction, StrategyId, TickerId};
 use std::collections::VecDeque;
 
