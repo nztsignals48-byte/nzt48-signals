@@ -70,6 +70,8 @@ pub struct PaperBroker {
     rate_limiter: TokenBucket,
     last_heartbeat_ns: u64,
     now_ns: u64,
+    /// Exchange per ticker — loaded from contracts.toml for lot sizing realism.
+    contract_exchanges: HashMap<TickerId, String>,
 }
 
 impl PaperBroker {
@@ -87,6 +89,14 @@ impl PaperBroker {
             rate_limiter: TokenBucket::new(rate_limit),
             last_heartbeat_ns: 0,
             now_ns: 0,
+            contract_exchanges: HashMap::new(),
+        }
+    }
+
+    /// Load exchange mappings from contract entries for lot sizing realism.
+    pub fn load_contract_exchanges(&mut self, contracts: &[(TickerId, String)]) {
+        for (tid, exchange) in contracts {
+            self.contract_exchanges.insert(*tid, exchange.clone());
         }
     }
 
@@ -434,6 +444,13 @@ impl BrokerAdapter for PaperBroker {
 
     fn client_id(&self) -> u32 {
         self.config.client_id
+    }
+
+    fn exchange_for_ticker(&self, ticker_id: &TickerId) -> &str {
+        self.contract_exchanges
+            .get(ticker_id)
+            .map(|s| s.as_str())
+            .unwrap_or("XLON")
     }
 }
 

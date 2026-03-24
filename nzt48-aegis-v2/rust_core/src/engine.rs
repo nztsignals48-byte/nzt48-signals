@@ -3,7 +3,7 @@
 
 use chrono::Timelike;
 use crate::asian_session::AsianSession;
-use crate::broker::{BrokerAdapter, BrokerError, BrokerEvent};
+use crate::broker::{BrokerAdapter, BrokerError, BrokerEvent, min_lot_for_exchange};
 use crate::clock::{Clock, TradingMode};
 use crate::config_loader::EngineConfig;
 use serde_json;
@@ -983,6 +983,18 @@ impl<B: BrokerAdapter> Engine<B> {
         if self.halted_tickers.remove(&tid) {
             self.gap_cooldowns.insert(tid, self.now_ns + HALT_COOLDOWN_NS);
             eprintln!("HALT_LIFT: ticker={} resumed trading — 5-min cooldown set", tid.0);
+            // Reset time-stop counter for any open position in this ticker.
+            // Post-unhalt price discovery is noise (Hasbrouck) — the bid-ask spread
+            // hasn't normalized yet. Give the position a fresh 45-minute window
+            // so the aggressive 0.3x ATR time-stop doesn't fire on auction jitter.
+            if let Some(pos) = self.positions.get_mut(&tid) {
+                let old_ticks = pos.active_trading_ticks;
+                pos.active_trading_ticks = 0;
+                eprintln!(
+                    "HALT_GRACE: ticker={} active_trading_ticks reset {} → 0 (post-unhalt grace)",
+                    tid.0, old_ticks,
+                );
+            }
         }
 
         // P3-A: GARCH(1,1) update with log return
@@ -1755,6 +1767,17 @@ impl<B: BrokerAdapter> Engine<B> {
         self.telemetry.signals_generated.inc();
         self.telemetry.signals_approved.inc();
 
+        // L1 data quality gate: only enter positions on tickers with true tick-by-tick data.
+        // MktData (250ms snapshot → 5s synthetic bar) is too coarse for signal validation.
+        // PaperBroker (simulation_mode) returns true for all tickers — gate only constrains live.
+        if !self.broker.is_l1_subscribed(&tid) {
+            eprintln!(
+                "L1_GATE: ticker={} signal approved but no L1 data — skipping entry",
+                tid.0,
+            );
+            return;
+        }
+
         // P6-C: ISA gate check before order submission.
         // tick.ask is already GBP-converted, so trade_value is in GBP.
         // Simulation: Kelly-anchored sizing with £500 base. Live: Python shares.
@@ -1853,6 +1876,27 @@ impl<B: BrokerAdapter> Engine<B> {
             shares_hint
         } else {
             (decision.adjusted_size / native_ask).max(1.0) as u32
+        };
+
+        // P1-2.11: Board lot rounding — TSE/HKEX/SGX require 100-share lots.
+        // Without this, simulation produces untradeable fractional lot sizes,
+        // breaking sim/live coherence for Asian exchanges.
+        let exchange_for_lot = self.config.contracts.get(tid.0 as usize)
+            .map(|c| c.exchange.as_str())
+            .unwrap_or("XLON");
+        let min_lot = min_lot_for_exchange(exchange_for_lot);
+        let qty = if min_lot > 1 {
+            let rounded = ((qty as f64 / min_lot as f64).round() as u32) * min_lot;
+            if rounded == 0 {
+                eprintln!(
+                    "LOT_SKIP: ticker={} qty={} < min_lot={} on {} — skipping entry",
+                    tid.0, qty, min_lot, exchange_for_lot,
+                );
+                return;
+            }
+            rounded
+        } else {
+            qty
         };
 
         // Get symbol name for logging

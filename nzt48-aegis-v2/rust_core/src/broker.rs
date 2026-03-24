@@ -165,10 +165,36 @@ pub trait BrokerAdapter {
         "XLON"
     }
 
+    /// Check if a ticker has L1 tick-by-tick data (not just MktData snapshots).
+    /// Used to gate signal generation: only trade on tickers with continuous tape.
+    /// Default: true (PaperBroker/simulation assumes all data is honest).
+    fn is_l1_subscribed(&self, _ticker_id: &TickerId) -> bool {
+        true
+    }
+
     /// Get the human-readable symbol for a ticker ID.
     /// Used for logging and simulated trade reporting.
     fn symbol_for(&self, _ticker_id: TickerId) -> Option<String> {
         None
+    }
+}
+
+/// P1-2.11: Minimum lot sizes per exchange (shared utility).
+/// Most western exchanges allow 1-share orders, but Asian exchanges
+/// enforce board-lot minimums that cause rejects if violated.
+/// Used by both engine.rs (simulation sizing) and ibkr_broker.rs (live orders).
+pub fn min_lot_for_exchange(exchange: &str) -> u32 {
+    match exchange {
+        "LSEETF" | "LSE" | "XLON" => 1,
+        "IBIS" | "XETRA" | "XETR" => 1,
+        "SBF" | "EURONEXT" | "XPAR" | "AEB" | "XAMS" => 1,
+        "SMART" | "NYSE" | "NASDAQ" | "AMEX" => 1,
+        "TSEJ" | "TSE" => 100,     // Tokyo: 100-share lots
+        "SEHK" | "HKEX" => 100,    // Hong Kong: board lots vary, 100 is common
+        "SGX" => 100,               // Singapore: 100-share lots
+        "KSE" | "KRX" => 1,        // Korea: 1-share lots (modern)
+        "ASX" => 1,                 // Australia: 1-share lots
+        _ => 1,
     }
 }
 

@@ -16,6 +16,7 @@ use ibapi::subscriptions::sync::Subscription;
 
 use crate::broker::{
     BrokerAdapter, BrokerError, BrokerEvent, BrokerOpenOrder, BrokerPosition, TokenBucket,
+    min_lot_for_exchange,
 };
 use crate::types::{BrokerAckStatus, MarketTick, OrderSide, TickerId};
 
@@ -103,23 +104,7 @@ impl Default for TickAccumulator {
     }
 }
 
-/// P1-2.11: Minimum lot sizes per exchange.
-/// Most western exchanges allow 1-share orders, but Asian exchanges
-/// enforce board-lot minimums that cause rejects if violated.
-fn min_lot_for_exchange(exchange: &str) -> u32 {
-    match exchange {
-        "LSEETF" | "LSE" | "XLON" => 1,
-        "IBIS" | "XETRA" | "XETR" => 1,
-        "SBF" | "EURONEXT" | "XPAR" | "AEB" | "XAMS" => 1,
-        "SMART" | "NYSE" | "NASDAQ" | "AMEX" => 1,
-        "TSEJ" | "TSE" => 100,     // Tokyo: 100-share lots
-        "SEHK" | "HKEX" => 100,    // Hong Kong: board lots vary, 100 is common
-        "SGX" => 100,               // Singapore: 100-share lots
-        "KSE" | "KRX" => 1,        // Korea: 1-share lots (modern)
-        "ASX" => 1,                 // Australia: 1-share lots
-        _ => 1,
-    }
-}
+// P1-2.11: min_lot_for_exchange() moved to broker.rs as shared utility.
 
 /// P1-2.12: Quantize price to exchange-appropriate tick size.
 /// Prevents order rejects from sub-tick pricing. LSE and TSE use
@@ -191,6 +176,9 @@ pub struct IbkrBroker {
     sub_errors_detected: u32,
     /// P1-2.18: Last cancel/modify time per order_id (prevent IBKR pacing violations).
     last_modify_ns: HashMap<String, u64>,
+    /// Set of tickers with active L1 tick-by-tick subscriptions.
+    /// Used to gate signal generation — only trade on continuous tape data.
+    l1_subscribed_set: HashSet<TickerId>,
 }
 
 impl IbkrBroker {
@@ -225,6 +213,7 @@ impl IbkrBroker {
             total_l1_received: 0,
             sub_errors_detected: 0,
             last_modify_ns: HashMap::new(),
+            l1_subscribed_set: HashSet::new(),
         }
     }
 
@@ -638,6 +627,7 @@ impl IbkrBroker {
                     symbol: mapping.symbol,
                     sub,
                 });
+                self.l1_subscribed_set.insert(ticker_id);
                 Ok(())
             }
             Err(e) => {
@@ -664,8 +654,9 @@ impl IbkrBroker {
         // Find and remove the L1 subscription
         if let Some(pos) = self.l1_subs.iter().position(|sub| sub.ticker_id == ticker_id) {
             self.l1_subs.remove(pos);
-            // Also remove from cache
+            // Also remove from cache and L1 tracking set
             self.l1_cache.remove(&ticker_id);
+            self.l1_subscribed_set.remove(&ticker_id);
             eprintln!(
                 "IBKR: Unsubscribed L1 for ticker_id={} (count: {})",
                 ticker_id.0,
@@ -1401,6 +1392,10 @@ impl BrokerAdapter for IbkrBroker {
             .get(ticker_id)
             .map(|m| m.exchange.as_str())
             .unwrap_or("XLON")
+    }
+
+    fn is_l1_subscribed(&self, ticker_id: &TickerId) -> bool {
+        self.l1_subscribed_set.contains(ticker_id)
     }
 
     fn symbol_for(&self, ticker_id: TickerId) -> Option<String> {

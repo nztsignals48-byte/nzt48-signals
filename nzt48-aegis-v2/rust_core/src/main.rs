@@ -356,22 +356,18 @@ fn main() {
         eprintln!("Market data: skipped (no broker connection)");
     }
 
-    // P0-01: Subscribe to L1 tick-by-tick bid/ask for first N LSE ETPs.
-    // IBKR paper limits tick-by-tick to ~2 concurrent (error 10190 at higher counts).
-    // Uses first 2 LSE contracts from contracts.toml (highest liquidity by convention).
+    // L1 tick-by-tick: subscribe for ALL registered tickers.
+    // IBKR will succeed for tickers with proper data subs, fail for others (error 10190/354).
+    // The l1_subscribed_set tracks which tickers actually have L1 — engine gates entries on this.
+    // This replaces the old "2 L1 only" approach with honest universe-wide L1 attempt.
     if broker_connected {
-        let mc = rust_core::market_config::MarketConfig::from_contracts(&config_dir);
-        let l1_core: Vec<&str> = mc.lse.iter()
-            .take(2)  // IBKR tick-by-tick limit
-            .map(|s| s.as_str())
-            .collect();
-        let lse_tids: Vec<rust_core::types::TickerId> = l1_core.iter()
-            .filter_map(|sym| broker.contract_map_keys().iter()
-                .find(|&&tid| broker.symbol_for(tid).map_or(false, |s| s == *sym))
-                .copied())
-            .collect();
-        let l1_count = broker.subscribe_l1_batch(&lse_tids);
-        eprintln!("Market data: subscribed to {l1_count} L1 bid/ask streams ({:?})", l1_core);
+        let all_tids = broker.contract_map_keys();
+        let l1_count = broker.subscribe_l1_batch(&all_tids);
+        let total = all_tids.len();
+        eprintln!(
+            "L1_GATE: {}/{} tickers have L1 tick-by-tick data — only these are trade-eligible",
+            l1_count, total
+        );
     }
 
     // Create tick channel for backpressure monitoring (Phase 6A)
@@ -569,6 +565,10 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(15));
                     let sub_count = engine.broker.subscribe_all();
                     eprintln!("BROKER RECONNECTED: subscribed to {sub_count} bar streams");
+                    // Re-subscribe L1 for honest signal gating post-reconnect
+                    let all_tids = engine.broker.contract_map_keys();
+                    let l1_count = engine.broker.subscribe_l1_batch(&all_tids);
+                    eprintln!("BROKER RECONNECTED: L1_GATE {}/{} tickers", l1_count, all_tids.len());
 
                     // P0-1.5: Post-reconnect position reconciliation.
                     // If we have open positions, we MUST verify they still exist at the broker.
