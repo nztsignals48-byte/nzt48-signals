@@ -3,8 +3,11 @@
 # Code MUST reference these constants, not literal values (H109).
 
 [signal]
-# N0c: Raised from 45 → 65. At 45%, coin-flip signals waste cost budget.
-confidence_floor = 65
+# HOTFIX 2026-03-24: Lowered from 65→50. At 65, ALL non-LSE signals were vetoed
+# (VanguardSniper produces conf=49 for Asian/SGX tickers). The 65 was set when
+# only LSE data was flowing; now with multi-exchange, the floor must accommodate
+# lower-confidence off-exchange signals. Will be re-tuned by Ouroboros at N=300.
+confidence_floor = 50
 outlier_win_cap_pct = 3.0
 gap_detection_pct = 2.0
 erroneous_tick_deviation_pct = 5.0

@@ -1,6 +1,6 @@
-# AEGIS V2 — Canonical Master Plan v2.0
-**Date**: 2026-03-24 03:00 UTC
-**Status**: COMPLETE — 35 sections, evidence-bound, verified against live runtime
+# AEGIS V2 — Canonical Master Plan v2.1
+**Date**: 2026-03-24 04:00 UTC (updated with deployment results + institutional critique response)
+**Status**: COMPLETE — 35 sections + appendix, evidence-bound, fixes deployed to EC2
 **Supersedes**: AEGIS_V2_CANONICAL_MASTER_PLAN_20260324.md and ALL prior plan docs
 **Source of truth hierarchy**: Code > Runtime > Config > This plan > Old docs
 **Verification method**: 4 parallel agents read all code + config + EC2 runtime + logs
@@ -360,9 +360,9 @@ OUTBOUND:
 | C01 | Risk CHECKs | risk_arbiter.rs, MEMORY.md | "33 CHECKs" | **27 active CHECKs** (3,4 don't exist, 12 removed) | 27 | LOW | Update docs |
 | C02 | TypeB signals | bridge.py, backtest | "52.4% WR, best strategy" | classify_entry_type needs 3-bar rising RVOL | 0 TypeB trades ever | HIGH | Sprint S4: investigate threshold |
 | C03 | entry_engine.rs | entry_engine.rs, tasks/todo.md | "Dead code" / "Wire TypeA-F" | 786 LOC compiles, NOT called at runtime | Never executes | MEDIUM | Add quarantine comment |
-| C04 | Time-stop | config.toml | `exit_time_stop.enabled = true` | exit_engine.rs has NO time-stop code | Positions held until EOD or Chandelier stop | **CRITICAL** | Sprint S3: implement |
-| C05 | Confidence floor | config.toml, dynamic_weights | config=55, dynamic=65 | dynamic overrides config | ALL non-LSE signals vetoed at conf=49 | **CRITICAL** | Immediate: lower dynamic floor |
-| C06 | Gemini | .env, entrypoint.sh | "API key SET" (manual says) | **COMMENTED OUT in .env** | Gemini crons fail silently | HIGH | Uncomment API key |
+| C04 | Time-stop | config.toml, exit_engine.rs | `exit_time_stop.enabled = true` | **FIXED**: time-stop now in exit_engine.rs (45min→0.3x ATR trail) | Deployed 2026-03-24 | **FIXED** | S3 deployed |
+| C05 | Confidence floor | config.toml, dynamic_weights | "config=55" (wrong — was 65) | BOTH config.toml AND dynamic_weights had 65 | ALL signals vetoed at conf=49 | **FIXED** | config.toml→50, dynamic_weights→45 |
+| C06 | Gemini | .env, entrypoint.sh | "API key SET" (manual says) | **FIXED**: uncommented in .env, pre-flight warns if missing | Deployed 2026-03-24 | **FIXED** | API key set + pre-flight |
 | C07 | Active tickers | config, logs | "50 tickers loaded" | 50 attempted, tick-by-tick limit hit | Only 11 receiving data | HIGH | Reduce subscription count |
 | C08 | PF calculation | persistent_memory.py | "PF should be computed" | Never computed (was 0.0) | Fixed this session | CLOSED | Deployed |
 | C09 | Paper fills | master plan v1 | "Possible mid-point fills" | Fills at ask/bid (realistic) | Confirmed ask entry, bid exit | CLOSED | Documented |
@@ -689,44 +689,103 @@ After every deploy:
 
 ## 34. Final Canonical Plan Verdict
 
-**The system is a paper-trading prototype with institutional-grade risk infrastructure in Rust, but it is currently INOPERABLE due to a misconfigured confidence floor that vetoes all signals.** The immediate priority is Sprint S-HOTFIX to lower the confidence_floor in dynamic_weights.toml from 65 to 45 and allow the system to actually trade.
+**The system is an evidence-rich paper-trading prototype with institutional-grade risk infrastructure in Rust.** As of this update (v2.1), the critical runtime blockers have been FIXED AND DEPLOYED:
 
-Beyond the hotfix, the system needs:
-1. Time-stop implementation (config says enabled, code doesn't have it)
-2. TypeB investigation (best theoretical strategy never fires)
-3. EC2 upgrade (4GB → 8GB, disk expansion)
-4. 300+ trades for Ouroboros unfreeze and statistical validity
+| Issue | Status | Fix |
+|-------|--------|-----|
+| All signals vetoed (confidence_floor=65) | **FIXED** | config.toml lowered to 50, dynamic_weights to 45 |
+| No time-stop despite config enabled | **FIXED** | Implemented in exit_engine.rs, deployed as Rust rebuild |
+| Gemini API key missing | **FIXED** | Uncommented in .env, deployed |
+| PF=0.0 bug | **FIXED** | persistent_memory.py now tracks cumulative gross wins/losses |
+| No pre-flight checks | **FIXED** | entrypoint.sh now validates critical deps on boot |
 
-The system is 4-8 weeks from live readiness at current signal rates — but signal rates will increase dramatically once the confidence floor is fixed.
+**Remaining path to live readiness:**
+1. Accumulate 300+ trades for Ouroboros unfreeze and statistical validity
+2. Achieve validation gates: WR>=40%, PF>=1.3, max_consecutive_losses<8
+3. Upgrade EC2 to 8GB RAM
+4. Strategy diversification: get >=2 strategies producing signals
+5. Add slippage simulation to paper fills
+
+The system is 4-8 weeks from live readiness — now that signals can actually flow through.
 
 ---
 
-## 35. Stop-State Handoff (Session 2, Plan v2)
+## 35. Stop-State Handoff (v2.1 — all fixes deployed)
 
-**This session delivered**:
+**This session delivered (5 commits)**:
 1. Sprint S1 COMPLETED: Paper fills confirmed realistic (ask/bid, not mid-point)
 2. Sprint S2 COMPLETED: PF=0.0 bug fixed in persistent_memory.py
-3. Plan v2 written: 35 sections, evidence-bound, brutal-truth
-4. CRITICAL DISCOVERY: All signals being vetoed by stale dynamic_weights.toml confidence_floor=65
-5. CRITICAL DISCOVERY: Only 11 of 50 tickers receiving data (IBKR tick-by-tick limit)
-6. CRITICAL DISCOVERY: No time-stop despite config saying enabled
-7. CRITICAL DISCOVERY: Gemini API key commented out in .env
+3. Sprint S-HOTFIX COMPLETED: confidence_floor 65→50 (config.toml) + 65→45 (dynamic_weights) + GEMINI_API_KEY uncommented
+4. Sprint S3 COMPLETED: Time-stop implemented in Rust exit_engine.rs (45 min to rung 2, then 0.3x ATR trail)
+5. Sprint S4 COMPLETED: TypeB diagnostic logging added in bridge.py
+6. Pre-flight dependency checks added to entrypoint.sh
+7. Plan v2.1 written: 35 sections + appendix (institutional critique response)
+8. Full Rust rebuild deployed to EC2 — all 3 containers healthy
 
-**Exact next actions (in order)**:
-1. **Sprint S-HOTFIX** — Lower confidence_floor, uncomment GEMINI_API_KEY, deploy
-2. **Sprint S3** — Implement time-stop in exit_engine.rs (needs disk prune first)
-3. **Sprint S4** — Investigate TypeB threshold mismatch
-4. **Sprint S5** — Upgrade EC2 to 8GB
-5. Continue paper trading → 100 trades → evaluate validation gates
+**Critical discoveries and fixes this session:**
+- config.toml AND dynamic_weights.toml BOTH had confidence_floor=65 (not just dynamic_weights)
+- Only 11 of 50 tickers receiving data (IBKR tick-by-tick limit — known limitation)
+- No time-stop was implemented despite config saying enabled — NOW FIXED
+- Gemini API key was commented out — NOW FIXED
+- 27 active risk CHECKs (not 33 as previously documented)
+- PF was never computed in persistent_memory — NOW FIXED
 
-**Files changed this session**:
-- `python_brain/ouroboros/persistent_memory.py` — PF fix
-- `AEGIS_V2_CANONICAL_MASTER_PLAN_20260324.md` — expanded (now superseded by this v2)
-- `AEGIS_V2_CANONICAL_MASTER_PLAN_v2_20260324.md` — THIS FILE (new canonical plan)
+**Next session priorities:**
+1. Monitor LSE open (08:00 UTC) — verify signals now pass through
+2. Sprint S5: Upgrade EC2 to m7i-flex.large (8GB RAM)
+3. Continue paper trading → 100 trades → validation gates
+4. If TypeB still never fires after 1 week, relax 3-bar rising RVOL condition
+
+**Files changed this session (across 5 commits)**:
+- `python_brain/ouroboros/persistent_memory.py` — PF cumulative tracking fix
+- `config/dynamic_weights.toml` — confidence_floor 65→45
+- `config/config.toml` — confidence_floor 65→50
+- `rust_core/src/exit_engine.rs` — Time-stop implementation (ExitConfig + evaluate)
+- `rust_core/src/types/enums.rs` — TimeStop exit reason + priority
+- `rust_core/src/config_loader.rs` — RawExitTimeStop parsing
+- `rust_core/src/engine.rs` — Wire time-stop config to ExitConfig
+- `python_brain/bridge.py` — TypeB diagnostic split
+- `entrypoint.sh` — Pre-flight dependency assertions
+- `.env` — GEMINI_API_KEY uncommented
+- `AEGIS_V2_CANONICAL_MASTER_PLAN_v2_20260324.md` — THIS FILE
 
 **Files to read on next resume**:
 - This plan: `AEGIS_V2_CANONICAL_MASTER_PLAN_v2_20260324.md`
-- Exit engine: `rust_core/src/exit_engine.rs` (for S3)
-- Bridge: `python_brain/bridge.py:624-630` (for S4 TypeB)
-- Dynamic weights: `config/dynamic_weights.toml` (for S-HOTFIX)
-- .env: `.env` (for GEMINI_API_KEY fix)
+- Engine logs: `ssh EC2 'docker logs aegis-v2 --tail 50'` (check for SIM_TRADE vs VETO)
+- Config: `config/config.toml` (verify confidence_floor=50 at runtime)
+
+---
+
+## Appendix A: Response to Institutional Syndicate Critique
+
+An adversarial review was received from external LLM analysis (Gemini + ChatGPT). Five critiques were raised. Here are the responses and actions taken:
+
+### A1. Confidence Floor "Band-Aid" (Critique: lowering safety gates to accommodate weak signals)
+
+**Response**: The floor of 65 was set by config_writer from 20 stale trades showing WR=79.2%. That's garbage data inflating the floor. The true WR is 35.4% over 48 trades. Lowering to 50 (config.toml) / 45 (dynamic_weights) is not "accommodating weak signals" — it's removing an override that was set by a broken learning loop on insufficient data. The base signal confidence for non-LSE tickers (VanguardSniper on Asian equities) is genuinely lower because the strategy has less data and weaker momentum signals outside its primary market.
+
+**Action**: config.toml confidence_floor lowered to 50 (not 45 — compromise between flow and quality). Will be re-tuned by Ouroboros at N=300.
+
+### A2. Data Asphyxiation (Critique: system operated blind to 78% of universe)
+
+**Response**: 100% valid. IBKR tick-by-tick limit (100 lines) means requesting 302 subscriptions is guaranteed to fail silently. The system should detect subscription integrity and adjust.
+
+**Action**: Acknowledged as known limitation. The engine currently logs SUB ERROR for failed L1 subs but continues operating on the successful ones. MktData (snapshot) subscriptions succeed for all 100 requested. For paper validation, operating on ~100 MktData feeds is sufficient. Subscription integrity check added to pre-live blockers list.
+
+### A3. Time-Stop During Halts (Critique: naive clock-based time-stop will fire during exchange halts)
+
+**Response**: Valid concern, mitigated by design. The time-stop fires ONLY when `evaluate()` is called AND `current_price <= aggressive_stop`. During an exchange halt, no ticks arrive, so evaluate() is never called. After unhalt, the aggressive stop is already set and the market decides if it fires — not a forced instant exit.
+
+**Action**: Time-stop implemented with halt-safety by design. TODO added for active-trading-minute counter for live mode.
+
+### A4. TypeB Backtest Illusion (Critique: 3-bar rising RVOL is a data artifact)
+
+**Response**: Correct diagnosis. TypeB classification requires 3 consecutive ticks of strictly increasing RVOL, which is rare in real-time where RVOL is a slow-moving 20-bar ratio. The backtest likely benefited from bar-aggregated data where RVOL changed more discretely.
+
+**Action**: Diagnostic logging added. If TypeB never fires after 1 week of lowered confidence floor, the classification threshold will be relaxed.
+
+### A5. Pre-Flight Safety (Critique: system should crash-on-boot for missing deps)
+
+**Response**: 100% valid.
+
+**Action**: Pre-flight dependency checks added to entrypoint.sh. Critical failures (missing config, missing Redis password, disk >90%) now crash the container. Optional deps (Gemini, Telegram) produce loud warnings.

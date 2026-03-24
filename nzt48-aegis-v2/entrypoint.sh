@@ -5,6 +5,49 @@
 IBKR_HOST=${IBKR_HOST:-ib-gateway}
 IBKR_PORT=${IBKR_PORT:-4003}
 
+# ============================================================================
+# PRE-FLIGHT DEPENDENCY CHECKS (fail-loud, not fail-silent)
+# Institutional requirement: crash on boot if critical deps are misconfigured.
+# ============================================================================
+echo "Running pre-flight dependency checks..."
+PREFLIGHT_FAIL=0
+
+# Check critical config files exist
+for f in /app/config/config.toml /app/config/contracts.toml; do
+    if [ ! -f "$f" ]; then
+        echo "PREFLIGHT FAIL: Missing critical config file: $f"
+        PREFLIGHT_FAIL=1
+    fi
+done
+
+# Check critical env vars
+if [ -z "$REDIS_PASSWORD" ]; then
+    echo "PREFLIGHT FAIL: REDIS_PASSWORD not set"
+    PREFLIGHT_FAIL=1
+fi
+
+# Warn (non-fatal) for optional but important deps
+if [ -z "$GEMINI_API_KEY" ]; then
+    echo "PREFLIGHT WARN: GEMINI_API_KEY not set — Gemini universe curation will be disabled"
+fi
+if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+    echo "PREFLIGHT WARN: Telegram not configured — alerts/kill-switch disabled"
+fi
+
+# Check disk space (fail if <10% free)
+DISK_PCT=$(df --output=pcent / 2>/dev/null | tail -1 | tr -d ' %' || echo "0")
+if [ "$DISK_PCT" -gt 90 ] 2>/dev/null; then
+    echo "PREFLIGHT FAIL: Disk usage ${DISK_PCT}% — need <90% for WAL writes and rebuilds"
+    PREFLIGHT_FAIL=1
+fi
+
+if [ "$PREFLIGHT_FAIL" -eq 1 ]; then
+    echo "PREFLIGHT: CRITICAL failures detected. Engine will NOT start."
+    echo "PREFLIGHT: Fix the above issues and restart the container."
+    exit 1
+fi
+echo "Pre-flight checks passed."
+
 # Sprint S02: Initialize Claude cold-path directories
 echo "Initializing data governance directories..."
 mkdir -p /app/data/claude/{reviews,briefings,challenges,curation,rejected_reviews,anomalies,macro}
