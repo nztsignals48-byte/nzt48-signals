@@ -67,11 +67,11 @@ If this plan contradicts code, the code is correct and this plan is wrong.
 | Max consecutive losses | 14 | < 8 | **FAILING** |
 | Strategy diversity | 1 with WR>35% | >= 2 | **FAILING** |
 
-**Dominant loss source**: LSEETF leveraged ETPs — 0% WR, -£30 over 28 trades. These are the single biggest drag on system performance. Removing or shadow-only restricting these tickers would immediately improve WR and PF.
+**Dominant loss source**: LSEETF leveraged ETPs — 0% WR, -£30 over 28 trades. **NOW BLOCKED** (Sprint S6: exchange-level blacklist, all 52 LSEETF tickers). WR and PF should improve once non-LSEETF trades accumulate.
 
-**Cost-adjusted reality**: Every trade showing +£0.10 sim profit is actually -£2.90 after round-trip commission (£3.00). Current sim lies about economics. Cost-adjusted PF is likely below 0.5.
+**Cost-adjusted reality**: **NOW TRACKED** (Sprint S5). Nightly pipeline computes cost-adjusted P&L per trade (commission £3.40 RT + slippage 0.5% + FX 0.4% for non-GBP + spread). Persistent memory records cost-adjusted values. A £2,000 LSE trade costs ~£17; a £2,000 US trade costs ~£23.
 
-**Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades with cost injection (Sprint S5).
+**Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades. Cost injection is now active (S5) — Ouroboros will learn from realistic economics when it unfreezes.
 
 ### Today's Live Trading (2026-03-25, post-S4 deploy)
 
@@ -122,17 +122,17 @@ First ever TypeC, TypeE, AND Orchestrator trades in production. 4 strategy types
 
 ### Simulation-Truth Gaps (from ChatGPT simulation triage)
 
-| Metric | Status | Blocked by |
+| Metric | Status | Resolved by |
 |--------|--------|------------|
-| Cost-adjusted PF | NOT TRACKED — real PF likely <0.5 | Sprint S5 (cost injection) |
-| Cost-adjusted expectancy/trade | NOT TRACKED — many "wins" become losses after costs | Sprint S5 |
-| Loss concentration by ticker family | KNOWN manually (LSEETF 0% WR) — not automated | Sprint S6 (symbol quality) |
-| % of wins invalidated by costs | NOT TRACKED | Sprint S5 |
-| Per-strategy net expectancy | NOT TRACKED | Sprint S5 |
-| Instrument-class-aware friction | NOT TRACKED — leveraged ETPs treated same as equities | Sprint S6 |
+| Cost-adjusted PF | **NOW TRACKED** — nightly records cost-adjusted P&L to persistent memory | Sprint S5 ✅ |
+| Cost-adjusted expectancy/trade | **NOW TRACKED** — estimate_trade_cost() per trade with per-exchange rates | Sprint S5 ✅ |
+| Loss concentration by ticker family | **RESOLVED** — LSEETF blocked at exchange level (52 tickers) | Sprint S6 ✅ |
+| % of wins invalidated by costs | **NOW TRACKED** — nightly logs cost-adjusted WR alongside sim WR | Sprint S5 ✅ |
+| Per-strategy net expectancy | **PARTIALLY** — nightly shows cost-adjusted per-strategy data, not yet ranked | Sprint S9 |
+| Instrument-class-aware friction | **RESOLVED** — LSEETF blocked, per-exchange cost rates in cost_model.py | Sprint S6 ✅ |
 | Net-edge ranking when multiple signals compete | NOT IMPLEMENTED — uses raw confidence only | Sprint S9 |
 
-All blocked by Sprint S5 (cost injection) or S6 (symbol quality). These are correctly the top 2 remaining sprints.
+S5 and S6 resolved. Remaining gap: S9 (friction-aware ranking when multiple signals compete).
 
 ---
 
@@ -153,6 +153,9 @@ All blocked by Sprint S5 (cost injection) or S6 (symbol quality). These are corr
 | Config generation | Python config_writer.py | dynamic_weights.toml (mutation FROZEN, analysis runs) |
 | Universe curation | Python ticker_selector.py + Gemini | RUNNING. Produces core_universe_latest.json every 2h. |
 | Signal challenge | Python claude_curator.py | RUNNING. Daily briefings, forensic reviews, gate calibration. |
+| Cost model | Python cost_model.py | estimate_trade_cost() — per-exchange commission, slippage, FX |
+| Exchange blocking | Python bridge.py | LSEETF blocked via [blacklist].exchanges in config.toml |
+| Regime/session gating | Python bridge.py | strategy_registry.json regime/session metadata enforced at runtime |
 | Hourly P&L Telegram | Python telegram_notify.py --hourly-pnl | RUNNING. Every hour 07:00-21:00 UTC Mon-Fri. |
 
 ---
@@ -188,6 +191,10 @@ Every item below has been verified against running code or runtime output.
 | Ouroboros nightly analysis | **WORKING** | nightly_v6.py runs at 04:50, analyzes trades, updates persistent_memory |
 | Ouroboros config writer | **WORKING (mutation frozen)** | Runs but skips writes because observe_only=true. Will auto-enable at N=300. |
 | Hourly P&L Telegram | **DEPLOYED** | --hourly-pnl mode, every hour 07:00-21:00 UTC Mon-Fri |
+| Cost injection (S5) | **DEPLOYED** | estimate_trade_cost() in cost_model.py, nightly records cost-adjusted P&L |
+| LSEETF exchange block (S6) | **DEPLOYED** | 52 tickers blocked via [blacklist].exchanges in config.toml |
+| config.live.toml (S7) | **DEPLOYED** | All 8 paper overrides covered with production-safe values |
+| Regime+session enforcement (S8) | **DEPLOYED** | strategy_registry.json gates enforced in bridge.py signal path |
 
 ---
 
@@ -221,6 +228,12 @@ The classification layer labels signals after generation. It does NOT generate s
 | TypeF (OBVDivergence) | **NOW LIVE** (S4A) | vol_div<-0.5, RVOL>0.7 | Shadow gate removed. Risk arbiter provides protection. |
 
 TypeA and TypeD remain correctly disabled (proven losers with <30% WR).
+
+**Signal pipeline gating (S6+S8)**: Before any signal reaches the engine, bridge.py now enforces:
+1. Ticker blacklist (4 individual tickers + all LSEETF via exchange block)
+2. Regime gate: strategy must be allowed in current market regime (hurst + rvol + adx classification)
+3. Session gate: strategy must be allowed in current UTC session window
+4. Log lines: `EXCHANGE_VETO`, `REGIME_SESSION_VETO` for debugging
 
 ---
 
@@ -296,14 +309,14 @@ Ordered by economic impact, not engineering convenience. Fix the P&L lie first, 
 | # | Blocker | Status | Sprint |
 |---|---------|--------|--------|
 | 1 | IS_LIVE=false hardcoded in Rust | OPEN | Rust rebuild + careful review |
-| 2 | 8 paper overrides in config.toml | OPEN | S6 |
-| 3 | WR 35.4% (gate requires >= 40%) | OPEN | Ongoing — need strategy improvement |
-| 4 | PF ~0.77 (gate requires >= 1.3) | OPEN | Ongoing — need better filtering |
-| 5 | 14 consecutive losses (gate requires < 8) | OPEN | Ongoing — LSEETF ETPs are primary cause |
-| 6 | Only 1 strategy producing trades (gate requires >= 2 with WR>35%) | OPEN | S4 unblocked strategies, now waiting for data |
-| 7 | Ouroboros frozen at N=68 (need N=300) | OPEN | S7 (cost injection first) |
-| 8 | EC2 only 4GB RAM | OPEN | S5 |
-| 9 | Zero cost injection in sim | OPEN | S7 |
+| 2 | 8 paper overrides in config.toml | **RESOLVED** — config.live.toml covers all 8 | S7 ✅ |
+| 3 | WR 35.4% (gate requires >= 40%) | OPEN | Ongoing — LSEETF blocked, should improve |
+| 4 | PF ~0.77 (gate requires >= 1.3) | OPEN | Ongoing — cost-adjusted tracking now active |
+| 5 | 14 consecutive losses (gate requires < 8) | OPEN | Ongoing — LSEETF (primary cause) now blocked |
+| 6 | Only 1 strategy producing trades (gate requires >= 2 with WR>35%) | OPEN | S4 unblocked strategies, S8 regime/session gates active |
+| 7 | Ouroboros frozen at N=68 (need N=300) | OPEN | Cost injection now active (S5), will unfreeze at N=300 |
+| 8 | EC2 only 4GB RAM | OPEN | S8-b (Terraform apply) |
+| 9 | Zero cost injection in sim | **RESOLVED** — nightly uses cost-adjusted P&L | S5 ✅ |
 
 **Closed blockers (resolved):**
 - ~~Time-stop missing~~ — deployed (45min, 0.3x ATR, halt-safe)
@@ -311,23 +324,27 @@ Ordered by economic impact, not engineering convenience. Fix the P&L lie first, 
 - ~~PF tracking broken~~ — S2 fixed cumulative tracking
 - ~~Shadow gate blocking strategies~~ — S4 removed shadow gates
 - ~~Startup clock starting in Dark~~ — S4D fixed to use system UTC
+- ~~8 paper overrides unreverted~~ — S7 config.live.toml covers all 8 with production-safe values
+- ~~Zero cost injection~~ — S5 estimate_trade_cost() with per-exchange rates, nightly records cost-adjusted P&L
+- ~~LSEETF not blocked~~ — S6 exchange-level blacklist, all 52 LSEETF tickers blocked
+- ~~Regime/session metadata not enforced~~ — S8 strategy_registry.json gates wired into bridge.py
 
 ---
 
 ## 11. Paper-vs-Live Override Analysis
 
-These 8 values in config.toml are set for paper experimentation and MUST be reverted before live trading.
+These 8 values in config.toml are set for paper experimentation and MUST be reverted before live trading. **All 8 are now covered in config.live.toml (Sprint S7).**
 
-| Config key | Paper value | Safe live value | Risk if left |
-|------------|-------------|-----------------|--------------|
-| max_positions | 999 | 3 | **CRITICAL** — unlimited position count, unbounded exposure |
-| max_heat_pct | 50% | 10% | **CRITICAL** — half of equity at risk simultaneously |
-| daily_trade_limit | 999 | 5 | **HIGH** — commission death spiral on active days |
-| spread_veto_pct | 4.5% | 1.5% | **HIGH** — accepting terrible fills, spread drag |
-| minimum_entry_gbp | 20 | 1500 | **HIGH** — dust positions that cost more in commission than they can earn |
-| confidence_floor | 55 | 65 | **MEDIUM** — accepting weak signals |
-| cash_buffer_pct | 5% | 15% | **MEDIUM** — no margin reserve for adverse moves |
-| is_simulation | true | false | N/A — controls fill path |
+| Config key | Paper value | Live value (config.live.toml) | Risk if left | S7 |
+|------------|-------------|-------------------------------|--------------|-----|
+| max_positions | 999 | 3 | **CRITICAL** — unlimited position count | ✅ |
+| max_heat_pct | 50% | 10% | **CRITICAL** — half of equity at risk | ✅ |
+| daily_trade_limit | 999 | 3 | **HIGH** — commission death spiral | ✅ |
+| spread_veto_pct | 0.3% | 0.3% | OK — already tight | ✅ |
+| minimum_entry_gbp | 20 | 1500 | **HIGH** — dust positions | ✅ |
+| confidence_floor | 50 | 65 | **MEDIUM** — accepting weak signals | ✅ |
+| cash_buffer_pct | 5% | 25% | **MEDIUM** — no margin reserve | ✅ |
+| is_simulation | true | false | N/A — controls fill path | ✅ |
 
 ---
 
@@ -367,11 +384,11 @@ Runs via supercronic cron scheduler. No zombies, proper serialization.
 |------|--------|--------|-------|
 | 1 | nightly_v6.py | nightly_output.json | Analyzes trades: WR, PF, per-ticker, per-session, regime metrics |
 | 2 | config_writer.py | dynamic_weights.toml | Generates recommendations. **Mutation frozen** (observe_only=true). Analysis runs, writes skipped. |
-| 3 | persistent_memory.py | system_memory.json | Update cumulative stats (PF, WR, trade count, gross wins/losses) |
+| 3 | persistent_memory.py | system_memory.json | Update cumulative stats with **cost-adjusted P&L** (S5) |
 | 4 | Claude review | /app/data/claude/reviews/ | Forensic analysis of day's trades. Shadow mode, advisory. |
 | 5 | Telegram report | — | Performance summary to Telegram |
 
-**Ouroboros nightly runs every night at 04:50 UTC.** It analyzes trades, computes metrics, and updates persistent_memory.json. The ONLY frozen part is config_writer mutation (dynamic_weights.toml writes). observe_only=true prevents parameter changes until N=300 trades with cost injection (Sprint S5). Current N=68. The analysis pipeline is fully operational.
+**Ouroboros nightly runs every night at 04:50 UTC.** It analyzes trades, computes metrics, and updates persistent_memory.json **with cost-adjusted P&L** (Sprint S5). The ONLY frozen part is config_writer mutation (dynamic_weights.toml writes). observe_only=true prevents parameter changes until N=300 trades. Current N=~68. Cost injection is active — when Ouroboros unfreezes at N=300, it will learn from realistic economics.
 
 ---
 
@@ -443,10 +460,12 @@ Market Ticks --> Rust engine.rs (tick processing, <1ms)
   |     Spoof detection (25x + 2% floor)
   |
   +-- Python bridge (JSON stdin/stdout, 5s timeout)
+  |     Exchange block (S6): LSEETF blocked (52 tickers)
   |     VanguardSniper (ADX + EMA + RVOL)
   |     Orchestrator S17-S20 (4 evaluators from strategies.toml)
   |     IBS_MeanReversion, VolExpansion, ORB_Breakout, GapFade
   |     TypeA-F classification (TypeA/D disabled, rest live)
+  |     Regime+session gate (S8): strategy_registry.json enforcement
   |     Kelly 12-factor sizing
   |
   +-- Risk arbiter (32 deterministic checks, <1ms)
@@ -478,14 +497,15 @@ Market Ticks --> Rust engine.rs (tick processing, <1ms)
 
 ## 17. Commission and Slippage Model
 
-| Dimension | Current (sim) | Live reality | Sprint |
-|-----------|---------------|--------------|--------|
-| Commission | £0.00 | £1.50/trade (£3.00 round trip) | S7 |
-| Slippage | 0 bps | ~5 bps (estimate) | S7 |
-| Spread | Fills at exact ask/bid | ~0.05-2% depending on instrument | — |
+| Dimension | Sim fills | Real cost (S5 estimate) | Status |
+|-----------|-----------|-------------------------|--------|
+| Commission | £0.00 in sim | £1.70/trade (£3.40 round trip) | **TRACKED** — estimate_trade_cost() |
+| Slippage | 0 bps | 0.5% of position (~£10 on £2k) | **TRACKED** — from config.toml risk.slippage_assumption_pct |
+| Spread | Exact ask/bid | Per-exchange: LSE 0.35%, US 0.15%, TSE 0.25% | **TRACKED** — per_exchange_rt in cost_model.py |
+| FX conversion | £0.00 | 0.2% × 2 for non-GBP exchanges (~£8 on £2k) | **TRACKED** — US/TSE/HKEX/SGX/XETRA/EURONEXT |
 | Fill model | simulation_mode: bypasses paper_broker.rs | paper_broker.rs with real IB fills | — |
 
-**The simulation lies about costs.** Every trade that shows +£0.10 profit would actually lose -£2.90 after round-trip commission. This is why S7 (cost injection) must happen before Ouroboros unfreezes.
+**Cost injection is now active (Sprint S5).** The nightly pipeline computes cost-adjusted P&L per trade and records it to persistent memory. Example costs: LSE £2k trade = ~£17 round-trip, US £2k trade = ~£23 round-trip. Ouroboros will learn from realistic economics when it unfreezes at N=300.
 
 ---
 
@@ -559,26 +579,34 @@ ssh EC2 'docker ps'
 
 ## 21. Brutal Final Verdict
 
-**The system has institutional-grade engineering and losing economics.**
+**The system has institutional-grade engineering and losing economics — but the worst economics are now being fixed.**
 
-The Rust engine is fast, deterministic, and correct. The risk arbiter is fail-closed with 32 checks. The exit engine ratchets properly. The deployment pipeline, cron, and nightly analysis all work. The microstructure handling (board lots, L1, unhalt grace, spoof detection) is production-ready. The intelligence layer is fully operational: Claude produces daily briefings and forensic reviews, Gemini curates the ticker universe every 2 hours, Ouroboros analyzes trades nightly (mutation frozen until N=300), and hourly P&L updates go to Telegram.
+The Rust engine is fast, deterministic, and correct. The risk arbiter is fail-closed with 32 checks. The exit engine ratchets properly. The deployment pipeline, cron, and nightly analysis all work. The microstructure handling (board lots, L1, unhalt grace, spoof detection) is production-ready. The intelligence layer is fully operational: Claude produces daily briefings and forensic reviews, Gemini curates the ticker universe every 2 hours, Ouroboros analyzes trades nightly with **cost-adjusted P&L** (mutation frozen until N=300), and hourly P&L updates go to Telegram.
 
-**The core problem is 35.4% WR.** This is below breakeven for any reasonable commission structure. The dominant loss source is LSEETF leveraged ETPs (0% WR, -£30 over 28 trades). Until these are either filtered out or the strategy adapted, the system will keep losing money.
+**The core problem is 35.4% WR.** This is below breakeven for any reasonable commission structure. The dominant loss source WAS LSEETF leveraged ETPs (0% WR, -£30 over 28 trades) — **now blocked** (Sprint S6). With LSEETF removed, the remaining trades have a higher WR baseline. We need to accumulate non-LSEETF trades to see if the system is profitable without the garbage.
 
-**The secondary problem is zero cost injection.** Every +£0.10 sim profit is actually a -£2.90 real loss after commission. The system has no concept of this. Ouroboros cannot learn from fantasy fills.
+**The secondary problem — zero cost injection — is now resolved.** Sprint S5 added `estimate_trade_cost()` with per-exchange rates (commission, slippage, FX, spread). The nightly pipeline records cost-adjusted P&L to persistent memory. Ouroboros will learn from realistic economics when it unfreezes at N=300.
 
-**What S4 accomplished**: Unblocked TypeC/E/F strategies, loosened TypeB, fixed the startup clock. The system now has 9 signal generators and a clean classification layer. But more strategies producing trades at 35.4% WR just means more losing trades. The WR problem must be addressed through either better entry filters, ticker-quality filtering (kill the LSEETF ETPs), or exit calibration.
+**What S5-S8 accomplished:**
+- **S5**: Cost injection. Nightly records cost-adjusted P&L. The lie is over.
+- **S6**: LSEETF blocked. 52 leveraged ETPs removed via exchange-level blacklist. Reversible.
+- **S7**: config.live.toml complete. All 8 paper overrides covered with production-safe values.
+- **S8**: Regime+session enforcement. Strategies now respect their registry regime/session constraints. Momentum blocked in choppy markets. Mean-reversion blocked in trending markets.
+
+**What S4 accomplished**: Unblocked TypeC/E/F strategies, loosened TypeB, fixed the startup clock. The system now has 9 signal generators with regime/session-aware gating.
 
 **Path to live:**
-1. S7: Inject costs into Ouroboros. Stop lying about P&L.
-2. S11: Symbol-quality memory. Auto-downrank LSEETF leveraged ETPs.
-3. Accumulate 200+ trades with cost-adjusted metrics.
-4. All 5 validation gates passing simultaneously.
-5. S5 + S6: EC2 upgrade + config.live.toml.
-6. Remove IS_LIVE=false.
+1. ~~S5: Inject costs into Ouroboros~~ ✅ DONE
+2. ~~S6: LSEETF disposal~~ ✅ DONE
+3. ~~S7: config.live.toml~~ ✅ DONE
+4. ~~S8: Regime+session enforcement~~ ✅ DONE
+5. S8-b: EC2 upgrade (4GB → 8GB, Terraform apply)
+6. Accumulate 200+ cost-adjusted trades with LSEETF excluded
+7. All 5 validation gates passing simultaneously over rolling 200-trade window
+8. Remove IS_LIVE=false (Rust rebuild + human sign-off)
 
-**Estimated timeline to live**: Not before 200 cost-adjusted trades pass all gates. At current rate (~68 trades in several weeks), this is months away. Do not rush. Capital is real.
+**Estimated timeline to live**: Not before 200 cost-adjusted trades pass all gates. With LSEETF removed and costs tracked, the signal-to-noise should improve. But the fundamental question remains: can VanguardSniper + TypeB/C/E/F produce a cost-adjusted WR above 40%? Only more trades will answer this. Do not rush. Capital is real.
 
 ---
 
-*End of canonical plan. Last updated 2026-03-24 end-of-day.*
+*End of canonical plan. Last updated 2026-03-24 16:00 UTC. S1-S8 completed and deployed.*
