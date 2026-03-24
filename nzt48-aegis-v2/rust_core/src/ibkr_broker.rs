@@ -751,6 +751,8 @@ impl IbkrBroker {
             // IBKR error 354 ("Not subscribed") arrives as "ParseInt: invalid digit" in ibapi.
             if let Some(err) = l1_sub.sub.error() {
                 let err_str = format!("{err}");
+                // Remove from L1 gate — this ticker doesn't actually have L1 data.
+                self.l1_subscribed_set.remove(&l1_sub.ticker_id);
                 if self.sub_errors_detected < 20 {
                     eprintln!(
                         "IBKR SUB ERROR [L1 {}]: {} (likely error 354 — no market data subscription shared to paper account)",
@@ -943,10 +945,10 @@ impl IbkrBroker {
             let poll_num = self.total_bars_received;
             if poll_num <= 40 || poll_num % 720 == 0 {
                 eprintln!(
-                    "POLL: bars={} mkt={} l1={} pending={} bar_subs={} mkt_subs={} l1_subs={} lifetime={}",
+                    "POLL: bars={} mkt={} l1={} pending={} bar_subs={} mkt_subs={} l1_subs={} l1_eligible={} lifetime={}",
                     bar_count, mkt_count, l1_count, total,
                     self.bar_subs.len(), self.mktdata_subs.len(), self.l1_subs.len(),
-                    self.total_bars_received
+                    self.l1_subscribed_set.len(), self.total_bars_received
                 );
             }
         }
