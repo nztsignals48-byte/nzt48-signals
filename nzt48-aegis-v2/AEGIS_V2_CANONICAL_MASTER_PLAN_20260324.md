@@ -1,6 +1,6 @@
 # AEGIS V2 — Canonical Master Plan
-**Date**: 2026-03-24 (updated 2026-03-24 session 2)
-**Status**: COMPLETE — all 22 sections written, S1+S2 sprints executed
+**Date**: 2026-03-24 (updated 2026-03-24 session 3 — Microstructure Sprint)
+**Status**: COMPLETE — all 22 sections written, S1+S2+S3(Microstructure) sprints executed
 **Supersedes**: All prior MASTER_PLAN, IMPLEMENTATION_PLAN, PLAN_1, PLAN_2 docs (now in docs/archive/)
 **Source of truth hierarchy**: Code > Runtime > This plan > Old docs
 
@@ -12,7 +12,9 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 
 **Current performance**: 48 nightly-tracked trades, 35.4% WR, -£6.79 cumulative P&L. LSEETF leveraged ETPs are the primary loss source (0% WR, -£30.34 over 28 trades). Asian equities showed 100% WR (+£16.91) but this likely reflects paper-mode mid-point fill artifacts.
 
-**This session (2026-03-23/24)**: 12 commits. Full codebase audit. 4 new strategies deployed. Ouroboros frozen. Gemini API key configured. IBS thresholds loosened. 108 stale docs archived. Brutal-truth 11-page PDF generated.
+**Session 2 (2026-03-23/24)**: 12 commits. Full codebase audit. 4 new strategies deployed. Ouroboros frozen. Gemini API key configured. IBS thresholds loosened. 108 stale docs archived. Brutal-truth 11-page PDF generated.
+
+**Session 3 — Microstructure Sprint (2026-03-24)**: 4 commits, 3 Rust rebuilds, 3 EC2 deployments. Board lot sizing (TSE/HKEX/SGX=100-share lots). L1 data quality gate (bypassed in sim mode after discovering IBKR paper limits ~7 concurrent tick-by-tick streams). Unhalt grace period (active_trading_ticks reset on halt lift). Spoof detector calibrated (25x multiplier + 2% absolute floor — was killing 86% of signals as false positives). EC2 live config prepared (c7i.large non-burstable). System trading again: STAN.L and AI (Air Liquide) entries observed.
 
 ---
 
@@ -157,11 +159,16 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 - **Verified**: Unit test — £10 win, £5 loss = PF 2.00 (correct)
 - **Pre-live**: COMPLETED
 
-### Sprint S3: Rust Rebuild (time-stop + dead-code quarantine) (2 hours)
-- **Goal**: Add time-stop to exit_engine.rs, quarantine dead code
-- **Blocker**: Need 5GB free disk — requires EC2 disk expansion or aggressive prune
-- **Files**: `rust_core/src/exit_engine.rs`, `rust_core/src/entry_engine.rs`, `rust_core/src/lib.rs`
-- **Pre-live**: MANDATORY (time-stop), MEDIUM (quarantine)
+### Sprint S3: Microstructure Sprint — COMPLETED 2026-03-24
+- **Goal**: Close gaps between paper simulation and physical market mechanics
+- **Delivered** (4 commits, 3 Rust rebuilds, 3 EC2 deployments):
+  1. Board lot sizing: `min_lot_for_exchange()` shared utility in broker.rs. Engine rounds qty to 100-share lots for TSE/HKEX/SGX before order. Sub-lot = LOT_SKIP.
+  2. L1 data quality gate: `l1_subscribed_set` tracks tickers with true tick-by-tick data. Gate enforced in live mode only — bypassed in sim mode because IBKR paper supports only ~7 concurrent L1 streams (error 10190 kills the rest async).
+  3. Unhalt grace period: `active_trading_ticks` reset to 0 when halt lifts — prevents aggressive 0.3x ATR time-stop from firing on post-unhalt auction noise.
+  4. Spoof detector calibration: Raised multiplier 10x→25x, added 2% absolute spread floor. Was false-positive-ing 86% of signals (426/496 vetoes) on normal MktData bid-ask noise.
+  5. EC2 live config: `terraform/variables.live.tfvars` with c7i.large (non-burstable).
+- **Also delivered from prior session**: Time-stop (45min, 0.3x ATR), strategy registry, PF fix, validation counter reset.
+- **Pre-live**: COMPLETED
 
 ### Sprint S4: TypeB Investigation (1 hour)
 - **Goal**: Determine why TypeB (best backtest, 52.4% WR) has 0 production signals
@@ -181,6 +188,47 @@ AEGIS V2 is a paper-trading system running on EC2 (c7i-flex.large, 4GB RAM, 19GB
 - **Files**: `config/config.live.toml` (new)
 - **Content**: max_positions=3, heat=10%, daily_trades=3, etc.
 - **Pre-live**: MANDATORY
+
+### Sprint S7: Spread-at-Fill Tracking + Synthetic Cost Injection (1 hour)
+- **Goal**: Track actual spread at entry/exit in WAL. Inject synthetic slippage + commission into Ouroboros learning.
+- **Why**: Ouroboros currently trains on zero-cost P&L. When enabled at N=300, it must learn from net-of-cost reality.
+- **Files**: `persistent_memory.py`, `nightly_v6.py`, `engine.rs` (WAL spread field)
+- **Pre-live**: HIGH (must be done before enabling Ouroboros learning)
+- **Source**: Gemini G4 (ACCEPTED), ChatGPT C6 (ACCEPTED)
+
+### Sprint S8: Friction-Aware Signal Ranking (1 hour)
+- **Goal**: Rank simultaneous signals by net expected P&L (gross edge - spread - commission - slippage)
+- **Why**: When TypeB starts firing alongside VanguardSniper, the engine needs to pick the best signal, not the first.
+- **Files**: `bridge.py` (signal scoring), `engine.rs` (multi-signal arbitration)
+- **Dependency**: Sprint S4 (TypeB fires) + Sprint S7 (cost tracking)
+- **Source**: ChatGPT C6 (ACCEPTED)
+
+### Sprint S9: Per-Strategy Asymmetric Exits (1 hour)
+- **Goal**: Configure different Chandelier ATR multipliers and time-stop thresholds per strategy family.
+- **Why**: Momentum continuation (TypeB) needs tighter trail than broader momentum (VanguardSniper).
+- **Infrastructure exists**: `strategy_config.rs` already supports per-strategy exit params.
+- **Dependency**: Sprint S4 (TypeB trades exist for comparison)
+- **Source**: ChatGPT C8 (ACCEPTED)
+
+### Sprint S10: Regime + Session Enforcement (2 hours)
+- **Goal**: Wire `strategy_registry.json` regime_allowed/blocked/reduced and session_allowed/blocked into runtime signal evaluation.
+- **Why**: Registry has the metadata but it's not enforced. Strategy X should only fire in regime Y during session Z.
+- **Files**: `bridge.py` (signal evaluation gate), `engine.rs` (regime forwarding to bridge)
+- **Dependency**: More trades (regime samples)
+- **Source**: ChatGPT C3+C4 (ACCEPTED)
+
+### Sprint S11: Symbol-Quality Memory + Net Expectancy Metrics (1 hour)
+- **Goal**: Track per-ticker quality score (spread stability, win rate, slippage). Add net expectancy per strategy to Section 2.
+- **Why**: Tickers that consistently lose should be deprioritized. Strategies need net expectancy, not just WR.
+- **Files**: `persistent_memory.py`, `nightly_v6.py`, this plan Section 2
+- **Dependency**: N=200+ trades for meaningful per-ticker samples
+- **Source**: ChatGPT C5+C12 (ACCEPTED)
+
+### Sprint S12: Cost-Honest Backtests (1 hour)
+- **Goal**: Ensure fast_backtest_pipeline.py includes IBKR tiered commissions + configurable slippage.
+- **Why**: Backtest results that exclude costs are misleading. Any strategy promotion decision must be cost-honest.
+- **Files**: `python_brain/ouroboros/fast_backtest_pipeline.py`
+- **Source**: ChatGPT C9 (ACCEPTED)
 
 ---
 
@@ -230,7 +278,13 @@ ssh EC2 'docker compose build --no-cache aegis-v2 && docker compose up -d'
 
 ## 12. Final Verdict
 
-The system is a paper-trading prototype with institutional-grade risk infrastructure in Rust. The Python signal layer is functional but unproven — only 1 of 6 strategies has produced signals, and overall performance is below validation thresholds. The biggest immediate risks are: (1) paper fill realism unverified, (2) no time-stop for stale positions, (3) 8 paper overrides that would be catastrophic in live, (4) Ouroboros frozen on statistically invalid data.
+The system is a paper-trading prototype with institutional-grade risk infrastructure in Rust. The Python signal layer is functional but unproven — only 1 of 6 strategies has produced signals, and overall performance is below validation thresholds.
+
+**Session 3 progress**: Time-stop IS now deployed. Paper fill audit IS complete. Board lot sizing, L1 gate, unhalt grace, spoof calibration are all deployed. The microstructure gap between paper and physical markets is narrowing. System is actively trading (2 entries today: STAN.L, AI).
+
+**Remaining immediate risks**: (1) 8 paper overrides that would be catastrophic in live (Sprint S6), (2) Ouroboros frozen on statistically invalid data (need N=300), (3) WR 35.4% below 40% validation gate, (4) only 1 of 6 strategies proven.
+
+**Sprint roadmap**: S3 DONE. S4 next (TypeB investigation). S5-S6 pre-live config. S7-S12 accepted from syndicate triage (cost injection, friction ranking, asymmetric exits, regime enforcement, symbol quality, cost-honest backtests).
 
 The system needs 300+ spread-adjusted trades across multiple strategies before considering live capital. Estimated timeline to readiness: 4-8 weeks of paper trading at current signal rate.
 
