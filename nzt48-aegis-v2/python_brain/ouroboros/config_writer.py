@@ -1751,6 +1751,31 @@ def run_config_writer() -> int:
     log.info("Project root: %s", _PROJECT_ROOT)
     log.info("Config dir: %s", CONFIG_DIR)
 
+    # OBSERVE-ONLY MODE: If config.toml [ouroboros] observe_only = true,
+    # skip all dynamic_weights.toml mutations. Nightly analysis still runs
+    # (via nightly_v6.py) but config_writer does NOT write new parameters.
+    # This prevents optimizing on statistically insufficient data (N < 300).
+    try:
+        try:
+            import tomllib as _tomllib_cw
+        except ImportError:
+            import tomli as _tomllib_cw
+        _cfg_path = CONFIG_DIR / "config.toml"
+        if _cfg_path.exists():
+            with open(_cfg_path, "rb") as _f:
+                _cfg = _tomllib_cw.load(_f)
+            if _cfg.get("ouroboros", {}).get("observe_only", False):
+                min_trades = _cfg.get("ouroboros", {}).get("min_trades_for_mutation", 300)
+                log.warning(
+                    "OBSERVE-ONLY MODE: config.toml [ouroboros] observe_only=true. "
+                    "Skipping dynamic_weights.toml mutation. Need %d+ trades before enabling.", min_trades
+                )
+                elapsed = time.monotonic() - start
+                log.info("Config writer completed (observe-only) in %.1fs", elapsed)
+                return 0
+    except Exception as e:
+        log.warning("Failed to check observe_only flag: %s — proceeding with normal write", e)
+
     errors = 0
 
     # --- Load all source data ---

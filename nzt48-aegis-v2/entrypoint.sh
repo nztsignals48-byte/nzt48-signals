@@ -43,6 +43,12 @@ python3 -m python_brain.ouroboros.bridge_watchdog --monitor &
 # N10a: Clean up stale KILL/PAUSE files from previous runs
 rm -f /app/data/KILL /app/data/PAUSE
 
+# Warn loudly if Gemini API key is missing (Gemini scanner crons will fail silently)
+if [ -z "$GEMINI_API_KEY" ]; then
+    echo "WARNING: GEMINI_API_KEY is not set. All Gemini scanner crons will fail silently."
+    echo "WARNING: Set GEMINI_API_KEY in .env file and rebuild to enable Gemini universe curation."
+fi
+
 echo "Starting AEGIS V2 engine..."
 exec aegis --config-dir /app/config --wal-dir /app/events \
     --ibkr-host "$IBKR_HOST" --ibkr-port "$IBKR_PORT" "$@"

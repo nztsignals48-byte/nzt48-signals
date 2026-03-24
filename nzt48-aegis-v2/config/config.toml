@@ -540,6 +540,23 @@ sector_heat_cap_pct = 100.0          # No sector heat limit in sim
 cash_buffer_pct = 0.0                # No cash buffer requirement in sim
 entry_cooldown_bars = 0              # No between-entry cooldown in backfill_simulator
 
+# OUROBOROS LEARNING CONTROL
+# observe_only = true: nightly_v6 still RUNS and ANALYZES, but config_writer will NOT
+# mutate dynamic_weights.toml. Prevents ML loop from optimizing on N=48 trades.
+# Set to false once 300+ spread-adjusted trades exist in system_memory.json.
+[ouroboros]
+observe_only = true
+min_trades_for_mutation = 300
+
+# TIME-STOP: Maximum minutes to hold a position that hasn't reached Rung 2 (breakeven).
+# After this many minutes, Rust exit_engine should tighten stop aggressively.
+# NOTE: Currently Rust does NOT read this — it's a config placeholder for the next
+# Rust rebuild. The Python bridge emits max_hold_minutes in signal metadata.
+[exit_time_stop]
+enabled = true
+max_minutes_to_rung2 = 45
+aggressive_trail_atr = 0.3
+
 [crucible]
 # Crucible phase overrides (Days 1-30)
 # AUDIT-FIX: Was 20, which allows unrealistic over-deployment at £10k equity.

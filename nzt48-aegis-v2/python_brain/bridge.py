@@ -1341,13 +1341,14 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
 
     # Strategy: IBS Mean Reversion (Connors RSI-2 / IBS combo)
     # Academic basis: Connors & Alvarez (2008). IBS < 0.2 + RSI(2) < 10 → ~57% WR.
-    # Fires in mean-reverting or random regimes (NOT trending — momentum owns those).
+    # Fires in ALL regimes (mean-reverting is strongest but don't gate on regime).
+    # LOOSENED from original: removed RVOL > 0.7 gate, widened RSI2 to < 25, IBS to < 0.30.
     ibs_signal = None
-    if (hurst_regime in ("mean_reverting", "random") or hurst < 0.45) and len(bars_5m) >= 10:
+    if len(bars_5m) >= 5:
         ibs_val = ind["ibs"]
         prices_for_rsi = [b["close"] for b in bars_5m]
         rsi2 = calculate_rsi(prices_for_rsi, period=2)
-        if ibs_val is not None and rsi2 is not None and ibs_val < 0.20 and rsi2 < 15.0 and ind["rvol"] > 0.7:
+        if ibs_val is not None and rsi2 is not None and ibs_val < 0.30 and rsi2 < 25.0:
             # Graduated confidence: lower IBS + lower RSI = higher conviction
             ibs_conf = 55.0
             if ibs_val < 0.10:
