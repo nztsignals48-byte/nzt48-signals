@@ -211,6 +211,13 @@ pub struct ExitConfig {
     pub dust_threshold_gbp: f64,
     /// P4-C: Use InfiniteChandelier (8 adaptive multipliers) instead of basic ChandelierStrategy.
     pub use_infinite_chandelier: bool,
+    /// S3: Time-stop — if position hasn't reached rung 2 within this many minutes,
+    /// tighten the trailing stop aggressively to force an exit on sideways positions.
+    pub time_stop_enabled: bool,
+    /// S3: Maximum minutes to reach rung 2 before aggressive trail kicks in.
+    pub time_stop_max_minutes_to_rung2: u32,
+    /// S3: Aggressive ATR multiplier applied when time-stop triggers (e.g., 0.3).
+    pub time_stop_aggressive_trail_atr: f64,
 }
 
 impl Default for ExitConfig {
@@ -221,6 +228,9 @@ impl Default for ExitConfig {
             min_ev_after_commission: 0.0,
             dust_threshold_gbp: 500.0,
             use_infinite_chandelier: false,
+            time_stop_enabled: true,
+            time_stop_max_minutes_to_rung2: 45,
+            time_stop_aggressive_trail_atr: 0.3,
         }
     }
 }
@@ -278,7 +288,7 @@ impl ExitEngine {
 
     /// Evaluate ALL exit conditions for a position on the current tick.
     /// Returns the highest-priority exit that fires, or None.
-    /// Priority: HALT > HardStop > Chandelier > EOD > Signal.
+    /// Priority: HALT > HardStop > Chandelier > TimeStop > EOD > Signal.
     /// Same-tick collision: highest priority wins, lower suppressed.
     #[allow(clippy::too_many_arguments)]
     pub fn evaluate(
@@ -291,6 +301,16 @@ impl ExitEngine {
         signal_reversal: bool,
         is_carried: bool,
     ) -> Option<ExitResult> {
+        // S3: Compute hold time for time-stop evaluation
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let hold_minutes = if position.entry_timestamp_ns > 0 && now_ns > position.entry_timestamp_ns {
+            ((now_ns - position.entry_timestamp_ns) / 60_000_000_000) as u32
+        } else {
+            0
+        };
         let mut checks: Vec<ExitCheck> = Vec::new();
 
         // Priority 5: HALT/FLATTEN override — market sell immediately
@@ -342,6 +362,27 @@ impl ExitEngine {
                     },
                     limit_price: if gapped_through { None } else { Some(chandelier_stop) },
                     tif: if gapped_through { TimeInForce::Ioc } else { TimeInForce::Day },
+                });
+            }
+        }
+
+        // Priority 2.5: Time-stop — if position hasn't reached rung 2 within max_minutes,
+        // tighten stop aggressively to force exit. Prevents capital lock in sideways trades.
+        if self.config.time_stop_enabled
+            && !is_carried
+            && hold_minutes >= self.config.time_stop_max_minutes_to_rung2
+            && position.trailing_rung < 2
+        {
+            // Aggressive trailing stop: use tight ATR multiplier below highest high
+            let aggressive_stop = position.highest_high
+                - self.config.time_stop_aggressive_trail_atr * atr.max(position.avg_entry * 0.005);
+            if current_price <= aggressive_stop {
+                checks.push(ExitCheck {
+                    reason: ExitReason::TimeStop,
+                    priority: ExitPriority::TimeStop,
+                    order_type: ExitOrderType::MarketSell,
+                    limit_price: None,
+                    tif: TimeInForce::Day,
                 });
             }
         }

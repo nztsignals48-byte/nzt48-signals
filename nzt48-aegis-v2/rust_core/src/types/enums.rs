@@ -407,6 +407,8 @@ pub enum ExitReason {
     ReverseSplitSuspected,
     /// SC-06: Position remainder below dust threshold → market sell.
     DustGuard,
+    /// S3: Position held too long without reaching rung 2 → aggressive trail exit.
+    TimeStop,
 }
 
 /// Exit priority. Higher number = higher priority. Enum ordering matches.
@@ -416,10 +418,12 @@ pub enum ExitPriority {
     SignalReversal = 1,
     /// SC-06: Dust guard cleanup (remainder < £500).
     DustGuard = 2,
-    EodFlatten = 3,
-    ChandelierStop = 4,
-    HardStopLoss = 5,
-    HaltFlatten = 6,
+    /// S3: Time-stop — between EOD and Chandelier in priority.
+    TimeStop = 3,
+    EodFlatten = 4,
+    ChandelierStop = 5,
+    HardStopLoss = 6,
+    HaltFlatten = 7,
 }
 
 /// Order type for exit execution.

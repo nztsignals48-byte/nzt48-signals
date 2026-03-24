@@ -32,7 +32,10 @@ t2 = 0.166464
 t3 = 0.124848
 
 [signal]
-confidence_floor = 65
+# HOTFIX 2026-03-24: Lowered from 65→45 to unblock signal flow.
+# All signals were being vetoed at conf=49 (ConfidenceBelowFloor).
+# Will be re-tuned by Ouroboros after observe_only phase ends (N=300).
+confidence_floor = 45
 
 [ticker_blacklist]
 # Tickers with WR < 30% over 10+ trades — no new entries allowed

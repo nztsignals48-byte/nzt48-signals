@@ -65,6 +65,9 @@ struct RawConfig {
     /// 80/20 dynamic ticker scanning architecture.
     #[serde(default)]
     scanner: ScannerConfig,
+    /// S3: Time-stop config for positions that don't reach rung 2.
+    #[serde(default)]
+    exit_time_stop: RawExitTimeStop,
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +272,31 @@ pub struct RotationConfig {
 
 /// 80/20 dynamic ticker scanning architecture.
 /// Core (80 slots): always-on, session-aware, top liquid stocks from Ouroboros ranking.
+/// S3: Time-stop configuration — exit positions that don't reach rung 2 in time.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawExitTimeStop {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_time_stop_max_minutes")]
+    pub max_minutes_to_rung2: u32,
+    #[serde(default = "default_time_stop_aggressive_atr")]
+    pub aggressive_trail_atr: f64,
+}
+
+impl Default for RawExitTimeStop {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_minutes_to_rung2: 45,
+            aggressive_trail_atr: 0.3,
+        }
+    }
+}
+
+fn default_true() -> bool { true }
+fn default_time_stop_max_minutes() -> u32 { 45 }
+fn default_time_stop_aggressive_atr() -> f64 { 0.3 }
+
 /// Dark horse (20 slots): unusual movers (RVOL spike, gap, volume outlier), rotated every 15 min.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScannerConfig {
@@ -984,6 +1012,8 @@ pub struct EngineConfig {
     pub exchange_cutoffs: HashMap<String, String>,
     /// 80/20 dynamic ticker scanning architecture config.
     pub scanner: ScannerConfig,
+    /// S3: Time-stop config for sideways positions.
+    pub exit_time_stop: RawExitTimeStop,
 }
 
 impl EngineConfig {
@@ -1072,6 +1102,7 @@ impl EngineConfig {
             hardening: raw.hardening,
             exchange_cutoffs: raw.timing.exchange_cutoffs,
             scanner: raw.scanner,
+            exit_time_stop: raw.exit_time_stop,
         })
     }
 

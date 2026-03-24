@@ -549,6 +549,9 @@ impl<B: BrokerAdapter> Engine<B> {
                 let exit_config = ExitConfig {
                     price_spike_pct: ch.price_spike_pct,
                     dust_threshold_gbp: ch.dust_threshold_gbp,
+                    time_stop_enabled: config.exit_time_stop.enabled,
+                    time_stop_max_minutes_to_rung2: config.exit_time_stop.max_minutes_to_rung2,
+                    time_stop_aggressive_trail_atr: config.exit_time_stop.aggressive_trail_atr,
                     ..ExitConfig::default()
                 };
                 ExitEngine::new(exit_config, Box::new(strategy))

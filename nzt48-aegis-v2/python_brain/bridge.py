@@ -623,10 +623,11 @@ def classify_entry_type(rsi_14, ibs, rvol, ticker_id, prices, volumes, vol_div):
 
     # TypeB (EarlyRunner): RVOL rising for 3 consecutive bars + RSI in [30, 70]
     rvol_hist = list(_rvol_history[ticker_id])
-    if (len(rvol_hist) >= 3
-            and rvol_hist[-3] < rvol_hist[-2] < rvol_hist[-1]
-            and rsi_14 is not None
-            and cfg["type_b_rsi_low"] <= rsi_14 <= cfg["type_b_rsi_high"]):
+    type_b_rising = (len(rvol_hist) >= 3
+                     and rvol_hist[-3] < rvol_hist[-2] < rvol_hist[-1])
+    type_b_rsi_ok = (rsi_14 is not None
+                     and cfg["type_b_rsi_low"] <= rsi_14 <= cfg["type_b_rsi_high"])
+    if type_b_rising and type_b_rsi_ok:
         return "TypeB"
 
     # TypeC (OverboughtFade): RSI > 80 + price rising + volume declining
