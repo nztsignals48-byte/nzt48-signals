@@ -69,7 +69,35 @@ If this plan contradicts code, the code is correct and this plan is wrong.
 
 **Cost-adjusted reality**: Every trade showing +£0.10 sim profit is actually -£2.90 after round-trip commission (£3.00). Current sim lies about economics. Cost-adjusted PF is likely below 0.5.
 
-**Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades with cost injection (Sprint S7).
+**Ouroboros status**: FROZEN (observe_only=true in config.toml). Will remain frozen until N=300 trades with cost injection (Sprint S5).
+
+### Today's Live Trading (2026-03-25, post-S4 deploy)
+
+**11 trades entered | 0 exits | Unrealised P&L: -£7.46 | Equity: £9,997.72**
+
+| # | Symbol | Exchange | Qty | Entry (GBP) | Value | Strategy | Conf |
+|---|--------|----------|-----|-------------|-------|----------|------|
+| 1 | 5USL.L | XLON | 11 | £22.20 | £244 | Momentum | 77 |
+| 2 | GLEN.L | XLON | 47 | £5.21 | £245 | Momentum | 77 |
+| 3 | SAP | XETR | 1 | £127.24 | £127 | **TypeE** | 66 |
+| 4 | MBG | XETR | 5 | £44.56 | £223 | **TypeE** | 77 |
+| 5 | MC | XPAR | 1 | £398.59 | £399 | **TypeE** | 77 |
+| 6 | AAPL | XNYS | 1 | £188.81 | £189 | Momentum | 77 |
+| 7 | AI | XPAR | 1 | £145.82 | £146 | **TypeC** | 77 |
+| 8 | MSFT | XNYS | 1 | £280.26 | £280 | Momentum | 77 |
+| 9 | GOOG | XNYS | 1 | £219.61 | £220 | Momentum | 77 |
+| 10 | SIE | XETR | 1 | £181.69 | £182 | Momentum | 77 |
+| 11 | SU | XPAR | 1 | £209.33 | £209 | Momentum | 88 |
+
+**Strategy diversity achieved (S4 working):**
+
+| Strategy | Trades | Tickers |
+|----------|--------|---------|
+| Momentum (VanguardSniper) | 7 | 5USL.L, GLEN.L, AAPL, MSFT, GOOG, SIE, SU |
+| TypeE (IBS MeanReversion) | 3 | SAP, MBG, MC |
+| TypeC (OverboughtFade) | 1 | AI |
+
+First ever TypeC and TypeE trades in production. 3 classification types firing across 5 exchanges (XLON, XETR, XPAR, XNYS). All positions open, managed by Chandelier exit engine.
 
 ---
 
@@ -268,9 +296,11 @@ These 8 values in config.toml are set for paper experimentation and MUST be reve
 
 ---
 
-## 12. Dead/Orphaned Code Register
+## 12. Dead/Orphaned Code + Technical Debt Register
 
-Code that exists in the repo but is not exercised at runtime. Keep documented, do not delete without explicit decision.
+Code that exists but isn't exercised, plus known technical debt from syndicate stress test (triage #2).
+
+### Dead/Orphaned Code
 
 | Item | Location | LOC | Status | Notes |
 |------|----------|-----|--------|-------|
@@ -278,6 +308,19 @@ Code that exists in the repo but is not exercised at runtime. Keep documented, d
 | strategy_config.rs | strategy_config.rs | ~200 | Loaded, never queried | Struct is parsed from config but no runtime code reads the fields. |
 | Hurst exponent | regime_detector.rs | ~50 | Computed, only has_jump used | Full Hurst value returned but discarded by callers. Future regime routing. |
 | Risk arbiter CHECK 26 | risk_arbiter.rs:~451 | ~20 | Never triggers | Scanner score sentinel = -1.0, condition never met. Duplicates CHECK 10. |
+
+### Technical Debt (from syndicate triage #2 — `tasks/syndicate_triage_2_20260324.md`)
+
+47 points evaluated → 6 genuinely new, 15 repeats, 26 premature.
+
+| ID | Issue | Severity | Action | Status |
+|----|-------|----------|--------|--------|
+| V1.6 | Crossed market (bid≥ask) causes divide-by-zero in spread calc | MEDIUM | Add guard `if bid >= ask { skip }` in engine.rs | TODO |
+| V1.8 | Slippage injection must be bps-based, not flat ticks | HIGH | Note for Sprint S5 — use bps not ticks | NOTED |
+| V6.2 | WAL corruption on kernel panic — malformed last JSON line crashes parser | MEDIUM | Add try-parse with skip-malformed in wal_replay.rs | TODO |
+| V6.3 | Orphaned orders after TCP drop between send and ACK | HIGH (live) | Already handled — reconciliation on reconnect (engine.rs:2954) | DOCUMENTED |
+| V6.4 | Config hierarchy ambiguity (config.toml vs dynamic_weights.toml) | MEDIUM | config.toml is primary, dynamic_weights is overlay. Verify on next session. | DOCUMENTED |
+| V4.6 | Stock splits look like 50% crash in paper mode | LOW | Paper only — IBKR adjusts prices in live mode | DOCUMENTED |
 
 ---
 
