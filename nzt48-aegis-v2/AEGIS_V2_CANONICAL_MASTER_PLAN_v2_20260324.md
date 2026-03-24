@@ -24,29 +24,32 @@ AEGIS V2 is a **paper-trading prototype** running on EC2 c7i-flex.large (4GB RAM
 
 | Fact | Value | Evidence | Verified |
 |------|-------|----------|----------|
-| Branch | `feat/tier-system-enhancements-full` @ `d17d9bd` | `git log --oneline -1` | Yes |
-| Containers | 3 healthy (aegis-v2, ib-gateway, redis) | `docker ps` on EC2 | Yes |
-| Disk | 80% (3.9GB free / 19GB) | `df -h /` on EC2 | Yes |
+| Branch | `feat/tier-system-enhancements-full` @ `c87f19f` (10 commits this session) | `git log --oneline -1` | Yes |
+| Containers | 3 healthy (aegis-v2, ib-gateway, redis) | `docker ps` on EC2 03:18 UTC | Yes |
+| Disk | 84% (3.1GB free / 19GB) — needs prune before next Rust build | `df -h /` on EC2 | Yes |
 | IB Gateway | Connected, 2FA approved | Subscription active | Yes |
-| Market data subscriptions | 200 mkt + 102 L1 attempted, but tick-by-tick limit hit for many | Engine logs | Yes |
-| Active tickers receiving data | **11** (not 50) | `active_watchlist.json` on EC2 | Yes |
-| Python Bridge | Running, producing signals | SIGNAL_ARRIVED logs | Yes |
-| Signal outcome | **TRADING** — 4 trades placed at conf 60-71 (Asian session) | SIM_TRADE logs at 03:18 UTC | Yes |
-| Ouroboros | FROZEN (observe_only=true) | config.toml | Yes |
-| Gemini API key | **COMMENTED OUT in .env** — Gemini crons fail silently | `.env` inspection | Yes |
-| Claude | CLI at /usr/bin/claude, shadow mode (non-blocking) | entrypoint.sh | Yes |
-| Strategies deployed | 6 sources + TypeA-F classification in bridge.py | Code audit | Yes |
-| Strategies producing signals | 1 (VanguardSniper — 4 trades in first 7 min post-fix) | SIM_TRADE logs | Yes |
-| Strategies with historical trades | VanguardSniper: 33 (pre-reset), 4 (post-reset) | WAL data | Yes |
-| Equity | £10,000 | system_memory.json | Yes |
-| Open positions | 0 | Heartbeat logs | Yes |
-| dynamic_weights.toml | **STALE** — WR=79.2% from 20 trades, confidence_floor=65 | File content | Yes |
-| Nightly pipeline | Runs 04:50 UTC via flock'd script | Crontab | Yes |
-| system_memory PF | 0.0 (BUG — fix deployed, awaits next nightly) | system_memory.json | Yes |
-| Risk CHECKs | **27 active** (not 33 as previously documented) | risk_arbiter.rs audit | Yes |
-| Time-stop | **ABSENT** despite config.toml having `[exit_time_stop] enabled=true` | exit_engine.rs audit | Yes |
-| Cron jobs | **35 scheduled jobs** in crontab | Crontab audit | Yes |
-| Config sections | **30 sections** in config.toml | Full file read | Yes |
+| Market data subscriptions | 200 MktData subs, 102 L1 attempted (most L1 fail due to IBKR limit) | Engine logs | Yes |
+| Active tickers receiving MktData | ~20-30 (watchlist says 11, but bridge diagnostics show 20+ tickers with bars=50) | Bridge stderr + watchlist | Yes |
+| Python Bridge | Running, producing signals, TypeA/D disabled, TypeC/E/F shadow | SIGNAL_ARRIVED + SHADOW_SIGNAL logs | Yes |
+| Signal outcome | **TRADING** — 4 SIM_TRADE orders placed at conf 60-71 (Asian session) | SIM_TRADE logs at 03:18 UTC | Yes |
+| Ouroboros | FROZEN (observe_only=true, min_trades_for_mutation=300) | config.toml verified | Yes |
+| Gemini API key | **SET** (length 39) — FIXED this session | `printenv GEMINI_API_KEY` on EC2 | Yes |
+| Claude | CLI at /usr/bin/claude, 3 roles operational, 6 shadow/stub | File timestamps in /app/data/claude/ | Yes |
+| Strategy registry | `config/strategy_registry.json` — 11 strategies, canonical authority | File on EC2 | Yes |
+| Strategies live | 2: VanguardSniper + TypeB (TypeB classification active but never fires) | bridge.py code audit | Yes |
+| Strategies shadow | 4: TypeC, TypeE, TypeF, Orchestrator/VolExp/ORB/GapFade | bridge.py returns None for shadow | Yes |
+| Strategies disabled | 2: TypeA, TypeD (proven losers, blocked in bridge.py) | bridge.py returns None | Yes |
+| Strategies producing trades | 1: VanguardSniper only (4 post-reset trades) | SIM_TRADE logs | Yes |
+| Equity | £10,000 (validation counters RESET to 0) | system_memory.json | Yes |
+| Confidence floor | config.toml=50, dynamic_weights=45, Python bridge Hurst H<0.30 | Verified in all 3 files | Yes |
+| dynamic_weights.toml | **STALE** — WR=79.2% from 20 trades. confidence_floor FIXED to 45. observe_only prevents further mutation. | File content | Yes |
+| Nightly pipeline | Runs 04:50 UTC via flock'd script | Crontab verified | Yes |
+| system_memory PF | 0.0 (counters reset — PF tracking FIXED, will compute after first nightly) | system_memory.json | Yes |
+| Risk CHECKs | **27 active** (not 33) — CHECKs 3,4 nonexistent, 12 removed | risk_arbiter.rs code audit | Yes |
+| Time-stop | **IMPLEMENTED** — active_trading_ticks counter, 45min to rung 2, 0.3x ATR trail | exit_engine.rs deployed | Yes |
+| Pre-flight checks | **IMPLEMENTED** — crash on missing config/Redis, warn on missing Gemini/Telegram | entrypoint.sh log: "Pre-flight checks passed" | Yes |
+| Cron jobs | **32 active** (was 35 — disabled 3 dead/duplicate) | Crontab verified | Yes |
+| Academic frameworks | 4 injected: López de Prado, Hasbrouck, Almgren/Chriss, Bollerslev | Claude prompt files verified | Yes |
 
 ---
 

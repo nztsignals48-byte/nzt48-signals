@@ -831,6 +831,12 @@ impl<B: BrokerAdapter> Engine<B> {
             self.arbiter.config.minimum_entry_gbp, self.simulation_mode,
         );
         eprintln!(
+            "EXIT_CONFIG: time_stop_enabled={} max_minutes_to_rung2={} aggressive_trail_atr={:.2}",
+            self.exit_engine.config.time_stop_enabled,
+            self.exit_engine.config.time_stop_max_minutes_to_rung2,
+            self.exit_engine.config.time_stop_aggressive_trail_atr,
+        );
+        eprintln!(
             "Q-051 COST_CONFIG: round_trip_fee={:.3}%, commission=GBP{:.2}, fx_cost={:.3}%",
             self.config.costs.round_trip_fee_pct * 100.0,
             self.config.costs.ibkr_commission_gbp,

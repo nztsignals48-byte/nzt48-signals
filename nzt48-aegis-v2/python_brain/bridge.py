@@ -88,6 +88,11 @@ _SIM_MODE = os.environ.get("AEGIS_SIM_MODE", "0") == "1"
 SIGNAL_COOLDOWN_TICKS = 0 if _SIM_MODE else _load_cooldown_from_config()
 _last_signal_tick = {}  # ticker_id → tick count when last signal was emitted
 
+# Startup audit log: strategy enforcement status
+sys.stderr.write("BRIDGE_STARTUP: Strategy enforcement: TypeA/D=DISABLED, TypeC/E/F=SHADOW, TypeB/VS=LIVE\n")
+sys.stderr.write(f"BRIDGE_STARTUP: SIM_MODE={_SIM_MODE}, COOLDOWN_TICKS={SIGNAL_COOLDOWN_TICKS}\n")
+sys.stderr.flush()
+
 # ============================================================================
 # T-01 (Sprint 5): Exchange cutoff blackout enforcement in Python.
 # Prevents wasting compute on signal generation after the per-exchange entry
