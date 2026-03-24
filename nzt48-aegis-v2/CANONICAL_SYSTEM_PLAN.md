@@ -243,8 +243,24 @@ ssh EC2 'docker system prune -f'   # reclaim old images
 
 ### Weekly (Monday)
 1. IB Gateway 2FA re-auth
-2. `docker system prune -f` if disk > 80%
+2. `docker system prune -f` if disk > 80% (also automated at 04:30 UTC daily)
 3. Review `dynamic_weights.toml` changes
+
+### Emergency Kill Switch
+```bash
+# Immediate halt — stops all trading, keeps containers running for forensics
+ssh EC2 'docker exec aegis-v2 touch /app/KILL'
+
+# Graceful flatten — engine sells all positions then halts
+ssh EC2 'docker exec aegis-v2 touch /app/PAUSE'
+
+# Full stop — kills all containers
+ssh EC2 'cd /home/ubuntu/nzt48-aegis-v2 && docker compose down'
+
+# Resume after kill
+ssh EC2 'docker exec aegis-v2 rm -f /app/KILL /app/PAUSE'
+ssh EC2 'cd /home/ubuntu/nzt48-aegis-v2 && docker compose up -d'
+```
 
 ---
 

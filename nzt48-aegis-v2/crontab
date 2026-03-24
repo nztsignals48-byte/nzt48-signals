@@ -107,6 +107,10 @@
 # v19-P2-15: Parquet Orphan Cleanup — 04:40 UTC daily (before nightly, prevents disk fill)
 40 4 * * * cd /app && python3 -m python_brain.ouroboros.maintenance --cleanup >> /var/log/maintenance.log 2>&1
 
+# Docker prune — 04:30 UTC daily (reclaim old images/build cache, prevents disk-full on next deploy)
+# Runs inside container so uses docker CLI socket if available; otherwise no-op.
+30 4 * * * which docker >/dev/null 2>&1 && docker system prune -f >> /var/log/docker_prune.log 2>&1 || true
+
 # P2-7: Write FTT Registry — 04:52 UTC Mon-Fri (after nightly_v6, before config_writer next day)
 # Only needs to run once; config_fixes writes transaction_tax_registry.toml atomically
 52 4 * * 1 cd /app && python3 -m python_brain.ouroboros.config_fixes --write-ftt >> /var/log/config_fixes.log 2>&1

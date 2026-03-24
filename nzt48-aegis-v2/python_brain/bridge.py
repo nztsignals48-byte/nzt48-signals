@@ -1368,35 +1368,34 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 }
 
     # Strategy: Volume Expansion Continuation
-    # Entry: RVOL > 2.0 AND ADX > 20 AND price > EMA20 AND 3+ consecutive up bars.
-    # This is a higher-quality filter for TypeB momentum — captures institutional flow.
+    # Entry: RVOL > 2.0 AND ADX > 20 AND 3+ consecutive up bars.
+    # Differentiation from VanguardSniper: requires RVOL > 2.0 (vs 1.5) and consecutive bars.
+    # VanguardSniper is ADX-based scoring; VolExpansion is structure-based confirmation.
     volexp_signal = None
     if ind["rvol"] > 2.0 and ind["adx"] > 20.0 and len(bars_5m) >= 5:
-        # Check 3+ consecutive up bars
         recent = bars_5m[-4:]
         up_count = sum(1 for b in recent if b["close"] > b["open"])
         if up_count >= 3:
-            # Check price > EMA20 (use simple check: price > mean of last 20 bars)
-            if len(bars_5m) >= 20:
-                ema20_approx = sum(b["close"] for b in bars_5m[-20:]) / 20
-                if bars_5m[-1]["close"] > ema20_approx:
-                    # Graduated confidence based on RVOL strength
-                    ve_conf = 60.0
-                    if ind["rvol"] > 3.0:
-                        ve_conf += 10.0
-                    if ind["adx"] > 30.0:
-                        ve_conf += 10.0
-                    if ind["vol_slope"] > 0:
-                        ve_conf += 5.0
-                    ve_conf = min(ve_conf, 95.0)
-                    if ve_conf >= conf_floor:
-                        kelly = _kelly_for(ve_conf)
-                        volexp_signal = {
-                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                            "confidence": ve_conf,
-                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                            "strategy": "VolExpansion", **common_fields,
-                        }
+            # Graduated confidence based on RVOL strength + trend strength
+            ve_conf = 60.0
+            if ind["rvol"] > 3.0:
+                ve_conf += 10.0
+            if ind["adx"] > 30.0:
+                ve_conf += 10.0
+            if ind["vol_slope"] > 0:
+                ve_conf += 5.0
+            # Differentiation bonus: if VanguardSniper ALSO fired, this is confirmation
+            if vanguard_signal is not None:
+                ve_conf += 5.0  # Cross-strategy confirmation
+            ve_conf = min(ve_conf, 95.0)
+            if ve_conf >= conf_floor:
+                kelly = _kelly_for(ve_conf)
+                volexp_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": ve_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "VolExpansion", **common_fields,
+                }
 
     # Strategy: Opening Range Breakout (ORB) — US session only
     # Entry: Price breaks the first-30-min high/low with volume confirmation.
@@ -1409,7 +1408,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         utc_dt = datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=timezone.utc)
         utc_hour = utc_dt.hour
         utc_min = utc_dt.minute
-        # US cash opens at 14:30 UTC. ORB window: 14:45-15:30 UTC (15-60 min after open)
+        # US cash opens at 14:30 UTC. ORB formation: 14:30-14:45 UTC (first 15 min).
+        # ORB breakout window: 14:45-15:30 UTC (trade the breakout for up to 45 min).
         if 14 <= utc_hour <= 15 and (utc_hour == 14 and utc_min >= 45 or utc_hour == 15 and utc_min <= 30):
             # Find the opening range: first 3 five-minute bars of this session
             # (bars_5m index 0 may not be session open, but we approximate with recent 6 bars)
@@ -1466,20 +1466,20 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "gap_type": gap_type, **common_fields,
                     }
 
-    # Collect all signals, return the best two for downstream comparison
+    # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
+    # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal] if s]
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
-
-    best1 = all_signals[0] if len(all_signals) >= 1 else None
-    best2 = all_signals[1] if len(all_signals) >= 2 else None
-    return best1, best2
+    return all_signals
 
 
-def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal):
-    """Stage 4: Apply confidence adjustments, select best, classify, size."""
+def _apply_adjustments(ticker_id, msg, ind, all_signals):
+    """Stage 4: Apply confidence adjustments to ALL signals, select best, classify, size."""
+    if not all_signals:
+        return None
     hurst_regime = ind["hurst_regime"]
 
-    # LSE boost during LSE hours
+    # LSE boost during LSE hours — applied to ALL signals
     from python_brain.ouroboros.contract_loader import load_lse_symbols
     lse_syms = set(load_lse_symbols())
     symbol = ticker_symbols.get(ticker_id, "")
@@ -1487,12 +1487,10 @@ def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal
     if is_lse:
         ls = msg.get("london_time_secs", 0)
         if 28800 <= ls < 59400:  # 08:00-16:30
-            if vanguard_signal:
-                vanguard_signal["confidence"] = min(vanguard_signal["confidence"] + 20, 100)
-            if orchestrator_signal:
-                orchestrator_signal["confidence"] = min(orchestrator_signal["confidence"] + 20, 100)
+            for sig in all_signals:
+                sig["confidence"] = min(sig["confidence"] + 20, 100)
 
-    # Drawdown regime filter
+    # Drawdown regime filter — applied to ALL signals
     dd = msg.get("drawdown_pct", 0.0)
     is_inverse = (symbol.startswith("3S") or symbol.startswith("5S") or
                   (symbol.endswith("S.L") and len(symbol) <= 7) or
@@ -1500,14 +1498,13 @@ def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal
     if dd > 0.02:
         penalty = min(int(dd * 500), 20)
         boost = min(int(dd * 300), 15) if is_inverse else 0
-        for sig in (vanguard_signal, orchestrator_signal):
-            if sig:
-                if is_inverse:
-                    sig["confidence"] = min(sig["confidence"] + boost, 100)
-                else:
-                    sig["confidence"] = max(sig["confidence"] - penalty, 0)
+        for sig in all_signals:
+            if is_inverse:
+                sig["confidence"] = min(sig["confidence"] + boost, 100)
+            else:
+                sig["confidence"] = max(sig["confidence"] - penalty, 0)
 
-    # Hour-of-day weights
+    # Hour-of-day weights — applied to ALL signals
     hw = _load_hour_weights()
     if hw:
         ts_ns = msg.get("timestamp_ns", 0)
@@ -1516,19 +1513,32 @@ def _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal
             utc_hour = _dt_hw.fromtimestamp(ts_ns / 1_000_000_000, tz=_tz_hw.utc).hour
             w = hw.get(utc_hour, 1.0)
             if w != 1.0:
-                for sig in (vanguard_signal, orchestrator_signal):
-                    if sig:
-                        sig["confidence"] = max(0, min(100, int(sig["confidence"] * w)))
+                for sig in all_signals:
+                    sig["confidence"] = max(0, min(100, int(sig["confidence"] * w)))
 
-    # Select best signal
-    if vanguard_signal and orchestrator_signal:
-        best = orchestrator_signal if orchestrator_signal["confidence"] > vanguard_signal["confidence"] else vanguard_signal
-    elif vanguard_signal:
-        best = vanguard_signal
-    elif orchestrator_signal:
-        best = orchestrator_signal
-    else:
-        return None
+    # Simulated commission + slippage deduction (paper mode reality check)
+    # Deducts estimated round-trip cost from Kelly sizing to prevent false positive edges.
+    # IBKR tiered: £1.70 entry + £1.70 exit = £3.40 per round trip.
+    # Slippage: 0.5% of position value (config.toml [risk] slippage_assumption_pct).
+    for sig in all_signals:
+        eq = msg.get("equity", 10000.0)
+        notional = sig["kelly_fraction"] * eq
+        sim_commission = 3.40  # £1.70 × 2 (IBKR tiered minimum)
+        sim_slippage = notional * 0.005  # 0.5% slippage assumption
+        total_cost = sim_commission + sim_slippage
+        # Attach cost estimate to signal for Ouroboros forensics
+        sig["sim_commission_gbp"] = round(sim_commission, 2)
+        sig["sim_slippage_gbp"] = round(sim_slippage, 2)
+        sig["sim_total_cost_gbp"] = round(total_cost, 2)
+        # Reduce shares by cost fraction (so Kelly reflects post-cost reality)
+        if notional > 0:
+            cost_frac = total_cost / notional
+            sig["kelly_fraction"] = max(0.001, sig["kelly_fraction"] * (1 - cost_frac))
+            sig["shares"] = max(1, int(sig["shares"] * (1 - cost_frac)))
+
+    # Select best signal after all adjustments
+    all_signals.sort(key=lambda s: s["confidence"], reverse=True)
+    best = all_signals[0]
 
     # Per-ticker cooldown
     tick_count = _tick_counts.get(ticker_id, 0)
@@ -1726,12 +1736,12 @@ def process_tick(msg):
         _log_gate_veto(ticker_id, gate_name, msg["last"], _ind, gate_detail)
         return no_signal
 
-    # Stage 3: Generate signals
+    # Stage 3: Generate signals (returns ALL signals, no bottleneck)
     conf_floor = _compute_confidence_floor(msg, ind)
-    vanguard_signal, orchestrator_signal = _generate_signals(ticker_id, msg, ticks, ind, conf_floor)
+    all_signals = _generate_signals(ticker_id, msg, ticks, ind, conf_floor)
 
-    # Stage 4: Adjust, select, classify, size
-    best = _apply_adjustments(ticker_id, msg, ind, vanguard_signal, orchestrator_signal)
+    # Stage 4: Adjust ALL signals, select best, classify, size
+    best = _apply_adjustments(ticker_id, msg, ind, all_signals)
 
     # Stage 5: Output
     if best:
