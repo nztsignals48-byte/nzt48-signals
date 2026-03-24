@@ -626,10 +626,11 @@ def classify_entry_type(rsi_14, ibs, rvol, ticker_id, prices, volumes, vol_div):
     if ibs < cfg["type_e_ibs_threshold"] and rvol > cfg["type_e_rvol_threshold"]:
         return "TypeE"
 
-    # TypeB (EarlyRunner): RVOL rising for 3 consecutive bars + RSI in [30, 70]
+    # TypeB (EarlyRunner): RVOL rising + RSI in [20, 80]
+    # S4B: Loosened from 3-bar strictly rising to 2-bar rising. 3-bar was unreachable on 5s bars.
     rvol_hist = list(_rvol_history[ticker_id])
-    type_b_rising = (len(rvol_hist) >= 3
-                     and rvol_hist[-3] < rvol_hist[-2] < rvol_hist[-1])
+    type_b_rising = (len(rvol_hist) >= 2
+                     and rvol_hist[-1] > rvol_hist[-2])
     type_b_rsi_ok = (rsi_14 is not None
                      and cfg["type_b_rsi_low"] <= rsi_14 <= cfg["type_b_rsi_high"])
     if type_b_rising and type_b_rsi_ok:
@@ -1577,10 +1578,11 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # STRATEGY REGISTRY ENFORCEMENT (2026-03-24):
     # TypeA/D DISABLED — net losers in 10.8M-trade backtest (29.5%/24.1% WR).
-    # TypeC/E/F SHADOW — logged for learning but signal suppressed.
-    # TypeB + VanguardSniper LIVE — only strategies allowed to deploy capital.
+    # TypeA/D DISABLED — net losers (29.5%/24.1% WR).
+    # S4A: Shadow gate REMOVED — risk arbiter (32 checks) provides real protection.
+    # TypeB/C/E/F now live alongside VanguardSniper and Orchestrator.
     _DISABLED_TYPES = {"TypeA", "TypeD"}
-    _SHADOW_TYPES = {"TypeC", "TypeE", "TypeF"}
+    _SHADOW_TYPES = set()  # Was {"TypeC", "TypeE", "TypeF"} — unblocked Sprint S4A
     if entry_type in _DISABLED_TYPES:
         # Block signal entirely — these strategies are proven losers
         return None

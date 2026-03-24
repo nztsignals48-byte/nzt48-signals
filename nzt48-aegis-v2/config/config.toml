@@ -429,8 +429,8 @@ type_a_rsi_oversold = 30.0            # Was 40 — require deeper oversold for g
 type_a_volume_spike_mult = 2.5        # Was 1.8 — require stronger panic volume
 type_a_drop_atr_mult = 2.5            # Was 2.0 — require larger price drop from recent high
 # Type B thresholds
-type_b_rsi_low = 30.0
-type_b_rsi_high = 70.0
+type_b_rsi_low = 20.0                 # S4B: Was 30 — widened to catch more real entries
+type_b_rsi_high = 80.0                # S4B: Was 70 — widened to catch more real entries
 type_b_momentum_bars = 3
 # Type C thresholds — TIGHTENED: more extreme overbought for higher conviction fade
 type_c_rsi_overbought = 80.0          # Was 75 — require more extreme overbought
@@ -442,7 +442,7 @@ type_d_rsi_high = 35.0                # Was 40 — narrower band, more oversold 
 confidence_decay_rate_per_hour = 2.1
 # Type E thresholds (IBS Mean Reversion — WR=52% PF=8.8, walk-forward STABLE)
 type_e_confidence = 72.0              # SHADOW PROMOTE — above 65 floor, will generate signals
-type_e_ibs_threshold = 0.10
+type_e_ibs_threshold = 0.30           # S4C: Was 0.10 — aligned with IBS_MR generator (bridge.py:1359)
 type_e_rvol_threshold = 1.0
 # Type F thresholds (OBV Divergence — WR=72% PF=33.3, walk-forward IMPROVES OOS)
 type_f_confidence = 75.0              # SHADOW PROMOTE — strongest signal in backtest
