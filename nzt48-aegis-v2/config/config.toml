@@ -318,6 +318,11 @@ tickers = [
     "LQQ3.L",   # Leveraged QQQ: 15% WR over 34 trades, -£3,468 (spread 2-3x wider than QQQ3.L)
     "3LRR.L",   # 3x Russell: -£3,256 in 7-day sim (low liquidity)
 ]
+# S6: Blocked exchanges — raw exchange names from contracts.toml.
+# LSEETF: 52 leveraged ETPs with 0% WR and -£30 cumulative over 28 paper trades.
+# All 3x/5x LSE-listed ETPs have wide spreads that destroy momentum edge.
+# Re-enable when: N>200 trades with cost-adjusted WR>35% on LSEETF subset.
+exchanges = ["LSEETF"]
 
 [wal]
 schema_version = 1

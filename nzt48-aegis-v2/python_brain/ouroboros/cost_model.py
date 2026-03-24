@@ -40,6 +40,8 @@ class CostModel:
     spread_veto_pct: float = 0.003       # 0.3%
     min_gross_edge_pct: float = 0.0015   # 0.15%
     slippage_pct: float = 0.005          # 0.5%
+    # Per-exchange round-trip cost overrides (from [costs.per_exchange])
+    per_exchange_rt: tuple = ()           # Stored as tuple of (exchange, pct) pairs
 
     @classmethod
     def from_toml(cls, config_dir: Optional[Path] = None) -> "CostModel":
@@ -69,6 +71,10 @@ class CostModel:
         costs = config.get("costs", {})
         risk = config.get("risk", {})
 
+        # Per-exchange round-trip costs
+        per_exch_raw = costs.get("per_exchange", {})
+        per_exch = tuple(sorted(per_exch_raw.items()))
+
         return cls(
             round_trip_fee_pct=costs.get("round_trip_fee_pct", 0.003),
             ibkr_commission_gbp=costs.get("ibkr_commission_gbp", 1.70),
@@ -78,6 +84,7 @@ class CostModel:
             spread_veto_pct=risk.get("spread_veto_pct", 0.003),
             min_gross_edge_pct=risk.get("min_gross_edge_pct", 0.0015),
             slippage_pct=risk.get("slippage_assumption_pct", 0.005),
+            per_exchange_rt=per_exch,
         )
 
 
@@ -128,6 +135,51 @@ def cost_drag_annual(
     """
     per_trade = total_round_trip_cost(avg_position_gbp, avg_spread_pct, is_fx, model)
     return per_trade * trades_per_day * 252
+
+
+def exchange_round_trip_pct(exchange: str, model: Optional[CostModel] = None) -> float:
+    """Get exchange-specific round-trip cost, falling back to default."""
+    m = model or costs
+    per_exch = dict(m.per_exchange_rt)
+    return per_exch.get(exchange, m.round_trip_fee_pct)
+
+
+# Exchanges that require FX conversion from GBP perspective
+_FX_EXCHANGES = {"US", "TSE", "HKEX", "SGX", "XETRA", "EURONEXT"}
+
+
+def estimate_trade_cost(
+    position_gbp: float,
+    exchange: str = "",
+    spread_at_entry_pct: float = 0.0,
+    spread_at_exit_pct: float = 0.0,
+    model: Optional[CostModel] = None,
+) -> float:
+    """Estimate realistic cost for a single trade in GBP.
+
+    Components:
+      1. Commission: 2x ibkr_commission_gbp (entry + exit)
+      2. Slippage: position_gbp * slippage_pct
+      3. FX: position_gbp * fx_conversion_pct * 2 (if non-GBP exchange)
+      4. Spread: uses WAL-recorded spread if available, else per-exchange estimate
+
+    Returns total cost in GBP (always positive).
+    """
+    m = model or costs
+    commission = m.ibkr_commission_gbp * 2
+    slippage = position_gbp * m.slippage_pct / 100.0  # slippage_pct is in % (e.g. 0.5 = 0.5%)
+    is_fx = exchange in _FX_EXCHANGES
+    fx_cost = position_gbp * m.fx_conversion_pct * 2 if is_fx else 0.0
+
+    # Spread cost: use WAL data if available, else fall back to per-exchange estimate
+    if spread_at_entry_pct > 0 or spread_at_exit_pct > 0:
+        spread_cost = position_gbp * (spread_at_entry_pct + spread_at_exit_pct) / 200.0
+    else:
+        # Use half the per-exchange round-trip as spread estimate
+        rt_pct = exchange_round_trip_pct(exchange, m)
+        spread_cost = position_gbp * rt_pct / 2.0
+
+    return commission + slippage + fx_cost + spread_cost
 
 
 # Module-level singleton — loaded once on import

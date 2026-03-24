@@ -38,7 +38,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
-from python_brain.ouroboros.cost_model import costs as _cost_model
+from python_brain.ouroboros.cost_model import costs as _cost_model, estimate_trade_cost
 from python_brain.ouroboros.contract_loader import load_lse_symbols
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,9 @@ class TradeRecord:
     atr_pct_at_entry: float = 0.01
     qty: int = 1
     trade_class: str = ""  # Assigned by trade taxonomy classifier
+    # S5: Cost-adjusted P&L (sim_pnl minus estimated real costs)
+    cost_adjusted_pnl: float = 0.0
+    estimated_cost: float = 0.0
 
 
 @dataclass
@@ -1647,11 +1650,33 @@ def run_nightly() -> int:
 
     # Step 1: Load and analyze today's trades
     trades = load_todays_trades(today)
+
+    # S5: Enrich each trade with cost-adjusted P&L
+    for t in trades:
+        position_gbp = abs(t.entry_price * t.qty) if t.entry_price > 0 else 20.0
+        t.estimated_cost = estimate_trade_cost(
+            position_gbp=position_gbp,
+            exchange=t.exchange,
+            spread_at_entry_pct=t.spread_at_entry_pct,
+            spread_at_exit_pct=t.spread_at_exit_pct,
+        )
+        t.cost_adjusted_pnl = t.pnl - t.estimated_cost
+
     metrics = analyze_trades(trades, today)
     log.info(
         "Trade analysis: %d trades, WR=%.1f%%, PF=%.2f, PnL=GBP %.2f",
         metrics.total_trades, metrics.win_rate * 100, metrics.profit_factor, metrics.total_pnl,
     )
+    # S5: Log cost-adjusted reality
+    if trades:
+        cost_adj_pnl = sum(t.cost_adjusted_pnl for t in trades)
+        total_costs = sum(t.estimated_cost for t in trades)
+        cost_adj_wins = sum(1 for t in trades if t.cost_adjusted_pnl > 0)
+        cost_adj_wr = cost_adj_wins / len(trades) * 100
+        log.info(
+            "COST-ADJUSTED: PnL=GBP %.2f (sim=%.2f, costs=%.2f), WR=%.1f%% (sim=%.1f%%)",
+            cost_adj_pnl, metrics.total_pnl, total_costs, cost_adj_wr, metrics.win_rate * 100,
+        )
 
     # Step 1.5: N1a — Cost-aware trade classification (trade taxonomy)
     # Classify each trade and compute cost-aware metrics for learning.
@@ -1799,16 +1824,21 @@ def run_nightly() -> int:
             from python_brain.ouroboros.persistent_memory import load_memory, save_memory
             mem = load_memory()
         for t in trades:
+            # S5: Record cost-adjusted P&L into persistent memory so Ouroboros
+            # learns from realistic economics, not zero-cost simulation fantasy.
             mem.record_trade(
-                symbol=t.ticker, pnl=t.pnl, rung=t.rung_achieved,
+                symbol=t.ticker, pnl=t.cost_adjusted_pnl, rung=t.rung_achieved,
                 kelly=recommendations.get("kelly_fraction", 0.2),
                 regime=t.regime_at_entry,
-                exchange=getattr(t, 'exchange', ''),  # AUDIT-FIX: pass exchange from WAL
+                exchange=getattr(t, 'exchange', ''),
                 confidence=t.confidence, strategy=t.strategy,
             )
+        # S5: Session P&L uses cost-adjusted values
+        cost_adj_session_pnl = sum(t.cost_adjusted_pnl for t in trades) if trades else metrics.total_pnl
+        cost_adj_wr = (sum(1 for t in trades if t.cost_adjusted_pnl > 0) / len(trades)) if trades else metrics.win_rate
         mem.record_session(
             date=today, trades=metrics.total_trades, exits=metrics.total_trades,
-            pnl=metrics.total_pnl, win_rate=metrics.win_rate,
+            pnl=cost_adj_session_pnl, win_rate=cost_adj_wr,
             avg_rung=metrics.avg_rung,
             kelly=recommendations.get("kelly_fraction", 0.2),
             chandelier=recommendations.get("chandelier_atr_mult", 3.0),

@@ -1,0 +1,94 @@
+# AEGIS V2 — LIVE CONFIGURATION OVERRIDES
+# RT1: Red-Team Safety Item from IMPLEMENTATION_MASTER_PLAN v6.0.
+#
+# This file contains PRODUCTION-SAFE values that OVERRIDE the paper config.
+# When IS_LIVE=true, the engine MUST load these values. If this file is
+# missing or contains PAPER VALIDATION values, the engine MUST refuse to start.
+#
+# HOW IT WORKS:
+# 1. config.toml has relaxed PAPER VALIDATION values for data collection
+# 2. config.live.toml has production-safe values (below)
+# 3. At startup, if IS_LIVE=true: load config.toml, then overlay config.live.toml
+# 4. Startup assertion: validate that critical params match live expectations
+#
+# PAPER -> LIVE transition checklist:
+# [ ] Set IS_LIVE=true in main.rs (requires code change + review)
+# [ ] Verify config.live.toml values are appropriate for current equity
+# [ ] Run 100-trade validation gate (WR>=40%, PF>=1.3, DD<10%)
+# [ ] Human sign-off on go-live decision
+#
+# FIELD NAMES: Must match the Rust serde field names in config_loader.rs.
+# [risk] uses max_daily_trades (not daily_trade_limit).
+# [risk] uses min_gross_edge_pct (not min_edge_bps).
+
+[position]
+# LIVE: Max 3 at 10k equity. Increase ONLY with more capital.
+max_simultaneous_positions = 3
+# LIVE: Portfolio heat capped at 10% of equity.
+portfolio_heat_limit_pct = 10.0
+# LIVE: No single sector > 33% of heat budget.
+sector_heat_cap_pct = 33.0
+# LIVE: Always hold 25% cash buffer for drawdown protection.
+cash_buffer_pct = 25.0
+
+[trading]
+# LIVE: Maximum 3 trades per day (cost control).
+# NOTE: This is the legacy overlay path. Prefer [risk] max_daily_trades below.
+daily_trade_limit = 3
+
+[signal]
+# LIVE: Confidence floor stays at 65 (same as paper).
+confidence_floor = 65
+
+[chandelier]
+# LIVE: Conservative trailing (same as paper, can be tightened with data).
+base_atr_mult = 3.0
+
+[kelly]
+# LIVE: Half-Kelly cap at 20% (same as paper).
+clamp_max = 0.20
+# LIVE: Kelly floor at 15%.
+clamp_min = 0.15
+
+# --- C2: Previously missing sections (added for completeness) ---
+
+[timing]
+# LIVE: Stale data threshold. Reject signals with data older than 120s.
+stale_data_threshold_secs = 120
+
+[risk]
+# LIVE: Maximum 3 trades per day (matches [trading] daily_trade_limit above).
+# Uses the canonical Rust field name from RawRisk.
+max_daily_trades = 3
+# LIVE: Halt after 5 consecutive stop losses (stricter than paper's 8).
+consecutive_loss_halt = 5
+# LIVE: Minimum gross edge 0.15% (reject trades where edge < 2x spread).
+# Reverted from paper's relaxed 0.10%.
+min_gross_edge_pct = 0.15
+# LIVE: Spread veto — reject entries with spread > 0.3% (matches paper, already tight).
+spread_veto_pct = 0.3
+# LIVE: Slippage assumption 0.5% (same as paper).
+slippage_assumption_pct = 0.5
+# LIVE: Tighter daily drawdown limit.
+daily_drawdown_pct = 3.0
+# LIVE: Tighter weekly drawdown limit.
+weekly_drawdown_pct = 5.0
+# LIVE: Peak drawdown halt.
+peak_drawdown_halt_pct = 12.0
+# LIVE: Max risk per trade.
+max_risk_per_trade_pct = 0.50
+
+[hardening]
+# LIVE: System velocity kept at 10 (same as paper).
+system_velocity_max = 10
+
+[hardening.sizing]
+# LIVE: Minimum trade size for live (GBP).
+min_trade_gbp_live = 1500.0
+
+[entry_types]
+# LIVE: Entry type confidence floors (stricter TypeD).
+type_a_confidence = 65.0
+type_b_confidence = 82.0
+type_c_confidence = 72.0
+type_d_confidence = 80.0

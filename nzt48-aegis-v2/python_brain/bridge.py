@@ -128,6 +128,7 @@ _SUFFIX_TO_EXCHANGE = {
 # Symbol → exchange mapping (built lazily from contracts.toml)
 _symbol_exchange_map_loaded = False
 _symbol_exchange_map = {}  # symbol → exchange key (e.g. "LSE", "US")
+_symbol_raw_exchange_map = {}  # S6: symbol → raw exchange from contracts.toml (e.g. "LSEETF")
 
 # Approximate UTC offsets per exchange (Rust does authoritative DST-aware check).
 # This is a compute-saving early return, not a safety gate — fail-open is safe.
@@ -178,7 +179,7 @@ def _load_exchange_cutoffs():
 
 def _load_symbol_exchange_map():
     """Build symbol -> exchange key mapping from contracts.toml (cached)."""
-    global _symbol_exchange_map_loaded, _symbol_exchange_map
+    global _symbol_exchange_map_loaded, _symbol_exchange_map, _symbol_raw_exchange_map
     if _symbol_exchange_map_loaded:
         return _symbol_exchange_map
     _symbol_exchange_map_loaded = True
@@ -198,6 +199,7 @@ def _load_symbol_exchange_map():
             if sym and exch:
                 key = _EXCHANGE_KEY_MAP.get(exch, exch)
                 _symbol_exchange_map[sym] = key
+                _symbol_raw_exchange_map[sym] = exch  # S6: preserve raw exchange for gating
         if _symbol_exchange_map:
             sys.stderr.write(
                 "Bridge: loaded symbol->exchange map ({} symbols)\n".format(len(_symbol_exchange_map))
@@ -377,6 +379,163 @@ def _load_ticker_blacklist():
         return _ticker_blacklist
     except Exception:
         return _ticker_blacklist
+
+
+_blocked_exchanges_loaded = False
+_blocked_exchanges = set()
+
+
+def _load_blocked_exchanges():
+    """S6: Load blocked exchanges from config.toml [blacklist].exchanges.
+
+    Blocks all tickers from specific raw exchanges (e.g. LSEETF leveraged ETPs).
+    Uses the raw exchange from contracts.toml, not the mapped key.
+    """
+    global _blocked_exchanges_loaded, _blocked_exchanges
+    if _blocked_exchanges_loaded:
+        return _blocked_exchanges
+    _blocked_exchanges_loaded = True
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        cfg_path = "/app/config/config.toml"
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            blocked = cfg.get("blacklist", {}).get("exchanges", [])
+            if blocked:
+                _blocked_exchanges = set(blocked)
+                sys.stderr.write(
+                    f"Bridge: blocked exchanges ({len(blocked)}): {', '.join(sorted(blocked))}\n"
+                )
+                sys.stderr.flush()
+    except Exception:
+        pass
+    return _blocked_exchanges
+
+
+# ---------------------------------------------------------------------------
+# S8: Regime + Session enforcement from strategy_registry.json
+# ---------------------------------------------------------------------------
+_strategy_registry_loaded = False
+_strategy_registry = {}  # strategy_id → {"regime_allowed", "regime_blocked", "session_allowed", "session_blocked"}
+
+
+def _load_strategy_registry():
+    """Load regime/session metadata from strategy_registry.json (cached)."""
+    global _strategy_registry_loaded, _strategy_registry
+    if _strategy_registry_loaded:
+        return _strategy_registry
+    _strategy_registry_loaded = True
+    reg_path = "/app/config/strategy_registry.json"
+    if not os.path.exists(reg_path):
+        return _strategy_registry
+    try:
+        with open(reg_path) as f:
+            data = json.load(f)
+        for key, entry in data.get("strategies", {}).items():
+            sid = entry.get("id", key)
+            _strategy_registry[sid] = {
+                "regime_allowed": set(entry.get("regime_allowed", [])),
+                "regime_blocked": set(entry.get("regime_blocked", [])),
+                "session_allowed": set(entry.get("session_allowed", [])),
+                "session_blocked": set(entry.get("session_blocked", [])),
+                "status": entry.get("status", "live"),
+            }
+        sys.stderr.write(f"Bridge: loaded strategy registry ({len(_strategy_registry)} strategies)\n")
+        sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"Bridge: failed to load strategy registry: {e}\n")
+        sys.stderr.flush()
+    return _strategy_registry
+
+
+def _classify_market_regime(hurst, rvol, adx):
+    """Map indicator values to registry regime name.
+
+    Uses the definitions from strategy_registry.json:
+      trend_up: Hurst > 0.55, ADX > 20, price above 20-SMA (simplified to Hurst+ADX)
+      trend_down: Hurst > 0.55, ADX > 20
+      high_vol_trend: Hurst > 0.55, RVOL > 2.0
+      high_vol_chop: Hurst < 0.45, RVOL > 2.0
+      low_vol_compression: 0.45 <= Hurst <= 0.55, RVOL < 1.0
+    """
+    if rvol > 2.0 and hurst > 0.55:
+        return "high_vol_trend"
+    if rvol > 2.0 and hurst < 0.45:
+        return "high_vol_chop"
+    if hurst > 0.55 and adx > 20:
+        return "trend_up"  # Can't distinguish up/down without price vs SMA
+    if 0.45 <= hurst <= 0.55 and rvol < 1.0:
+        return "low_vol_compression"
+    if hurst > 0.55:
+        return "trend_up"
+    return "low_vol_compression"  # Default: benign regime
+
+
+def _classify_current_session():
+    """Determine current session from UTC time.
+
+    Returns session name matching strategy_registry.json definitions.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    h = now.hour
+
+    if 1 <= h < 8:
+        return "asia_main"
+    if 8 <= h < 12:
+        return "lse_main"
+    if 12 <= h < 14:
+        return "us_premarket"
+    if h == 14 and now.minute < 30:
+        return "us_premarket"
+    if (h == 14 and now.minute >= 30) or (h == 15 and now.minute < 30):
+        return "us_open"
+    if 15 <= h < 19:
+        return "us_midday"
+    if 19 <= h < 21:
+        return "us_power_hour"
+    if 21 <= h < 23:
+        return "us_after_hours"
+    return "lse_main"  # Default: benign session
+
+
+def _check_regime_session_gate(strategy_id, hurst, rvol, adx):
+    """S8: Check if strategy is allowed in current regime and session.
+
+    Returns (allowed, reason) tuple.
+    """
+    registry = _load_strategy_registry()
+    entry = registry.get(strategy_id)
+    if not entry:
+        return True, ""  # Unknown strategy: fail-open
+
+    # Regime check
+    regime = _classify_market_regime(hurst, rvol, adx)
+    if "ALL" in entry["regime_blocked"]:
+        return False, f"regime_blocked=ALL (regime={regime})"
+    if regime in entry["regime_blocked"]:
+        return False, f"regime_blocked={regime}"
+    if entry["regime_allowed"] and regime not in entry["regime_allowed"]:
+        return False, f"regime={regime} not in allowed={entry['regime_allowed']}"
+
+    # Session check
+    session = _classify_current_session()
+    if "ALL" in entry["session_blocked"]:
+        return False, f"session_blocked=ALL (session={session})"
+    if session in entry["session_blocked"]:
+        return False, f"session_blocked={session}"
+    # ALL_EXCEPT_* pattern (used by ORB)
+    for blocked in entry["session_blocked"]:
+        if blocked.startswith("ALL_EXCEPT_"):
+            allowed_session = blocked.replace("ALL_EXCEPT_", "").lower()
+            if session != allowed_session:
+                return False, f"session={session} not in {allowed_session}"
+
+    return True, ""
 
 
 def _load_indicator_gates():
@@ -1593,6 +1752,19 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         sys.stderr.flush()
         return None
 
+    # S8: Regime + session enforcement from strategy_registry.json
+    if not _SIM_MODE:
+        strategy_id = best.get("strategy", entry_type)
+        allowed, reason = _check_regime_session_gate(
+            strategy_id, ind["hurst"], ind["rvol"], ind["adx"],
+        )
+        if not allowed:
+            sys.stderr.write(
+                f"REGIME_SESSION_VETO: {strategy_id} tid={ticker_id} — {reason}\n"
+            )
+            sys.stderr.flush()
+            return None
+
     if entry_type != "Unclassified":
         best["strategy"] = entry_type
     best["rsi"] = cls_rsi if cls_rsi is not None else 0.0
@@ -1722,6 +1894,18 @@ def process_tick(msg):
             sys.stderr.flush()
             _blacklist_warned.add(sym)
         return no_signal
+
+    # S6: Early exit: blocked exchanges (e.g. LSEETF leveraged ETPs — 0% WR, -£30)
+    if not _SIM_MODE and sym:
+        _load_symbol_exchange_map()  # ensure maps are loaded
+        raw_exch = _symbol_raw_exchange_map.get(sym, "")
+        blocked_exchanges = _load_blocked_exchanges()
+        if raw_exch and raw_exch in blocked_exchanges:
+            if sym not in _blacklist_warned:
+                sys.stderr.write(f"EXCHANGE_VETO: {sym} (tid={ticker_id}) blocked — {raw_exch} in blocked_exchanges\n")
+                sys.stderr.flush()
+                _blacklist_warned.add(sym)
+            return no_signal
 
     # Early exit: warmup
     MIN_WARMUP = 10 if _SIM_MODE else 50
