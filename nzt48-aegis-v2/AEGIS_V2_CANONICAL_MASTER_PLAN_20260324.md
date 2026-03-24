@@ -14,7 +14,7 @@ AEGIS V2 is a paper-trading system on EC2. Rust engine (32,603 LOC) processes ti
 
 **What was fixed today (S4)**: The classification layer was blocking signals that passed all quality checks. Shadow gates on TypeC/E/F removed. TypeB loosened to actually fire. TypeE threshold aligned. Startup clock fixed. First TypeE trade observed (GOOG Long). IBS_MeanReversion now live.
 
-**What remains broken**: 35.4% WR. LSEETF leveraged ETPs are the dominant loss source (0% WR, -£30 over 28 trades). Validation gates all failing. Ouroboros frozen at N=68 (needs N=300). 8 paper overrides not reverted. Zero cost injection in simulation.
+**What remains broken**: 35.4% WR. LSEETF leveraged ETPs are the dominant loss source (0% WR, -£30 over 28 trades). Validation gates all failing. Ouroboros config mutation frozen at N=68 (nightly analysis RUNS, only parameter writes are frozen until N=300). 8 paper overrides not reverted. Zero cost injection in simulation.
 
 **Capital doctrine**: VanguardSniper is the capital core (33+ trades, only strategy with production history). All other strategies are either newly unblocked (S4) or dormant awaiting their market conditions.
 
@@ -85,11 +85,12 @@ If this plan contradicts code, the code is correct and this plan is wrong.
 | Signal generation | Python bridge.py | VanguardSniper + Orchestrator + inline generators |
 | Signal classification | Python bridge.py:606-659 | TypeA-F labels |
 | Position sizing | Python kelly_12factor.py | 12-factor Kelly + sim costs |
-| Nightly learning | Python nightly_v6.py | FROZEN (observe_only) |
+| Nightly learning | Python nightly_v6.py | RUNNING (analysis active, config mutation frozen) |
 | Persistent memory | Python persistent_memory.py | system_memory.json (cumulative stats) |
-| Config generation | Python config_writer.py | dynamic_weights.toml (FROZEN) |
-| Universe curation | Python ticker_selector.py + Gemini | Rotation priority, cron 2h |
-| Signal challenge | Python claude_curator.py | Shadow mode, advisory, non-blocking |
+| Config generation | Python config_writer.py | dynamic_weights.toml (mutation FROZEN, analysis runs) |
+| Universe curation | Python ticker_selector.py + Gemini | RUNNING. Produces core_universe_latest.json every 2h. |
+| Signal challenge | Python claude_curator.py | RUNNING. Daily briefings, forensic reviews, gate calibration. |
+| Hourly P&L Telegram | Python telegram_notify.py --hourly-pnl | RUNNING. Every hour 07:00-21:00 UTC Mon-Fri. |
 
 ---
 
@@ -116,6 +117,14 @@ Every item below has been verified against running code or runtime output.
 | Strategy registry | **WORKING** | config/strategy_registry.json, perfect alignment with bridge.py |
 | Docker deployment | **WORKING** | Preflight checks, graceful degradation |
 | Cron scheduler | **WORKING** | supercronic, no zombies, proper serialization |
+| Claude morning briefing | **WORKING** | briefing_2026-03-24_morning.txt generated at 07:45 |
+| Claude evening briefing | **WORKING** | Runs at 21:30 daily, sends to Telegram |
+| Claude approval gate | **WORKING** | approval_log.ndjson updated nightly |
+| Gemini core scanner | **WORKING** | core_universe_latest.json updated at 11:05 today, valid ticker data |
+| Gemini morning brief | **WORKING** | morning_brief_latest.json generated at 06:00 |
+| Ouroboros nightly analysis | **WORKING** | nightly_v6.py runs at 04:50, analyzes trades, updates persistent_memory |
+| Ouroboros config writer | **WORKING (mutation frozen)** | Runs but skips writes because observe_only=true. Will auto-enable at N=300. |
+| Hourly P&L Telegram | **DEPLOYED** | --hourly-pnl mode, every hour 07:00-21:00 UTC Mon-Fri |
 
 ---
 
@@ -279,25 +288,61 @@ Runs via supercronic cron scheduler. No zombies, proper serialization.
 | Step | Script | Output | Notes |
 |------|--------|--------|-------|
 | 1 | nightly_v6.py | nightly_output.json | Analyzes trades: WR, PF, per-ticker, per-session, regime metrics |
-| 2 | config_writer.py | dynamic_weights.toml | Generate config recommendations. **FROZEN** (observe_only=true). |
+| 2 | config_writer.py | dynamic_weights.toml | Generates recommendations. **Mutation frozen** (observe_only=true). Analysis runs, writes skipped. |
 | 3 | persistent_memory.py | system_memory.json | Update cumulative stats (PF, WR, trade count, gross wins/losses) |
 | 4 | Claude review | /app/data/claude/reviews/ | Forensic analysis of day's trades. Shadow mode, advisory. |
 | 5 | Telegram report | — | Performance summary to Telegram |
 
-**Ouroboros (nightly_v6.py + config_writer.py)**: FROZEN. observe_only=true. Will not modify any parameters until N=300 trades with cost injection (S7). Current N=68.
+**Ouroboros nightly runs every night at 04:50 UTC.** It analyzes trades, computes metrics, and updates persistent_memory.json. The ONLY frozen part is config_writer mutation (dynamic_weights.toml writes). observe_only=true prevents parameter changes until N=300 trades with cost injection (Sprint S5). Current N=68. The analysis pipeline is fully operational.
 
 ---
 
-## 14. AI Model Roles
+## 14. AI Model Roles + Intelligence Layer Status
 
-| Role | Model | Mechanism | Authority |
-|------|-------|-----------|-----------|
-| Signal challenge | Claude | claude_curator.py, shadow mode | Advisory only. Non-blocking. Cannot force or prevent trades. |
-| Universe curation | Gemini 2.5 Flash | ticker_selector.py, cron every 2h | Advisory only. API key is set and functional. |
-| Nightly analysis | Deterministic | nightly_v6.py | Analysis only. FROZEN. |
-| Config generation | Deterministic | config_writer.py | Analysis only. FROZEN. |
+**Neither AI model has trading authority.** All trade entries flow through the deterministic RiskArbiter (32 checks, fail-closed). AI models observe, advise, and curate. The system trades on math, not AI opinions.
 
-**Neither AI model has trading authority.** All trade entries flow through the deterministic RiskArbiter (32 checks, fail-closed). AI models observe and advise. The system trades on math, not on AI opinions.
+### Claude (via `claude -p` CLI on EC2, $0/month Max subscription)
+
+| Role | Schedule | Output | Status |
+|------|----------|--------|--------|
+| Morning briefing | 07:45 UTC daily | /app/data/claude/briefings/ | **RUNNING** — briefing_2026-03-24_morning.txt verified |
+| Evening briefing | 21:30 UTC daily | /app/data/claude/briefings/ | **RUNNING** |
+| Forensic review | 04:53 UTC (nightly pipeline) | /app/data/claude/reviews/ | **RUNNING** — empty until trades close in WAL |
+| Gate calibration | Friday 22:00 UTC | rejected_reviews/ | **RUNNING** — weekly schedule |
+| Universe curation | Every 2h (shadow) | /app/data/claude/curation/ | **RUNNING (shadow)** — logs only, not yet promoted |
+| Filing/news scanner | 06:00 UTC daily | macro/ | **RUNNING** |
+
+Claude is fully operational in cold-path advisory mode. It produces daily briefings, nightly forensic reviews, and weekly gate calibration analysis. None of these affect execution — they inform the operator.
+
+### Gemini 2.5 Flash (API key: AIzaSyBMyC..., 39 chars)
+
+| Role | Schedule | Output | Status |
+|------|----------|--------|--------|
+| Core universe curation | Every 2h (cron) | /app/data/gemini/core_universe_latest.json | **RUNNING** — last updated 11:05 today, valid ticker lists |
+| Morning brief | 06:00 UTC daily | /app/data/gemini/morning_brief_latest.json | **RUNNING** — generated today |
+
+Gemini is fully operational. API key is deployed and producing valid output. It curates the ticker universe for the session-aware watchlist rotation.
+
+### Ouroboros (deterministic nightly learning loop)
+
+| Component | Schedule | Output | Status |
+|-----------|----------|--------|--------|
+| nightly_v6.py (analysis) | 04:50 UTC Mon-Fri | nightly_output.json | **RUNNING** — analyzes trades, computes WR/PF/per-ticker metrics |
+| persistent_memory.py | After nightly | system_memory.json | **RUNNING** — updates cumulative stats |
+| config_writer.py (mutation) | 04:51 UTC Mon-Fri | dynamic_weights.toml | **RUNNING but MUTATION FROZEN** — observe_only=true |
+
+Ouroboros runs every night. It analyzes trades, updates persistent memory, and generates config recommendations. The only frozen part is the final config write — `observe_only=true` prevents dynamic_weights.toml from being updated until N=300 trades with cost injection (Sprint S5).
+
+### Telegram Notifications
+
+| Type | Schedule | Status |
+|------|----------|--------|
+| Trade entry alerts | On every SIM_TRADE | **RUNNING** |
+| Trade exit alerts | On every PositionClosed | **RUNNING** |
+| System heartbeat | Every 4h | **RUNNING** |
+| Hourly P&L update | Every hour 07:00-21:00 UTC | **DEPLOYED** (new, added 2026-03-24) |
+| Daily sim report | 21:15 UTC | **RUNNING** |
+| Session summaries | Session boundaries | **RUNNING** |
 
 ---
 
@@ -334,7 +379,7 @@ Market Ticks --> Rust engine.rs (tick processing, <1ms)
   +-- WAL events --> /app/events/current.ndjson
         |
         +-- Nightly pipeline (04:50 UTC)
-              nightly_v6.py -> persistent_memory.py -> config_writer.py (FROZEN)
+              nightly_v6.py -> persistent_memory.py -> config_writer.py (mutation frozen)
 ```
 
 ---
@@ -438,7 +483,7 @@ ssh EC2 'docker ps'
 
 **The system has institutional-grade engineering and losing economics.**
 
-The Rust engine is fast, deterministic, and correct. The risk arbiter is fail-closed with 32 checks. The exit engine ratchets properly. The deployment pipeline, cron, and nightly analysis all work. The microstructure handling (board lots, L1, unhalt grace, spoof detection) is production-ready.
+The Rust engine is fast, deterministic, and correct. The risk arbiter is fail-closed with 32 checks. The exit engine ratchets properly. The deployment pipeline, cron, and nightly analysis all work. The microstructure handling (board lots, L1, unhalt grace, spoof detection) is production-ready. The intelligence layer is fully operational: Claude produces daily briefings and forensic reviews, Gemini curates the ticker universe every 2 hours, Ouroboros analyzes trades nightly (mutation frozen until N=300), and hourly P&L updates go to Telegram.
 
 **The core problem is 35.4% WR.** This is below breakeven for any reasonable commission structure. The dominant loss source is LSEETF leveraged ETPs (0% WR, -£30 over 28 trades). Until these are either filtered out or the strategy adapted, the system will keep losing money.
 
