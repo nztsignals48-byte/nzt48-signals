@@ -19,7 +19,7 @@ AEGIS V2 is a multi-exchange paper-trading system running on EC2 (c7i-flex.large
 - 6 signal sources in Python, 32 risk checks in Rust, Chandelier 5-rung exit.
 - No time-stop exists. Only price-based Chandelier trailing.
 - TypeA and TypeD entry types are enabled but are known backtest losers (29.5% and 24.1% WR respectively).
-- Gemini API key is NOT SET on EC2. All Gemini crons fail silently.
+- Gemini API key is SET on EC2 (configured 2026-03-24 01:33 UTC). Gemini scanner crons now operational.
 - Claude CLI is available at `/usr/bin/claude` but operates in shadow mode only. It never blocks trades.
 - `strategies.toml` exists (16KB). The Orchestrator can produce signals but has generated zero in production.
 - `dynamic_weights.toml` shows Bayesian WR = 0.365, Sharpe = -1.607.
@@ -160,7 +160,7 @@ Similarly, `rust_core/src/strategy_config.rs` (1,110 LOC) is unused and still in
 
 ### DISABLED / BROKEN
 
-- Gemini scanner -- API key not set on EC2, all Gemini crons fail silently
+- Gemini scanner -- API key SET on EC2 (2026-03-24), crons now operational
 - `quantum_apex.rs` -- deleted (Sprint 1)
 - `dqn_signal_weighting.rs` -- deleted (Sprint 1)
 - `neural_hawkes.rs` -- deleted (Sprint 1)
@@ -300,7 +300,7 @@ Every signal that passes quality gates gets sized through this 12-factor pipelin
 
 ### BLOCKER
 
-1. **Gemini API key not set on EC2.** All Gemini crons fail silently. No scanner, no Gemini morning brief. The operator receives no error notification.
+1. ~~Gemini API key not set on EC2.~~ **FIXED 2026-03-24 01:33 UTC.** Gemini API key configured. Scanner crons now operational. Entrypoint.sh warns if key is missing on future deploys.
 
 ### MAJOR
 
@@ -308,7 +308,7 @@ Every signal that passes quality gates gets sized through this 12-factor pipelin
 
 3. **LSEETF leveraged ETPs: 0% WR over 28 trades (-30.34 GBP).** These are the system's largest loss source. They are NOT blacklisted -- the user deliberately chose to keep trading them for data collection. But every LSEETF trade has been a loser.
 
-4. **4 new strategies have 0 observed signals.** IBS_MeanReversion, VolExpansion, ORB_Breakout, and GapFade were deployed 2026-03-23. None has produced a signal in production yet. They are completely unproven.
+4. **4 new strategies have 0 observed signals.** IBS_MeanReversion, VolExpansion, ORB_Breakout, and GapFade were deployed 2026-03-23. IBS thresholds loosened (2026-03-24: IBS<0.30, RSI2<25, no regime/RVOL gate) to increase fire rate. Still unproven — monitoring for first signals.
 
 5. **Paper mode has 8 relaxed limits that MUST be reverted before live.** See Section 13 for the full list. If these are not reverted, the system will deploy with 999 max positions and 50% portfolio heat.
 
@@ -371,7 +371,7 @@ The 100-trade validation gate determines whether the system can progress toward 
 | 04:51 | `config_writer.py` | Generate dynamic_weights.toml from nightly output |
 | Every 15 min | `ticker_selector.py` | Universe rotation, active watchlist update |
 | Every 2 hours | Claude curation | Shadow mode signal evaluation |
-| Every 2 hours | Gemini scanner | **BROKEN** -- API key not set |
+| Every 2 hours | Gemini scanner | **OPERATIONAL** -- API key set 2026-03-24 |
 
 ### Session Briefings (8 total, DST-aware)
 
@@ -495,7 +495,7 @@ Every Monday morning, check these in order:
 3. **LSE session at 08:00 UTC** -- most active signal window. Watch for VanguardSniper momentum signals.
 4. **US session ORB at 14:45 UTC** -- first real test of ORB_Breakout strategy. Needs a clear opening range to trigger.
 5. **Disk usage** -- if above 80%, run `docker system prune -f` on EC2. Docker builds consume ~5GB each.
-6. **Gemini API key** -- still not set. All Gemini crons will continue to fail silently until configured.
+6. ~~Gemini API key~~ **FIXED.** Key set on EC2. Verify scanner output at next 2-hour cycle.
 
 ---
 
@@ -670,7 +670,7 @@ This is a strict checklist. Every item must be completed.
 
 3. **All 8 paper overrides reverted.** Max positions from 999 to 3, portfolio heat from 50% to 10%, etc. See Section 12 for the full list.
 
-4. **Gemini API key configured on EC2.** Currently not set. All Gemini crons fail silently.
+4. ~~Gemini API key configured on EC2.~~ **DONE** (2026-03-24 01:33 UTC).
 
 5. **Time-stop added to exit engine.** Currently no time-based exit exists. A position can sit indefinitely if price stays within Chandelier range.
 
