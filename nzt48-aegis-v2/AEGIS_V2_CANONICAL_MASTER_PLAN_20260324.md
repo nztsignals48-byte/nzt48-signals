@@ -168,10 +168,11 @@ _SHADOW_TYPES = {"TypeC", "TypeE", "TypeF"}  # WRONG — kills signals that pass
 
 | Item | Files | Impact | Action |
 |------|-------|--------|--------|
-| Shadow gate blocks IBS/TypeC/E/F | bridge.py:1583 | Kills valid signals | **REMOVE** shadow gate |
-| TypeB unreachable condition | bridge.py:631 | "Best strategy" never fires | **LOOSEN** to 2-bar rising |
-| TypeE threshold mismatch | config.toml:445 vs bridge.py:1359 | 0.10 vs 0.30 | **FIX** config to 0.30 |
-| Dead CHECK 26 | risk_arbiter.rs:451 | Misleading, never triggers | **DELETE** |
+| ~~Shadow gate blocks IBS/TypeC/E/F~~ | bridge.py:1583 | ~~Kills valid signals~~ | **DONE S4A** — shadow gate removed |
+| ~~TypeB unreachable condition~~ | bridge.py:631 | ~~"Best strategy" never fires~~ | **DONE S4B** — loosened to 2-bar rising, RSI [20,80] |
+| ~~TypeE threshold mismatch~~ | config.toml:445 | ~~0.10 vs 0.30~~ | **DONE S4C** — aligned to 0.30 |
+| ~~Startup clock Dark mode~~ | engine.rs:813 | ~~Starts Dark during market hours~~ | **DONE** — uses system UTC clock at startup |
+| Dead CHECK 26 | risk_arbiter.rs:451 | Misleading, never triggers | **DELETE** (backlog) |
 | Dead Hurst returns | regime_detector.rs | Computed, never read | KEEP (future regime routing) |
 | Orphaned strategy_config.rs | strategy_config.rs | Loaded, never queried | KEEP (documents intent) |
 | Dead entry_engine.rs detectors | entry_engine.rs:88-500 | 500 LOC quarantined | KEEP (future option) |
@@ -189,11 +190,12 @@ _SHADOW_TYPES = {"TypeC", "TypeE", "TypeF"}  # WRONG — kills signals that pass
 ### Sprint S3: Microstructure Sprint — COMPLETED 2026-03-24
 - Board lots, L1 gate, unhalt grace, spoof calibration, EC2 live config.
 
-### Sprint S4: Unblock Strategies + Analyze Losses (NEXT)
-- **Part A**: Remove TypeC/E/F shadow gate, loosen TypeB, fix TypeE threshold
-- **Part B**: Analyze 66 trades — segment by ticker, session, rung attainment, P&L
-- **Goal**: More strategies producing + understand WHY VanguardSniper loses
-- **Files**: bridge.py:1583, bridge.py:631, config.toml:445,432-433
+### Sprint S4: Unblock Strategies + Clock Fix — COMPLETED 2026-03-24
+- **S4A**: Removed TypeC/E/F shadow gate (bridge.py:1583). All types now live. Risk arbiter provides real protection.
+- **S4B**: Loosened TypeB classifier from 3-bar→2-bar rising RVOL, RSI [30,70]→[20,80].
+- **S4C**: Fixed TypeE threshold mismatch (config.toml: 0.10→0.30, aligned with bridge.py:1359).
+- **S4D**: Fixed startup clock: engine now uses system UTC for initial trading mode instead of starting in Dark.
+- **Part B (pending)**: Analyze 66+ trades — segment by ticker, session, rung attainment, P&L. Next priority.
 
 ### Sprint S5: EC2 Instance Upgrade (15 min)
 - Upgrade to 8GB RAM. Pre-live MANDATORY.
