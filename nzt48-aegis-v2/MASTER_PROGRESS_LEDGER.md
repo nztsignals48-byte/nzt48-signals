@@ -8,86 +8,93 @@ Session recovery source of truth. Append-only. If a session stops unexpectedly, 
 ## Session: 2026-03-23/24 (Full System Audit + Deploy)
 
 ### Chunk 1: Codebase Audit (16:40 UTC, Mar 23)
-- **Objective**: Map entire system from real code
-- **Files Read**: 74 .rs files (32,603 LOC), 40+ .py files, config.toml, docker-compose.yml, .gitignore, 277 .md files
+- **Files Read**: 74 .rs files (32,603 LOC), 40+ .py files, config.toml, docker-compose.yml, .gitignore
 - **Findings**: 12 contradictions registered, 4 simplification items, 14 action items ranked by ROI
-- **Key Discovery**: WAL persistence is CORRECT (Docker named volume `aegis-events`). EC2 data/ dir has reports, not WAL files.
-- **Key Discovery**: TypeA/D are NET LOSERS in backtest (29.5%/24.1% WR, PF 0.04/0.03) — but kept active for live data collection
+- **Key Discovery**: WAL persistence CORRECT (Docker named volume `aegis-events`)
+- **Key Discovery**: WAL `PositionClosed.final_pnl` IS correctly populated (earlier script read wrong field `pnl` instead of `final_pnl`)
 
-### Chunk 2: Sprint A — Infrastructure Fixes
-- **EC2 Disk**: Pruned from 83% → 79% (reclaimed 785MB)
-- **WAL Fix**: NOT NEEDED — already on persistent Docker volume
-- **.env Fix**: NOT NEEDED — already in .gitignore
+### Chunk 2: Infrastructure Fixes
+- EC2 Disk: 83% → 75% (multiple prune cycles, removed old nzt48-signals dir)
+- WAL: NOT NEEDED — already persistent
+- .env: NOT NEEDED — already in .gitignore
 
-### Chunk 3: Sprint C — New Strategies
-- **Files Changed**: `python_brain/bridge.py` (+140 lines)
-- **New Strategies**:
-  - IBS_MeanReversion: IBS < 0.2 + RSI(2) < 15 + RVOL > 0.7 (mean-reverting regimes)
-  - VolExpansion: RVOL > 2.0 + ADX > 20 + 3+ up bars + price > EMA20
-  - ORB_Breakout: US session 14:45-15:30 UTC, breaks opening range high with volume
-- **Tests**: `py_compile bridge.py` — OK, `cargo check --release` — OK
+### Chunk 3: New Strategies Added
+- IBS_MeanReversion: IBS < 0.2 + RSI(2) < 15 + RVOL > 0.7
+- VolExpansion: RVOL > 2.0 + ADX > 20 + 3+ up bars
+- ORB_Breakout: US session 14:45-15:30 UTC
+- GapFade: Liquidity gap down >1%, RVOL < 2.0
 
 ### Chunk 4: TypeA/D Decision
-- Initially disabled TypeA/D (commit `89ec4a8`)
-- User requested keeping them active for paper data collection
-- Reverted block (commit `596e695`) — TypeA/D active, Ouroboros tracks per-type WR
+- Initially disabled (commit `89ec4a8`), then reverted (commit `596e695`)
+- **Final state: TypeA/D ENABLED.** Collecting live paper data. Ouroboros auto-downweights.
 
-### Chunk 5: Deploy + Verify
-- 3 deploys total (initial + TypeA/D revert)
-- All 3 containers healthy after each deploy
-- 100 reqMktData streams active (HKEX, XETRA, EURONEXT, SGX)
-- Python Bridge started successfully, no errors
+### Chunk 5: Log Spam Fix
+- `python_bridge.rs`: "0 signals" CRITICAL throttled to 1K/5K/10K intervals (was every 10 ticks)
+- Verified: no CRITICAL spam in post-deploy logs
 
-### Chunk 6: Documentation
-- CANONICAL_SYSTEM_PLAN.md — written (reflects actual code truth)
-- MASTER_PROGRESS_LEDGER.md — this file
-- AEGIS_V2_OPERATING_MANUAL.pdf — generated (6 pages, PyMuPDF)
+### Chunk 6: Doc Cleanup
+- 108 stale .md files archived to `docs/archive/`
+- Root now has 5 files: CANONICAL_SYSTEM_PLAN, MASTER_PROGRESS_LEDGER, PLAN_1, PLAN_2, CLAUDE
 
----
-
-## Trade Report: All-Time (308 WAL Events)
-
-### Summary
-- **Total entries**: 35 (Long)
-- **Total exits**: 15 (Sell)
-- **Position closures**: 15
-- **Open positions**: 0 (all flattened by EodFlatten/HaltFlatten)
-- **Equity**: £10,000 (starting) — P&L tracking shows pnl=None (needs Rust fix)
-- **Strategies**: Momentum (33), TypeE (2)
-- **Entry types**: Unclassified (33), TypeE (2)
-- **New strategies** (IBS/ORB/VolExpansion): 0 signals yet — need market open + 50-bar warmup
-
-### Exit Reasons
-- EodFlatten: 8 (end of day forced close)
-- HaltFlatten: 7 (system halt forced close)
-
-### Issue: P&L = None
-WAL PositionClosed events have `pnl=None` — the Rust engine isn't calculating realized P&L on close. MFE/MAE are recorded correctly. This is a Rust-side issue to fix.
-
-### Symbols Traded
-LSE: BP..L, STAN.L, AAL.L, ADM.L(x2), BA..L, BATS.L, BEZ.L, BLND.L, BTRW.L, DCC.L, QQQS.L, 3USL.L, GLEN.L, AUTO.L(x2), BGEO.L, QQQ3.L, AZN.L, BAB.L(x2), BBOX.L(x2), BKG.L, BRBY.L, CCH.L, CPG.L, DPLM.L, EXPN.L, GAW.L
-US: GOOG(x2), AMZN
-EU: AI, SU
+### Chunk 7: Consistency Audit (00:00 UTC, Mar 24)
+- Fixed 5 contradictions in CANONICAL_SYSTEM_PLAN.md:
+  1. TypeA/D: removed "BLOCKED" from Stage 4 description — they are ENABLED
+  2. Trade count: updated from "4 trades" to ~64 trades with correct breakdown
+  3. P&L: corrected from "pnl=None bug" to "final_pnl correctly populated"
+  4. Universe: explained 1,251 contracts vs 867 tickers (superset vs curated watchlist)
+  5. Strategy maturity: added Implemented/Enabled/Observed columns
 
 ---
 
-## Current System Status
-- **Branch**: `feat/tier-system-enhancements-full`
-- **Latest Commit**: `596e695`
-- **EC2 Disk**: 79%
+## Authoritative Trade Data (as of 2026-03-24 00:00 UTC)
+
+### Source: system_memory.json (nightly_v6, 48 trades) + current WAL (16 closures)
+
+| Source | Trades | Wins | Losses | P&L |
+|--------|--------|------|--------|-----|
+| system_memory.json (Mar 18-23) | 48 | 17 | 31 | -£6.79 |
+| Current WAL (post-restart) | 16 closures | 3 | 8 | ~-£2.27 |
+| **Combined estimate** | **~64** | **~20** | **~39** | **~-£9.06** |
+
+### By Exchange (system_memory.json)
+| Exchange | Trades | Wins | P&L | WR |
+|----------|--------|------|-----|-----|
+| LSEETF | 28 | 0 | -£30.34 | 0% |
+| Asian (HK/TSE) | ~11 | 11 | +£16.91 | 100% |
+| XETRA/EURONEXT | ~5 | 4 | +£3.63 | 80% |
+| US | ~4 | 2 | +£3.01 | 50% |
+
+### By Strategy (observed in WAL)
+| Strategy | Trades | Observed? |
+|----------|--------|-----------|
+| Momentum (VanguardSniper) | 61 | Yes |
+| TypeE (IBS classifier) | 3 | Yes |
+| IBS_MeanReversion | 0 | No — deployed after market close |
+| VolExpansion | 0 | No — deployed after market close |
+| ORB_Breakout | 0 | No — US session only |
+| GapFade | 0 | No — needs gap-down >1% |
+
+---
+
+## Current System Status (2026-03-24 00:00 UTC)
+- **Commit**: `99f733e`
+- **EC2 Disk**: 75% (4.7GB free)
 - **Containers**: 3, all healthy
 - **Open Positions**: 0
 - **Equity**: £10,000
-- **Strategies Active**: VanguardSniper (Momentum), Orchestrator, IBS_MeanReversion, VolExpansion, ORB_Breakout, TypeA-F (all)
-- **100-trade gate**: 35/100 complete
+- **Session**: AfterHours / ModeA (pre-Asian)
+- **Strategies**: 6 sources implemented + enabled; 2 observed in WAL (Momentum, TypeE)
+- **Validation gate**: ~64/100 trades (64%)
 
-## Commits This Session
-1. `89ec4a8`: Disable TypeA/D losers + add IBS/ORB/VolExpansion strategies
+## Commits This Session (6 total)
+1. `89ec4a8`: Add IBS/ORB/VolExpansion strategies + initial TypeA/D disable
 2. `5f6045d`: Add canonical system plan and progress ledger
-3. `596e695`: Keep TypeA/D active for paper validation data collection
+3. `596e695`: Keep TypeA/D active for paper validation
+4. `44af315`: Updated ledger with trade report
+5. `99f733e`: Add GapFade, fix CRITICAL log spam, archive 108 docs
+6. (pending): Consistency audit fix for canonical plan
 
-## Next Session
-1. Verify new strategies (IBS/ORB/VolExpansion) generate signals during market hours
-2. Fix P&L tracking in Rust PositionClosed events (pnl=None bug)
-3. Continue 100-trade validation gate (65 trades remaining)
-4. Archive 250+ stale docs
+## Next Actions
+1. Monitor Asian session (TSE 00:00 UTC, HKEX 01:30 UTC) for new strategy signals
+2. Monitor if IBS/VolExpansion/GapFade fire during live market
+3. Continue 100-trade validation gate (~36 remaining)
