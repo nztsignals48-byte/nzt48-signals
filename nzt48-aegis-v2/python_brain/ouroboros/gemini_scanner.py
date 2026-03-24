@@ -1349,6 +1349,231 @@ def _write_scanner_output(action: str, data: Any) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Session Triage — bounded Gemini ranking for universe_pipeline
+# ---------------------------------------------------------------------------
+
+def triage_session_universe(
+    session,  # SessionDefinition from session_map.py
+    eligible_tickers: List[Dict[str, Any]],
+    market_data: Optional[Dict[str, Any]] = None,
+    total_slots: int = 100,
+) -> Dict[str, Any]:
+    """Gemini-assisted session triage: rank eligible tickers for the current session.
+
+    Called by universe_pipeline Phase 3. Returns a structured ranking that the
+    pipeline merges with deterministic scores. Final admission is ALWAYS
+    deterministic — Gemini is advisory only.
+
+    Args:
+        session: SessionDefinition from session_map.py
+        eligible_tickers: List of ticker dicts (from Phase 2 eligible universe)
+        market_data: Optional live market data (RVOL, gap_pct, etc.)
+        total_slots: Target number of tickers to rank (default 100)
+
+    Returns:
+        {
+            "session": str,
+            "timestamp": str,
+            "rankings": [{"symbol": str, "rank": int, "reason": str}, ...],
+            "source": "gemini" | "deterministic_fallback",
+            "gemini_latency_ms": float,
+            "confidence": float,
+        }
+    """
+    session_name = getattr(session, 'name', str(session))
+    session_exchanges = list(getattr(session, 'eligible_exchanges', []))
+    slot_allocation = dict(getattr(session, 'slot_allocation', {}))
+
+    all_symbols = {t["symbol"] for t in eligible_tickers if t.get("symbol")}
+    now = datetime.now(timezone.utc)
+
+    # Build ticker summary for the prompt (top 500 by research_score to keep prompt manageable)
+    sorted_eligible = sorted(eligible_tickers,
+                              key=lambda t: -t.get("research_score", t.get("composite_score", 0)))
+    prompt_tickers = sorted_eligible[:500]
+
+    ticker_lines = []
+    for t in prompt_tickers:
+        sym = t.get("symbol", "")
+        exch = t.get("exchange", "")
+        vol = t.get("avg_daily_volume", 0)
+        mcap = t.get("market_cap_usd", 0)
+        lev = t.get("leverage_factor", 1)
+        sector = t.get("sector", "Unknown")
+        name = t.get("name", "")
+        line = f"{sym} | {exch} | vol={vol:,.0f} | mcap={mcap:,.0f} | lev={lev}x | {sector}"
+        if name:
+            line += f" | {name}"
+        ticker_lines.append(line)
+
+    # Include market data highlights if available
+    market_highlights = ""
+    if market_data:
+        unusual = []
+        for sym, md in market_data.items():
+            if not isinstance(md, dict):
+                continue
+            rvol = md.get("rvol", 0)
+            gap = abs(md.get("gap_pct", 0))
+            if rvol >= 3.0 or gap >= 1.5:
+                unusual.append(f"  {sym}: RVOL={rvol:.1f}x gap={gap:.1f}%")
+        if unusual:
+            market_highlights = "\n--- UNUSUAL ACTIVITY ---\n" + "\n".join(unusual[:30])
+
+    prompt = f"""You are AEGIS V2's session-aware universe curator. Rank tickers for streaming.
+
+CURRENT SESSION: {session_name}
+UTC TIME: {now.strftime('%H:%M')}
+ACTIVE EXCHANGES: {', '.join(session_exchanges)}
+SLOT ALLOCATION: {json.dumps(slot_allocation)}
+TARGET SLOTS: {total_slots}
+
+ELIGIBLE TICKERS ({len(prompt_tickers)} of {len(eligible_tickers)} total):
+{chr(10).join(ticker_lines[:300])}
+{'...' if len(ticker_lines) > 300 else ''}
+{market_highlights}
+
+RANKING RULES:
+- Allocate slots proportionally to the session's exchange slot allocation
+- Prioritize: high volume, high volatility, leveraged ETPs, catalyst-driven names
+- Avoid: wide-spread names, dead/range-bound stocks, blacklisted exchanges
+- Each ticker's exchange must be in the active exchanges for this session
+- Leveraged ETPs (3x/5x) rank higher when their underlying is in play
+
+OUTPUT FORMAT (pure JSON array, no markdown):
+[{{"symbol": "NVDA", "rank": 1, "reason": "catalyst"}}, {{"symbol": "TSLA", "rank": 2, "reason": "momentum"}}, ...]
+
+Return exactly {total_slots} entries. Return ONLY the JSON array."""
+
+    # Simulation mode
+    if SIMULATION_MODE:
+        result = _sim_triage(session_name, eligible_tickers, total_slots)
+        _log_interaction("triage_session", 0, result, 0.0, result_count=total_slots)
+        return result
+
+    # Call Gemini
+    t0 = time.monotonic()
+    raw = _call_gemini(prompt, timeout=90)
+    latency_ms = (time.monotonic() - t0) * 1000
+
+    if raw is None:
+        # Fallback: return deterministic ranking by research_score
+        rankings = _fallback_triage(eligible_tickers, total_slots)
+        _log_interaction("triage_session", len(prompt), rankings, latency_ms,
+                         error="gemini_unavailable", result_count=len(rankings))
+        return {
+            "session": session_name,
+            "timestamp": now.isoformat(),
+            "rankings": rankings,
+            "source": "deterministic_fallback",
+            "gemini_latency_ms": latency_ms,
+            "confidence": 0.0,
+        }
+
+    # Parse response
+    parsed = _parse_json_from_text(raw)
+    if parsed is None:
+        rankings = _fallback_triage(eligible_tickers, total_slots)
+        _log_interaction("triage_session", len(prompt), rankings, latency_ms,
+                         error="json_parse_failure", result_count=len(rankings))
+        return {
+            "session": session_name,
+            "timestamp": now.isoformat(),
+            "rankings": rankings,
+            "source": "deterministic_fallback",
+            "gemini_latency_ms": latency_ms,
+            "confidence": 0.0,
+        }
+
+    # Validate and extract rankings
+    rankings = []
+    if isinstance(parsed, list):
+        for i, entry in enumerate(parsed):
+            if isinstance(entry, dict):
+                sym = entry.get("symbol", "")
+                if sym in all_symbols:
+                    rankings.append({
+                        "symbol": sym,
+                        "rank": entry.get("rank", i + 1),
+                        "reason": entry.get("reason", "gemini_ranked"),
+                    })
+            elif isinstance(entry, str) and entry in all_symbols:
+                rankings.append({"symbol": entry, "rank": i + 1, "reason": "gemini_ranked"})
+
+    if len(rankings) < 10:
+        log.warning("Gemini triage returned only %d valid rankings, falling back", len(rankings))
+        rankings = _fallback_triage(eligible_tickers, total_slots)
+        source = "deterministic_fallback"
+        confidence = 0.0
+    else:
+        # Pad with deterministic if Gemini returned fewer than total_slots
+        if len(rankings) < total_slots:
+            ranked_syms = {r["symbol"] for r in rankings}
+            fallback = _fallback_triage(
+                [t for t in eligible_tickers if t["symbol"] not in ranked_syms],
+                total_slots - len(rankings),
+            )
+            rankings.extend(fallback)
+        rankings = rankings[:total_slots]
+        source = "gemini"
+        confidence = min(1.0, len(rankings) / total_slots)
+
+    # Log and save
+    _log_interaction("triage_session", len(prompt), rankings, latency_ms,
+                     result_count=len(rankings))
+    _write_scanner_output("session_triage", {
+        "session": session_name,
+        "rankings": rankings,
+        "source": source,
+    })
+
+    log.info("Session triage: %d rankings (source=%s, session=%s, latency=%.0fms)",
+             len(rankings), source, session_name, latency_ms)
+
+    return {
+        "session": session_name,
+        "timestamp": now.isoformat(),
+        "rankings": rankings,
+        "source": source,
+        "gemini_latency_ms": latency_ms,
+        "confidence": confidence,
+    }
+
+
+def _fallback_triage(
+    tickers: List[Dict[str, Any]], total_slots: int,
+) -> List[Dict[str, Any]]:
+    """Deterministic fallback for session triage: rank by research_score."""
+    sorted_t = sorted(tickers,
+                       key=lambda t: -t.get("research_score", t.get("composite_score", 0)))
+    rankings = []
+    for i, t in enumerate(sorted_t[:total_slots]):
+        rankings.append({
+            "symbol": t["symbol"],
+            "rank": i + 1,
+            "reason": "deterministic_fallback",
+        })
+    return rankings
+
+
+def _sim_triage(
+    session_name: str,
+    tickers: List[Dict[str, Any]],
+    total_slots: int,
+) -> Dict[str, Any]:
+    """Simulation mode triage: return deterministic ranking."""
+    rankings = _fallback_triage(tickers, total_slots)
+    return {
+        "session": session_name,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "rankings": rankings,
+        "source": "simulation",
+        "gemini_latency_ms": 0.0,
+        "confidence": 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 def _test_cli():

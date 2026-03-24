@@ -311,18 +311,13 @@ connect_timeout_sec = 15
 # These are blocked BEFORE signal generation (not just via dynamic Ouroboros blacklist).
 # Review quarterly — remove if spread/liquidity improves.
 [blacklist]
-# High-leverage LSE ETPs with wide spreads that destroy edge:
-tickers = [
-    "3LGO.L",   # 3x Google: 0% WR over 8 trades, -£1,942 (wide spread + low volume)
-    "3LSI.L",   # 3x Silver: 14% WR over 36 trades, -£7,293 (commodity vol + spread drag)
-    "LQQ3.L",   # Leveraged QQQ: 15% WR over 34 trades, -£3,468 (spread 2-3x wider than QQQ3.L)
-    "3LRR.L",   # 3x Russell: -£3,256 in 7-day sim (low liquidity)
-]
-# S6: Blocked exchanges — raw exchange names from contracts.toml.
-# LSEETF: 52 leveraged ETPs with 0% WR and -£30 cumulative over 28 paper trades.
-# All 3x/5x LSE-listed ETPs have wide spreads that destroy momentum edge.
-# Re-enable when: N>200 trades with cost-adjusted WR>35% on LSEETF subset.
-exchanges = ["LSEETF"]
+# 2026-03-24: CLEARED for universe expansion. All previously blacklisted tickers and
+# the LSEETF exchange block are removed so the 5K research universe can include them.
+# The Rust 33-CHECK RiskArbiter + Chandelier exit + spread veto (CHECK 13) still
+# protect against wide-spread trades at execution time. Ouroboros nightly will
+# re-blacklist via dynamic_weights.toml if they prove unprofitable at N>200.
+tickers = []
+exchanges = []
 
 [wal]
 schema_version = 1
@@ -602,3 +597,20 @@ claude_log_file = "/app/data/claude_curator.ndjson"
 
 # Meta-learning: tier effectiveness tracking
 tier_effectiveness_file = "/app/data/system_memory.json"
+
+# ============================================================================
+# [universe_pipeline] — 5-Phase Universe Pipeline (Sprint U, 2026-03-24)
+# Builds 5,000-ticker research universe, applies deterministic filters,
+# uses Gemini for bounded session triage, deterministic final admission.
+# Replaces ad-hoc ticker_selector + gemini_scanner scheduling.
+# ============================================================================
+[universe_pipeline]
+enabled = true
+research_universe_size = 5000       # Phase 1: top N tickers by quality score
+eligible_min_volume = 100000        # Phase 2: min avg daily volume
+eligible_min_price = 0.10           # Phase 2: min last price
+streamed_slots = 100                # Phase 4: engine hard cap (engine.rs line 2682)
+shadow_slots = 200                  # Phase 4: pre-market/next-session candidates
+gemini_triage_enabled = true        # Phase 3: use Gemini for session ranking
+gemini_triage_timeout_secs = 90     # Phase 3: Gemini API timeout
+artifacts_dir = "/app/data/universe"  # Phase 5: output directory

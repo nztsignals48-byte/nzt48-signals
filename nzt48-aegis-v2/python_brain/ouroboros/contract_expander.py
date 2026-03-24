@@ -72,10 +72,11 @@ log = logging.getLogger("contract_expander")
 # Configuration
 # ---------------------------------------------------------------------------
 # Max new contracts to add per run (prevent runaway growth)
-MAX_NEW_PER_RUN = 20
-# Max total contracts in contracts.toml (IBKR paper limits ~100 concurrent subs
-# but we register more and let the engine cap subscriptions)
-MAX_TOTAL_CONTRACTS = 500
+MAX_NEW_PER_RUN = 100  # Raised from 20 (universe expansion sprint)
+# Max new contracts in --bulk mode (weekly seeding runs)
+MAX_BULK_PER_RUN = 500
+# Max total contracts in contracts.toml (raised from 500 for 5K research universe)
+MAX_TOTAL_CONTRACTS = 5000
 # Minimum composite score to consider a ticker for contract expansion
 MIN_SCORE_THRESHOLD = 0.3
 # yfinance batch size
@@ -271,6 +272,37 @@ def load_candidates() -> List[Dict[str, Any]]:
         except Exception as e:
             log.warning("Failed to load master universe: %s", e)
 
+    # Source 3: pending_contracts.json (from universe_pipeline Phase 2)
+    pending_path = DATA_DIR / "universe" / "pending_contracts.json"
+    if pending_path.exists():
+        try:
+            with open(pending_path) as f:
+                pending = json.load(f)
+            for t in pending.get("tickers", []):
+                sym = t.get("symbol", "")
+                if not sym or sym in seen_symbols:
+                    continue
+                contract_sym = _yf_to_contract_symbol(sym)
+                if contract_sym in existing:
+                    continue
+                seen_symbols.add(sym)
+                score = t.get("research_score", 0) / 100.0  # Normalize to 0-1 range
+                if score >= MIN_SCORE_THRESHOLD:
+                    candidates.append({
+                        "symbol": sym,
+                        "contract_symbol": contract_sym,
+                        "composite_score": score,
+                        "exchange": t.get("exchange", ""),
+                        "name": t.get("name", ""),
+                        "sector": t.get("sector", "Unknown"),
+                        "leverage_factor": t.get("leverage_factor") or (3 if t.get("leveraged") else 1),
+                        "source": "pending_contracts",
+                    })
+            log.info("  Pending contracts source: %d candidates",
+                     sum(1 for c in candidates if c["source"] == "pending_contracts"))
+        except Exception as e:
+            log.warning("Failed to load pending_contracts.json: %s", e)
+
     # Sort by score descending
     candidates.sort(key=lambda c: c["composite_score"], reverse=True)
     return candidates
@@ -424,14 +456,19 @@ def signal_engine_reload() -> bool:
 # Main expansion logic
 # ---------------------------------------------------------------------------
 
-def run_expansion() -> int:
+def run_expansion(bulk: bool = False) -> int:
     """Execute one round of contract expansion.
+
+    Args:
+        bulk: If True, use MAX_BULK_PER_RUN limit (for weekly seeding).
 
     Returns the number of new contracts added.
     """
     start = time.monotonic()
+    mode_str = "BULK" if bulk else "standard"
     log.info("=" * 60)
-    log.info("Contract Expander — %s", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+    log.info("Contract Expander (%s) — %s", mode_str,
+             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
     log.info("=" * 60)
 
     # Check current contract count
@@ -442,7 +479,8 @@ def run_expansion() -> int:
         return 0
 
     room = MAX_TOTAL_CONTRACTS - current_count
-    batch_limit = min(MAX_NEW_PER_RUN, room)
+    per_run_limit = MAX_BULK_PER_RUN if bulk else MAX_NEW_PER_RUN
+    batch_limit = min(per_run_limit, room)
     log.info("Current contracts: %d | Room for %d more (batch limit: %d)",
              current_count, room, batch_limit)
 
@@ -525,8 +563,14 @@ def run_expansion() -> int:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Contract Expander — grow contracts.toml")
+    parser.add_argument("--bulk", action="store_true",
+                        help=f"Bulk mode: add up to {MAX_BULK_PER_RUN} contracts (weekly seeding)")
+    args = parser.parse_args()
+
     try:
-        added = run_expansion()
+        added = run_expansion(bulk=args.bulk)
         sys.exit(0 if added >= 0 else 1)
     except KeyboardInterrupt:
         log.info("Interrupted")
