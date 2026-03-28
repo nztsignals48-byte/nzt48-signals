@@ -52,7 +52,10 @@ volatility_drag_5x = 25
 # During GMT (Nov-Mar): these are UTC. During BST (Mar-Oct): UTC = local - 1h.
 # Use chrono-tz crate, NEVER hardcode UTC offsets.
 stale_data_threshold_secs = 120
-entry_cutoff_london = "15:45"     # London local time
+entry_cutoff_london = "15:45"     # London local time (LSE-specific)
+# Global absolute cutoff — no entries on ANY exchange after this London time.
+# US close is 21:00 London, so 20:55 gives 5-min buffer before Dark mode.
+global_entry_cutoff_london = "20:55"  # Was hardcoded 20*3600+55*60 in config_loader.rs
 lse_open_london = "08:00"         # London local time
 lse_close_london = "16:30"        # London local time
 auction_open_start = "07:50"      # London local time

@@ -140,6 +140,9 @@ struct RawKelly {
 struct RawTiming {
     stale_data_threshold_secs: u64,
     entry_cutoff_london: String,
+    /// Global absolute entry cutoff (London local time). No entries on ANY exchange after this.
+    #[serde(default = "default_global_cutoff")]
+    global_entry_cutoff_london: String,
     lse_open_london: String,
     lse_close_london: String,
     auction_open_start: String,
@@ -201,6 +204,7 @@ fn default_overnight() -> f64 { 50.0 }
 fn default_max_corr() -> u32 { 3 }
 fn default_risk_per_trade() -> f64 { 0.75 }
 
+fn default_global_cutoff() -> String { "20:55".to_string() }
 fn default_daily_trade_limit() -> u32 { 3 }
 fn default_min_gross_edge_pct() -> f64 { 0.15 }
 
@@ -1083,8 +1087,9 @@ impl EngineConfig {
             spread_veto_pct: raw.risk.spread_veto_pct,
             stale_data_threshold_secs: raw.timing.stale_data_threshold_secs,
             confidence_floor: raw.signal.confidence_floor,
-            // P2-#2/#29: Parse timing strings from config (was hardcoded UTC seconds).
-            entry_cutoff_secs: parse_hhmm_to_secs(&raw.timing.entry_cutoff_london),
+            // P2-#2: Global entry cutoff (all exchanges). Was hardcoded 20:55 UTC.
+            // Uses global_entry_cutoff_london (20:55) not entry_cutoff_london (15:45 LSE-only).
+            entry_cutoff_secs: parse_hhmm_to_secs(&raw.timing.global_entry_cutoff_london),
             auction_open_start_secs: parse_hhmm_to_secs(&raw.timing.auction_open_start),
             auction_open_end_secs: parse_hhmm_to_secs(&raw.timing.auction_open_end),
             auction_close_start_secs: parse_hhmm_to_secs(&raw.timing.auction_close_start),

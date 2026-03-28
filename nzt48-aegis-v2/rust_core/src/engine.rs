@@ -1179,7 +1179,10 @@ impl<B: BrokerAdapter> Engine<B> {
                             stop_price: pos.stop_price,
                             highest_high: pos.highest_high,
                         });
-                        let _ = wal.append(&evt);
+                        if let Err(e) = wal.append(&evt) {
+                            eprintln!("WAL_WRITE_FAIL: rung advance: {} — will HALT next tick", e);
+                            // Can't borrow self.arbiter here; write_wal() handles HALT for other paths
+                        }
                     }
                 }
                 // P1-2.6: Activate mega-runner when profit exceeds 3 ATR.
@@ -3155,7 +3158,12 @@ impl<B: BrokerAdapter> Engine<B> {
     pub fn write_wal(&mut self, payload: WalPayload) {
         if let Some(ref mut wal) = self.wal {
             let event = make_wal_event(self.now_ns, payload);
-            let _ = wal.append(&event);
+            if let Err(e) = wal.append(&event) {
+                // P3-B1.5: WAL write failure → escalate to HALT (Book 45).
+                // Lost events = incomplete audit trail = unsafe to continue trading.
+                eprintln!("WAL_WRITE_FAIL: {} — escalating to HALT", e);
+                self.arbiter.regime = RiskRegime::Halt;
+            }
         }
     }
 

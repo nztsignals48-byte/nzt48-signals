@@ -216,6 +216,12 @@ impl PaperBroker {
         if order.cancelled {
             return Err(BrokerError::InvalidOrder("order cancelled".into()));
         }
+        // P3: Apply slippage to single fills too (consistency with generate_fills).
+        let slip = self.config.slippage_pct / 100.0;
+        let price = match order.side {
+            OrderSide::Buy => price * (1.0 + slip),
+            OrderSide::Sell => price * (1.0 - slip),
+        };
         let new_filled = order.filled_qty + qty;
         if new_filled > order.total_qty {
             return Err(BrokerError::InvalidOrder("overfill".into()));
