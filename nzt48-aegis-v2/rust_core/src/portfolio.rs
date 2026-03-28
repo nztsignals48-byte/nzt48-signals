@@ -223,6 +223,14 @@ impl PortfolioState {
         exposure / self.equity * 100.0
     }
 
+    /// P8-CHECK 34: Count positions in the same sector (for correlation limit).
+    pub fn count_positions_in_sector(&self, sector_name: &str) -> u32 {
+        self.positions
+            .keys()
+            .filter(|tid| self.sector_map.get(tid).map(|s| s.as_str()) == Some(sector_name))
+            .count() as u32
+    }
+
     /// Daily drawdown from high-water mark (%).
     pub fn daily_drawdown_pct(&self) -> f64 {
         if self.high_water_mark <= 0.0 {

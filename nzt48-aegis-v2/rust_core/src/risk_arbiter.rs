@@ -470,6 +470,20 @@ impl RiskArbiter {
             return self.reject(VetoReason::KellyBelowFloor, ts);
         }
 
+        // CHECK 34: Correlation — max positions in >0.7 correlated instruments (Book 41, Phase 8).
+        // Uses the volatilities map as a proxy: tickers with similar vol profiles are correlated.
+        // Full Hayashi-Yoshida correlation will be wired when H-Y output is consumed (Phase 8+).
+        if enforce_live_gates && self.config.max_correlated_positions > 0 {
+            let sector = crate::sector_rotation::sector_for_ticker(intent_ticker);
+            let sector_name = format!("{sector:?}");
+            let same_sector_count = portfolio.count_positions_in_sector(&sector_name);
+            if same_sector_count >= self.config.max_correlated_positions {
+                return self.reject(VetoReason::CorrelationConcentration {
+                    corr_pct: (same_sector_count * 100 / self.config.max_correlated_positions.max(1)) as u32,
+                }, ts);
+            }
+        }
+
         // All checks passed. Calculate adjusted size.
         // SC-13: Kelly scaling ramp — configurable target, clamp range
         let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)

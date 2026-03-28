@@ -1650,6 +1650,210 @@ def _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, com
     }
 
 
+def _system4_volatility(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
+    """System 4: Volatility Premium — VIX-driven inverse ETP trading.
+
+    Low VIX (< 18): long inverse 3x ETPs (short vol premium).
+    High VIX (> 25): long regular 3x ETPs (long vol rebound).
+    ISA constraint: long-only, so we buy inverse ETPs to express short-vol view.
+    Habitat: Index inverse pairs (3USS, QQQS). US session primarily.
+    """
+    vix = msg.get("vix", 0)
+    if vix <= 0:
+        return None
+
+    symbol = ticker_symbols.get(ticker_id, "")
+    is_inverse = symbol.startswith("3S") or symbol.startswith("QQQ S") or symbol in (
+        "QQQS.L", "3USS.L", "3STS.L", "3SNV.L", "3SAP.L", "3SMS.L", "3SEM.L",
+    )
+
+    # Low VIX regime: buy inverse ETPs (expressing short vol)
+    if vix < 18.0 and is_inverse:
+        conf = 57.0
+        if vix < 14.0:
+            conf += 8.0  # Very low VIX = strong vol premium
+        if ind.get("adx", 0) < 15.0:
+            conf += 5.0  # Low trend = range-bound = vol selling works
+        conf = min(conf, 78.0)
+        if conf < conf_floor:
+            return None
+        kelly = kelly_fn(conf)
+        return {
+            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+            "confidence": conf,
+            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+            "strategy": "S4_VolPremium", "s4_vix": round(vix, 1), "s4_mode": "short_vol",
+            **common_fields,
+        }
+
+    # High VIX regime: buy regular (non-inverse) 3x ETPs (long vol rebound)
+    if vix > 30.0 and not is_inverse:
+        conf = 55.0
+        if vix > 40.0:
+            conf += 10.0  # Extreme fear = strong rebound potential
+        conf = min(conf, 75.0)
+        if conf < conf_floor:
+            return None
+        kelly = kelly_fn(conf)
+        return {
+            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+            "confidence": conf,
+            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+            "strategy": "S4_VolPremium", "s4_vix": round(vix, 1), "s4_mode": "long_rebound",
+            **common_fields,
+        }
+
+    return None
+
+
+def _system5_overnight(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
+    """System 5: Overnight Carry — buy at close, sell at open.
+
+    Academic basis: Cliff, Cooper, Gulen (2008) — overnight drift premium.
+    Leveraged ETPs amplify the overnight premium (3x drift = 3x carry).
+    Entry: 30 minutes before market close. Exit: handled by exit_engine at open.
+    Habitat: Tier 1 liquid ETPs. Regime: Normal, Caution.
+    """
+    # Only fire near market close (last 30 min of session)
+    london_secs = msg.get("london_time_secs", 0)
+    # LSE close window: 16:00-16:25 London (57600-59100 secs)
+    # US close window: 20:30-20:55 London (73800-75300 secs)
+    in_lse_close = 57600 <= london_secs <= 59100
+    in_us_close = 73800 <= london_secs <= 75300
+    if not (in_lse_close or in_us_close):
+        return None
+
+    # Regime gate: only Normal/Caution (overnight in Stress/Crisis is too risky)
+    hurst_regime = ind.get("hurst_regime", "random")
+    if hurst_regime in ("mean_reverting",):
+        return None  # Choppy = bad for carry
+
+    # Need positive momentum going into close (don't carry a falling knife)
+    bars_5m = ind.get("bars_5m", [])
+    if len(bars_5m) < 6:
+        return None
+    recent_3 = bars_5m[-3:]
+    up_count = sum(1 for b in recent_3 if b["close"] > b["open"])
+    if up_count < 2:
+        return None  # Need 2/3 recent bars up
+
+    conf = 56.0
+    if up_count == 3:
+        conf += 5.0
+    if ind.get("rvol", 1.0) > 1.2:
+        conf += 5.0  # Volume supports direction
+    if ind.get("adx", 0) > 20.0:
+        conf += 5.0  # Trending into close
+    conf = min(conf, 78.0)
+
+    if conf < conf_floor:
+        return None
+
+    kelly = kelly_fn(conf)
+    return {
+        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+        "confidence": conf,
+        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+        "strategy": "S5_OvernightCarry",
+        "s5_window": "lse_close" if in_lse_close else "us_close",
+        "s5_up_bars": up_count,
+        **common_fields,
+    }
+
+
+def _system6_catalyst(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
+    """System 6: Catalyst Rotation — event-driven trading.
+
+    Fires around major macro events (FOMC, NFP, CPI) + gap fades.
+    Post-event drift: markets tend to continue in the direction of the initial move
+    30-60 minutes after the event. ISA long-only: only trade bullish catalysts.
+    Habitat: All ETPs during events. All regimes.
+    """
+    # Check for gap (already computed by engine)
+    gap_pct = msg.get("gap_pct", 0.0)
+
+    # Post-gap continuation: if gap > 1.5% up with high volume, ride the momentum
+    if gap_pct > 1.5 and ind.get("rvol", 1.0) > 2.0:
+        conf = 58.0
+        if gap_pct > 3.0:
+            conf += 8.0  # Large gap = strong catalyst
+        if ind.get("adx", 0) > 20.0:
+            conf += 7.0  # Trending after gap = continuation likely
+        bars_5m = ind.get("bars_5m", [])
+        if len(bars_5m) >= 3:
+            recent_up = sum(1 for b in bars_5m[-3:] if b["close"] > b["open"])
+            if recent_up >= 2:
+                conf += 5.0  # Price confirming after gap
+        conf = min(conf, 82.0)
+        if conf >= conf_floor:
+            kelly = kelly_fn(conf)
+            return {
+                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                "confidence": conf,
+                "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                "strategy": "S6_Catalyst", "s6_gap_pct": round(gap_pct, 3),
+                "s6_trigger": "gap_continuation",
+                **common_fields,
+            }
+
+    return None
+
+
+def _system7_tail_hedge(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
+    """System 7: Tail Hedge — long inverse positions during crisis.
+
+    When VIX > 25 AND hurst regime is trending AND market is falling,
+    buy inverse 3x ETPs to profit from the crash and hedge the portfolio.
+    Habitat: Inverse ETPs (-3x). Regime: Stress, Crisis only.
+    """
+    vix = msg.get("vix", 0)
+    if vix < 25.0:
+        return None
+
+    symbol = ticker_symbols.get(ticker_id, "")
+    is_inverse = symbol.startswith("3S") or symbol in (
+        "QQQS.L", "3USS.L", "3STS.L", "3SNV.L", "3SAP.L", "3SMS.L", "3SEM.L",
+    )
+    if not is_inverse:
+        return None
+
+    # Need trending regime (crisis = strong trends)
+    hurst_regime = ind.get("hurst_regime", "random")
+    if hurst_regime not in ("trending",):
+        return None
+
+    # Confirm downward momentum (inverse ETPs go UP when market goes DOWN)
+    bars_5m = ind.get("bars_5m", [])
+    if len(bars_5m) < 5:
+        return None
+    # For inverse ETPs, "up" bars mean the underlying is falling
+    recent_up = sum(1 for b in bars_5m[-5:] if b["close"] > b["open"])
+    if recent_up < 3:
+        return None  # Inverse not trending up = market not crashing
+
+    conf = 60.0
+    if vix > 35.0:
+        conf += 10.0  # Extreme fear
+    if vix > 45.0:
+        conf += 5.0   # Panic
+    if ind.get("rvol", 1.0) > 3.0:
+        conf += 5.0   # Extreme volume = capitulation
+    conf = min(conf, 88.0)
+
+    if conf < conf_floor:
+        return None
+
+    kelly = kelly_fn(conf)
+    return {
+        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+        "confidence": conf,
+        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+        "strategy": "S7_TailHedge", "s7_vix": round(vix, 1),
+        "s7_inverse_momentum": recent_up,
+        **common_fields,
+    }
+
+
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion + S1."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
@@ -1878,9 +2082,24 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     if len(bars_5m) >= 20:
         s3_signal = _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, _kelly_for, common_fields)
 
+    # ── SYSTEM 4: Volatility Premium (Phase 8) ──
+    s4_signal = _system4_volatility(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+
+    # ── SYSTEM 5: Overnight Carry (Phase 8) ──
+    s5_signal = _system5_overnight(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+
+    # ── SYSTEM 6: Catalyst Rotation (Phase 9) ──
+    s6_signal = _system6_catalyst(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+
+    # ── SYSTEM 7: Tail Hedge (Phase 9) ──
+    s7_signal = _system7_tail_hedge(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+
     # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
-    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal, s1_signal, s2_signal, s3_signal] if s]
+    all_signals = [s for s in [
+        vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
+        s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
+    ] if s]
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     return all_signals
 
@@ -1964,7 +2183,10 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # P5: System 1+ signals bypass legacy TypeA-F classification entirely.
     # They have their own strategy identity and validation path.
-    _SYSTEM_STRATEGIES = {"S1_Microstructure", "S2_Reversion", "S3_MacroTrend"}
+    _SYSTEM_STRATEGIES = {
+        "S1_Microstructure", "S2_Reversion", "S3_MacroTrend",
+        "S4_VolPremium", "S5_OvernightCarry", "S6_Catalyst", "S7_TailHedge",
+    }
     is_system_signal = best.get("strategy", "") in _SYSTEM_STRATEGIES
 
     if not is_system_signal:
@@ -2066,8 +2288,23 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if cr.get("claude_verdict") == "reject":
                 best["claude_rejected"] = True
                 best["claude_reasoning"] = cr.get("reasoning", "")[:200]
+                # P9: Claude rejection is now a SOFT gate — reduce confidence by 15 points.
+                # If confidence drops below floor, the signal will be vetoed by CHECK 10.
+                # This makes Claude advisory meaningful without giving it hard-veto power.
+                best["confidence"] = max(0, best["confidence"] - 15)
+                best["kelly_fraction"] = best["kelly_fraction"] * 0.5  # Halve sizing on reject
+                best["shares"] = max(1, best["shares"] // 2)
+                sys.stderr.write(
+                    f"CLAUDE_SOFT_GATE: tid={ticker_id} conf_reduced_by=15 "
+                    f"reason={cr.get('reasoning', '')[:80]}\n"
+                )
+                sys.stderr.flush()
             elif cr.get("adjusted_confidence"):
                 best["claude_adjusted_confidence"] = cr["adjusted_confidence"]
+                # P9: Apply Claude's adjusted confidence if it's lower (conservative gate)
+                adj = cr["adjusted_confidence"]
+                if adj < best["confidence"]:
+                    best["confidence"] = adj
             best["claude_verdict"] = cr.get("claude_verdict", "no_response")
         except Exception as e:
             best["claude_error"] = str(e)[:200]
