@@ -55,8 +55,10 @@ PRIMARY_TICKERS = load_lse_symbols()
 TICKER_ID_MAP = {sym: i for i, sym in enumerate(PRIMARY_TICKERS)}
 
 # Guardrails
-KELLY_MIN = 0.15
-KELLY_MAX = 0.20  # Must match config.toml [kelly] clamp_max = 0.20
+# P2-#35: CRITICAL FIX — KELLY_MAX was 0.20 but engine clamps at config.toml [kelly] clamp_max = 0.05.
+# Ouroboros recommendations must stay within the range the engine actually uses.
+KELLY_MIN = 0.005  # Minimum Kelly fraction (0.5% — below this, trade is dust)
+KELLY_MAX = 0.05   # Maximum Kelly fraction — must match config.toml [kelly] clamp_max
 CHANDELIER_ATR_MIN = 1.5
 CHANDELIER_ATR_MAX = 4.0
 MAX_DRIFT_PCT = 15.0  # No parameter can drift >15% from baseline in one night

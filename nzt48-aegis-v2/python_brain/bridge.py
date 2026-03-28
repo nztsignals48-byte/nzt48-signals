@@ -1648,16 +1648,10 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         return None
     hurst_regime = ind["hurst_regime"]
 
-    # LSE boost during LSE hours — applied to ALL signals
-    from python_brain.ouroboros.contract_loader import load_lse_symbols
-    lse_syms = set(load_lse_symbols())
+    # P2-#7: LSE confidence boost DELETED — was +20 blanket boost that inflated
+    # marginal signals (conf 45-49) above floor, causing false entries.
+
     symbol = ticker_symbols.get(ticker_id, "")
-    is_lse = ticker_id < len(lse_syms) or symbol in lse_syms
-    if is_lse:
-        ls = msg.get("london_time_secs", 0)
-        if 28800 <= ls < 59400:  # 08:00-16:30
-            for sig in all_signals:
-                sig["confidence"] = min(sig["confidence"] + 20, 100)
 
     # Drawdown regime filter — applied to ALL signals
     dd = msg.get("drawdown_pct", 0.0)

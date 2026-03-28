@@ -68,6 +68,32 @@ struct RawConfig {
     /// S3: Time-stop config for positions that don't reach rung 2.
     #[serde(default)]
     exit_time_stop: RawExitTimeStop,
+    /// P2-B0.7: Macro indicator defaults (fail-safe, config-driven).
+    #[serde(default)]
+    macro_defaults: MacroDefaultsConfig,
+}
+
+/// P2-B0.7: Configurable macro indicator defaults.
+/// Previously hardcoded as VIX=15/DXY=100/credit=100/F&G=50 → always "Normal".
+#[derive(Debug, Clone, Deserialize)]
+pub struct MacroDefaultsConfig {
+    pub vix: f64,
+    pub dxy: f64,
+    pub credit_spread_bps: f64,
+    pub fear_greed: f64,
+    pub staleness_threshold_secs: u64,
+}
+
+impl Default for MacroDefaultsConfig {
+    fn default() -> Self {
+        Self {
+            vix: 21.0,
+            dxy: 100.0,
+            credit_spread_bps: 120.0,
+            fear_greed: 35.0,
+            staleness_threshold_secs: 300,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +204,18 @@ fn default_risk_per_trade() -> f64 { 0.75 }
 fn default_daily_trade_limit() -> u32 { 3 }
 fn default_min_gross_edge_pct() -> f64 { 0.15 }
 
+/// P2-#2/#29: Parse "HH:MM" string to seconds from midnight.
+fn parse_hhmm_to_secs(hhmm: &str) -> u32 {
+    let parts: Vec<&str> = hhmm.split(':').collect();
+    if parts.len() == 2 {
+        let h: u32 = parts[0].parse().unwrap_or(0);
+        let m: u32 = parts[1].parse().unwrap_or(0);
+        h * 3600 + m * 60
+    } else {
+        0 // fail-safe: midnight
+    }
+}
+
 /// Q-051: Unified cost model — single source of truth for all trading costs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CostsConfig {
@@ -244,7 +282,12 @@ pub struct BackpressureConfig {
 pub struct ReconciliationConfig {
     pub interval_secs: u64,
     pub orphan_ack_timeout_secs: u64,
+    /// P2-#27: Checkpoint interval (was hardcoded 3600s in engine.rs).
+    #[serde(default = "default_checkpoint_interval")]
+    pub checkpoint_interval_secs: u64,
 }
+
+fn default_checkpoint_interval() -> u64 { 3600 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct IbkrConfig {
@@ -814,6 +857,8 @@ pub struct RawSizingHardening {
     #[serde(default = "default_cold_stop")] pub cold_start_stop_pct: f64,
     #[serde(default = "default_kelly_floor_gbp")] pub kelly_notional_floor_gbp: f64,
     #[serde(default = "default_kelly_cap")] pub kelly_notional_cap_pct: f64,
+    /// P2-#6: GBX detection threshold — LSE GBP prices above this are assumed GBX (pence).
+    #[serde(default = "default_gbx_threshold")] pub gbx_threshold: f64,
 }
 
 impl Default for RawSizingHardening {
@@ -827,9 +872,12 @@ impl Default for RawSizingHardening {
             cold_start_stop_pct: default_cold_stop(),
             kelly_notional_floor_gbp: default_kelly_floor_gbp(),
             kelly_notional_cap_pct: default_kelly_cap(),
+            gbx_threshold: default_gbx_threshold(),
         }
     }
 }
+
+fn default_gbx_threshold() -> f64 { 500.0 }
 
 fn default_min_sim() -> f64 { 20.0 }
 fn default_min_live() -> f64 { 1500.0 }
@@ -1014,6 +1062,8 @@ pub struct EngineConfig {
     pub scanner: ScannerConfig,
     /// S3: Time-stop config for sideways positions.
     pub exit_time_stop: RawExitTimeStop,
+    /// P2-B0.7: Macro indicator defaults (config-driven, fail-safe).
+    pub macro_defaults: MacroDefaultsConfig,
 }
 
 impl EngineConfig {
@@ -1033,16 +1083,17 @@ impl EngineConfig {
             spread_veto_pct: raw.risk.spread_veto_pct,
             stale_data_threshold_secs: raw.timing.stale_data_threshold_secs,
             confidence_floor: raw.signal.confidence_floor,
-            entry_cutoff_secs: 20 * 3600 + 55 * 60, // 20:55 London (5 min before Dark at 21:00)
-            auction_open_start_secs: 7 * 3600 + 50 * 60,
-            auction_open_end_secs: 8 * 3600,
-            auction_close_start_secs: 16 * 3600 + 30 * 60,
-            auction_close_end_secs: 16 * 3600 + 35 * 60,
+            // P2-#2/#29: Parse timing strings from config (was hardcoded UTC seconds).
+            entry_cutoff_secs: parse_hhmm_to_secs(&raw.timing.entry_cutoff_london),
+            auction_open_start_secs: parse_hhmm_to_secs(&raw.timing.auction_open_start),
+            auction_open_end_secs: parse_hhmm_to_secs(&raw.timing.auction_open_end),
+            auction_close_start_secs: parse_hhmm_to_secs(&raw.timing.auction_close_start),
+            auction_close_end_secs: parse_hhmm_to_secs(&raw.timing.auction_close_end),
             velocity_window_ns: raw.signal.velocity_check_window_secs as u64 * 1_000_000_000,
             velocity_max_intents: raw.signal.velocity_check_max_intents,
             consecutive_loss_halt: raw.risk.consecutive_loss_halt,
             isa_annual_limit_gbp: raw.position.isa_annual_limit_gbp,
-            minimum_entry_gbp: 1500.0,
+            minimum_entry_gbp: raw.hardening.sizing.min_trade_gbp_live, // P2-#4: Was hardcoded 1500.0
             kelly_ramp_trades: 0,
             daily_trade_limit: raw.risk.max_daily_trades,
             min_gross_edge_pct: raw.risk.min_gross_edge_pct,
@@ -1103,6 +1154,7 @@ impl EngineConfig {
             exchange_cutoffs: raw.timing.exchange_cutoffs,
             scanner: raw.scanner,
             exit_time_stop: raw.exit_time_stop,
+            macro_defaults: raw.macro_defaults,
         })
     }
 

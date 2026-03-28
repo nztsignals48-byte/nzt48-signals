@@ -14,6 +14,12 @@ pub struct LiquidationDefense {
     pub consecutive_stop_losses: u32,
     /// Equity snapshot at start of trading day (GBP).
     pub start_of_day_equity: f64,
+    /// P2-#31: Daily drawdown flatten threshold (%, was hardcoded 2.0).
+    pub flatten_drawdown_pct: f64,
+    /// P2-#32: Consecutive stop losses before halt (was hardcoded 3).
+    pub halt_consecutive_stops: u32,
+    /// P2-#33: ISA ceiling % — block entries when remaining allowance < this % of equity.
+    pub isa_ceiling_pct: f64,
 }
 
 impl LiquidationDefense {
@@ -25,6 +31,10 @@ impl LiquidationDefense {
             daily_drawdown_pct: 0.0,
             consecutive_stop_losses: 0,
             start_of_day_equity: 0.0,
+            // P2: These now match config.toml values (were divergent hardcodes).
+            flatten_drawdown_pct: 4.0,
+            halt_consecutive_stops: 8,
+            isa_ceiling_pct: 3.0,
         }
     }
 
@@ -47,9 +57,9 @@ impl LiquidationDefense {
         self.remaining_isa_allowance() / equity * 100.0
     }
 
-    /// True if remaining ISA allowance is less than 3% of equity — block new entries.
+    /// True if remaining ISA allowance is less than ceiling % of equity — block new entries.
     pub fn should_block_entries(&self, equity: f64) -> bool {
-        self.remaining_allowance_pct(equity) < 3.0
+        self.remaining_allowance_pct(equity) < self.isa_ceiling_pct
     }
 
     /// Update daily drawdown from current equity vs start-of-day snapshot.
@@ -63,9 +73,9 @@ impl LiquidationDefense {
         self.daily_drawdown_pct = change.max(0.0);
     }
 
-    /// True if daily drawdown exceeds 2.0% — flatten all positions.
+    /// True if daily drawdown exceeds threshold — flatten all positions.
     pub fn should_flatten(&self) -> bool {
-        self.daily_drawdown_pct > 2.0
+        self.daily_drawdown_pct > self.flatten_drawdown_pct
     }
 
     /// Record a stop-loss hit (increments consecutive counter).
@@ -78,9 +88,9 @@ impl LiquidationDefense {
         self.consecutive_stop_losses = 0;
     }
 
-    /// True if 3+ consecutive stop losses — halt trading (Blood Oath H12).
+    /// True if consecutive stop losses exceed threshold — halt trading (Blood Oath H12).
     pub fn should_halt(&self) -> bool {
-        self.consecutive_stop_losses >= 3
+        self.consecutive_stop_losses >= self.halt_consecutive_stops
     }
 
     /// Reset daily state for a new trading day.
@@ -130,8 +140,8 @@ mod tests {
     fn test_drawdown_flatten() {
         let mut ld = LiquidationDefense::new(20_000.0);
         ld.daily_reset(10_000.0);
-        // 2.5% loss
-        ld.update_drawdown(9_750.0);
+        // P2: flatten_drawdown_pct is now 4.0 (was hardcoded 2.0). 4.5% loss triggers.
+        ld.update_drawdown(9_550.0);
         assert!(ld.should_flatten());
     }
 
@@ -139,19 +149,21 @@ mod tests {
     fn test_drawdown_no_flatten() {
         let mut ld = LiquidationDefense::new(20_000.0);
         ld.daily_reset(10_000.0);
-        // 1.5% loss — under threshold
-        ld.update_drawdown(9_850.0);
+        // 3.5% loss — under 4.0% threshold
+        ld.update_drawdown(9_650.0);
         assert!(!ld.should_flatten());
     }
 
     #[test]
     fn test_consecutive_stops_halt() {
         let mut ld = LiquidationDefense::new(20_000.0);
-        ld.record_stop_loss();
-        ld.record_stop_loss();
+        // P2: halt_consecutive_stops is now 8 (was hardcoded 3).
+        for _ in 0..7 {
+            ld.record_stop_loss();
+        }
         assert!(!ld.should_halt());
-        ld.record_stop_loss();
-        assert!(ld.should_halt()); // Blood Oath H12: 3 consecutive → halt
+        ld.record_stop_loss(); // 8th → halt
+        assert!(ld.should_halt());
     }
 
     #[test]

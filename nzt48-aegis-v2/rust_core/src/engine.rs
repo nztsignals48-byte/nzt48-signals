@@ -56,7 +56,7 @@ use std::collections::{HashMap, VecDeque};
 /// P2-3.18: Promoted constants for compiler optimization.
 const EXIT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
 const HALT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
-const STALE_TICK_MS: u64 = 500; // 500ms stale threshold
+// P2-#22: STALE_TICK_MS removed — now read from config.hardening.stale_tick_ms
 
 /// Errors from engine operations.
 #[derive(Debug)]
@@ -524,6 +524,17 @@ impl<B: BrokerAdapter> Engine<B> {
         let cb_window = config.hardening.broker.circuit_breaker_window_secs;
         let cb_cooldown = config.hardening.broker.circuit_breaker_cooldown_secs;
         let watchdog_timeout = config.hardening.broker.tick_watchdog_timeout_secs;
+        // P2-#27: Extract values before config is moved into Self
+        let checkpoint_interval = config.reconciliation.checkpoint_interval_secs;
+        // P2-B0.7: Extract macro defaults
+        let macro_vix = config.macro_defaults.vix;
+        let macro_dxy = config.macro_defaults.dxy;
+        let macro_credit = config.macro_defaults.credit_spread_bps;
+        let macro_fg = config.macro_defaults.fear_greed;
+        // P2-#1/#31/#32: Extract liquidation defense values
+        let ld_isa_limit = config.risk.isa_annual_limit_gbp;
+        let ld_flatten_dd = config.risk.daily_drawdown_pct;
+        let ld_halt_stops = config.risk.consecutive_loss_halt;
         Self {
             broker,
             portfolio: PortfolioState::with_dividend_factor(equity, dividend_factor),
@@ -598,16 +609,27 @@ impl<B: BrokerAdapter> Engine<B> {
             european_session: EuropeanSession::default(),
             cross_timezone: CrossTimezoneEngine::default(),
             carry_manager: CarryManager::default(),
-            macro_regime: CrossAssetMacro::new(),
+            macro_regime: {
+                // P2-B0.7: Initialize macro regime from config (fail-safe defaults).
+                let indicator = crate::cross_asset_macro::MacroIndicator::from_config(
+                    macro_vix, macro_dxy, macro_credit, macro_fg,
+                );
+                CrossAssetMacro::from_indicator(indicator)
+            },
             multiframe_vol: HashMap::new(),
             sector_tracker: SectorHeatTracker::new(),
             predictive_scorer: PredictiveScorer::new(),
             quote_imbalance: QuoteImbalanceDetector::new(),
             split_handler: SplitHandler::new(),
-            liquidation_defense: LiquidationDefense::new(20_000.0),
+            liquidation_defense: {
+                let mut ld = LiquidationDefense::new(ld_isa_limit);
+                ld.flatten_drawdown_pct = ld_flatten_dd;
+                ld.halt_consecutive_stops = ld_halt_stops;
+                ld
+            },
             broker_health: BrokerHealthMonitor::new(),
             wal_compressor: WalCompressor::new("events/current.ndjson", "events/archive", 1_000_000),
-            checkpoint_mgr: CheckpointManager::new(3600),
+            checkpoint_mgr: CheckpointManager::new(checkpoint_interval),
             session_mgr: SessionManager::new(),
             last_session_mode: SessionMode::Dark,
             market_config: MarketConfig::default(),
@@ -683,7 +705,7 @@ impl<B: BrokerAdapter> Engine<B> {
         // P0-1.4: Restore Kelly ramp counter from WAL.
         if replay_result.kelly_ramp_count > 0 {
             self.arbiter.config.kelly_ramp_trades = replay_result.kelly_ramp_count as u32;
-            let ramp_pct = ((replay_result.kelly_ramp_count as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32;
+            let ramp_pct = ((replay_result.kelly_ramp_count as f64 / self.arbiter.config.kelly_ramp_target as f64).clamp(0.1, 1.0) * 100.0) as u32;
             eprintln!(
                 "STARTUP: Kelly ramp restored from WAL: {} trades ({}% Kelly)",
                 replay_result.kelly_ramp_count, ramp_pct,
@@ -970,7 +992,7 @@ impl<B: BrokerAdapter> Engine<B> {
             let exchange = self.broker.exchange_for_ticker(&tid);
             let is_lse = matches!(exchange, "LSEETF" | "LSE");
             let is_gbp = currency_code == "GBP";
-            if is_lse && is_gbp && tick.ask > 500.0 {
+            if is_lse && is_gbp && tick.ask > self.config.hardening.sizing.gbx_threshold {
                 tick.bid /= 100.0;
                 tick.ask /= 100.0;
                 tick.last /= 100.0;
@@ -1502,7 +1524,7 @@ impl<B: BrokerAdapter> Engine<B> {
             } else {
                 0 // No timestamp info = assume fresh
             };
-            if tick_age_ms > STALE_TICK_MS {
+            if tick_age_ms > self.config.hardening.ticks.stale_tick_ms {
                 // Don't log every stale tick — just count in telemetry
                 self.telemetry.ticks_stale.inc();
                 return;
@@ -1620,7 +1642,7 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // P11: Check sector concentration before entry (33% cap per sector).
         let sector = sector_for_ticker(tid);
-        if self.sector_tracker.is_over_concentrated(sector, self.portfolio.equity, 33.0) {
+        if self.sector_tracker.is_over_concentrated(sector, self.portfolio.equity, self.arbiter.config.sector_heat_cap_pct) {
             return;
         }
 
@@ -1874,10 +1896,10 @@ impl<B: BrokerAdapter> Engine<B> {
         // HIGH-PRICE GUARD: If 1 share costs more than the Kelly notional cap (£2000),
         // skip entry entirely. Forcing min 1 share on £10k+ tickers creates unrealistic
         // concentration that poisons simulation data quality.
-        if self.simulation_mode && tick.ask > 2000.0 {
+        if self.simulation_mode && tick.ask > self.config.hardening.sizing.high_price_guard_sim {
             eprintln!(
-                "SIZING_SKIP: ticker={} price=£{:.0} exceeds £2000 sim cap — no fractional shares",
-                tid.0, tick.ask,
+                "SIZING_SKIP: ticker={} price=£{:.0} exceeds £{:.0} sim cap — no fractional shares",
+                tid.0, tick.ask, self.config.hardening.sizing.high_price_guard_sim,
             );
             return;
         }
@@ -1993,9 +2015,11 @@ impl<B: BrokerAdapter> Engine<B> {
             // Fallback to 5% if ATR unavailable (cold start).
             let atr_val = self.bar_history.get(&tid).map(|h| h.atr(14)).unwrap_or(0.0);
             let stop_pct = if atr_val > 0.0 && entry_price_gbp > 0.0 {
-                (1.5 * atr_val / entry_price_gbp).clamp(0.01, 0.10) // 1-10% bounded
+                // P2-#11/#13: Read ATR mult and clamp from config (was hardcoded 1.5, 0.01-0.10)
+                (self.config.chandelier.initial_stop_atr_mult * atr_val / entry_price_gbp)
+                    .clamp(self.config.hardening.sizing.stop_pct_clamp_min, self.config.hardening.sizing.stop_pct_clamp_max)
             } else {
-                0.05 // Cold-start fallback
+                self.config.hardening.sizing.cold_start_stop_pct // P2-#12: Was hardcoded 0.05
             };
             let stop = initial_stop_price(entry_price_gbp, stop_pct);
             self.positions.insert(tid, PositionState {
@@ -2029,7 +2053,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 count: self.arbiter.config.kelly_ramp_trades as u64,
             });
             if self.arbiter.config.kelly_ramp_trades % 25 == 0 || self.arbiter.config.kelly_ramp_trades <= 5 {
-                let ramp_pct = ((self.arbiter.config.kelly_ramp_trades as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32;
+                let ramp_pct = ((self.arbiter.config.kelly_ramp_trades as f64 / self.arbiter.config.kelly_ramp_target as f64).clamp(0.1, 1.0) * 100.0) as u32;
                 eprintln!(
                     "KELLY_RAMP: trade #{} → sizing at {}% Kelly",
                     self.arbiter.config.kelly_ramp_trades, ramp_pct,
@@ -3235,7 +3259,9 @@ impl<B: BrokerAdapter> Engine<B> {
                 self.broker_disconnect_ns = self.now_ns;
             }
             let disconnect_secs = (self.now_ns.saturating_sub(self.broker_disconnect_ns)) / 1_000_000_000;
-            if disconnect_secs > 10 && self.arbiter.regime < RiskRegime::Halt {
+            if disconnect_secs > self.config.hardening.broker.broker_disconnect_escalate_secs
+                && self.arbiter.regime < RiskRegime::Halt
+            {
                 eprintln!(
                     "BROKER_HALT: Disconnected {}s with {} open positions — escalating to HALT",
                     disconnect_secs, self.portfolio.filled_count()
@@ -3279,7 +3305,10 @@ impl<B: BrokerAdapter> Engine<B> {
                 if self.simulation_mode { "[SIMULATED]" } else { "[LIVE]" });
             if !self.simulation_mode {
                 // Only submit real orders in live mode
-                let _ = self.broker.submit_order(&order_id, *tid, OrderSide::Sell, *qty, 0.01);
+                // P2-#10: Use 5% below last bid (was hardcoded 0.01 penny limit).
+                let bid = self.last_prices.get(tid).copied().unwrap_or(0.01);
+                let emergency_limit = (bid * 0.95).max(0.01);
+                let _ = self.broker.submit_order(&order_id, *tid, OrderSide::Sell, *qty, emergency_limit);
             }
             // In simulation mode, positions are just removed from self.positions
         }

@@ -14,12 +14,27 @@ pub struct MacroIndicator {
 }
 
 impl Default for MacroIndicator {
+    /// P2-B0.7: Fail-safe defaults trigger Caution regime until live data arrives.
+    /// Previously hardcoded VIX=15/DXY=100/credit=100/F&G=50 → always "Normal" (CRITICAL BUG).
     fn default() -> Self {
         Self {
-            vix: 15.0,
-            dxy: 100.0,
-            credit_spread_bps: 100.0,
-            fear_greed: 50.0,
+            vix: 21.0,             // > 20 → Caution
+            dxy: 100.0,            // neutral
+            credit_spread_bps: 120.0, // elevated but below Stress
+            fear_greed: 35.0,      // < 40 → Caution
+            last_update_ns: 0,     // timestamp 0 → immediately stale
+        }
+    }
+}
+
+impl MacroIndicator {
+    /// Create from config values (loaded from [macro_defaults] in config.toml).
+    pub fn from_config(vix: f64, dxy: f64, credit_spread_bps: f64, fear_greed: f64) -> Self {
+        Self {
+            vix,
+            dxy,
+            credit_spread_bps,
+            fear_greed,
             last_update_ns: 0,
         }
     }
@@ -129,10 +144,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_regime_is_normal() {
+    fn default_regime_is_caution() {
+        // P2-B0.7: Fail-safe defaults now trigger Caution (VIX=21 > 20, F&G=35 < 40).
         let cam = CrossAssetMacro::new();
+        assert_eq!(cam.evaluate(), MacroRegimeSignal::Caution);
+        assert!(!cam.should_escalate_regime()); // Caution is not Stress/Crisis
+    }
+
+    #[test]
+    fn from_config_benign_is_normal() {
+        let indicator = MacroIndicator::from_config(15.0, 100.0, 100.0, 50.0);
+        let cam = CrossAssetMacro::from_indicator(indicator);
         assert_eq!(cam.evaluate(), MacroRegimeSignal::Normal);
-        assert!(!cam.should_escalate_regime());
     }
 
     #[test]

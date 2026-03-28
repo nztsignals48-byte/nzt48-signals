@@ -360,11 +360,8 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
         .collect();
 
     if kelly_ramp_count > 0 {
-        eprintln!(
-            "WAL_REPLAY: Restored Kelly ramp count = {} ({}% Kelly)",
-            kelly_ramp_count,
-            ((kelly_ramp_count as f64 / 250.0).clamp(0.1, 1.0) * 100.0) as u32,
-        );
+        // P2-#5: Removed hardcoded 250.0 divisor. Engine logs correct % after applying config.kelly_ramp_target.
+        eprintln!("WAL_REPLAY: Restored Kelly ramp count = {}", kelly_ramp_count);
     }
 
     ReplayResult {

@@ -18,11 +18,13 @@ velocity_check_max_intents = 5
 # AUDIT-ADJUSTED (2026-03-18): Max 3 at £10k equity.
 # Fund manager: "Max 2-3 at £10k. £9,000 committed = 90% is suicidal."
 # Risk officer: "committed capital must never exceed 75% of equity"
-max_simultaneous_positions = 999  # PAPER VALIDATION: No position limit. Revert to 3 for live.
+# P2-B0.6: Paper values now match live limits (paper_uses_live_gates=true).
+# Previously relaxed to 999/50/80/5 — made paper results non-transferable to live.
+max_simultaneous_positions = 3    # Live value. Was 999 in paper.
 # Portfolio heat = sum((entry_price - stop_price) * qty / total_equity)
-portfolio_heat_limit_pct = 50.0   # PAPER VALIDATION: Relaxed for data collection. Revert to 10 for live.
-sector_heat_cap_pct = 80.0        # PAPER VALIDATION: Relaxed. Revert to 33 for live.
-cash_buffer_pct = 5.0             # PAPER VALIDATION: Relaxed. Revert to 25 for live.
+portfolio_heat_limit_pct = 10.0   # Live value. Was 50 in paper.
+sector_heat_cap_pct = 33.0        # Live value. Was 80 in paper.
+cash_buffer_pct = 25.0            # Live value. Was 5 in paper.
 isa_annual_limit_gbp = 20000      # Tracked in WAL, enforced by RiskArbiter
 isa_tax_year_start = "04-06"      # 6 April UK tax year start
 dividend_withholding_factor = 0.85  # R6: UK ISA net = gross * 0.85 (15% withholding)
@@ -170,6 +172,23 @@ min_gross_edge_pct = 0.10          # PAPER: Lowered from 0.15 for data collectio
 reject_to_halt_count = 3
 reject_to_halt_window_secs = 60
 
+# P2-#31/#32/#33: LiquidationDefense thresholds (were hardcoded, diverged from [risk] values).
+[risk.liquidation_defense]
+flatten_drawdown_pct = 4.0              # Was hardcoded 2.0 — now aligned with risk.daily_drawdown_pct
+halt_consecutive_stops = 8              # Was hardcoded 3 — now aligned with risk.consecutive_loss_halt
+isa_ceiling_pct = 3.0                   # Block entries when ISA allowance < 3% of equity
+
+# P2-B0.7: Macro indicator defaults — used when no live feed is available.
+# These values determine the INITIAL regime before live data arrives.
+# CRITICAL: Previously hardcoded as VIX=15/DXY=100/credit=100/F&G=50 → always "Normal".
+# Now fail-safe: defaults trigger Caution regime until live data overrides.
+[macro_defaults]
+vix = 21.0                             # > 20 triggers Caution (fail-safe)
+dxy = 100.0                            # Neutral
+credit_spread_bps = 120.0              # Slightly elevated (Caution-adjacent)
+fear_greed = 35.0                      # < 40 triggers Caution (fail-safe)
+staleness_threshold_secs = 300         # 5 minutes — escalate to Reduce if stale
+
 # VIX-tiered response (risk officer Item 8)
 [risk.vix_tiers]
 low_max = 18                       # VIX < 18: full allocation
@@ -224,6 +243,7 @@ reduce_ms = 2000
 [reconciliation]
 interval_secs = 300
 orphan_ack_timeout_secs = 5
+checkpoint_interval_secs = 3600         # P2-#27: State checkpoint every hour (was hardcoded)
 
 [ibkr]
 client_id_executioner = 101
@@ -520,6 +540,7 @@ stop_pct_clamp_max = 0.10
 cold_start_stop_pct = 0.05
 kelly_notional_floor_gbp = 100.0
 kelly_notional_cap_pct = 0.25
+gbx_threshold = 500.0                   # P2-#6: LSE GBP prices above this → divide by 100 (GBX→GBP)
 
 # ============================================================================
 # [simulation] — Override values when AEGIS_SIM_MODE=1 (backtesting/sim only).
@@ -567,6 +588,9 @@ aggressive_trail_atr = 0.3
 max_positions_override = 15          # PAPER VALIDATION: Maximise trade data. Revert to 3 for live.
 paper_mode = true
 starting_equity_gbp = 10000
+# P2-B0.6: Enable live risk gates in paper mode. Paper results now match live behavior.
+# The 9 previously-bypassed checks (positions, heat, drawdown, equity floor) are now enforced.
+paper_uses_live_gates = true
 
 # ============================================================================
 # [intelligence] — 3-Tier Intelligence Stack (Plan 2)
