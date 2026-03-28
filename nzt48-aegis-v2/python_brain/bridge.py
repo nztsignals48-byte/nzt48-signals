@@ -50,6 +50,11 @@ _HEARTBEAT_INTERVAL = 30.0
 
 bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 
+# P5: Per-strategy signal counter for validation tracking.
+# Logged to stderr every 25 signals per strategy for Ouroboros forensics.
+_strategy_signal_counts = defaultdict(int)
+_strategy_total_confidence = defaultdict(float)
+
 # Per-ticker VWAP calculators (persist across ticks, reset at session open)
 vwap_calculators = defaultdict(VWAPCalculator)
 
@@ -1818,32 +1823,35 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         best["confidence"] = max(0, best["confidence"] - min(4, (50 - ss) // 5))
     best["structural_score"] = ss
 
-    # TypeA-F classification (all variables local — no scope bugs)
-    cls_prices = [t["last"] for t in list(bar_history[ticker_id])]
-    cls_volumes = [t.get("volume", 0) for t in list(bar_history[ticker_id])]
-    cls_rsi = calculate_rsi(cls_prices, period=14) if len(cls_prices) >= 14 else None
-    entry_type = classify_entry_type(
-        rsi_14=cls_rsi, ibs=ind["ibs"], rvol=ind["rvol"], ticker_id=ticker_id,
-        prices=cls_prices, volumes=cls_volumes, vol_div=ind["vol_div"],
-    )
-    best["entry_type"] = entry_type
+    # P5: System 1+ signals bypass legacy TypeA-F classification entirely.
+    # They have their own strategy identity and validation path.
+    _SYSTEM_STRATEGIES = {"S1_Microstructure", "S2_Reversion", "S3_MacroTrend"}
+    is_system_signal = best.get("strategy", "") in _SYSTEM_STRATEGIES
 
-    # STRATEGY REGISTRY ENFORCEMENT (2026-03-24):
-    # TypeA/D DISABLED — net losers in 10.8M-trade backtest (29.5%/24.1% WR).
-    # TypeA/D DISABLED — net losers (29.5%/24.1% WR).
-    # S4A: Shadow gate REMOVED — risk arbiter (32 checks) provides real protection.
-    # TypeB/C/E/F now live alongside VanguardSniper and Orchestrator.
-    _DISABLED_TYPES = {"TypeA", "TypeD"}
-    _SHADOW_TYPES = set()  # Was {"TypeC", "TypeE", "TypeF"} — unblocked Sprint S4A
-    if entry_type in _DISABLED_TYPES:
-        # Block signal entirely — these strategies are proven losers
-        return None
-    if entry_type in _SHADOW_TYPES:
-        # Log for learning but do NOT emit signal to engine
-        import sys
-        sys.stderr.write(f"SHADOW_SIGNAL: {entry_type} tid={ticker_id} conf={best['confidence']} (logged, not emitted)\n")
-        sys.stderr.flush()
-        return None
+    if not is_system_signal:
+        # TypeA-F classification (all variables local — no scope bugs)
+        cls_prices = [t["last"] for t in list(bar_history[ticker_id])]
+        cls_volumes = [t.get("volume", 0) for t in list(bar_history[ticker_id])]
+        cls_rsi = calculate_rsi(cls_prices, period=14) if len(cls_prices) >= 14 else None
+        entry_type = classify_entry_type(
+            rsi_14=cls_rsi, ibs=ind["ibs"], rvol=ind["rvol"], ticker_id=ticker_id,
+            prices=cls_prices, volumes=cls_volumes, vol_div=ind["vol_div"],
+        )
+        best["entry_type"] = entry_type
+
+        # STRATEGY REGISTRY ENFORCEMENT (2026-03-24):
+        # TypeA/D DISABLED — net losers (29.5%/24.1% WR).
+        _DISABLED_TYPES = {"TypeA", "TypeD"}
+        _SHADOW_TYPES = set()
+        if entry_type in _DISABLED_TYPES:
+            return None
+        if entry_type in _SHADOW_TYPES:
+            sys.stderr.write(f"SHADOW_SIGNAL: {entry_type} tid={ticker_id} conf={best['confidence']} (logged, not emitted)\n")
+            sys.stderr.flush()
+            return None
+    else:
+        # System signals keep their own strategy name and entry_type
+        best["entry_type"] = best["strategy"]
 
     # S8: Regime + session enforcement from strategy_registry.json
     if not _SIM_MODE:
@@ -1858,9 +1866,14 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sys.stderr.flush()
             return None
 
-    if entry_type != "Unclassified":
-        best["strategy"] = entry_type
-    best["rsi"] = cls_rsi if cls_rsi is not None else 0.0
+    if not is_system_signal:
+        if entry_type != "Unclassified":
+            best["strategy"] = entry_type
+        cls_rsi_val = cls_rsi if cls_rsi is not None else 0.0
+    else:
+        cls_rsi_val = 0.0
+        entry_type = best["entry_type"]
+    best["rsi"] = cls_rsi_val
     best["ibs"] = ind["ibs"]
 
     # Adaptive entry type weight → Kelly sizing
@@ -1919,6 +1932,19 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             best["claude_verdict"] = cr.get("claude_verdict", "no_response")
         except Exception as e:
             best["claude_error"] = str(e)[:200]
+
+    # P5: Per-strategy signal tracking for validation metrics
+    strat = best.get("strategy", "unknown")
+    _strategy_signal_counts[strat] += 1
+    _strategy_total_confidence[strat] += best.get("confidence", 0)
+    n = _strategy_signal_counts[strat]
+    if n % 25 == 0 or n <= 3:
+        avg_conf = _strategy_total_confidence[strat] / n if n > 0 else 0
+        sys.stderr.write(
+            f"STRATEGY_TRACKER: {strat} signals={n} avg_conf={avg_conf:.1f} "
+            f"tid={ticker_id} conf={best.get('confidence', 0)}\n"
+        )
+        sys.stderr.flush()
 
     # Record cooldown
     _last_signal_tick[ticker_id] = tick_count

@@ -1766,13 +1766,32 @@ def run_config_writer() -> int:
                 _cfg = _tomllib_cw.load(_f)
             if _cfg.get("ouroboros", {}).get("observe_only", False):
                 min_trades = _cfg.get("ouroboros", {}).get("min_trades_for_mutation", 300)
-                log.warning(
-                    "OBSERVE-ONLY MODE: config.toml [ouroboros] observe_only=true. "
-                    "Skipping dynamic_weights.toml mutation. Need %d+ trades before enabling.", min_trades
-                )
-                elapsed = time.monotonic() - start
-                log.info("Config writer completed (observe-only) in %.1fs", elapsed)
-                return 0
+                # P5: Auto-unfreeze gate — check actual trade count from system_memory.json
+                _mem_path = CONFIG_DIR.parent / "data" / "system_memory.json"
+                _actual_trades = 0
+                if _mem_path.exists():
+                    try:
+                        import json as _json_cw
+                        with open(_mem_path) as _mf:
+                            _mem = _json_cw.load(_mf)
+                        _actual_trades = _mem.get("bayesian", {}).get("trade_count", 0)
+                    except Exception:
+                        pass
+                if _actual_trades >= min_trades:
+                    log.warning(
+                        "OUROBOROS UNFREEZE: %d trades >= %d threshold. "
+                        "Proceeding with dynamic_weights mutation despite observe_only=true.",
+                        _actual_trades, min_trades
+                    )
+                    # Don't return — fall through to normal mutation path
+                else:
+                    log.warning(
+                        "OBSERVE-ONLY MODE: %d/%d trades. "
+                        "Skipping dynamic_weights.toml mutation.", _actual_trades, min_trades
+                    )
+                    elapsed = time.monotonic() - start
+                    log.info("Config writer completed (observe-only) in %.1fs", elapsed)
+                    return 0
     except Exception as e:
         log.warning("Failed to check observe_only flag: %s — proceeding with normal write", e)
 
