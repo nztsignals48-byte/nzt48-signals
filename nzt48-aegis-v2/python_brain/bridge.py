@@ -55,6 +55,14 @@ bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 _strategy_signal_counts = defaultdict(int)
 _strategy_total_confidence = defaultdict(float)
 
+# P7: Cannibalization detector — tracks which strategies fire on the same ticker/tick.
+# If S1 and S2 fire on the same ticker within 5 minutes, they're correlated.
+# Per Book 98: rho > 0.50 sustained 5 days → flag weaker. rho > 0.70 → quarantine.
+_cofire_counts = defaultdict(int)  # (stratA, stratB) → count of co-fires
+_cofire_total = defaultdict(int)   # stratA → total fires (for denominator)
+_COFIRE_WINDOW_NS = 5 * 60 * 1_000_000_000  # 5-minute window for co-fire detection
+_recent_strategy_fires = {}  # ticker_id → [(strategy, timestamp_ns)]
+
 # Per-ticker VWAP calculators (persist across ticks, reset at session open)
 vwap_calculators = defaultdict(VWAPCalculator)
 
@@ -1517,6 +1525,131 @@ def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, co
     }
 
 
+def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, common_fields):
+    """System 2: Statistical Reversion — Bollinger Band z-score + RSI(2) + IBS.
+
+    Academic basis: Connors & Alvarez (2008), Bollinger (2001).
+    Mean-reversion works best in Normal regime (fails in trends).
+    Habitat: Tier 1-2 ETPs. Session: LSE 09:00-15:00.
+    """
+    if len(bars_5m) < 20:
+        return None
+
+    # Only fire in Normal regime (mean-reversion fails in trends)
+    hurst_regime = ind.get("hurst_regime", "random")
+    if hurst_regime == "trending":
+        return None
+
+    closes = [b["close"] for b in bars_5m[-20:]]
+    current = closes[-1]
+
+    # Bollinger Band z-score (20-bar, 2 std dev)
+    sma20 = sum(closes) / len(closes)
+    variance = sum((c - sma20) ** 2 for c in closes) / len(closes)
+    std20 = variance ** 0.5
+    if std20 < 1e-9:
+        return None
+    z_score = (current - sma20) / std20
+
+    # RSI(2) — need at least 3 bars
+    rsi2 = calculate_rsi(closes, period=2)
+
+    # IBS
+    ibs_val = ind.get("ibs", 0.5)
+
+    # Entry: z-score < -2 (below lower BB) + RSI(2) < 10 + IBS < 0.30
+    if z_score >= -1.5 or rsi2 is None or rsi2 >= 20.0 or ibs_val >= 0.30:
+        return None
+
+    # Graduated confidence
+    conf = 58.0
+    if z_score < -2.5:
+        conf += 8.0  # Deeper oversold
+    if rsi2 < 5.0:
+        conf += 7.0  # Extreme oversold
+    if ibs_val < 0.15:
+        conf += 5.0  # Close near low
+    if ind.get("rvol", 1.0) > 1.5:
+        conf += 5.0  # Volume spike on sell-off (capitulation)
+    conf = min(conf, 88.0)
+
+    if conf < conf_floor:
+        return None
+
+    kelly = kelly_fn(conf)
+    return {
+        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+        "confidence": conf,
+        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+        "strategy": "S2_Reversion",
+        "s2_zscore": round(z_score, 3), "s2_rsi2": round(rsi2, 2),
+        "s2_ibs": round(ibs_val, 4),
+        **common_fields,
+    }
+
+
+def _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, common_fields):
+    """System 3: Macro Trend Following — SMA crossover + regime filter.
+
+    Academic basis: Moskowitz, Ooi & Pedersen (2012), Faber (2007).
+    Time-series momentum on index ETPs. Thrives in Stress (trend following).
+    Habitat: Index ETPs (3USL, QQQ3, 3UKL). Session: All.
+    """
+    if len(bars_5m) < 20:
+        return None
+
+    closes = [b["close"] for b in bars_5m]
+
+    # 10-bar and 20-bar SMA (on 5-min bars, these represent ~50min and ~100min)
+    sma10 = sum(closes[-10:]) / 10
+    sma20 = sum(closes[-20:]) / 20
+    current = closes[-1]
+
+    # Bullish crossover: SMA10 > SMA20 AND price > SMA10
+    if sma10 <= sma20 or current <= sma10:
+        return None
+
+    # ADX confirmation — need trend strength
+    adx = ind.get("adx", 0)
+    if adx < 15.0:
+        return None
+
+    # Regime filter: S3 thrives in Normal, Caution, AND Stress (trend following benefits from momentum)
+    # Only disabled in random/choppy regime
+    hurst_regime = ind.get("hurst_regime", "random")
+    if hurst_regime == "mean_reverting":
+        return None  # Mean-reverting = choppy = bad for trend following
+
+    # Crossover strength: how far above SMA20 is SMA10?
+    crossover_pct = (sma10 - sma20) / sma20 * 100.0 if sma20 > 0 else 0
+
+    # Graduated confidence
+    conf = 56.0
+    if crossover_pct > 0.5:
+        conf += 8.0  # Strong crossover
+    if adx > 25.0:
+        conf += 8.0  # Strong trend
+    if ind.get("rvol", 1.0) > 1.2:
+        conf += 5.0  # Volume supports trend
+    if ind.get("vol_slope", 0) > 0:
+        conf += 4.0  # Increasing volume
+    conf = min(conf, 85.0)
+
+    if conf < conf_floor:
+        return None
+
+    kelly = kelly_fn(conf)
+    return {
+        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+        "confidence": conf,
+        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+        "strategy": "S3_MacroTrend",
+        "s3_sma10": round(sma10, 4), "s3_sma20": round(sma20, 4),
+        "s3_crossover_pct": round(crossover_pct, 3), "s3_adx": round(adx, 1),
+        **common_fields,
+    }
+
+
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion + S1."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
@@ -1731,17 +1864,23 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     }
 
     # ── SYSTEM 1: Microstructure Momentum (Phase 4) ──
-    # Signal: Trade-to-mid ratio (TMR) + VPIN + spread compression + tick momentum.
-    # No L2 data required — uses bid/ask/last/volume from MarketTick.
-    # Habitat: Tier 1 ETPs (leveraged). Regime: Normal, Caution.
-    # Shadow mode: competes on confidence with other signals.
     s1_signal = None
     if len(ticks) >= 20 and msg.get("bid", 0) > 0 and msg.get("ask", 0) > 0:
         s1_signal = _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, _kelly_for, common_fields)
 
+    # ── SYSTEM 2: Statistical Reversion (Phase 6) ──
+    s2_signal = None
+    if len(bars_5m) >= 20:
+        s2_signal = _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, _kelly_for, common_fields)
+
+    # ── SYSTEM 3: Macro Trend Following (Phase 6) ──
+    s3_signal = None
+    if len(bars_5m) >= 20:
+        s3_signal = _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, _kelly_for, common_fields)
+
     # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
-    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal, s1_signal] if s]
+    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal, s1_signal, s2_signal, s3_signal] if s]
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     return all_signals
 
@@ -1945,6 +2084,32 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             f"tid={ticker_id} conf={best.get('confidence', 0)}\n"
         )
         sys.stderr.flush()
+
+    # P7: Cannibalization detection — track co-fires within 5-min window per ticker
+    ts_ns = msg.get("timestamp_ns", 0)
+    if ts_ns > 0 and strat.startswith("S"):
+        _cofire_total[strat] = _cofire_total.get(strat, 0) + 1
+        recent = _recent_strategy_fires.get(ticker_id, [])
+        # Check for co-fires with other strategies on same ticker
+        cutoff = ts_ns - _COFIRE_WINDOW_NS
+        for prev_strat, prev_ts in recent:
+            if prev_ts >= cutoff and prev_strat != strat:
+                pair = tuple(sorted([strat, prev_strat]))
+                _cofire_counts[pair] = _cofire_counts.get(pair, 0) + 1
+                ct = _cofire_counts[pair]
+                if ct % 10 == 0:
+                    denom = min(_cofire_total.get(pair[0], 1), _cofire_total.get(pair[1], 1))
+                    rho_est = ct / max(denom, 1)
+                    severity = "CRITICAL" if rho_est > 0.70 else "WARNING" if rho_est > 0.50 else "INFO"
+                    sys.stderr.write(
+                        f"CANNIBALIZATION_{severity}: {pair[0]}↔{pair[1]} "
+                        f"co-fires={ct} rho_est={rho_est:.2f}\n"
+                    )
+                    sys.stderr.flush()
+        # Record this fire
+        recent = [(s, t) for s, t in recent if t >= cutoff]
+        recent.append((strat, ts_ns))
+        _recent_strategy_fires[ticker_id] = recent[-10:]  # Keep last 10
 
     # Record cooldown
     _last_signal_tick[ticker_id] = tick_count
