@@ -27,6 +27,9 @@ pub struct PaperBrokerConfig {
     pub heartbeat_timeout_ns: u64,
     /// Starting nextValidId from broker.
     pub initial_next_valid_id: u64,
+    /// P3: Slippage model — percentage adverse fill adjustment.
+    /// Buy fills at limit * (1 + slippage_pct/100), sells at limit * (1 - slippage_pct/100).
+    pub slippage_pct: f64,
 }
 
 impl Default for PaperBrokerConfig {
@@ -40,6 +43,7 @@ impl Default for PaperBrokerConfig {
             rate_limit_per_sec: 50,
             heartbeat_timeout_ns: 60_000_000_000,
             initial_next_valid_id: 1,
+            slippage_pct: 0.5, // P3: Default 0.5% slippage (matches config.toml risk.slippage_assumption_pct)
         }
     }
 }
@@ -133,7 +137,12 @@ impl PaperBroker {
         if remaining == 0 {
             return Ok(());
         }
-        let price = order.limit_price;
+        // P3: Apply slippage model — adverse fill adjustment per Book 12.
+        let slip = self.config.slippage_pct / 100.0;
+        let price = match order.side {
+            OrderSide::Buy => order.limit_price * (1.0 + slip),   // Buy fills worse (higher)
+            OrderSide::Sell => order.limit_price * (1.0 - slip),  // Sell fills worse (lower)
+        };
         let ticker_id = order.ticker_id;
         let chunks = if self.config.partial_fill_enabled {
             self.config.partial_fill_chunks.max(1)

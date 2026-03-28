@@ -35,25 +35,35 @@ pub struct WalHandle {
     tx: Sender<WalCommand>,
 }
 
+/// P3: WAL append result — callers must check for backpressure and escalate.
+#[derive(Debug, PartialEq, Eq)]
+pub enum WalAppendResult {
+    Ok,
+    /// Channel full — event dropped. Caller MUST escalate to HALT (Book 45).
+    Backpressure,
+    /// Actor thread disconnected — WAL is dead. Caller MUST escalate to HALT.
+    Disconnected,
+}
+
 impl WalHandle {
-    /// Non-blocking enqueue of a WAL event. Returns false only if channel is disconnected.
-    pub fn append(&self, event: WalEvent) -> bool {
+    /// Non-blocking enqueue of a WAL event.
+    /// P3-B1.5: Returns Backpressure/Disconnected instead of silently dropping.
+    pub fn append(&self, event: WalEvent) -> WalAppendResult {
         match self.tx.try_send(WalCommand::Append(event)) {
-            Ok(()) => true,
-            // Bounded channel backpressure — drop event, do NOT escalate to HALT
+            Ok(()) => WalAppendResult::Ok,
             Err(TrySendError::Full(_)) => {
-                eprintln!("WAL: channel full (50K capacity)");
-                false
+                eprintln!("WAL_BACKPRESSURE: channel full (50K capacity) — MUST ESCALATE TO HALT");
+                WalAppendResult::Backpressure
             }
             Err(TrySendError::Disconnected(_)) => {
-                eprintln!("WAL: actor thread disconnected");
-                false
+                eprintln!("WAL_DISCONNECTED: actor thread dead — MUST ESCALATE TO HALT");
+                WalAppendResult::Disconnected
             }
         }
     }
 
     /// Convenience: build and enqueue a WalEvent from a payload.
-    pub fn write_payload(&self, event_time_ns: u64, payload: WalPayload) -> bool {
+    pub fn write_payload(&self, event_time_ns: u64, payload: WalPayload) -> WalAppendResult {
         let event = make_wal_event(event_time_ns, payload);
         self.append(event)
     }
@@ -288,7 +298,7 @@ mod tests {
             wal_events_replayed: 0,
             positions_reconciled: 0,
         });
-        assert!(handle.append(event));
+        assert_eq!(handle.append(event), WalAppendResult::Ok);
 
         // Shutdown and collect stats
         assert!(handle.shutdown());
@@ -312,7 +322,7 @@ mod tests {
                 wal_events_replayed: i,
                 positions_reconciled: 0,
             });
-            assert!(handle.append(event));
+            assert_eq!(handle.append(event), WalAppendResult::Ok);
         }
 
         assert!(handle.shutdown());
@@ -335,7 +345,7 @@ mod tests {
             wal_events_replayed: 0,
             positions_reconciled: 0,
         });
-        assert!(handle.append(event));
+        assert_eq!(handle.append(event), WalAppendResult::Ok);
         assert!(handle.force_sync());
         assert!(handle.shutdown());
 
@@ -353,14 +363,14 @@ mod tests {
 
         let (handle, join) = WalActor::spawn(&events, &dead, 100);
 
-        assert!(handle.write_payload(
+        assert_eq!(handle.write_payload(
             123_456_789,
             WalPayload::RiskStateChange {
                 from: "Normal".into(),
                 to: "Reduce".into(),
                 trigger: "test".into(),
             }
-        ));
+        ), WalAppendResult::Ok);
 
         assert!(handle.shutdown());
         let stats = join.join().expect("join");
