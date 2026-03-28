@@ -1422,8 +1422,98 @@ def _compute_confidence_floor(msg, ind):
     return floor
 
 
+def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, common_fields):
+    """System 1: Microstructure Momentum — price-based order flow proxy.
+
+    Computes 4 microstructure indicators from bid/ask/last/volume (no L2 needed):
+    1. TMR (Trade-to-Mid Ratio): where last trade falls in the spread → buy/sell pressure
+    2. VPIN: volume-synchronized informed trading probability (already in ind)
+    3. Spread compression: narrowing spread = increasing competition
+    4. Tick momentum: net up-ticks vs down-ticks over last 20 ticks
+
+    Fires when 3+ of 4 indicators align bullishly + ADX > 15 for trend confirmation.
+    """
+    bid, ask, last = msg["bid"], msg["ask"], msg["last"]
+    spread = ask - bid
+    if spread <= 0:
+        return None
+    mid = (bid + ask) / 2.0
+
+    # 1. TMR: Trade-to-Mid Ratio — where does trade execution fall in the spread?
+    # TMR > 0.3 = hitting ask (buy pressure), TMR < -0.3 = hitting bid (sell pressure)
+    tmr = (last - mid) / spread if spread > 0 else 0.0
+    tmr_bullish = tmr > 0.3
+
+    # 2. VPIN: already computed — high VPIN (> 0.6) = informed buying
+    vpin = ind.get("vpin", 0.5)
+    vpin_bullish = vpin > 0.6
+
+    # 3. Spread compression: compare current spread to average spread over ticks
+    spreads = []
+    for t in ticks[-20:]:
+        if isinstance(t, dict):
+            tb, ta = t.get("bid", 0), t.get("ask", 0)
+        else:
+            tb, ta = getattr(t, "bid", 0), getattr(t, "ask", 0)
+        if tb > 0 and ta > tb:
+            spreads.append((ta - tb) / tb * 100.0)  # spread as % of bid
+    if len(spreads) >= 5:
+        avg_spread = sum(spreads) / len(spreads)
+        current_spread_pct = spread / bid * 100.0
+        spread_compressed = current_spread_pct < avg_spread * 0.8  # 20% narrower than average
+    else:
+        spread_compressed = False
+
+    # 4. Tick momentum: net direction of last 20 price changes
+    prices = []
+    for t in ticks[-21:]:
+        if isinstance(t, dict):
+            prices.append(t.get("last", t.get("close", 0)))
+        else:
+            prices.append(getattr(t, "last", 0))
+    up_ticks = sum(1 for i in range(1, len(prices)) if prices[i] > prices[i-1])
+    dn_ticks = sum(1 for i in range(1, len(prices)) if prices[i] < prices[i-1])
+    total_moves = up_ticks + dn_ticks
+    tick_ratio = up_ticks / total_moves if total_moves > 0 else 0.5
+    tick_bullish = tick_ratio > 0.6  # 60%+ up-ticks
+
+    # Count aligned bullish indicators
+    bullish_count = sum([tmr_bullish, vpin_bullish, spread_compressed, tick_bullish])
+
+    # Require 3+ bullish + ADX > 15 for trend confirmation
+    adx = ind.get("adx", 0)
+    if bullish_count < 3 or adx < 15.0:
+        return None
+
+    # Graduated confidence: base 55, +5 per extra indicator, +10 for strong ADX
+    conf = 55.0
+    conf += (bullish_count - 3) * 5.0  # bonus for 4/4 alignment
+    if adx > 25.0:
+        conf += 10.0
+    if ind.get("rvol", 1.0) > 1.5:
+        conf += 5.0  # volume confirmation
+    if tmr > 0.6:
+        conf += 5.0  # strong buy pressure
+    conf = min(conf, 90.0)
+
+    if conf < conf_floor:
+        return None
+
+    kelly = kelly_fn(conf)
+    return {
+        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+        "confidence": conf,
+        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+        "strategy": "S1_Microstructure",
+        "s1_tmr": round(tmr, 3), "s1_vpin": round(vpin, 3),
+        "s1_spread_compressed": spread_compressed, "s1_tick_ratio": round(tick_ratio, 3),
+        "s1_bullish_count": bullish_count,
+        **common_fields,
+    }
+
+
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
-    """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion."""
+    """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion + S1."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
     bars_5m = ind["bars_5m"]
     common_fields = {
@@ -1635,9 +1725,18 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "gap_type": gap_type, **common_fields,
                     }
 
+    # ── SYSTEM 1: Microstructure Momentum (Phase 4) ──
+    # Signal: Trade-to-mid ratio (TMR) + VPIN + spread compression + tick momentum.
+    # No L2 data required — uses bid/ask/last/volume from MarketTick.
+    # Habitat: Tier 1 ETPs (leveraged). Regime: Normal, Caution.
+    # Shadow mode: competes on confidence with other signals.
+    s1_signal = None
+    if len(ticks) >= 20 and msg.get("bid", 0) > 0 and msg.get("ask", 0) > 0:
+        s1_signal = _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, _kelly_for, common_fields)
+
     # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
-    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal] if s]
+    all_signals = [s for s in [vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal, s1_signal] if s]
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     return all_signals
 
