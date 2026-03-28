@@ -55,7 +55,7 @@ log = logging.getLogger("step_runner")
 # Redis config
 # ---------------------------------------------------------------------------
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://aegis-redis:6379/0")
 LOCK_KEY = "ouroboros:step_lock"
 LOCK_TTL_SEC = 1800        # 30 minutes — auto-expire if holder dies
 LOCK_WAIT_SEC = 600        # 10 minutes — max time to wait for lock
@@ -79,7 +79,7 @@ STEP_REGISTRY: Dict[str, str] = {
     "ticker_selector":       "python_brain.ouroboros.ticker_selector",
     "backfill_simulator":    "python_brain.ouroboros.backfill_simulator",
     "sheets_sync":           "python_brain.ouroboros.sheets_sync",
-    "meta_label_optimizer":  "python_brain.ouroboros.meta_label_optimizer",
+    # P3: meta_label_optimizer deleted (no runtime consumers, no cron)
     "ibkr_scanner":          "python_brain.ouroboros.ibkr_scanner",
     "win_loss_delta":        "python_brain.ouroboros.win_loss_delta",
     "fill_quality":          "python_brain.ouroboros.fill_quality",
