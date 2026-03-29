@@ -484,6 +484,15 @@ impl RiskArbiter {
             }
         }
 
+        // CHECK 35: Structural Tradability Score — reject untradeable instruments (Book 43).
+        // Score is computed by Python bridge from spread, volume, and liquidity metrics.
+        // < 15 = completely untradeable; default 50.0 (neutral) in EvalContext.
+        if ctx.structural_score < 15.0 {
+            return self.reject(VetoReason::StructuralScoreTooLow {
+                score: ctx.structural_score as u32,
+            }, ts);
+        }
+
         // All checks passed. Calculate adjusted size.
         // SC-13: Kelly scaling ramp — configurable target, clamp range
         let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)

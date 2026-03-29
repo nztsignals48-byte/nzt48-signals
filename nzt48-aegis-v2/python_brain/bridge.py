@@ -2510,6 +2510,122 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     if not all_signals:
         return None
 
+    # STRATEGY-REGIME MATRIX (Book 15, 113, 124)
+    # Disable or scale strategies based on current market regime.
+    try:
+        from python_brain.regime.strategy_regime_matrix import (
+            RegimeState, apply_regime_adjustments,
+        )
+        vix_val = msg.get("vix", 21.0)
+        hurst_val = msg.get("hurst", 0.50)
+        hmm_st = msg.get("hmm_state", 1)
+        regime_state = RegimeState.from_indicators(
+            vix=vix_val, hurst=hurst_val, hmm_state=hmm_st,
+        )
+        regime_filtered = []
+        for sig in all_signals:
+            strat = sig.get("strategy", "")
+            adj_conf, adj_kelly = apply_regime_adjustments(
+                strat, sig["confidence"], sig["kelly_fraction"], regime_state,
+            )
+            if adj_conf > 0:
+                sig["confidence"] = adj_conf
+                sig["kelly_fraction"] = adj_kelly
+                regime_filtered.append(sig)
+        all_signals = regime_filtered
+        if not all_signals:
+            return None
+    except Exception:
+        pass  # Non-fatal: if regime matrix fails, proceed without it
+
+    # OVERNIGHT GAP RISK FILTER (Book 40, 148, 186)
+    # Adjust confidence and Kelly for late-session entries approaching overnight.
+    # Blocks entries that would create overnight exposure exceeding tier/regime limits.
+    try:
+        from python_brain.overnight.risk import check_overnight_risk
+        vix_val = msg.get("vix", 21.0)
+        london_secs = msg.get("london_time_secs", 0)
+        is_fri = msg.get("day_of_week", 0) == 4  # 0=Mon, 4=Fri
+        filtered_signals = []
+        for sig in all_signals:
+            ticker = sig.get("ticker", "")
+            lev = sig.get("leverage", 3)
+            adj_conf, adj_kelly = check_overnight_risk(
+                ticker=ticker,
+                confidence=sig["confidence"],
+                kelly_fraction=sig["kelly_fraction"],
+                vix=vix_val,
+                london_time_secs=london_secs,
+                leverage=lev,
+                is_friday=is_fri,
+            )
+            if adj_conf > 0:
+                sig["confidence"] = adj_conf
+                sig["kelly_fraction"] = adj_kelly
+                filtered_signals.append(sig)
+        all_signals = filtered_signals
+        if not all_signals:
+            return None
+    except Exception:
+        pass  # Non-fatal: if overnight risk module fails, proceed without it
+
+    # DRAWDOWN RECOVERY SIZING (Book 42)
+    # Scale Kelly based on current drawdown phase. Deeper drawdown = smaller size.
+    try:
+        from python_brain.risk.drawdown_recovery import DrawdownMonitor
+        dd_monitor = DrawdownMonitor(initial_equity=msg.get("initial_equity", 10000.0))
+        dd_monitor.update(msg.get("equity", 10000.0))
+        dd_scale = dd_monitor.kelly_scale()
+        dd_min_conf = dd_monitor.min_confidence()
+        if dd_scale < 1.0:
+            for sig in all_signals:
+                sig["kelly_fraction"] *= dd_scale
+                sig["shares"] = max(1, int(sig["shares"] * dd_scale))
+        # Filter by drawdown-adjusted confidence floor
+        all_signals = [s for s in all_signals if s["confidence"] >= dd_min_conf]
+        if not all_signals:
+            return None
+    except Exception:
+        pass
+
+    # CORRELATION POSITION SIZING (Book 41)
+    # Reduce size when portfolio correlation is elevated.
+    try:
+        from python_brain.risk.correlation import CorrelationTracker
+        corr_tracker = getattr(msg, "_corr_tracker", None)
+        if corr_tracker is not None:
+            corr_mult = corr_tracker.position_size_multiplier()
+            if corr_mult < 1.0:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= corr_mult
+                    sig["shares"] = max(1, int(sig["shares"] * corr_mult))
+            if corr_tracker.should_block_long_entry():
+                all_signals = [s for s in all_signals
+                               if s.get("ticker", "").endswith("S.L")]  # Only inverse
+                if not all_signals:
+                    return None
+    except Exception:
+        pass
+
+    # VOL-TARGETING (Book 80)
+    # Scale Kelly inversely to realized volatility for constant dollar risk.
+    try:
+        from python_brain.sizing.vol_targeting import vol_adjusted_kelly, student_t_correction
+        for sig in all_signals:
+            rv = msg.get("realized_vol", 0.02)
+            lev = sig.get("leverage", 3)
+            # Vol-target: shrink in high vol, expand in low vol
+            sig["kelly_fraction"] = vol_adjusted_kelly(
+                sig["kelly_fraction"], rv, target_vol=0.02,
+            )
+            # Student-t correction for fat-tailed ETP returns
+            sig["kelly_fraction"] = student_t_correction(
+                sig["kelly_fraction"], nu=5.0, leverage=lev,
+            )
+            sig["shares"] = max(1, int(sig["kelly_fraction"] * msg.get("equity", 10000) / max(sig.get("price", 1), 0.01)))
+    except Exception:
+        pass
+
     # Select best signal after all adjustments
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     best = all_signals[0]

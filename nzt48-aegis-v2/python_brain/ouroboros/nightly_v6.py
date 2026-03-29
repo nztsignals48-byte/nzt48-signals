@@ -709,6 +709,57 @@ def _load_historical_metrics(reports_dir: Path, days: int) -> List[Dict[str, Any
     return history
 
 
+def _load_wal_returns_for_hmm(lookback_days: int = 90) -> np.ndarray:
+    """Extract daily log returns from WAL files for HMM regime detection.
+
+    Reads PositionClosed events from the last `lookback_days` WAL files,
+    computes daily aggregate log returns, and returns as numpy array.
+    Falls back to simple daily P&L-based returns if insufficient data.
+    """
+    import numpy as _np
+    from datetime import datetime as _dt, timedelta as _td
+
+    returns = []
+    today = _dt.now(timezone.utc).date()
+
+    for d in range(lookback_days):
+        date = today - _td(days=d)
+        date_str = date.strftime("%Y-%m-%d")
+        wal_path = WAL_DIR / f"{date_str}.ndjson"
+        if not wal_path.exists():
+            continue
+
+        day_pnl = 0.0
+        day_equity = 10000.0  # Fallback if no equity snapshot
+        try:
+            with open(wal_path) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        evt = json.loads(line)
+                        et = evt.get("event_type", "")
+                        if et == "PositionClosed":
+                            day_pnl += evt.get("realized_pnl", 0.0)
+                        elif et == "StateSnapshot":
+                            day_equity = max(evt.get("equity", 10000.0), 1000.0)
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except IOError:
+            continue
+
+        if day_equity > 0:
+            daily_return = day_pnl / day_equity
+            returns.append(daily_return)
+
+    if not returns:
+        return _np.array([], dtype=_np.float64)
+
+    # Reverse to chronological order (we iterated newest→oldest)
+    returns.reverse()
+    return _np.array(returns, dtype=_np.float64)
+
+
 def _avg_metric(records: List[Dict[str, Any]], key: str) -> float:
     """Average a metric across historical records."""
     vals = [r.get(key, 0.0) for r in records if key in r]
@@ -1758,6 +1809,39 @@ def run_nightly() -> int:
     regime_acc = check_regime_accuracy(trades, {})
     log.info("Regime accuracy: %d predictions, %.1f%% correct", regime_acc.total_predictions, regime_acc.accuracy_pct)
 
+    # Step 2.1: HMM Student-t Regime Detection (Book 113, Book 43 wiring fix)
+    # Runs the HMM model on recent WAL returns data and writes regime state files
+    # that signal_filters.py reads for regime-conditional strategy activation.
+    try:
+        from python_brain.ouroboros.hmm_student_t import StudentTHMM, generate_regime_report
+        hmm_model = StudentTHMM(n_regimes=3, nu=4.0)
+        # Load returns from WAL (last 90 days of daily log returns)
+        wal_returns = _load_wal_returns_for_hmm(lookback_days=90)
+        if len(wal_returns) >= 20:
+            hmm_model.fit(wal_returns)
+            regime_report = generate_regime_report(hmm_model, wal_returns)
+            current_regime = hmm_model.current_regime(wal_returns)
+            regime_probs = hmm_model.regime_probabilities(wal_returns)
+            regime_names = {0: "LowVol", 1: "Normal", 2: "HighVol"}
+            log.info(
+                "HMM regime: %s (P=%.2f), probs=[%.2f, %.2f, %.2f]",
+                regime_names.get(current_regime, f"R{current_regime}"),
+                regime_probs[current_regime] if current_regime < len(regime_probs) else 0.0,
+                regime_probs[0] if len(regime_probs) > 0 else 0.0,
+                regime_probs[1] if len(regime_probs) > 1 else 0.0,
+                regime_probs[2] if len(regime_probs) > 2 else 0.0,
+            )
+            recommendations["hmm_regime"] = {
+                "current": int(current_regime),
+                "name": regime_names.get(current_regime, f"R{current_regime}"),
+                "probabilities": [float(p) for p in regime_probs],
+                "report_path": regime_report,
+            }
+        else:
+            log.info("HMM regime: insufficient data (%d returns, need 20+)", len(wal_returns))
+    except Exception as e:
+        log.warning("HMM regime detection failed (non-fatal): %s", e)
+
     # Step 2.5: Load persistent memory for cumulative learning
     mem = None
     try:
@@ -1866,6 +1950,37 @@ def run_nightly() -> int:
 
     # Step 5: Alpha decay detection
     decay_signals = detect_alpha_decay(REPORTS_DIR, metrics)
+
+    # Step 5.05: MFE/MAE Analysis & R-Multiple Tracking (Book 39)
+    try:
+        from python_brain.forensics.mfe_mae import analyze_all_trades, save_mfe_mae_report
+        mfe_report = analyze_all_trades(WAL_DIR, lookback_days=30)
+        if mfe_report["total_trades"] > 0:
+            save_mfe_mae_report(mfe_report)
+            overall = mfe_report.get("overall", {})
+            log.info(
+                "MFE/MAE: %d trades, avg_mfe=%.2f%%, avg_mae=%.2f%%, "
+                "avg_exit_eff=%.2f, avg_edge_ratio=%.2f, exit_below_half_mfe=%.0f%%",
+                mfe_report["total_trades"],
+                overall.get("avg_mfe_pct", 0),
+                overall.get("avg_mae_pct", 0),
+                overall.get("avg_exit_efficiency", 0),
+                overall.get("avg_edge_ratio", 0),
+                overall.get("pct_exit_below_half_mfe", 0),
+            )
+            recommendations["mfe_mae"] = mfe_report
+            # Per-strategy exit diagnostics
+            for strat, stats in mfe_report.get("strategies", {}).items():
+                if stats.get("count", 0) >= 5:
+                    log.info(
+                        "  %s: n=%d exit_eff=%.2f edge_ratio=%.2f exit_below_half=%.0f%%",
+                        strat, stats["count"], stats.get("avg_exit_efficiency", 0),
+                        stats.get("avg_edge_ratio", 0), stats.get("pct_exit_below_half_mfe", 0),
+                    )
+        else:
+            log.info("MFE/MAE: no closed trades in 30-day lookback")
+    except Exception as e:
+        log.warning("MFE/MAE analysis failed (non-fatal): %s", e)
 
     # Step 5.5: Phase H — Indicator Intelligence (30-day lookback analysis)
     try:
@@ -2071,6 +2186,87 @@ def run_nightly() -> int:
                  tier_effectiveness.get("claude_rejection_accuracy", 0) * 100)
     except Exception as e:
         log.warning("3-Tier intelligence analysis failed (non-fatal): %s", e)
+
+    # Step 5.12: Strategy Lifecycle Evaluation (Books 47, 141, 189)
+    # Evaluate each strategy's lifecycle state — SPRT edge test, quarantine, kill.
+    try:
+        from python_brain.lifecycle.strategy_state import StrategyLifecycle, detect_cannibalization
+        lifecycle_results = {}
+        for t in trades:
+            strat = t.strategy or "unknown"
+            if strat not in lifecycle_results:
+                lifecycle_results[strat] = StrategyLifecycle(strat)
+            lifecycle_results[strat].record_trade(pnl=t.cost_adjusted_pnl, won=t.cost_adjusted_pnl > 0)
+
+        for strat, lc in lifecycle_results.items():
+            new_state = lc.evaluate()
+            if new_state:
+                log.warning("LIFECYCLE: %s transitioned to %s", strat, new_state.value)
+
+        recommendations["lifecycle"] = {
+            name: lc.to_dict() for name, lc in lifecycle_results.items()
+        }
+        log.info("Lifecycle: %d strategies evaluated", len(lifecycle_results))
+    except Exception as e:
+        log.warning("Strategy lifecycle evaluation failed (non-fatal): %s", e)
+
+    # Step 5.13: Validation Gates Check (Books 6, 31, 192)
+    # Run DSR and PBO on each strategy's cumulative returns.
+    try:
+        from python_brain.validation.strategy_gates import deflated_sharpe_ratio, validate_strategy
+        import numpy as _np
+        if mem is not None:
+            validation_results = {}
+            for strat, stats in getattr(mem, 'per_strategy_stats', {}).items():
+                returns = stats.get("returns", [])
+                if len(returns) >= 30:
+                    arr = _np.array(returns, dtype=_np.float64)
+                    result = validate_strategy(arr, n_trials=len(getattr(mem, 'per_strategy_stats', {})))
+                    validation_results[strat] = result.to_dict()
+                    if not result.passed:
+                        log.info("VALIDATION: %s FAILED gate: %s", strat, result.reason)
+
+            if validation_results:
+                recommendations["validation_gates"] = validation_results
+                passed = sum(1 for v in validation_results.values() if v["passed"])
+                log.info("Validation: %d/%d strategies pass all gates", passed, len(validation_results))
+    except Exception as e:
+        log.warning("Validation gates check failed (non-fatal): %s", e)
+
+    # Step 5.14: Edge Forensics & Signal Attribution (Book 219)
+    # Six-dimensional per-trade attribution for understanding where edge comes from.
+    try:
+        from python_brain.forensics.mfe_mae import compute_trade_metrics
+        if trades:
+            edge_scores = []
+            for t in trades:
+                trade_dict = {
+                    "ticker": t.ticker, "strategy": t.strategy,
+                    "entry_price": t.entry_price, "exit_price": t.exit_price,
+                    "initial_stop": getattr(t, 'initial_stop', 0),
+                    "highest_price": getattr(t, 'mfe', t.entry_price),
+                    "lowest_price": getattr(t, 'mae', t.entry_price),
+                    "hold_time_mins": t.hold_time_mins,
+                    "highest_rung": t.rung_achieved,
+                    "pnl": t.cost_adjusted_pnl,
+                }
+                m = compute_trade_metrics(trade_dict)
+                edge_scores.append({
+                    "ticker": m.ticker, "strategy": m.strategy,
+                    "exit_efficiency": round(m.exit_efficiency, 3),
+                    "edge_ratio": round(m.edge_ratio, 3),
+                    "r_multiple": round(m.exit_r_multiple, 3),
+                    "mfe_pct": round(m.mfe_pct, 3),
+                    "mae_pct": round(m.mae_pct, 3),
+                })
+
+            recommendations["edge_forensics"] = edge_scores
+            avg_eff = sum(s["exit_efficiency"] for s in edge_scores) / max(len(edge_scores), 1)
+            avg_edge = sum(s["edge_ratio"] for s in edge_scores) / max(len(edge_scores), 1)
+            log.info("Edge forensics: %d trades, avg_exit_eff=%.2f, avg_edge_ratio=%.2f",
+                     len(edge_scores), avg_eff, avg_edge)
+    except Exception as e:
+        log.warning("Edge forensics failed (non-fatal): %s", e)
 
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)

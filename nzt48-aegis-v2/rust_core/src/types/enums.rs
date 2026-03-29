@@ -172,6 +172,8 @@ pub enum VetoReason {
     EquityFloorBreached,
     /// Sprint 10: Risk per trade exceeds limit.
     RiskPerTradeExceeded { risk_pct: u32 },
+    /// Book 43: Structural tradability score too low (poor spread/vol/liquidity).
+    StructuralScoreTooLow { score: u32 },
 }
 
 /// Python-visible wrapper for VetoReason (simplified for FFI).
@@ -369,6 +371,10 @@ impl From<&VetoReason> for PyVetoReason {
             VetoReason::RiskPerTradeExceeded { risk_pct } => Self {
                 name: "RiskPerTradeExceeded".into(),
                 detail: format!("{risk_pct}bps"),
+            },
+            VetoReason::StructuralScoreTooLow { score } => Self {
+                name: "StructuralScoreTooLow".into(),
+                detail: format!("{score}/100"),
             },
         }
     }

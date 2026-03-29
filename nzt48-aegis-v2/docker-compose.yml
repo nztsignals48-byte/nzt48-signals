@@ -157,6 +157,8 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana-provisioning:/etc/grafana/provisioning
     ports:
       - "3000:3000"
     depends_on:

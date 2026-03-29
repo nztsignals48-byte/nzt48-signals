@@ -1,0 +1,190 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Equity Curve (Net P&L)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "aegis_equity_gbp",
+          "legendFormat": "Equity (GBP)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyGBP",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 9000 },
+              { "color": "yellow", "value": 9500 },
+              { "color": "green", "value": 10000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Trade Frequency",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "increase(aegis_trades_total[24h])",
+          "legendFormat": "Trades/24h"
+        }
+      ]
+    },
+    {
+      "title": "Win Rate (Rolling 50)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "expr": "aegis_win_rate_rolling50",
+          "legendFormat": "WR%"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 40 },
+              { "color": "green", "value": 55 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Risk Regime",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        {
+          "expr": "aegis_risk_regime",
+          "legendFormat": "Regime"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "NORMAL", "color": "green" } } },
+            { "type": "value", "options": { "1": { "text": "REDUCE", "color": "yellow" } } },
+            { "type": "value", "options": { "2": { "text": "FLATTEN", "color": "orange" } } },
+            { "type": "value", "options": { "3": { "text": "HALT", "color": "red" } } }
+          ]
+        }
+      }
+    },
+    {
+      "title": "Daily P&L (Net)",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "aegis_daily_pnl_net_gbp",
+          "legendFormat": "Net P&L"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyGBP",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Per-Strategy Performance",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "aegis_strategy_win_rate",
+          "legendFormat": "{{strategy}}"
+        }
+      ]
+    },
+    {
+      "title": "Drawdown from HWM",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "aegis_drawdown_pct",
+          "legendFormat": "Drawdown %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 },
+              { "color": "dark-red", "value": 8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "System Health",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "aegis_uptime_seconds", "legendFormat": "Uptime" },
+        { "expr": "aegis_tick_rate_per_sec", "legendFormat": "Ticks/s" },
+        { "expr": "aegis_wal_size_bytes", "legendFormat": "WAL Size" }
+      ]
+    },
+    {
+      "title": "Cost Drag",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 16 },
+      "targets": [
+        {
+          "expr": "aegis_cumulative_cost_gbp",
+          "legendFormat": "Cumulative Costs"
+        },
+        {
+          "expr": "aegis_cumulative_pnl_gross_gbp",
+          "legendFormat": "Gross P&L"
+        },
+        {
+          "expr": "aegis_cumulative_pnl_net_gbp",
+          "legendFormat": "Net P&L"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["aegis", "trading"],
+  "templating": { "list": [] },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "Europe/London",
+  "title": "AEGIS V2 — Overview",
+  "uid": "aegis-overview",
+  "version": 1
+}
