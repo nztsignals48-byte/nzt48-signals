@@ -29,11 +29,14 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger("bayesian_aggregator")
 
@@ -74,12 +77,21 @@ class SignalSource:
 
     @property
     def likelihood_ratio_positive(self) -> float:
-        """LR+ = sensitivity / (1 - specificity)."""
+        """LR+ = sensitivity / (1 - specificity).
+
+        Returns 1.0 (no update) when insufficient data to estimate.
+        Only starts adjusting after 10+ observations.
+        """
+        total = self.true_positive + self.false_positive + self.true_negative + self.false_negative
+        if total < 10:
+            return 1.0  # No data → no Bayesian adjustment
         sensitivity = self.recall
         specificity = self.true_negative / max(self.true_negative + self.false_positive, 1)
         if specificity >= 1.0:
             return 10.0  # Cap
-        return sensitivity / (1 - specificity + 1e-10)
+        lr = sensitivity / (1 - specificity + 1e-10)
+        # Clamp to [0.1, 10.0] to prevent extreme swings from small samples
+        return max(0.1, min(10.0, lr))
 
     def update(self, predicted_direction: str, actual_profitable: bool):
         """Update confusion matrix with new observation."""
@@ -258,3 +270,125 @@ class BayesianAggregator:
             "active_sources": sum(1 for s in self._sources.values() if s.is_active),
             "sources": self.get_all_sources(),
         }
+
+    # -----------------------------------------------------------------------
+    # Persistence — Book 209: calibration data survives restarts
+    # -----------------------------------------------------------------------
+    def save(self, path: Optional[Path] = None):
+        """Persist source calibration data to JSON."""
+        path = path or _CALIBRATION_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "base_rate": self.base_rate,
+            "sources": {},
+        }
+        for name, src in self._sources.items():
+            state["sources"][name] = {
+                "true_positive": src.true_positive,
+                "false_positive": src.false_positive,
+                "true_negative": src.true_negative,
+                "false_negative": src.false_negative,
+                "total_signals": src.total_signals,
+                "is_active": src.is_active,
+                "consecutive_wrong": src.consecutive_wrong,
+            }
+        try:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            os.rename(str(tmp), str(path))
+        except OSError as e:
+            log.warning("Failed to save calibration data: %s", e)
+
+    def load(self, path: Optional[Path] = None):
+        """Restore source calibration data from JSON."""
+        path = path or _CALIBRATION_FILE
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.base_rate = data.get("base_rate", self.base_rate)
+            for name, s in data.get("sources", {}).items():
+                src = self._sources.get(name)
+                if src is None:
+                    src = SignalSource(name=name)
+                    self._sources[name] = src
+                src.true_positive = s.get("true_positive", 0)
+                src.false_positive = s.get("false_positive", 0)
+                src.true_negative = s.get("true_negative", 0)
+                src.false_negative = s.get("false_negative", 0)
+                src.total_signals = s.get("total_signals", 0)
+                src.is_active = s.get("is_active", True)
+                src.consecutive_wrong = s.get("consecutive_wrong", 0)
+            log.info("BAYES: loaded calibration for %d sources from %s",
+                     len(self._sources), path)
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("Failed to load calibration data: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton + integration helpers for bridge.py
+# ---------------------------------------------------------------------------
+_DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", "/app/data"))
+_CALIBRATION_FILE = _DATA_DIR / "bayesian_calibration.json"
+
+# All known strategy sources — registered on first use
+_ALL_SOURCES = [
+    "VanguardSniper", "ApexScout",
+    "S1_Microstructure", "S2_Reversion", "S3_MacroTrend",
+    "S4_VolPremium", "S5_OvernightCarry", "S7_TailHedge",
+    "IBS_MeanReversion", "Momentum", "VolExpansion", "ORB", "GapFade",
+    "Orchestrator",
+    "Gemini", "Claude",
+]
+
+_singleton: Optional[BayesianAggregator] = None
+
+
+def get_aggregator() -> BayesianAggregator:
+    """Get or create the singleton aggregator with calibration loaded."""
+    global _singleton
+    if _singleton is None:
+        _singleton = BayesianAggregator(base_rate=0.52)
+        for src_name in _ALL_SOURCES:
+            _singleton.add_source(src_name, accuracy=0.50, n_trades=0)
+        _singleton.load()
+    return _singleton
+
+
+def aggregate_signals(
+    signals: List[Dict[str, Any]],
+) -> Optional[AggregatedSignal]:
+    """Bridge.py integration: aggregate a list of strategy signals.
+
+    Each signal dict should have: strategy, direction, confidence.
+    Returns AggregatedSignal if consensus, None if no_trade.
+    """
+    agg = get_aggregator()
+    tuples = []
+    for sig in signals:
+        name = sig.get("strategy", "")
+        direction = sig.get("direction", "").lower()
+        conf = sig.get("confidence", 0) / 100.0  # Convert 0-100 → 0.0-1.0
+        if name and direction and conf > 0:
+            # Auto-register unknown sources
+            if agg.get_source(name) is None:
+                agg.add_source(name, accuracy=0.50, n_trades=0)
+            tuples.append((name, direction, conf))
+
+    if not tuples:
+        return None
+
+    result = agg.aggregate(tuples)
+    if result.direction == "no_trade":
+        return None
+    return result
+
+
+def record_outcome(strategy: str, direction: str, profitable: bool):
+    """Record trade outcome for source calibration. Call on every exit."""
+    agg = get_aggregator()
+    agg.update_source(strategy, direction, profitable)
+    # Auto-save every 50 updates
+    total = sum(s.total_signals for s in agg._sources.values())
+    if total % 50 == 0:
+        agg.save()

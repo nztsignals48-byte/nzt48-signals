@@ -1445,12 +1445,58 @@ def generate_dynamic_weights_toml(
     except Exception:
         pass
 
+    # Merge Gemini morning brief avoid_tickers into blacklist (GAP 2 fix)
+    gemini_avoid: List[str] = []
+    gemini_focus: List[str] = []
+    gemini_strategy_weights: Dict[str, float] = {}
+    try:
+        brief_path = DATA_DIR / "gemini" / "morning_brief_latest.json"
+        if brief_path.exists():
+            brief_age_hours = (time.time() - brief_path.stat().st_mtime) / 3600.0
+            if brief_age_hours < 12.0:
+                with open(brief_path) as f:
+                    brief = json.load(f)
+                brief_data = brief.get("data", {})
+                gemini_avoid = brief_data.get("avoid_tickers", [])
+                gemini_focus = brief_data.get("focus_tickers", [])
+                gemini_strategy_weights = brief_data.get("strategy_weights", {})
+                if gemini_avoid:
+                    # Append to blacklist (deduplicating)
+                    for sym in gemini_avoid:
+                        if sym not in blacklisted:
+                            blacklisted.append(sym)
+                    log.info("Gemini morning brief: %d avoid tickers merged into blacklist", len(gemini_avoid))
+                if gemini_focus:
+                    log.info("Gemini morning brief: %d focus tickers loaded", len(gemini_focus))
+            else:
+                log.info("Gemini morning_brief_latest.json is %.1fh old (>12h), skipping", brief_age_hours)
+    except Exception as e:
+        log.warning("Gemini morning brief integration failed (non-fatal): %s", e)
+
     lines += [
         f"",
         f"[ticker_blacklist]",
-        f"# Tickers with Wilson LB < 20% over 20+ trades — no new entries allowed",
+        f"# Tickers with Wilson LB < 20% over 20+ trades + Gemini avoid list",
         f"tickers = [{', '.join(repr(t) for t in sorted(blacklisted))}]",
     ]
+
+    # Gemini focus tickers + strategy weights (advisory, engine reads if available)
+    if gemini_focus:
+        lines += [
+            f"",
+            f"[gemini]",
+            f"# Focus tickers from Gemini morning brief (advisory priority boost)",
+            f"focus_tickers = [{', '.join(repr(t) for t in gemini_focus[:20])}]",
+        ]
+    if gemini_strategy_weights:
+        lines += [
+            f"",
+            f"[strategy_weight_overrides]",
+            f"# From Gemini morning brief — strategy allocation weights",
+        ]
+        for k, v in gemini_strategy_weights.items():
+            lines.append(f"{k} = {v:.4f}")
+
 
     # Phase E: Indicator gates — discovered thresholds from indicator_intelligence
     # These are actionable rules like "ADX > 15 improves WR by 12%"
@@ -1804,42 +1850,11 @@ def run_config_writer() -> int:
     events = load_todays_wal_events(today)
     watchlist = load_watchlist()
 
-    # --- 0. Gemini core universe → active_watchlist.json (Tier 2 intelligence) ---
-    # Read Gemini's latest core universe recommendation and write to active_watchlist
-    # for the engine to consume. Gemini runs every 2 hours; config_writer runs nightly.
-    # Only overwrite watchlist if Gemini data is fresh (< 4 hours old).
-    try:
-        gemini_core_path = DATA_DIR / "gemini" / "core_universe_latest.json"
-        if gemini_core_path.exists():
-            gemini_mtime = gemini_core_path.stat().st_mtime
-            gemini_age_hours = (time.time() - gemini_mtime) / 3600.0
-            if gemini_age_hours < 4.0:
-                with open(gemini_core_path) as f:
-                    gemini_data = json.load(f)
-                gemini_tickers = gemini_data.get("data", {}).get("tickers", [])
-                if gemini_tickers:
-                    watchlist_payload = {
-                        "tickers": gemini_tickers[:80],
-                        "source": "gemini",
-                        "timestamp": gemini_data.get("timestamp"),
-                        "session": gemini_data.get("data", {}).get("session", "unknown"),
-                    }
-                    watchlist_path = CONFIG_DIR / "active_watchlist.json"
-                    tmp_path = watchlist_path.with_suffix(".json.tmp")
-                    tmp_path.write_text(json.dumps(watchlist_payload, indent=2), encoding="utf-8")
-                    os.rename(str(tmp_path), str(watchlist_path))
-                    log.info("Gemini → active_watchlist.json: %d tickers (%.1fh old, session=%s)",
-                             len(gemini_tickers[:80]), gemini_age_hours,
-                             watchlist_payload["session"])
-                else:
-                    log.info("Gemini core_universe_latest.json has no tickers, skipping watchlist update")
-            else:
-                log.info("Gemini core_universe_latest.json is stale (%.1fh old), skipping watchlist update",
-                         gemini_age_hours)
-        else:
-            log.info("Gemini core_universe_latest.json not found, skipping watchlist update")
-    except Exception as e:
-        log.warning("Gemini → watchlist integration failed (non-fatal): %s", e)
+    # --- 0. Gemini core universe → active_watchlist.json ---
+    # REMOVED (GAP 6 fix): This block wrote Gemini tickers with wrong format
+    # ("tickers" key) but engine expects "vanguard" format. ticker_selector.py
+    # is the canonical watchlist writer; Gemini core universe already feeds into
+    # ticker_selector via the every-2-hour cron. Dead code removed.
 
     # --- 1. dynamic_weights.toml (always written, even with defaults) ---
     try:

@@ -1036,6 +1036,76 @@ def generate_watchlist(
     return watchlist
 
 
+def _merge_gemini_dark_horses(watchlist: Dict[str, Any]) -> int:
+    """Merge Gemini dark horse tickers into the watchlist as Apex (Tier 3).
+
+    Reads dark_horses_latest.json if fresh (< 30 min), deduplicates against
+    existing vanguard tickers, and appends new ones as apex entries.
+    Returns count of dark horses merged.
+    """
+    dark_path = DATA_DIR / "gemini" / "dark_horses_latest.json"
+    if not dark_path.exists():
+        return 0
+
+    try:
+        age_min = (time.time() - dark_path.stat().st_mtime) / 60.0
+        if age_min > 30.0:
+            log.debug("Gemini dark_horses_latest.json is %.0fmin old (>30min), skipping", age_min)
+            return 0
+
+        with open(dark_path) as f:
+            dark_data = json.load(f)
+
+        dark_tickers = dark_data.get("data", {}).get("tickers", [])
+        if not dark_tickers:
+            return 0
+
+        # Deduplicate: skip tickers already in the vanguard list
+        existing = set(watchlist.get("tickers", []))
+        new_dark = [t for t in dark_tickers if t not in existing]
+
+        if not new_dark:
+            return 0
+
+        # Append to tickers list
+        watchlist.setdefault("tickers", []).extend(new_dark[:20])  # Cap at 20
+
+        # Add minimal apex entries for the Rust engine
+        for sym in new_dark[:20]:
+            watchlist.setdefault("apex", []).append({
+                "symbol": sym,
+                "source": "gemini_dark_horse",
+            })
+
+        watchlist["dark_horse_count"] = len(new_dark[:20])
+        log.info("Gemini dark horses: merged %d tickers (%.0fmin old)", len(new_dark[:20]), age_min)
+        return len(new_dark[:20])
+
+    except Exception as e:
+        log.warning("Gemini dark horse merge failed (non-fatal): %s", e)
+        return 0
+
+
+def _send_engine_sighup():
+    """Send SIGHUP to aegis engine for hot-reload (best-effort)."""
+    import signal as sig
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-x", "aegis"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = [p for p in proc.stdout.strip().split("\n") if p.isdigit()]
+        if not pids:
+            log.debug("No aegis process found — SIGHUP skipped")
+            return
+        for pid_str in pids:
+            os.kill(int(pid_str), sig.SIGHUP)
+            log.info("Sent SIGHUP to aegis PID %s (dark horse hot-reload)", pid_str)
+    except Exception as e:
+        log.warning("Failed to send SIGHUP: %s (non-fatal)", e)
+
+
 def save_watchlist(watchlist: Dict[str, Any]) -> Path:
     """Save the active watchlist and regenerate initial_universe.toml for Rust engine.
 
@@ -1044,6 +1114,9 @@ def save_watchlist(watchlist: Dict[str, Any]) -> Path:
     (for diagnostics) but skip overwriting initial_universe.toml to prevent
     the engine from starting with an empty universe on next restart.
     """
+    # Merge Gemini dark horses before saving (Tier 3 rotating slots)
+    dark_count = _merge_gemini_dark_horses(watchlist)
+
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     # Atomic write: write to .tmp then os.replace to avoid partial reads by engine
     tmp_path = WATCHLIST_FILE.with_suffix(".json.tmp")
@@ -1057,6 +1130,10 @@ def save_watchlist(watchlist: Dict[str, Any]) -> Path:
     # Bridge: regenerate initial_universe.toml from top Vanguard tickers
     # so the Rust engine picks up the daily-ranked universe on restart.
     _regenerate_universe_toml(watchlist)
+
+    # Hot-reload: send SIGHUP so the running engine picks up new tickers
+    if dark_count > 0:
+        _send_engine_sighup()
 
     return WATCHLIST_FILE
 

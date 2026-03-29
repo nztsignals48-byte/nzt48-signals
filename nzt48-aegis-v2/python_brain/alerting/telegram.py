@@ -129,6 +129,20 @@ class TelegramAlerter:
                     self._last_sent[alert.title] = now
                     if alert.requires_ack:
                         self._pending_acks[alert.title] = alert
+                    # Book 58: Register WARNING/CRITICAL alerts for escalation tracking
+                    if alert.level in (AlertLevel.WARNING, AlertLevel.CRITICAL):
+                        try:
+                            from python_brain.alerting.escalation_manager import get_manager
+                            alert_id = f"{alert.level.value}_{int(now)}_{alert.title[:20]}"
+                            get_manager().register_alert(
+                                alert_id=alert_id,
+                                level=alert.level.value,
+                                title=alert.title,
+                                body=alert.body[:500],
+                                source=alert.source,
+                            )
+                        except Exception as esc_err:
+                            log.debug("Escalation register failed (non-fatal): %s", esc_err)
                     return True
         except Exception as e:
             log.warning("Telegram send failed: %s", e)

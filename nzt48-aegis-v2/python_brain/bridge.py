@@ -103,10 +103,22 @@ def _track_strategy_exit(ticker_id, strategy, exit_price):
             _auto_killed_strategies.add(strategy)
             sys.stderr.write(f"COMPOUND_KILL: {strategy} Sharpe={stats['sharpe']} n={stats['n']}\n")
             sys.stderr.flush()
+            # Book 208: Also suspend in lifecycle tracking
+            try:
+                from python_brain.validation.quality_gates import get_lifecycle
+                get_lifecycle().suspend(strategy, f"compound_kill: Sharpe={stats['sharpe']:.2f} n={stats['n']}")
+            except ImportError:
+                pass
         elif stats["sharpe"] > -0.3 and strategy in _auto_killed_strategies:
             _auto_killed_strategies.discard(strategy)
             sys.stderr.write(f"COMPOUND_REVIVE: {strategy} Sharpe={stats['sharpe']}\n")
             sys.stderr.flush()
+            # Book 208: Re-promote revived strategy
+            try:
+                from python_brain.validation.quality_gates import get_lifecycle
+                get_lifecycle().promote_to_live(strategy)
+            except ImportError:
+                pass
 
     # SIZE: Recompute edge-proportional allocation weights across ALL strategies.
     # Strategies with higher Sharpe get more capital. Negative Sharpe gets zero.
@@ -134,9 +146,66 @@ def _track_strategy_exit(ticker_id, strategy, exit_price):
                          f"weights={{{', '.join(f'{s}:{w:.2f}' for s, w in sorted(_strategy_allocation_weights.items()))}}}\n")
         sys.stderr.flush()
 
+_gemini_weights_loaded = False
+
+# Map Gemini's family codes (F_MOM etc.) to bridge.py strategy names
+_GEMINI_FAMILY_MAP = {
+    "F_MOM": ["S1_Microstructure", "S3_MacroTrend", "VanguardSniper"],  # Momentum family
+    "F_REV": ["S2_Reversion"],                                          # Reversion family
+    "F_MAC": ["S4_VolPremium", "S7_TailHedge"],                        # Macro/vol family
+    "F_DIS": ["S5_OvernightCarry"],                                     # Discretionary/carry
+}
+
+def _load_gemini_strategy_weights():
+    """Seed strategy allocation weights from Gemini morning brief (dynamic_weights.toml).
+
+    Only seeds if no live P&L data exists yet (0 exits). Once trades accumulate,
+    the edge-proportional calc in _update_allocation_weights() naturally takes over.
+    Called once at first tick.
+    """
+    global _gemini_weights_loaded
+    if _gemini_weights_loaded:
+        return
+    _gemini_weights_loaded = True
+
+    # Only seed if we have no live data (fresh start with 0 trades)
+    total_exits = sum(len(h) for h in _strategy_pnl_history.values())
+    if total_exits > 0:
+        return  # Live data exists — don't override with Gemini
+
+    dw_path = "/app/config/dynamic_weights.toml"
+    if not os.path.exists(dw_path):
+        return
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        with open(dw_path, "rb") as f:
+            data = tomllib.load(f)
+        overrides = data.get("strategy_weight_overrides", {})
+        if not overrides:
+            return
+
+        # Convert family weights → per-strategy weights
+        for family_code, weight in overrides.items():
+            strategies = _GEMINI_FAMILY_MAP.get(family_code, [])
+            for strat in strategies:
+                _strategy_allocation_weights[strat] = float(weight)
+
+        sys.stderr.write(f"GEMINI_SEED: strategy weights seeded from dynamic_weights.toml: "
+                         f"{dict(_strategy_allocation_weights)}\n")
+        sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"GEMINI_SEED: failed to load strategy weights (non-fatal): {e}\n")
+        sys.stderr.flush()
+
+
 def get_strategy_weight(strategy):
     """SIZE: Get current allocation weight for a strategy [0.0, 1.0].
-    Used by _kelly_for to scale Kelly proportional to proven edge."""
+    Used by _kelly_for to scale Kelly proportional to proven edge.
+    Seeds from Gemini morning brief if no live data exists yet."""
+    _load_gemini_strategy_weights()  # Lazy load on first call
     if strategy in _auto_killed_strategies:
         return 0.0
     return _strategy_allocation_weights.get(strategy, 0.5)  # Default 50% until proven
@@ -2844,6 +2913,38 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     best = all_signals[0]
 
+    # Book 209: Bayesian multi-source aggregation when multiple strategies fire.
+    # If 2+ strategies fire on the same tick, the posterior from all sources
+    # adjusts the best signal's confidence (up if consensus, down if conflict).
+    if len(all_signals) >= 2:
+        try:
+            from python_brain.aggregation.bayesian_aggregator import aggregate_signals
+            agg_result = aggregate_signals(all_signals)
+            if agg_result is not None:
+                bayes_conf = agg_result.confidence
+                naive_conf = best["confidence"]
+                # If Bayesian posterior agrees with best signal direction
+                if agg_result.direction.lower() == best.get("direction", "").lower():
+                    # Boost: posterior is consensus-weighted (but cap at +10)
+                    boost = min(10, max(0, bayes_conf - naive_conf))
+                    best["confidence"] = min(100, naive_conf + boost)
+                    best["bayes_boost"] = boost
+                else:
+                    # Conflict: multiple sources disagree on direction — dampen
+                    penalty = min(15, max(0, naive_conf - bayes_conf))
+                    best["confidence"] = max(0, naive_conf - penalty)
+                    best["bayes_conflict_penalty"] = penalty
+                best["bayes_posterior"] = agg_result.posterior_prob
+                best["bayes_n_agree"] = agg_result.n_sources_agree
+                best["bayes_n_total"] = agg_result.n_sources_total
+        except ImportError:
+            pass  # Module not deployed yet
+        except Exception as bayes_err:
+            # Non-fatal — fall through to naive best-of
+            if _tick_counts.get(ticker_id, 0) % 100 == 0:
+                sys.stderr.write(f"BAYES_ERR: {bayes_err}\n")
+                sys.stderr.flush()
+
     # COMPOUNDING MACHINE: Scale Kelly by edge-proportional allocation weight.
     # Strategies with proven higher Sharpe get more capital. Unproven get 50%.
     strat_name = best.get("strategy", "")
@@ -3166,8 +3267,32 @@ def process_tick(msg):
     # Stage 4: Adjust ALL signals, select best, classify, size
     best = _apply_adjustments(ticker_id, msg, ind, all_signals)
 
-    # Stage 5: Output
+    # Stage 5: Output — Book 208 quality gate + Book 207 schema validation
     if best:
+        # Book 208: Quality gate — PAPER strategies produce shadow signals only
+        strat_name_qg = best.get("strategy", "")
+        if not _SIM_MODE and strat_name_qg:
+            try:
+                from python_brain.validation.quality_gates import is_strategy_live, log_shadow_signal
+                if not is_strategy_live(strat_name_qg):
+                    log_shadow_signal(best)
+                    return no_signal
+            except ImportError:
+                pass  # Module not deployed yet — fail-open
+
+        # Book 207: Validate signal schema before sending to Rust
+        try:
+            from python_brain.validation.signal_schema import NormalizedSignal
+            ns = NormalizedSignal.from_dict(best)
+            ns.validate()
+            best = ns.to_dict()
+        except ValueError as ve:
+            sys.stderr.write(f"SCHEMA_REJECT: tid={ticker_id} {ve}\n")
+            sys.stderr.flush()
+            return no_signal
+        except ImportError:
+            pass  # Module not deployed yet — fail-open
+
         return best
     return no_signal
 
@@ -3245,6 +3370,18 @@ def main():
                 _write_heartbeat({"ticks_processed": sum(_tick_counts.values())})
             except Exception:
                 pass
+            # Book 58: Run escalation tick alongside heartbeat
+            try:
+                from python_brain.alerting.escalation_manager import escalation_tick
+                esc_actions = escalation_tick()
+                for ea in esc_actions:
+                    sys.stderr.write(f"ESCALATION: {ea.get('action', '?')} {ea.get('title', '')}\n")
+                    sys.stderr.flush()
+            except ImportError:
+                pass  # Module not deployed yet
+            except Exception as esc_err:
+                sys.stderr.write(f"Escalation tick error (non-fatal): {esc_err}\n")
+                sys.stderr.flush()
 
         if msg_type == "tick":
             try:
@@ -3289,6 +3426,7 @@ def main():
                 exit_price = msg.get("exit_price", 0)
                 exit_pnl = msg.get("pnl", 0)
                 exit_strategy = msg.get("strategy", "")
+                exit_direction = msg.get("direction", "long").lower()
                 if exit_price > 0 and exit_strategy:
                     _track_strategy_exit(exit_tid, exit_strategy, exit_price)
                     stats = _strategy_live_stats(exit_strategy)
@@ -3297,6 +3435,13 @@ def main():
                         f"live_wr={stats['wr']} live_pf={stats['pf']} live_sharpe={stats['sharpe']}\n"
                     )
                     sys.stderr.flush()
+
+                    # Book 209: Feed outcome to Bayesian source calibration
+                    try:
+                        from python_brain.aggregation.bayesian_aggregator import record_outcome
+                        record_outcome(exit_strategy, exit_direction, exit_pnl > 0)
+                    except ImportError:
+                        pass  # Module not deployed yet
             except Exception as e:
                 sys.stderr.write(f"Bridge: exit tracking error: {e}\n")
                 sys.stderr.flush()
@@ -3305,6 +3450,14 @@ def main():
         elif msg_type == "shutdown":
             sys.stderr.write("Python Brain Bridge: shutting down\n")
             sys.stderr.flush()
+            # Book 209: Save Bayesian calibration on clean shutdown
+            try:
+                from python_brain.aggregation.bayesian_aggregator import get_aggregator
+                get_aggregator().save()
+                sys.stderr.write("BAYES: calibration saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
             break
 
         else:

@@ -337,6 +337,46 @@ class TelegramCommandListener:
                 _tg_send("Kill confirmation expired (>30s). Send /kill again to retry.")
                 self.pending_kill_from = None
 
+        elif text == "/ack" or text.startswith("/ack "):
+            # Book 58: Acknowledge escalation alerts
+            try:
+                from python_brain.alerting.escalation_manager import get_manager
+                mgr = get_manager()
+                parts = text.split(maxsplit=1)
+                if len(parts) > 1:
+                    ok = mgr.acknowledge(parts[1])
+                    _tg_send(f"ACK {'OK' if ok else 'NOT FOUND'}: {parts[1]}")
+                else:
+                    ok = mgr.acknowledge("")  # Acks oldest unacked
+                    _tg_send(f"ACK {'OK — oldest alert acknowledged' if ok else 'no pending alerts'}")
+                _audit("ACK", "telegram", f"text={text}")
+            except Exception as e:
+                _tg_send(f"ACK failed: {e}")
+
+        elif text == "/ack-all" or text == "/ackall":
+            try:
+                from python_brain.alerting.escalation_manager import get_manager
+                n = get_manager().acknowledge_all()
+                _tg_send(f"ACK_ALL: {n} alert(s) acknowledged")
+                _audit("ACK_ALL", "telegram", f"count={n}")
+            except Exception as e:
+                _tg_send(f"ACK_ALL failed: {e}")
+
+        elif text == "/alerts":
+            # Book 58: Show pending escalation alerts
+            try:
+                from python_brain.alerting.escalation_manager import get_manager
+                pending = get_manager().pending_summary()
+                if not pending:
+                    _tg_send("No pending alerts.")
+                else:
+                    lines = [f"<b>{len(pending)} pending alert(s):</b>"]
+                    for p in pending:
+                        lines.append(f"  [{p['level']}] {p['id']}: {p['title']} ({p['age_min']:.0f} min)")
+                    _tg_send("\n".join(lines))
+            except Exception as e:
+                _tg_send(f"Alerts check failed: {e}")
+
         elif text == "/help":
             _tg_send(
                 "<b>AEGIS Kill Switch Commands</b>\n\n"
@@ -344,6 +384,10 @@ class TelegramCommandListener:
                 "/pause — Freeze signal generation (market data continues)\n"
                 "/resume — Resume signal generation\n"
                 "/kill — Graceful shutdown (requires confirmation)\n"
+                "/ack — Acknowledge oldest escalation alert\n"
+                "/ack &lt;id&gt; — Acknowledge specific alert by ID\n"
+                "/ack-all — Acknowledge all pending alerts\n"
+                "/alerts — Show pending escalation alerts\n"
                 "/help — This message"
             )
 

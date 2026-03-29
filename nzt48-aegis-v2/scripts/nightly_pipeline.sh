@@ -24,6 +24,13 @@ log "=========================================="
 log "NIGHTLY PIPELINE START"
 log "=========================================="
 
+# STEP 0: Gemini core universe scan (NON-CRITICAL — ensures fresh data for config_writer)
+log "STEP 0: gemini_scanner --core — fresh universe data"
+if ! python3 -m python_brain.ouroboros.gemini_scanner --core >> "$LOG" 2>&1; then
+    log "WARNING: gemini_scanner failed (non-critical — config_writer will use cached/stale data)"
+fi
+log "STEP 0: gemini_scanner DONE"
+
 # STEP 1: Ouroboros nightly analysis (CRITICAL — abort on failure)
 log "STEP 1: nightly_v6.py — Ouroboros expectancy analysis"
 if ! python3 -m python_brain.ouroboros.nightly_v6 >> "$LOG" 2>&1; then
@@ -78,6 +85,84 @@ if [ -f /app/python_brain/ouroboros/approval_gate.py ]; then
 else
     log "STEP 6: SKIP — approval_gate.py not found"
 fi
+
+# STEP 7: Claude daily decisions — D-JOURNAL + D-CONFIG (Book 72, NON-CRITICAL)
+log "STEP 7: claude dispatcher --daily — journal + config audit"
+if ! python3 -m python_brain.claude.dispatcher --daily --telegram >> "$LOG" 2>&1; then
+    log "WARNING: claude dispatcher (daily) failed (non-critical)"
+fi
+log "STEP 7: claude dispatcher DONE"
+
+# STEP 8: Claude weekly decisions — D-HYPOTHESIS + D-CLUSTER + D-DECAY (Friday only, Book 72)
+DOW=$(date -u +%u)  # 1=Mon, 5=Fri
+if [ "$DOW" = "5" ]; then
+    log "STEP 8: claude dispatcher --weekly — hypothesis + cluster + decay (Friday)"
+    if ! python3 -m python_brain.claude.dispatcher --weekly --telegram >> "$LOG" 2>&1; then
+        log "WARNING: claude dispatcher (weekly) failed (non-critical)"
+    fi
+    log "STEP 8: claude dispatcher DONE"
+else
+    log "STEP 8: SKIP — weekly decisions only run on Friday (today is day $DOW)"
+fi
+
+# STEP 9: Quality gate promotion check (Book 208, NON-CRITICAL)
+log "STEP 9: quality_gates.py — check PAPER strategy promotions"
+if [ -f /app/python_brain/validation/quality_gates.py ]; then
+    python3 -m python_brain.validation.quality_gates --summary >> "$LOG" 2>&1 || true
+    # Check each PAPER strategy for promotion eligibility and notify operator
+    python3 -c "
+import json
+from python_brain.validation.quality_gates import get_lifecycle
+lc = get_lifecycle()
+for name, rec in lc._strategies.items():
+    if rec.state != 'PAPER':
+        continue
+    result = lc.check_promotion(name)
+    if result.get('eligible'):
+        try:
+            from python_brain.ouroboros.claude_helper import send_telegram
+            m = result.get('metrics', {})
+            send_telegram(
+                f'PROMOTION ELIGIBLE: {name}\n'
+                f'Days: {m.get(\"paper_days\", 0):.0f}\n'
+                f'Signals: {m.get(\"paper_signals\", 0)}\n'
+                f'Win Rate: {m.get(\"paper_win_rate\", 0):.1%}\n\n'
+                f'Run: python3 -m python_brain.validation.quality_gates --promote-validated {name}'
+            )
+        except Exception:
+            pass
+        print(f'ELIGIBLE: {name} — {json.dumps(result[\"metrics\"])}')
+    else:
+        print(f'NOT YET: {name} — {result.get(\"reason\", \"\")}')
+" >> "$LOG" 2>&1 || true
+    log "STEP 9: quality_gates DONE"
+else
+    log "STEP 9: SKIP — quality_gates.py not found"
+fi
+
+# STEP 10: Escalation status check (Book 58, NON-CRITICAL)
+log "STEP 10: escalation_manager.py — check pending alerts"
+if [ -f /app/python_brain/alerting/escalation_manager.py ]; then
+    if ! python3 -m python_brain.alerting.escalation_manager --once >> "$LOG" 2>&1; then
+        log "WARNING: escalation_manager check failed (non-critical)"
+    fi
+    log "STEP 10: escalation_manager DONE"
+else
+    log "STEP 10: SKIP — escalation_manager.py not found"
+fi
+
+# STEP 11: Save Bayesian calibration (Book 209, NON-CRITICAL)
+log "STEP 11: bayesian calibration snapshot"
+python3 -c "
+try:
+    from python_brain.aggregation.bayesian_aggregator import get_aggregator
+    agg = get_aggregator()
+    agg.save()
+    print(f'Bayesian calibration saved: {agg.to_dict()[\"n_sources\"]} sources')
+except Exception as e:
+    print(f'Bayesian save skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 11: bayesian calibration DONE"
 
 log "=========================================="
 log "NIGHTLY PIPELINE COMPLETE"

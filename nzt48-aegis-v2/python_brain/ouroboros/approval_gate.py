@@ -40,6 +40,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from python_brain.ouroboros.claude_helper import send_telegram
 
+try:
+    from python_brain.claude.decision_authority import (
+        DecisionAuthority, DecisionType, AuthorityLevel,
+    )
+    _HAS_AUTHORITY = True
+except ImportError:
+    _HAS_AUTHORITY = False
+
 log = logging.getLogger("approval_gate")
 
 # ---------------------------------------------------------------------------
@@ -391,6 +399,116 @@ def _wilson_lower(wins: int, n: int, z: float = 1.96) -> float:
 # ---------------------------------------------------------------------------
 # Main workflow
 # ---------------------------------------------------------------------------
+def _load_claude_review_gate_tuning() -> List[Dict[str, Any]]:
+    """Load gate_tuning recommendations from the latest Claude nightly review.
+
+    Returns challenger-compatible list of dicts with param/proposed_value/verdict.
+    Returns [] if no review or no gate_tuning found.
+    """
+    review_dir = DATA_DIR / "claude" / "reviews"
+    if not review_dir.exists():
+        return []
+
+    # Find most recent review file
+    review_files = sorted(review_dir.glob("review_*.json"), reverse=True)
+    if not review_files:
+        return []
+
+    latest = review_files[0]
+    # Only use if < 24 hours old
+    try:
+        age_hours = (time.time() - latest.stat().st_mtime) / 3600.0
+        if age_hours > 24.0:
+            log.info("Claude review %s is %.1fh old (>24h), skipping gate_tuning", latest.name, age_hours)
+            return []
+    except OSError:
+        return []
+
+    try:
+        with open(latest) as f:
+            review = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("Failed to load Claude review %s: %s", latest.name, e)
+        return []
+
+    tuning = review.get("gate_tuning", [])
+    if not tuning:
+        return []
+
+    # Convert gate_tuning format to challenger-compatible format
+    # gate_tuning: [{"gate": "kelly_fraction", "recommendation": "tighten", "confidence": 0.8, "sample_size": 30}]
+    challenges: List[Dict[str, Any]] = []
+    current_weights = _load_dynamic_weights()
+
+    for t in tuning:
+        gate = t.get("gate", "")
+        recommendation = t.get("recommendation", "")
+        confidence = t.get("confidence", 0.0)
+
+        if gate not in HARD_BOUNDS or confidence < 0.6:
+            continue  # Skip unknown gates or low-confidence recommendations
+
+        current_val = _get_current_value(current_weights, gate)
+        if current_val is None:
+            continue
+
+        # Derive proposed value from recommendation direction
+        bounds = HARD_BOUNDS[gate]
+        if recommendation == "tighten":
+            # Tighten = reduce risk: lower kelly, raise conf floor, etc.
+            if gate == "kelly_fraction":
+                proposed = current_val * 0.95  # 5% reduction
+            elif gate == "confidence_floor":
+                proposed = current_val + 3  # Raise floor by 3 pts
+            elif gate == "chandelier_atr_mult":
+                proposed = current_val * 1.05  # Wider stops = tighter risk
+            elif gate == "spread_veto_pct":
+                proposed = max(bounds["min"], current_val - 0.05)
+            else:
+                proposed = current_val * 0.95
+        elif recommendation == "loosen":
+            if gate == "kelly_fraction":
+                proposed = current_val * 1.05
+            elif gate == "confidence_floor":
+                proposed = current_val - 3
+            elif gate == "chandelier_atr_mult":
+                proposed = current_val * 0.95
+            elif gate == "spread_veto_pct":
+                proposed = min(bounds["max"], current_val + 0.05)
+            else:
+                proposed = current_val * 1.05
+        else:
+            continue  # "keep" → no change needed
+
+        challenges.append({
+            "param": gate,
+            "proposed_value": proposed,
+            "current_value": current_val,
+            "verdict": "APPLY",
+            "source": "claude_review_gate_tuning",
+            "confidence": confidence,
+        })
+
+    if challenges:
+        log.info("Claude review gate_tuning: %d actionable recommendations from %s",
+                 len(challenges), latest.name)
+
+    return challenges
+
+
+def _get_trade_count() -> int:
+    """Get total trade count from nightly_output.json for authority check."""
+    nightly_path = DATA_DIR / "nightly_output.json"
+    if not nightly_path.exists():
+        return 0
+    try:
+        with open(nightly_path) as f:
+            data = json.load(f)
+        return int(data.get("trade_count", data.get("total_trades", 0)))
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return 0
+
+
 def run_approval_gate(
     dry_run: bool = False,
     send_tg: bool = False,
@@ -408,28 +526,55 @@ def run_approval_gate(
         "escalated": [],
     }
 
-    # Load challenger output
-    challenge_path = CHALLENGE_DIR / f"challenge_{date_str}.json"
-    if not challenge_path.exists():
-        log.warning("No challenger output for %s -- nothing to approve", date_str)
-        result["status"] = "skipped"
-        result["reason"] = "no_challenger_output"
-        _log_decision({"action": "SKIP", "reason": "no_challenger_output", "date": date_str})
-        return result
+    # === AUTHORITY CHECK (FULLY AUTONOMOUS — hard bounds are the safety net) ===
+    # L0-L4 levels are logged for audit trail but never block changes.
+    # The system starts at 0 trades and gets smarter every day — hard bounds
+    # (Kelly [0.10-0.35], max 10%/cycle, 30-day drift cap 50%) are the guardrails.
+    trade_count = _get_trade_count()
+    authority_level = "AUTONOMOUS"
+    can_apply_params = True  # Always true — hard bounds are the gate, not trade count
+    if _HAS_AUTHORITY:
+        authority = DecisionAuthority(trade_count=trade_count)
+        authority_level = f"AUTONOMOUS ({authority.current_level.name} equivalent, trades={trade_count})"
+    log.info("Decision authority: FULLY AUTONOMOUS (trades=%d, hard bounds enforced)", trade_count)
 
-    try:
-        with open(challenge_path) as f:
-            challenger_output = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        log.error("Failed to load challenger output: %s", e)
-        result["status"] = "error"
-        result["reason"] = str(e)
+    result["authority_level"] = authority_level
+    result["trade_count"] = trade_count
+    _log_decision({
+        "action": "AUTHORITY_CHECK",
+        "level": authority_level,
+        "trade_count": trade_count,
+        "can_apply": True,
+        "mode": "fully_autonomous",
+        "date": date_str,
+    })
+
+    # === LOAD CHALLENGER OUTPUT ===
+    challenge_path = CHALLENGE_DIR / f"challenge_{date_str}.json"
+    challenger_output: Dict[str, Any] = {}
+    if challenge_path.exists():
+        try:
+            with open(challenge_path) as f:
+                challenger_output = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            log.error("Failed to load challenger output: %s", e)
+
+    # === LOAD CLAUDE REVIEW GATE_TUNING (GAP 4 fix) ===
+    review_challenges = _load_claude_review_gate_tuning()
+
+    # Merge challenger + review challenges
+    challenges = challenger_output.get("challenges", []) + review_challenges
+
+    if not challenges:
+        log.info("No challenges to process (challenger=%s, review=%d)",
+                 "found" if challenge_path.exists() else "missing", len(review_challenges))
+        result["status"] = "no_changes"
+        result["reason"] = "no_challenger_and_no_review_tuning"
+        _log_decision({"action": "SKIP", "reason": "no_challenges", "date": date_str})
         return result
 
     # Load current dynamic weights
     current_weights = _load_dynamic_weights()
-
-    challenges = challenger_output.get("challenges", [])
     if not challenges:
         log.info("No challenges to process")
         result["status"] = "no_changes"
@@ -598,7 +743,9 @@ def run_approval_gate(
                 )
             continue
 
-        # Safe to auto-apply (within bounds, not risk-increasing, within drift cap)
+        # FULLY AUTONOMOUS: no authority gate — hard bounds + drift cap are the safety net.
+        # Risk-increasing changes still escalated above (line ~580) for Telegram notification,
+        # but non-risk-increasing changes auto-apply within bounds immediately.
         if dry_run:
             decision = {
                 "param": param,
