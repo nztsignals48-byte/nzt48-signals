@@ -671,6 +671,38 @@ impl<B: BrokerAdapter> Engine<B> {
         broker_time_secs: u64,
         system_time_ns: u64,
     ) -> Result<StartupResult, EngineError> {
+        // LIVE-MODE SAFETY GUARD: Reject startup if config has paper-era values.
+        // Prevents accidentally running live with max_daily_trades=999 or max_positions=15.
+        if !self.simulation_mode {
+            let max_pos = self.config.crucible.max_positions_override;
+            let max_trades = self.config.risk.daily_trade_limit;
+            let halt_count = self.config.risk.consecutive_loss_halt;
+            let mut violations = Vec::new();
+            if max_pos > 5 {
+                violations.push(format!("max_positions_override={} (max 5 for live)", max_pos));
+            }
+            if max_trades > 10 {
+                violations.push(format!("max_daily_trades={} (max 10 for live)", max_trades));
+            }
+            if halt_count > 6 {
+                violations.push(format!("consecutive_loss_halt={} (max 6 for live)", halt_count));
+            }
+            if !violations.is_empty() {
+                eprintln!("╔══════════════════════════════════════════════════════════════╗");
+                eprintln!("║  FATAL: LIVE MODE WITH UNSAFE CONFIG — REFUSING TO START    ║");
+                eprintln!("╠══════════════════════════════════════════════════════════════╣");
+                for v in &violations {
+                    eprintln!("║  ✗ {}", v);
+                }
+                eprintln!("╚══════════════════════════════════════════════════════════════╝");
+                return Err(EngineError::ConfigError(
+                    format!("Live mode rejected: {}", violations.join("; "))
+                ));
+            }
+            eprintln!("STARTUP: Live-mode safety guard PASSED (positions={}, trades={}, halt={})",
+                max_pos, max_trades, halt_count);
+        }
+
         // Step 1: Verify broker connection (skip in simulation mode — broker is optional)
         let has_broker = self.broker.is_connected();
         if !has_broker && !self.simulation_mode {

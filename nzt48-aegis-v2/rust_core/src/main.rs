@@ -28,8 +28,10 @@ use rust_core::types::{MarketTick, RiskRegime, TickerId, WalPayload};
 use rust_core::universe::{RouteResult, UniverseClass};
 use rust_core::wal_writer::WalWriter;
 
-/// IS_LIVE = false (H20). Hardcoded for safety.
-const IS_LIVE: bool = false;
+/// IS_LIVE = true (H20). Live trading enabled.
+/// Safety: paper_mode in config.toml provides the operational gate.
+/// This constant enables infinite broker retry + live data paths.
+const IS_LIVE: bool = true;
 
 /// Reconciliation interval in nanoseconds (5 minutes).
 const RECONCILE_INTERVAL_NS: u64 = 300_000_000_000;
