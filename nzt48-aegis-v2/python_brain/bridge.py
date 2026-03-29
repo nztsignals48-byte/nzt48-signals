@@ -71,6 +71,8 @@ _strategy_total_confidence = defaultdict(float)
 _auto_killed_strategies = {"S6_Catalyst"}  # Killed by 730-day backtest: 13% WR, PF 0.01 over 554K trades
 _strategy_pnl_history = defaultdict(list)
 _strategy_entry_prices = {}
+# Book 1: Track entry confidence per position for IC computation on exit
+_entry_confidences = {}  # (ticker_id, strategy) → confidence at entry
 _cofire_counts = defaultdict(int)
 _cofire_total = defaultdict(int)
 _COFIRE_WINDOW_NS = 5 * 60 * 1_000_000_000
@@ -254,6 +256,17 @@ def _track_daily_equity(equity):
                     f"CAGR={annualized_cagr*100:.1f}% max_dd={drawdown:.1f}%\n"
                 )
                 sys.stderr.flush()
+
+                # Book 1: Feed daily return for variance drag computation
+                if n_days >= 2:
+                    prev_eq = _daily_equity_snapshots[-2][1]
+                    if prev_eq > 0:
+                        daily_ret = (latest_eq - prev_eq) / prev_eq
+                        try:
+                            from python_brain.metrics.fundamental_law import get_tracker
+                            get_tracker().record_daily_portfolio_return(daily_ret)
+                        except ImportError:
+                            pass
 
 def _strategy_live_stats(strategy):
     """Get live WR, PF, Sharpe for a strategy."""
@@ -3293,6 +3306,9 @@ def process_tick(msg):
         except ImportError:
             pass  # Module not deployed yet — fail-open
 
+        # Book 1: Record entry confidence for IC computation on exit
+        _entry_confidences[(ticker_id, best.get("strategy", ""))] = best.get("confidence", 0)
+
         return best
     return no_signal
 
@@ -3442,6 +3458,16 @@ def main():
                         record_outcome(exit_strategy, exit_direction, exit_pnl > 0)
                     except ImportError:
                         pass  # Module not deployed yet
+
+                    # Book 1: Feed confidence + return for IC tracking
+                    try:
+                        from python_brain.metrics.fundamental_law import get_tracker
+                        entry_conf = _entry_confidences.pop((exit_tid, exit_strategy), 0)
+                        if entry_conf > 0:
+                            # exit_pnl from Rust is the actual return (fractional)
+                            get_tracker().record_signal(exit_strategy, entry_conf / 100.0, exit_pnl)
+                    except ImportError:
+                        pass
             except Exception as e:
                 sys.stderr.write(f"Bridge: exit tracking error: {e}\n")
                 sys.stderr.flush()
@@ -3455,6 +3481,14 @@ def main():
                 from python_brain.aggregation.bayesian_aggregator import get_aggregator
                 get_aggregator().save()
                 sys.stderr.write("BAYES: calibration saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            # Book 1: Save fundamental law state on clean shutdown
+            try:
+                from python_brain.metrics.fundamental_law import get_tracker
+                get_tracker().save()
+                sys.stderr.write("BOOK1: fundamental law state saved on shutdown\n")
                 sys.stderr.flush()
             except Exception:
                 pass

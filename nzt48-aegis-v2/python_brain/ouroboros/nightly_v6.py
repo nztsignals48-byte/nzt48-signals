@@ -2376,6 +2376,28 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Performance attribution failed (non-fatal): %s", e)
 
+    # Step 5.20b: Fundamental Law of Active Management (Book 1)
+    try:
+        from python_brain.metrics.fundamental_law import get_tracker
+        fl_tracker = get_tracker()
+        fl_report = fl_tracker.compute_report()
+        recommendations["fundamental_law"] = fl_report.to_dict()
+        fl_tracker.save()
+        fl = fl_report.to_dict()
+        log.info(
+            "Book1: IR=%.3f (IC=%.4f, BR=%d), portfolio_SR=%.3f (uncorr=%.3f), "
+            "variance_drag=%.2f%%/yr, geometric_growth=%.2f%%/yr",
+            fl["fundamental_law"]["information_ratio"],
+            fl["fundamental_law"]["avg_ic"],
+            fl["fundamental_law"]["annual_breadth"],
+            fl["portfolio_sharpe"]["portfolio_estimated"],
+            fl["portfolio_sharpe"]["portfolio_uncorrelated"],
+            fl["compounding"]["variance_drag_annual_pct"],
+            fl["compounding"]["geometric_growth_annual_pct"],
+        )
+    except Exception as e:
+        log.warning("Fundamental law computation failed (non-fatal): %s", e)
+
     # Step 5.21: Audit Trail (Books 88, 185)
     try:
         from python_brain.forensics.audit_trail import AuditTrail, AuditCategory
