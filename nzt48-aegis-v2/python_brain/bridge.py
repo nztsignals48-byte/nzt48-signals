@@ -2670,6 +2670,18 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     if not all_signals:
         return None
 
+    # NEWS/SENTIMENT ENRICHMENT — same-time-as-hedge-funds data
+    # Enrich each signal with news sentiment, dark pool flow, options flow, Congress trades.
+    # Confidence modified: +8 max for aligned sentiment, -15 max for opposing.
+    try:
+        from python_brain.feeds.data_manager import get_data_manager
+        _dm = get_data_manager()
+        ticker_symbol = msg.get("symbol", "")
+        for sig in all_signals:
+            _dm.enrich_signal(sig, ticker_symbol)
+    except Exception:
+        pass  # Non-fatal: if feeds are down, signals proceed without enrichment
+
     # FEATURE FLAGS GATE (Book 71) — disable modules via feature flags
     try:
         from python_brain.risk.feature_flags import FeatureFlagManager
@@ -3197,6 +3209,17 @@ def main():
         _write_heartbeat({"ticks_processed": 0})
     except Exception:
         pass
+
+    # Start data feeds (news, sentiment, Polygon backup) — non-blocking
+    try:
+        from python_brain.feeds.data_manager import get_data_manager
+        _data_mgr = get_data_manager()
+        sys.stderr.write("Bridge: DataManager started (news + polygon feeds)\n")
+        sys.stderr.flush()
+    except Exception as e:
+        _data_mgr = None
+        sys.stderr.write(f"Bridge: DataManager failed (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     for line in sys.stdin:
         line = line.strip()

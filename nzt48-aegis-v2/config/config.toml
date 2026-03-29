@@ -654,6 +654,64 @@ claude_log_file = "/app/data/claude_curator.ndjson"
 tier_effectiveness_file = "/app/data/system_memory.json"
 
 # ============================================================================
+# [feeds] — Institutional Data Feeds (Books 8, 53, 58, 72, 198)
+# Same-time-as-hedge-funds news, sentiment, flow, and market data.
+# All feeds are optional — system degrades gracefully if API keys missing.
+# ============================================================================
+[feeds]
+enabled = true
+news_data_dir = "/app/data/news"
+
+# Polygon.io — real-time WebSocket market data (IBKR redundancy)
+# Set POLYGON_API_KEY in .env to enable
+[feeds.polygon]
+enabled = true
+subscribe_trades = true
+subscribe_quotes = true
+subscribe_aggregates = true
+max_subscriptions = 200
+stale_threshold_s = 10.0
+
+# Benzinga Pro — real-time financial news (institutional-grade)
+# Set BENZINGA_API_KEY in .env to enable
+[feeds.benzinga]
+enabled = true
+poll_interval_s = 15
+page_size = 20
+
+# Unusual Whales — dark pool + options flow + Congress trades
+# Set UW_API_KEY in .env to enable
+[feeds.unusual_whales]
+enabled = true
+flow_poll_interval_s = 30
+congress_poll_interval_s = 3600
+
+# EODHD — news with pre-scored sentiment
+# Set EODHD_API_KEY in .env to enable
+[feeds.eodhd]
+enabled = true
+poll_interval_s = 60
+
+# Free RSS feeds (no API key required)
+[feeds.rss]
+sec_edgar = true            # SEC Form 4, 8-K filings
+fed_reserve = true          # FOMC statements, speeches
+finviz = true               # Market headlines
+
+# Gemini sentiment scoring (batched, ~$0/month via free tier)
+[feeds.sentiment]
+gemini_scoring = true
+batch_size = 10
+model = "gemini-2.5-flash"
+
+# News → signal confidence adjustment
+[feeds.signal_adjustment]
+max_boost = 8               # Max confidence boost for aligned news sentiment
+max_penalty = 15            # Max confidence penalty for opposing sentiment
+min_news_confidence = 0.3   # Minimum news confidence to adjust signals
+flow_weight_multiplier = 2.0  # Dark pool/options flow weighted 2x vs headlines
+
+# ============================================================================
 # [universe_pipeline] — 5-Phase Universe Pipeline (Sprint U, 2026-03-24)
 # Builds 5,000-ticker research universe, applies deterministic filters,
 # uses Gemini for bounded session triage, deterministic final admission.

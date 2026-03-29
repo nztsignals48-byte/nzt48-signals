@@ -58,6 +58,29 @@ def _collect_system_state() -> Dict[str, Any]:
         "feature_flags": _load_json_file(DATA_DIR / "feature_flags.json"),
     }
 
+    # Data feeds health
+    try:
+        from python_brain.feeds.data_manager import get_data_manager
+        dm = get_data_manager()
+        state["data_feeds"] = dm.health_dict()
+    except Exception:
+        state["data_feeds"] = {"active": False}
+
+    # Latest news sentiment
+    try:
+        news_dir = DATA_DIR / "news"
+        if news_dir.exists():
+            news_files = sorted(news_dir.glob("news_*.ndjson"))
+            if news_files:
+                with open(news_files[-1]) as f:
+                    lines = f.readlines()
+                state["news_feed"] = {
+                    "total_items_today": len(lines),
+                    "latest_5": [json.loads(l) for l in lines[-5:]] if lines else [],
+                }
+    except Exception:
+        state["news_feed"] = {"total_items_today": 0}
+
     # Load latest regime report
     regime_dir = DATA_DIR / "regime_reports"
     if regime_dir.exists():

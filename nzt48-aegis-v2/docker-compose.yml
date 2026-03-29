@@ -38,6 +38,12 @@ services:
       - IS_LIVE=false
       # SC-13: Prevent Polars from starving Tokio async reactor (2 vCPU EC2)
       - POLARS_MAX_THREADS=1
+      # Data feeds — set API keys in .env (all optional, graceful degradation)
+      - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+      - BENZINGA_API_KEY=${BENZINGA_API_KEY:-}
+      - UW_API_KEY=${UW_API_KEY:-}
+      - EODHD_API_KEY=${EODHD_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       - ./config:/app/config
       - aegis-events:/app/events
