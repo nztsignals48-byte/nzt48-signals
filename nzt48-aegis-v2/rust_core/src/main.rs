@@ -832,7 +832,12 @@ fn main() {
                         // P8+: Fields for S4-S7 strategies
                         vix: engine.macro_regime.indicator().vix,
                         london_time_secs: engine.clock.now_london_secs(engine.now_ns),
-                        gap_pct: if engine.gap_cooldowns.contains_key(&t.ticker_id) { 2.0 } else { 0.0 },
+                        gap_pct: {
+                            // Compute real gap % from last known price vs current
+                            if let Some(&prev) = engine.last_prices.get(&t.ticker_id) {
+                                if prev > 0.0 { (t.last - prev) / prev * 100.0 } else { 0.0 }
+                            } else { 0.0 }
+                        },
                         symbol: engine.config.contracts
                             .get(t.ticker_id.0 as usize)
                             .map(|c| c.symbol.clone())

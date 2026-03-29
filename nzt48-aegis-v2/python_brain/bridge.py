@@ -51,17 +51,62 @@ _HEARTBEAT_INTERVAL = 30.0
 bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 
 # P5: Per-strategy signal counter for validation tracking.
-# Logged to stderr every 25 signals per strategy for Ouroboros forensics.
 _strategy_signal_counts = defaultdict(int)
 _strategy_total_confidence = defaultdict(float)
 
-# P7: Cannibalization detector — tracks which strategies fire on the same ticker/tick.
-# If S1 and S2 fire on the same ticker within 5 minutes, they're correlated.
-# Per Book 98: rho > 0.50 sustained 5 days → flag weaker. rho > 0.70 → quarantine.
-_cofire_counts = defaultdict(int)  # (stratA, stratB) → count of co-fires
-_cofire_total = defaultdict(int)   # stratA → total fires (for denominator)
-_COFIRE_WINDOW_NS = 5 * 60 * 1_000_000_000  # 5-minute window for co-fire detection
-_recent_strategy_fires = {}  # ticker_id → [(strategy, timestamp_ns)]
+# P7: Cannibalization detector
+_cofire_counts = defaultdict(int)
+_cofire_total = defaultdict(int)
+_COFIRE_WINDOW_NS = 5 * 60 * 1_000_000_000
+_recent_strategy_fires = {}
+
+# ── LIVE PERFORMANCE TRACKER (per-strategy Sharpe, rolling 100-trade window) ──
+# Tracks realized P&L per strategy for real-time edge measurement.
+_strategy_pnl_history = defaultdict(list)  # strategy → [(entry_price, exit_price, timestamp)]
+_strategy_entry_prices = {}  # (ticker_id, strategy) → entry_price
+
+def _track_strategy_entry(ticker_id, strategy, price):
+    """Record entry for live performance tracking."""
+    _strategy_entry_prices[(ticker_id, strategy)] = price
+
+def _track_strategy_exit(ticker_id, strategy, exit_price):
+    """Record exit and compute return for live Sharpe."""
+    key = (ticker_id, strategy)
+    entry = _strategy_entry_prices.pop(key, None)
+    if entry is not None and entry > 0:
+        ret = (exit_price - entry) / entry
+        _strategy_pnl_history[strategy].append(ret)
+        # Keep rolling window of 100
+        if len(_strategy_pnl_history[strategy]) > 100:
+            _strategy_pnl_history[strategy] = _strategy_pnl_history[strategy][-100:]
+
+def _strategy_live_sharpe(strategy):
+    """Compute rolling Sharpe for a strategy (annualized, assuming 252 trading days)."""
+    rets = _strategy_pnl_history.get(strategy, [])
+    if len(rets) < 10:
+        return 0.0
+    mean_r = sum(rets) / len(rets)
+    var_r = sum((r - mean_r) ** 2 for r in rets) / len(rets)
+    std_r = var_r ** 0.5
+    if std_r < 1e-9:
+        return 0.0
+    # Annualize: assume ~3 trades/day, 252 days
+    daily_sharpe = mean_r / std_r
+    return daily_sharpe * (252 ** 0.5)
+
+def _strategy_live_stats(strategy):
+    """Get live WR, PF, Sharpe for a strategy."""
+    rets = _strategy_pnl_history.get(strategy, [])
+    n = len(rets)
+    if n < 5:
+        return {"n": n, "wr": 0, "pf": 0, "sharpe": 0}
+    wins = [r for r in rets if r > 0]
+    losses = [r for r in rets if r <= 0]
+    wr = len(wins) / n
+    avg_win = sum(wins) / len(wins) if wins else 0
+    avg_loss = abs(sum(losses) / len(losses)) if losses else 1e-9
+    pf = avg_win / avg_loss if avg_loss > 1e-9 else 99.0
+    return {"n": n, "wr": round(wr, 3), "pf": round(pf, 3), "sharpe": round(_strategy_live_sharpe(strategy), 2)}
 
 # Per-ticker VWAP calculators (persist across ticks, reset at session open)
 vwap_calculators = defaultdict(VWAPCalculator)
@@ -1436,83 +1481,113 @@ def _compute_confidence_floor(msg, ind):
 
 
 def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, common_fields):
-    """System 1: Microstructure Momentum — price-based order flow proxy.
+    """System 1: Microstructure Momentum — order flow proxy + intraday momentum.
 
-    Computes 4 microstructure indicators from bid/ask/last/volume (no L2 needed):
-    1. TMR (Trade-to-Mid Ratio): where last trade falls in the spread → buy/sell pressure
-    2. VPIN: volume-synchronized informed trading probability (already in ind)
-    3. Spread compression: narrowing spread = increasing competition
-    4. Tick momentum: net up-ticks vs down-ticks over last 20 ticks
+    6 indicators (Easley-LdP-O'Hara 2012, Gao-Ritter 2010, Chordia-Roll-Subrahmanyam 2002):
+    1. TMR: Trade-to-mid ratio — buy/sell pressure
+    2. VPIN: Volume-sync informed trading probability
+    3. Spread compression: narrowing = competition for liquidity
+    4. Tick momentum: net up-ticks vs down-ticks
+    5. Volume-weighted price momentum: VWAP slope direction
+    6. Amihud illiquidity drop: improving liquidity = institutional interest
 
-    Fires when 3+ of 4 indicators align bullishly + ADX > 15 for trend confirmation.
+    Entry: 4+ of 6 bullish + ADX > 15 + hurst != mean_reverting.
     """
     bid, ask, last = msg["bid"], msg["ask"], msg["last"]
     spread = ask - bid
-    if spread <= 0:
+    if spread <= 0 or bid <= 0:
         return None
     mid = (bid + ask) / 2.0
 
-    # 1. TMR: Trade-to-Mid Ratio — where does trade execution fall in the spread?
-    # TMR > 0.3 = hitting ask (buy pressure), TMR < -0.3 = hitting bid (sell pressure)
-    tmr = (last - mid) / spread if spread > 0 else 0.0
-    tmr_bullish = tmr > 0.3
+    # 1. TMR — where trades execute in the spread
+    tmr = (last - mid) / spread
+    tmr_bullish = tmr > 0.25
 
-    # 2. VPIN: already computed — high VPIN (> 0.6) = informed buying
+    # 2. VPIN — informed trading detection
     vpin = ind.get("vpin", 0.5)
-    vpin_bullish = vpin > 0.6
+    vpin_bullish = vpin > 0.55
 
-    # 3. Spread compression: compare current spread to average spread over ticks
+    # 3. Spread compression — current vs rolling average
     spreads = []
-    for t in ticks[-20:]:
-        if isinstance(t, dict):
-            tb, ta = t.get("bid", 0), t.get("ask", 0)
-        else:
-            tb, ta = getattr(t, "bid", 0), getattr(t, "ask", 0)
+    for t in ticks[-30:]:
+        tb = t.get("bid", 0) if isinstance(t, dict) else getattr(t, "bid", 0)
+        ta = t.get("ask", 0) if isinstance(t, dict) else getattr(t, "ask", 0)
         if tb > 0 and ta > tb:
-            spreads.append((ta - tb) / tb * 100.0)  # spread as % of bid
-    if len(spreads) >= 5:
-        avg_spread = sum(spreads) / len(spreads)
-        current_spread_pct = spread / bid * 100.0
-        spread_compressed = current_spread_pct < avg_spread * 0.8  # 20% narrower than average
+            spreads.append((ta - tb) / tb)
+    if len(spreads) >= 10:
+        avg_s = sum(spreads) / len(spreads)
+        cur_s = spread / bid
+        spread_compressed = cur_s < avg_s * 0.75
     else:
         spread_compressed = False
 
-    # 4. Tick momentum: net direction of last 20 price changes
+    # 4. Tick momentum — Lee-Ready (1991) tick test
     prices = []
-    for t in ticks[-21:]:
-        if isinstance(t, dict):
-            prices.append(t.get("last", t.get("close", 0)))
-        else:
-            prices.append(getattr(t, "last", 0))
-    up_ticks = sum(1 for i in range(1, len(prices)) if prices[i] > prices[i-1])
-    dn_ticks = sum(1 for i in range(1, len(prices)) if prices[i] < prices[i-1])
-    total_moves = up_ticks + dn_ticks
-    tick_ratio = up_ticks / total_moves if total_moves > 0 else 0.5
-    tick_bullish = tick_ratio > 0.6  # 60%+ up-ticks
+    for t in ticks[-31:]:
+        prices.append(t.get("last", t.get("close", 0)) if isinstance(t, dict) else getattr(t, "last", 0))
+    if len(prices) < 10:
+        return None
+    up = sum(1 for i in range(1, len(prices)) if prices[i] > prices[i-1])
+    dn = sum(1 for i in range(1, len(prices)) if prices[i] < prices[i-1])
+    total = up + dn
+    tick_ratio = up / total if total > 0 else 0.5
+    tick_bullish = tick_ratio > 0.58
 
-    # Count aligned bullish indicators
-    bullish_count = sum([tmr_bullish, vpin_bullish, spread_compressed, tick_bullish])
+    # 5. VWAP slope — Gao-Ritter (2010) intraday momentum
+    vwap_slope = ind.get("vwap_slope", 0) if "vwap_slope" not in common_fields else common_fields.get("vwap_slope", 0)
+    # Compute from raw data if not available
+    if vwap_slope == 0 and len(prices) >= 10:
+        # Simple price-volume weighted slope over last 10 ticks
+        n = min(10, len(prices) - 1)
+        recent = prices[-n-1:]
+        rets = [(recent[i+1] - recent[i]) / recent[i] for i in range(n) if recent[i] > 0]
+        vwap_slope = sum(rets) / len(rets) if rets else 0
+    vwap_bullish = vwap_slope > 0.0005  # 0.05% positive slope
 
-    # Require 3+ bullish + ADX > 15 for trend confirmation
+    # 6. Amihud illiquidity drop — decreasing illiquidity = institutional inflow
+    amihud = msg.get("amihud", 0)
+    amihud_bullish = amihud < 0.01 and ind.get("rvol", 1.0) > 1.0
+
+    # Count aligned indicators
+    signals = [tmr_bullish, vpin_bullish, spread_compressed, tick_bullish, vwap_bullish, amihud_bullish]
+    bullish_count = sum(signals)
+
+    # Entry gate: 4+ of 6 + ADX > 15 + not mean-reverting regime
     adx = ind.get("adx", 0)
-    if bullish_count < 3 or adx < 15.0:
+    hurst_regime = ind.get("hurst_regime", "random")
+    if bullish_count < 4 or adx < 15.0 or hurst_regime == "mean_reverting":
         return None
 
-    # Graduated confidence: base 55, +5 per extra indicator, +10 for strong ADX
-    conf = 55.0
-    conf += (bullish_count - 3) * 5.0  # bonus for 4/4 alignment
+    # Graduated confidence with regime conditioning
+    conf = 52.0
+    conf += (bullish_count - 4) * 4.0
     if adx > 25.0:
-        conf += 10.0
-    if ind.get("rvol", 1.0) > 1.5:
-        conf += 5.0  # volume confirmation
-    if tmr > 0.6:
-        conf += 5.0  # strong buy pressure
-    conf = min(conf, 90.0)
+        conf += 8.0
+    if adx > 35.0:
+        conf += 4.0
+    if ind.get("rvol", 1.0) > 2.0:
+        conf += 5.0
+    if tmr > 0.5:
+        conf += 3.0
+    if hurst_regime == "trending":
+        conf += 5.0  # Momentum works best in trending regime
+    # Penalize if structural score is low (poor tradability)
+    ss = ind.get("structural_score", 50)
+    if ss < 40:
+        conf -= 5.0
+    conf = max(0, min(conf, 92.0))
 
     if conf < conf_floor:
         return None
 
+    # Live stats for adaptive sizing
+    stats = _strategy_live_stats("S1_Microstructure")
+    # If we have enough data and Sharpe is negative, reduce confidence
+    if stats["n"] >= 30 and stats["sharpe"] < -0.5:
+        conf *= 0.7
+
     kelly = kelly_fn(conf)
+    _track_strategy_entry(ticker_id, "S1_Microstructure", last)
     return {
         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
         "confidence": conf,
@@ -1520,22 +1595,22 @@ def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, co
         "strategy": "S1_Microstructure",
         "s1_tmr": round(tmr, 3), "s1_vpin": round(vpin, 3),
         "s1_spread_compressed": spread_compressed, "s1_tick_ratio": round(tick_ratio, 3),
-        "s1_bullish_count": bullish_count,
+        "s1_bullish_count": bullish_count, "s1_vwap_slope": round(vwap_slope, 6),
+        "s1_live_sharpe": stats["sharpe"],
         **common_fields,
     }
 
 
 def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, common_fields):
-    """System 2: Statistical Reversion — Bollinger Band z-score + RSI(2) + IBS.
+    """System 2: Statistical Reversion — multi-factor oversold detection.
 
-    Academic basis: Connors & Alvarez (2008), Bollinger (2001).
-    Mean-reversion works best in Normal regime (fails in trends).
-    Habitat: Tier 1-2 ETPs. Session: LSE 09:00-15:00.
+    Academic basis: Connors & Alvarez (2008), Bollinger (2001), Jegadeesh (1990).
+    5 factors: BB z-score, RSI(2), IBS, volume capitulation, mean-reversion speed.
+    Regime gate: mean_reverting or random only (never trending — that's S3's job).
     """
     if len(bars_5m) < 20:
         return None
 
-    # Only fire in Normal regime (mean-reversion fails in trends)
     hurst_regime = ind.get("hurst_regime", "random")
     if hurst_regime == "trending":
         return None
@@ -1543,7 +1618,7 @@ def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, commo
     closes = [b["close"] for b in bars_5m[-20:]]
     current = closes[-1]
 
-    # Bollinger Band z-score (20-bar, 2 std dev)
+    # 1. BB z-score (20-bar)
     sma20 = sum(closes) / len(closes)
     variance = sum((c - sma20) ** 2 for c in closes) / len(closes)
     std20 = variance ** 0.5
@@ -1551,101 +1626,148 @@ def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, commo
         return None
     z_score = (current - sma20) / std20
 
-    # RSI(2) — need at least 3 bars
+    # 2. RSI(2) — Connors short-term oversold
     rsi2 = calculate_rsi(closes, period=2)
 
-    # IBS
+    # 3. IBS (Internal Bar Strength)
     ibs_val = ind.get("ibs", 0.5)
 
-    # Entry: z-score < -2 (below lower BB) + RSI(2) < 10 + IBS < 0.30
-    if z_score >= -1.5 or rsi2 is None or rsi2 >= 20.0 or ibs_val >= 0.30:
+    # 4. Volume capitulation — RVOL spike on down move = panic selling exhaustion
+    rvol = ind.get("rvol", 1.0)
+    last_3_down = sum(1 for b in bars_5m[-3:] if b["close"] < b["open"])
+    vol_capitulation = rvol > 2.0 and last_3_down >= 2
+
+    # 5. Mean-reversion speed — how fast did price deviate? Fast = liquidity gap = fills faster
+    if len(closes) >= 5:
+        dev_speed = abs(closes[-1] - closes[-5]) / (std20 * 5) if std20 > 0 else 0
+    else:
+        dev_speed = 0
+
+    # Scoring: each factor adds conviction
+    score = 0
+    if z_score < -1.5: score += 1
+    if z_score < -2.0: score += 1
+    if z_score < -2.5: score += 1
+    if rsi2 is not None and rsi2 < 15: score += 1
+    if rsi2 is not None and rsi2 < 5: score += 1
+    if ibs_val < 0.25: score += 1
+    if ibs_val < 0.10: score += 1
+    if vol_capitulation: score += 2  # Strong signal — double weight
+    if dev_speed > 0.5: score += 1  # Fast deviation = faster fill
+
+    # Need score >= 4 (out of 10 possible)
+    if score < 4:
         return None
 
-    # Graduated confidence
-    conf = 58.0
-    if z_score < -2.5:
-        conf += 8.0  # Deeper oversold
-    if rsi2 < 5.0:
-        conf += 7.0  # Extreme oversold
-    if ibs_val < 0.15:
-        conf += 5.0  # Close near low
-    if ind.get("rvol", 1.0) > 1.5:
-        conf += 5.0  # Volume spike on sell-off (capitulation)
-    conf = min(conf, 88.0)
+    # Confidence maps score to conviction
+    conf = 48.0 + score * 4.0  # 48 + 4*4=64 minimum, up to 48+40=88
+    if hurst_regime == "mean_reverting":
+        conf += 5.0  # Bonus: confirmed MR regime
+    conf = max(0, min(conf, 90.0))
 
     if conf < conf_floor:
         return None
 
+    # Adaptive: reduce if strategy has negative live Sharpe
+    stats = _strategy_live_stats("S2_Reversion")
+    if stats["n"] >= 30 and stats["sharpe"] < -0.5:
+        conf *= 0.7
+
     kelly = kelly_fn(conf)
+    _track_strategy_entry(ticker_id, "S2_Reversion", current)
     return {
         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
         "confidence": conf,
         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
         "strategy": "S2_Reversion",
-        "s2_zscore": round(z_score, 3), "s2_rsi2": round(rsi2, 2),
-        "s2_ibs": round(ibs_val, 4),
+        "s2_zscore": round(z_score, 3), "s2_rsi2": round(rsi2, 2) if rsi2 else 0,
+        "s2_ibs": round(ibs_val, 4), "s2_score": score,
+        "s2_vol_capitulation": vol_capitulation, "s2_dev_speed": round(dev_speed, 3),
+        "s2_live_sharpe": stats["sharpe"],
         **common_fields,
     }
 
 
 def _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, common_fields):
-    """System 3: Macro Trend Following — SMA crossover + regime filter.
+    """System 3: Macro Trend Following — multi-timeframe momentum.
 
-    Academic basis: Moskowitz, Ooi & Pedersen (2012), Faber (2007).
-    Time-series momentum on index ETPs. Thrives in Stress (trend following).
-    Habitat: Index ETPs (3USL, QQQ3, 3UKL). Session: All.
+    Academic basis: Moskowitz-Ooi-Pedersen (2012), Faber (2007), Asness-Moskowitz-Pedersen (2013).
+    5 factors: dual MA crossover, 12-bar momentum, ADX trend strength, volume trend, Hurst confirmation.
+    Thrives in trending + stress. ISA long-only: only long momentum.
     """
     if len(bars_5m) < 20:
         return None
 
     closes = [b["close"] for b in bars_5m]
-
-    # 10-bar and 20-bar SMA (on 5-min bars, these represent ~50min and ~100min)
-    sma10 = sum(closes[-10:]) / 10
-    sma20 = sum(closes[-20:]) / 20
     current = closes[-1]
 
-    # Bullish crossover: SMA10 > SMA20 AND price > SMA10
-    if sma10 <= sma20 or current <= sma10:
-        return None
+    # 1. Dual MA crossover (fast/slow)
+    sma5 = sum(closes[-5:]) / 5
+    sma20 = sum(closes[-20:]) / 20
+    ma_bullish = sma5 > sma20 and current > sma5
 
-    # ADX confirmation — need trend strength
+    # 2. 12-bar momentum (Moskowitz-style time-series momentum)
+    if len(closes) >= 12:
+        mom_12 = (current - closes[-12]) / closes[-12] if closes[-12] > 0 else 0
+    else:
+        mom_12 = 0
+    mom_bullish = mom_12 > 0.005  # >0.5% gain over 12 bars (1 hour)
+
+    # 3. ADX trend strength
     adx = ind.get("adx", 0)
-    if adx < 15.0:
+    adx_strong = adx > 20.0
+
+    # 4. Volume trend — increasing volume confirms trend
+    vol_slope = ind.get("vol_slope", 0)
+    vol_confirming = vol_slope > 0
+
+    # 5. Hurst regime — trending confirmed
+    hurst = ind.get("hurst", 0.5)
+    hurst_regime = ind.get("hurst_regime", "random")
+    hurst_trending = hurst_regime == "trending" or hurst > 0.55
+
+    # Regime gate: reject in mean_reverting (choppy kills trend following)
+    if hurst_regime == "mean_reverting":
         return None
 
-    # Regime filter: S3 thrives in Normal, Caution, AND Stress (trend following benefits from momentum)
-    # Only disabled in random/choppy regime
-    hurst_regime = ind.get("hurst_regime", "random")
-    if hurst_regime == "mean_reverting":
-        return None  # Mean-reverting = choppy = bad for trend following
+    # Score: need 4+ of 5
+    factors = [ma_bullish, mom_bullish, adx_strong, vol_confirming, hurst_trending]
+    score = sum(factors)
+    if score < 4:
+        return None
 
-    # Crossover strength: how far above SMA20 is SMA10?
-    crossover_pct = (sma10 - sma20) / sma20 * 100.0 if sma20 > 0 else 0
+    # Crossover strength for confidence scaling
+    crossover_pct = (sma5 - sma20) / sma20 * 100.0 if sma20 > 0 else 0
 
-    # Graduated confidence
-    conf = 56.0
-    if crossover_pct > 0.5:
-        conf += 8.0  # Strong crossover
-    if adx > 25.0:
-        conf += 8.0  # Strong trend
-    if ind.get("rvol", 1.0) > 1.2:
-        conf += 5.0  # Volume supports trend
-    if ind.get("vol_slope", 0) > 0:
-        conf += 4.0  # Increasing volume
-    conf = min(conf, 85.0)
+    conf = 50.0
+    conf += score * 4.0
+    if crossover_pct > 0.3:
+        conf += 5.0
+    if adx > 30.0:
+        conf += 5.0
+    if mom_12 > 0.01:
+        conf += 3.0  # Strong 1-hour momentum
+    if hurst_trending:
+        conf += 4.0
+    conf = max(0, min(conf, 90.0))
 
     if conf < conf_floor:
         return None
 
+    stats = _strategy_live_stats("S3_MacroTrend")
+    if stats["n"] >= 30 and stats["sharpe"] < -0.5:
+        conf *= 0.7
+
     kelly = kelly_fn(conf)
+    _track_strategy_entry(ticker_id, "S3_MacroTrend", current)
     return {
         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
         "confidence": conf,
         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
         "strategy": "S3_MacroTrend",
-        "s3_sma10": round(sma10, 4), "s3_sma20": round(sma20, 4),
-        "s3_crossover_pct": round(crossover_pct, 3), "s3_adx": round(adx, 1),
+        "s3_sma5": round(sma5, 4), "s3_sma20": round(sma20, 4),
+        "s3_crossover_pct": round(crossover_pct, 3), "s3_mom12": round(mom_12, 5),
+        "s3_score": score, "s3_live_sharpe": stats["sharpe"],
         **common_fields,
     }
 
@@ -1897,6 +2019,15 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 eq = msg.get("equity", 10000.0)
                 k["kelly_fraction"] = pk
                 k["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
+
+        # Regime-aware Kelly scaling (Bouchaud-Potters 2003):
+        # - Trending: full Kelly (momentum works)
+        # - Mean-reverting: 80% Kelly (counter-trend risk)
+        # - Random/choppy: 60% Kelly (no edge, reduce exposure)
+        regime_scale = {"trending": 1.0, "mean_reverting": 0.80, "random": 0.60}.get(hurst_regime, 0.70)
+        k["kelly_fraction"] *= regime_scale
+        k["shares"] = max(1, int(k["shares"] * regime_scale))
+
         return k
 
     # VanguardSniper (momentum, non-mean-reverting regimes)
