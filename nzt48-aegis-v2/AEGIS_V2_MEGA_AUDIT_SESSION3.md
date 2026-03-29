@@ -943,24 +943,44 @@ The single highest-ROI action available right now, measured in expected reductio
 | **Friction** | Total cost of a trade: commission + slippage + spread drag |
 | **TypeA-F** | Legacy signal generators (quarantined in Rust, active in Python) |
 
-## APPENDIX C: CRITICAL BUG LIST
+## APPENDIX C: CRITICAL BUG LIST (POST-FIX STATUS)
 
-| ID | Severity | File:Line | Description | Fix |
-|----|----------|-----------|-------------|-----|
-| BUG-001 | P0 | `risk_arbiter.rs:180` | CHECK 6 uses `!self.simulation_mode` instead of `enforce_live_gates` | Change to `if enforce_live_gates {` |
-| BUG-002 | P0 | PaperBroker | Zero commission injected into paper fills | Add `max(1.50, 0.0005 * notional)` per side |
-| BUG-003 | P0 | PaperBroker | Zero slippage injected into paper fills | Add 5bps adverse on entry and exit |
-| BUG-004 | P1 | `ci.yml:87,92,102,105` | `\|\| true` swallows pytest failures | Remove `\|\| true` or replace with allowed-failure annotation |
-| BUG-005 | P1 | `exit_engine.rs` | Per-strategy Chandelier config not wired to `update_tracking()` | Call `config.chandelier.params_for_strategy(strategy)` |
-| BUG-006 | P2 | `fast_backtest_pipeline.py:808` | Backtests run with `paper_uses_live_gates=False` | Set to `True` or parametrize |
+| ID | Severity | File:Line | Description | Status |
+|----|----------|-----------|-------------|--------|
+| BUG-001 | P0 | `risk_arbiter.rs:180` | CHECK 6 used `!self.simulation_mode` instead of `enforce_live_gates` | **FIXED** (commit dec34ca) — now uses `enforce_live_gates` |
+| BUG-002 | ~~P0~~ | PaperBroker | Zero commission claim | **NON-BUG** — `paper_broker.rs:164` already charges `commission: 1.50` per fill; `bridge.py:2647` deducts `sim_commission = 3.40` from Kelly sizing |
+| BUG-003 | ~~P0~~ | PaperBroker | Zero slippage claim | **NON-BUG** — `paper_broker.rs:46` has `slippage_pct: 0.5` (500bps, 10x more conservative than the 5bps Gemini demanded); market impact scaling at line 145 |
+| BUG-004 | P1 | `ci.yml:87,92,102,105` | `\|\| true` swallowed pytest failures | **FIXED** (commit dec34ca) — all `\|\| true` removed, failures now fail the pipeline |
+| BUG-005 | P1 | `exit_engine.rs` | Per-strategy Chandelier not wired to `update_tracking()` | **FIXED** (commit dec34ca) — `per_strategy_overrides` HashMap on ExitEngine, `update_tracking()` looks up `entry_type`, engine.rs wires from config |
+| BUG-006 | P2 | `risk_arbiter.rs:135` | Default `paper_uses_live_gates = false` meant replay/backtest bypassed risk gates | **FIXED** (commit dec34ca) — default changed to `true` |
+
+### Additional actions taken:
+| Action | Description | Commit |
+|--------|-------------|--------|
+| Quarantine TypeA-F | All 6 legacy signal types disabled for GBP 10K account. Only VS/AS/S1-S7 active. | dec34ca |
+| Claude/Gemini API | `DecisionAuthority.execute()` now calls Claude CLI (`claude -p`) with Gemini SDK fallback. Budget tracking, authority gating, structured response parsing. Nightly review wired to execute. | dec34ca |
+
+### Gemini Syndicate claim verification (post-investigation):
+
+| Gemini Claim | Truth | Evidence |
+|-------------|-------|----------|
+| "ask=0 division-by-zero" | **FALSE** | 3-layer guard at `exit_engine.rs:472-483` (bid<=0, ask<=0, crossed book) |
+| "9 bypassed risk checks" | **MOSTLY FALSE** | 8/9 were already fixed; CHECK 6 was real, now fixed |
+| "GBP/GBX 500p crash" | **IRRELEVANT** | System trades US equities via IBKR |
+| "14,357 lines of dead code" | **FALSE** | All 58 modules imported AND called in bridge.py or nightly_v6.py |
+| "Zero-friction paper broker" | **FALSE** | 0.5% slippage + GBP 1.50/fill commission + market impact scaling already present |
+| "Delete Types A-F" | **VALID** | Implemented — all quarantined |
+| "9.2/10 is a lie" | **PARTIALLY TRUE** | Code quality is high, proven edge is 0/10. Now scored as vector, not scalar. |
 
 ---
 
-**END OF AUDIT**
+**END OF AUDIT (UPDATED 2026-03-29 POST-FIX)**
 
 *This document was generated from direct codebase evidence. Every file:line reference was verified by grep/read against the actual source at `/Users/rr/nzt48-signals/nzt48-aegis-v2/` on branch `feat/tier-system-enhancements-full`. No claims are based on documentation alone -- all were cross-referenced with running code.*
 
 *The auditor has no financial interest in the performance of AEGIS V2. The auditor's incentive is accuracy, not optimism.*
+
+*Post-fix verification: All 6 bugs addressed (4 fixed, 2 verified as non-bugs). All fixes deployed to EC2 (3.230.44.22). All 5 Docker containers healthy.*
 
 *Auditor: Claude Opus 4.6, Institutional Mode*
 *Date: 2026-03-29*
