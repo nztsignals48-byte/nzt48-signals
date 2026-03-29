@@ -54,53 +54,92 @@ bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 _strategy_signal_counts = defaultdict(int)
 _strategy_total_confidence = defaultdict(float)
 
-# AUTONOMY: Auto-kill set — strategies disabled by live Sharpe feedback.
-# Once a strategy has 30+ trades AND Sharpe < -1.0, it's added here and blocked.
-# Recovery: if subsequent exits improve Sharpe above -0.5, strategy is re-enabled.
-_auto_killed_strategies = set()
+# ══════════════════════════════════════════════════════════════════════════════
+# THE COMPOUNDING MACHINE
+# ══════════════════════════════════════════════════════════════════════════════
+# This is the core autonomous feedback loop. It does 5 things:
+#   1. TRACK:  Record every entry/exit per strategy
+#   2. SCORE:  Compute rolling WR, PF, Sharpe per strategy
+#   3. SIZE:   Allocate Kelly proportional to proven edge (not equal weight)
+#   4. KILL:   Disable strategies with Sharpe < -1.0 over 30+ trades
+#   5. COMPOUND: Track geometric growth rate and log CAGR daily
+#
+# The machine doesn't care WHICH strategy wins. It finds winners and scales them.
+# Losers get killed automatically. No human intervention needed.
+# ══════════════════════════════════════════════════════════════════════════════
 
-# P7: Cannibalization detector
+_auto_killed_strategies = {"S6_Catalyst"}  # Killed by 730-day backtest: 13% WR, PF 0.01 over 554K trades
+_strategy_pnl_history = defaultdict(list)
+_strategy_entry_prices = {}
 _cofire_counts = defaultdict(int)
 _cofire_total = defaultdict(int)
 _COFIRE_WINDOW_NS = 5 * 60 * 1_000_000_000
 _recent_strategy_fires = {}
 
-# ── LIVE PERFORMANCE TRACKER (per-strategy Sharpe, rolling 100-trade window) ──
-# Tracks realized P&L per strategy for real-time edge measurement.
-_strategy_pnl_history = defaultdict(list)  # strategy → [(entry_price, exit_price, timestamp)]
-_strategy_entry_prices = {}  # (ticker_id, strategy) → entry_price
+# Edge-proportional allocation weights (updated on every exit)
+_strategy_allocation_weights = {}  # strategy → weight [0.0, 1.0]
 
 def _track_strategy_entry(ticker_id, strategy, price):
-    """Record entry for live performance tracking."""
+    """TRACK: Record entry price for P&L computation."""
     _strategy_entry_prices[(ticker_id, strategy)] = price
 
 def _track_strategy_exit(ticker_id, strategy, exit_price):
-    """Record exit, compute return, auto-kill/recover strategies by live Sharpe."""
+    """TRACK + SCORE + SIZE + KILL: The compounding machine core loop."""
     key = (ticker_id, strategy)
     entry = _strategy_entry_prices.pop(key, None)
-    if entry is not None and entry > 0:
-        ret = (exit_price - entry) / entry
-        _strategy_pnl_history[strategy].append(ret)
-        if len(_strategy_pnl_history[strategy]) > 100:
-            _strategy_pnl_history[strategy] = _strategy_pnl_history[strategy][-100:]
+    if entry is None or entry <= 0:
+        return
 
-        # AUTONOMY: Auto-kill/recover based on rolling Sharpe
-        stats = _strategy_live_stats(strategy)
-        if stats["n"] >= 30:
-            if stats["sharpe"] < -1.0 and strategy not in _auto_killed_strategies:
-                _auto_killed_strategies.add(strategy)
-                sys.stderr.write(
-                    f"AUTO_KILL: {strategy} disabled — Sharpe={stats['sharpe']} "
-                    f"WR={stats['wr']} PF={stats['pf']} over {stats['n']} trades\n"
-                )
-                sys.stderr.flush()
-            elif stats["sharpe"] > -0.5 and strategy in _auto_killed_strategies:
-                _auto_killed_strategies.discard(strategy)
-                sys.stderr.write(
-                    f"AUTO_RECOVER: {strategy} re-enabled — Sharpe={stats['sharpe']} "
-                    f"improved above -0.5 threshold\n"
-                )
-                sys.stderr.flush()
+    ret = (exit_price - entry) / entry
+    _strategy_pnl_history[strategy].append(ret)
+    if len(_strategy_pnl_history[strategy]) > 200:
+        _strategy_pnl_history[strategy] = _strategy_pnl_history[strategy][-200:]
+
+    stats = _strategy_live_stats(strategy)
+
+    # KILL: Disable losers
+    if stats["n"] >= 30:
+        if stats["sharpe"] < -1.0 and strategy not in _auto_killed_strategies:
+            _auto_killed_strategies.add(strategy)
+            sys.stderr.write(f"COMPOUND_KILL: {strategy} Sharpe={stats['sharpe']} n={stats['n']}\n")
+            sys.stderr.flush()
+        elif stats["sharpe"] > -0.3 and strategy in _auto_killed_strategies:
+            _auto_killed_strategies.discard(strategy)
+            sys.stderr.write(f"COMPOUND_REVIVE: {strategy} Sharpe={stats['sharpe']}\n")
+            sys.stderr.flush()
+
+    # SIZE: Recompute edge-proportional allocation weights across ALL strategies.
+    # Strategies with higher Sharpe get more capital. Negative Sharpe gets zero.
+    all_stats = {s: _strategy_live_stats(s) for s in _strategy_pnl_history if _strategy_live_stats(s)["n"] >= 10}
+    total_edge = 0.0
+    for s, st in all_stats.items():
+        edge = max(st["sharpe"], 0.0)  # Only positive edge counts
+        all_stats[s]["edge"] = edge
+        total_edge += edge
+
+    if total_edge > 0:
+        for s, st in all_stats.items():
+            _strategy_allocation_weights[s] = st["edge"] / total_edge
+    else:
+        # No proven edge anywhere — equal weight for data collection
+        n_active = len([s for s in all_stats if s not in _auto_killed_strategies])
+        if n_active > 0:
+            for s in all_stats:
+                _strategy_allocation_weights[s] = 1.0 / n_active
+
+    # Log compound state every 10 exits
+    total_exits = sum(len(h) for h in _strategy_pnl_history.values())
+    if total_exits % 10 == 0:
+        sys.stderr.write(f"COMPOUND_STATE: exits={total_exits} killed={list(_auto_killed_strategies)} "
+                         f"weights={{{', '.join(f'{s}:{w:.2f}' for s, w in sorted(_strategy_allocation_weights.items()))}}}\n")
+        sys.stderr.flush()
+
+def get_strategy_weight(strategy):
+    """SIZE: Get current allocation weight for a strategy [0.0, 1.0].
+    Used by _kelly_for to scale Kelly proportional to proven edge."""
+    if strategy in _auto_killed_strategies:
+        return 0.0
+    return _strategy_allocation_weights.get(strategy, 0.5)  # Default 50% until proven
 
 def _strategy_live_sharpe(strategy):
     """Compute rolling Sharpe for a strategy (annualized, assuming 252 trading days)."""
@@ -2475,6 +2514,15 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     best = all_signals[0]
 
+    # COMPOUNDING MACHINE: Scale Kelly by edge-proportional allocation weight.
+    # Strategies with proven higher Sharpe get more capital. Unproven get 50%.
+    strat_name = best.get("strategy", "")
+    alloc_weight = get_strategy_weight(strat_name)
+    if alloc_weight < 1.0:
+        best["kelly_fraction"] *= max(alloc_weight, 0.1)  # Floor 10% to keep data flowing
+        best["shares"] = max(1, int(best["shares"] * max(alloc_weight, 0.1)))
+    best["allocation_weight"] = round(alloc_weight, 3)
+
     # Per-ticker cooldown
     tick_count = _tick_counts.get(ticker_id, 0)
     if not _SIM_MODE:
@@ -2510,9 +2558,11 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         )
         best["entry_type"] = entry_type
 
-        # STRATEGY REGISTRY ENFORCEMENT (2026-03-24):
-        # TypeA/D DISABLED — net losers (29.5%/24.1% WR).
-        _DISABLED_TYPES = {"TypeA", "TypeD"}
+        # STRATEGY REGISTRY (updated by 730-day backtest 2026-03-29):
+        # TypeA/D RE-ENABLED — 730-day backtest shows 44%/43% WR, PF 1.22/1.28.
+        # Previous disable was based on broken system with fantasy weights.
+        # TypeC disabled — 39% WR, PF 0.81 over 62K trades.
+        _DISABLED_TYPES = {"TypeC"}
         _SHADOW_TYPES = set()
         if entry_type in _DISABLED_TYPES:
             return None
