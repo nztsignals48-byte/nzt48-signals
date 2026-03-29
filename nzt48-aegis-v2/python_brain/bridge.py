@@ -94,6 +94,37 @@ def _strategy_live_sharpe(strategy):
     daily_sharpe = mean_r / std_r
     return daily_sharpe * (252 ** 0.5)
 
+# ── COMPOUNDING METRICS: Daily equity tracking + CAGR computation ──
+_daily_equity_snapshots = []  # [(date_str, equity)]
+_last_equity_date = ""
+
+def _track_daily_equity(equity):
+    """Track daily equity for CAGR computation. Call once per new day."""
+    global _last_equity_date
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if today != _last_equity_date and equity > 0:
+        _last_equity_date = today
+        _daily_equity_snapshots.append((today, equity))
+        if len(_daily_equity_snapshots) > 365:
+            _daily_equity_snapshots[:] = _daily_equity_snapshots[-365:]
+        if len(_daily_equity_snapshots) >= 2:
+            first_eq = _daily_equity_snapshots[0][1]
+            latest_eq = equity
+            n_days = len(_daily_equity_snapshots)
+            if first_eq > 0 and n_days > 1:
+                total_return = latest_eq / first_eq
+                daily_geo = total_return ** (1.0 / n_days) - 1.0
+                annualized_cagr = (1 + daily_geo) ** 252 - 1.0
+                max_eq = max(eq for _, eq in _daily_equity_snapshots)
+                drawdown = (max_eq - latest_eq) / max_eq * 100.0 if max_eq > 0 else 0
+                sys.stderr.write(
+                    f"COMPOUNDING: days={n_days} equity=£{latest_eq:.0f} "
+                    f"total_return={total_return:.4f} daily_geo={daily_geo*100:.4f}% "
+                    f"CAGR={annualized_cagr*100:.1f}% max_dd={drawdown:.1f}%\n"
+                )
+                sys.stderr.flush()
+
 def _strategy_live_stats(strategy):
     """Get live WR, PF, Sharpe for a strategy."""
     rets = _strategy_pnl_history.get(strategy, [])
@@ -2292,6 +2323,19 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["kelly_fraction"] = max(0.001, sig["kelly_fraction"] * (1 - cost_frac))
             sig["shares"] = max(1, int(sig["shares"] * (1 - cost_frac)))
 
+    # COMPOUNDING: Cost-aware edge filter — reject if cost > 50% of expected edge.
+    # Expected edge ≈ kelly_fraction * equity * (WR - 0.5) * 2 (simplified edge proxy).
+    # If the cost of the trade exceeds half the expected profit, it's not worth taking.
+    wr = msg.get("win_rate", 0.5)
+    edge_proxy = max(wr - 0.45, 0) * 2  # edge above 45% WR breakeven (after costs)
+    all_signals = [
+        sig for sig in all_signals
+        if sig["sim_total_cost_gbp"] <= 0 or edge_proxy <= 0 or
+        sig["sim_total_cost_gbp"] < (sig["kelly_fraction"] * msg.get("equity", 10000) * edge_proxy * 0.5)
+    ]
+    if not all_signals:
+        return None
+
     # Select best signal after all adjustments
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     best = all_signals[0]
@@ -2488,6 +2532,11 @@ def process_tick(msg):
     """Process a tick message through 5 stages: ingest → indicators → gates → signals → output."""
     ticker_id = msg["ticker_id"]
     _load_adaptive_params()
+
+    # COMPOUNDING: Track daily equity for CAGR computation
+    equity = msg.get("equity", 0)
+    if equity > 0:
+        _track_daily_equity(equity)
 
     # Track symbol mapping
     if "symbol" in msg and msg["symbol"]:
@@ -2704,6 +2753,27 @@ def main():
                     "error": f"{type(e).__name__}: {e}",
                 }
             print(json.dumps(response), flush=True)
+
+        elif msg_type == "exit":
+            # COMPOUNDING FIX: Engine notifies bridge when a position is closed.
+            # Updates live Sharpe tracking for the strategy that opened the position.
+            try:
+                exit_tid = msg.get("ticker_id", -1)
+                exit_price = msg.get("exit_price", 0)
+                exit_pnl = msg.get("pnl", 0)
+                exit_strategy = msg.get("strategy", "")
+                if exit_price > 0 and exit_strategy:
+                    _track_strategy_exit(exit_tid, exit_strategy, exit_price)
+                    stats = _strategy_live_stats(exit_strategy)
+                    sys.stderr.write(
+                        f"EXIT_TRACKED: {exit_strategy} tid={exit_tid} pnl={exit_pnl:.4f} "
+                        f"live_wr={stats['wr']} live_pf={stats['pf']} live_sharpe={stats['sharpe']}\n"
+                    )
+                    sys.stderr.flush()
+            except Exception as e:
+                sys.stderr.write(f"Bridge: exit tracking error: {e}\n")
+                sys.stderr.flush()
+            response = {"type": "ack", "ticker_id": msg.get("ticker_id", -1)}
 
         elif msg_type == "shutdown":
             sys.stderr.write("Python Brain Bridge: shutting down\n")

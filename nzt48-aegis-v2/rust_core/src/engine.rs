@@ -319,6 +319,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub last_prices: HashMap<TickerId, f64>,
     pub positions: HashMap<TickerId, PositionState>,
     pub gap_cooldowns: HashMap<TickerId, u64>,
+    /// COMPOUNDING: Exit events queued for Python bridge notification (live Sharpe tracking).
+    pub pending_exit_notifications: Vec<(u32, f64, f64, String)>, // (ticker_id, exit_price, pnl, strategy)
     /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
     halted_tickers: std::collections::HashSet<TickerId>,
     /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.
@@ -574,6 +576,7 @@ impl<B: BrokerAdapter> Engine<B> {
             last_prices: HashMap::new(),
             positions: HashMap::new(),
             gap_cooldowns: HashMap::new(),
+            pending_exit_notifications: Vec::new(),
             halted_tickers: std::collections::HashSet::new(),
             economic_calendar: Vec::new(),
             now_ns: 0,
@@ -963,6 +966,22 @@ impl<B: BrokerAdapter> Engine<B> {
             .or_insert_with(|| self.broker.currency_for_ticker(&tid).to_string())
             .clone();
         let fx_currency = crate::currency::Currency::from_str_code(&currency_code);
+
+        // COMPOUNDING FIX: Wire live VIX data into macro regime from IBKR ticks.
+        // When we see a tick for a VIX-tracking instrument, update macro_regime.
+        // This makes S4 (VolPremium) and S7 (TailHedge) react to real market conditions.
+        {
+            let sym = self.config.contracts
+                .get(tid.0 as usize)
+                .map(|c| c.symbol.as_str())
+                .unwrap_or("");
+            let is_vix_proxy = sym.contains("VIX") || sym.contains("UVXY") || sym.contains("VXX")
+                || sym == "VIXY" || sym.starts_with("SVXY");
+            if is_vix_proxy && tick.last > 0.0 {
+                self.macro_regime.update_vix(tick.last, self.now_ns);
+            }
+        }
+
         // Keep native prices for order submission (IBKR needs native-currency limit price)
         // WIRED (Sprint 3A): Both bid and ask kept for spread calculation.
         let native_ask = tick.ask;
@@ -1391,10 +1410,14 @@ impl<B: BrokerAdapter> Engine<B> {
                         vix_at_entry: self.macro_regime.indicator().vix,
                         vol_slope_at_entry: e_vol_slope,
                         trade_class: String::new(),   // Assigned by nightly trade taxonomy
-                        entry_type: pos_entry_type,
+                        entry_type: pos_entry_type.clone(),
                     });
                     self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
                     self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
+                    // COMPOUNDING: Queue exit for Python bridge live Sharpe tracking
+                    self.pending_exit_notifications.push((
+                        tid.0, exit_price_gbp, final_pnl, pos_entry_type,
+                    ));
                     if final_pnl < 0.0 {
                         self.liquidation_defense.record_stop_loss();
                     } else {

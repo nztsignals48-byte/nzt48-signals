@@ -328,6 +328,15 @@ impl PythonBridge {
         }
     }
 
+    /// COMPOUNDING: Send a raw JSON message to the bridge (fire-and-forget, no response expected).
+    /// Used for exit notifications, config updates, etc.
+    pub fn send_notification(&mut self, json_line: &str) {
+        if writeln!(self.stdin, "{json_line}").is_err() {
+            eprintln!("BRIDGE_NOTIFY: stdin write failed (non-fatal)");
+        }
+        let _ = self.stdin.flush();
+    }
+
     /// Send a tick to the Python bridge and get a signal back.
     /// Returns None if no signal or if communication fails.
     pub fn evaluate_tick(

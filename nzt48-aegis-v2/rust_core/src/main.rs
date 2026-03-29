@@ -882,6 +882,18 @@ fn main() {
 
                     // Process tick with signal through engine pipeline
                     engine.process_tick_with_signal(t, signal);
+
+                    // COMPOUNDING: Send exit notifications to Python bridge for live Sharpe
+                    if let Some(ref mut bridge) = python_bridge {
+                        for (tid, exit_price, pnl, strategy) in engine.pending_exit_notifications.drain(..) {
+                            let exit_msg = format!(
+                                r#"{{"type":"exit","ticker_id":{},"exit_price":{:.6},"pnl":{:.6},"strategy":"{}"}}"#,
+                                tid, exit_price, pnl, strategy,
+                            );
+                            bridge.send_notification(&exit_msg);
+                        }
+                    }
+                    engine.pending_exit_notifications.clear();
                 }
                 Some(RouteResult::Apex(t)) => {
                     // P4-A: Record tick route in telemetry
