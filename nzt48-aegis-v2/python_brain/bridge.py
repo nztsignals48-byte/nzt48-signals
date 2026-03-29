@@ -2425,12 +2425,62 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # ── SYSTEM 7: Tail Hedge (Phase 9) ──
     s7_signal = _system7_tail_hedge(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
 
+    # ── NEW STRATEGIES FROM BOOK LIBRARY ──
+
+    # Vol Compression Breakout (Book 22)
+    vol_comp_signal = None
+    try:
+        from python_brain.strategies.vol_compression import detect_squeeze
+        import numpy as _np
+        closes = ind.get("closes_arr")
+        highs = ind.get("highs_arr")
+        lows = ind.get("lows_arr")
+        vols = ind.get("volumes_arr")
+        if closes is not None and len(closes) > 100:
+            sq = detect_squeeze(_np.array(closes), _np.array(highs), _np.array(lows), _np.array(vols),
+                                ticker=msg.get("symbol", ""))
+            if sq and sq.confidence >= conf_floor and sq.breakout_direction == "up":
+                vol_comp_signal = {
+                    "confidence": sq.confidence,
+                    "kelly_fraction": _kelly_for(sq.confidence),
+                    "shares": max(1, int(_kelly_for(sq.confidence) * msg.get("equity", 10000) / max(ind.get("last_price", 1), 0.01))),
+                    "strategy": "VolCompression",
+                    "squeeze_score": sq.squeeze_score,
+                    **common_fields,
+                }
+    except Exception:
+        pass
+
+    # Calendar Anomaly Modifier (Book 171) — applies to ALL signals
+    cal_conf_delta = 0
+    cal_kelly_mult = 1.0
+    try:
+        from python_brain.strategies.calendar_anomalies import get_calendar_adjustment
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        cal_adj = get_calendar_adjustment(
+            now.year, now.month, now.day, now.weekday(),
+            now.hour, now.minute,
+            london_time_secs=msg.get("london_time_secs", 0),
+        )
+        cal_conf_delta = cal_adj.confidence_delta
+        cal_kelly_mult = cal_adj.kelly_multiplier
+    except Exception:
+        pass
+
     # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
+        vol_comp_signal,
     ] if s]
+
+    # Apply calendar anomaly adjustments to ALL signals (Book 171)
+    if cal_conf_delta != 0 or cal_kelly_mult != 1.0:
+        for sig in all_signals:
+            sig["confidence"] = max(0, min(100, sig["confidence"] + cal_conf_delta))
+            sig["kelly_fraction"] *= cal_kelly_mult
 
     # AUTONOMY: Filter out auto-killed strategies (live Sharpe < -1.0 over 30+ trades)
     if _auto_killed_strategies:
