@@ -487,6 +487,11 @@ pub struct RawChandelier {
     /// Sprint G: Volume exhaustion exit config.
     #[serde(default)]
     pub exhaustion: RawChandelierExhaustion,
+    /// Book 39: Per-strategy exit parameter overrides.
+    /// Keys are strategy names (e.g., "TypeF", "S2_Reversion").
+    /// Any field present overrides the global default for that strategy.
+    #[serde(default)]
+    pub per_strategy: HashMap<String, RawChandelierPerStrategy>,
 }
 
 impl Default for RawChandelier {
@@ -502,8 +507,47 @@ impl Default for RawChandelier {
             dust_threshold_gbp: default_dust(),
             adaptive: RawChandelierAdaptive::default(),
             exhaustion: RawChandelierExhaustion::default(),
+            per_strategy: HashMap::new(),
         }
     }
+}
+
+impl RawChandelier {
+    /// Book 39: Get chandelier params for a strategy, falling back to global defaults.
+    pub fn params_for_strategy(&self, strategy: &str) -> (Vec<f64>, f64, f64, f64, f64, f64) {
+        if let Some(ovr) = self.per_strategy.get(strategy) {
+            (
+                ovr.rung_pct.clone().unwrap_or_else(|| self.rung_pct.clone()),
+                ovr.initial_stop_atr_mult.unwrap_or(self.initial_stop_atr_mult),
+                ovr.rung3_trail_atr.unwrap_or(self.rung3_trail_atr),
+                ovr.rung4_trail_atr.unwrap_or(self.rung4_trail_atr),
+                ovr.rung5_trail_atr.unwrap_or(self.rung5_trail_atr),
+                ovr.atr_floor_pct.unwrap_or(self.atr_floor_pct),
+            )
+        } else {
+            (
+                self.rung_pct.clone(),
+                self.initial_stop_atr_mult,
+                self.rung3_trail_atr,
+                self.rung4_trail_atr,
+                self.rung5_trail_atr,
+                self.atr_floor_pct,
+            )
+        }
+    }
+}
+
+/// Book 39: Per-strategy Chandelier exit parameter overrides.
+/// Each field is Optional — only present fields override the global default.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct RawChandelierPerStrategy {
+    pub rung_pct: Option<Vec<f64>>,
+    pub initial_stop_atr_mult: Option<f64>,
+    pub rung3_trail_atr: Option<f64>,
+    pub rung4_trail_atr: Option<f64>,
+    pub rung5_trail_atr: Option<f64>,
+    pub atr_floor_pct: Option<f64>,
+    pub time_stop_max_minutes: Option<u32>,
 }
 
 /// Sprint G: Volume exhaustion exit config (from config.toml [chandelier.exhaustion]).
