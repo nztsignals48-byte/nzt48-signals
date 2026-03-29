@@ -54,6 +54,11 @@ bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 _strategy_signal_counts = defaultdict(int)
 _strategy_total_confidence = defaultdict(float)
 
+# AUTONOMY: Auto-kill set — strategies disabled by live Sharpe feedback.
+# Once a strategy has 30+ trades AND Sharpe < -1.0, it's added here and blocked.
+# Recovery: if subsequent exits improve Sharpe above -0.5, strategy is re-enabled.
+_auto_killed_strategies = set()
+
 # P7: Cannibalization detector
 _cofire_counts = defaultdict(int)
 _cofire_total = defaultdict(int)
@@ -70,15 +75,32 @@ def _track_strategy_entry(ticker_id, strategy, price):
     _strategy_entry_prices[(ticker_id, strategy)] = price
 
 def _track_strategy_exit(ticker_id, strategy, exit_price):
-    """Record exit and compute return for live Sharpe."""
+    """Record exit, compute return, auto-kill/recover strategies by live Sharpe."""
     key = (ticker_id, strategy)
     entry = _strategy_entry_prices.pop(key, None)
     if entry is not None and entry > 0:
         ret = (exit_price - entry) / entry
         _strategy_pnl_history[strategy].append(ret)
-        # Keep rolling window of 100
         if len(_strategy_pnl_history[strategy]) > 100:
             _strategy_pnl_history[strategy] = _strategy_pnl_history[strategy][-100:]
+
+        # AUTONOMY: Auto-kill/recover based on rolling Sharpe
+        stats = _strategy_live_stats(strategy)
+        if stats["n"] >= 30:
+            if stats["sharpe"] < -1.0 and strategy not in _auto_killed_strategies:
+                _auto_killed_strategies.add(strategy)
+                sys.stderr.write(
+                    f"AUTO_KILL: {strategy} disabled — Sharpe={stats['sharpe']} "
+                    f"WR={stats['wr']} PF={stats['pf']} over {stats['n']} trades\n"
+                )
+                sys.stderr.flush()
+            elif stats["sharpe"] > -0.5 and strategy in _auto_killed_strategies:
+                _auto_killed_strategies.discard(strategy)
+                sys.stderr.write(
+                    f"AUTO_RECOVER: {strategy} re-enabled — Sharpe={stats['sharpe']} "
+                    f"improved above -0.5 threshold\n"
+                )
+                sys.stderr.flush()
 
 def _strategy_live_sharpe(strategy):
     """Compute rolling Sharpe for a strategy (annualized, assuming 252 trading days)."""
@@ -2370,6 +2392,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
     ] if s]
+
+    # AUTONOMY: Filter out auto-killed strategies (live Sharpe < -1.0 over 30+ trades)
+    if _auto_killed_strategies:
+        all_signals = [s for s in all_signals if s.get("strategy", "") not in _auto_killed_strategies]
+
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     return all_signals
 

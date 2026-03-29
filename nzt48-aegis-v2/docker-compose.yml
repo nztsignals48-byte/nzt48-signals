@@ -132,12 +132,52 @@ services:
     networks:
       - aegis-net
 
+  # ── MONITORING STACK (Book 72B) ──
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aegis-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.retention.time=30d']
+    restart: unless-stopped
+    networks:
+      - aegis-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aegis-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=aegis2026
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - aegis-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
 volumes:
   aegis-events:
   aegis-data:
   aegis-logs:
   aegis-redis-data:
-  claude-auth:            # Sprint S03: Persist Claude auth token
+  claude-auth:
+  prometheus-data:
+  grafana-data:
 
 networks:
   aegis-net:

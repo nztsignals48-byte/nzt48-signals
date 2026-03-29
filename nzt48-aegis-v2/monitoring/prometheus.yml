@@ -1,0 +1,15 @@
+# AEGIS V2 Prometheus Configuration
+# Scrapes aegis-v2 container metrics server on :9090/metrics
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'aegis-v2'
+
+scrape_configs:
+  - job_name: 'aegis-engine'
+    static_configs:
+      - targets: ['aegis-v2:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s

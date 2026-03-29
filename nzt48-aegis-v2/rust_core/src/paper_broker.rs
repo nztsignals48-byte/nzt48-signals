@@ -138,10 +138,15 @@ impl PaperBroker {
             return Ok(());
         }
         // P3: Apply slippage model — adverse fill adjustment per Book 12.
-        let slip = self.config.slippage_pct / 100.0;
+        // EXECUTION: TWAP-aware slippage — larger orders get more slippage (market impact).
+        let notional = order.limit_price * remaining as f64;
+        let base_slip = self.config.slippage_pct / 100.0;
+        // Orders > £500: +0.1% per £500 bracket (simulates market impact)
+        let impact_slip = if notional > 500.0 { (notional / 500.0).min(5.0) * 0.001 } else { 0.0 };
+        let slip = base_slip + impact_slip;
         let price = match order.side {
-            OrderSide::Buy => order.limit_price * (1.0 + slip),   // Buy fills worse (higher)
-            OrderSide::Sell => order.limit_price * (1.0 - slip),  // Sell fills worse (lower)
+            OrderSide::Buy => order.limit_price * (1.0 + slip),
+            OrderSide::Sell => order.limit_price * (1.0 - slip),
         };
         let ticker_id = order.ticker_id;
         let chunks = if self.config.partial_fill_enabled {

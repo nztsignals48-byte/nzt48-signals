@@ -92,6 +92,10 @@ if [ -z "$GEMINI_API_KEY" ]; then
     echo "WARNING: Set GEMINI_API_KEY in .env file and rebuild to enable Gemini universe curation."
 fi
 
+# Start Prometheus metrics server (port 9090, daemon)
+echo "Starting metrics server on :9090..."
+python3 /app/python_brain/metrics_server.py &
+
 echo "Starting AEGIS V2 engine..."
 exec aegis --config-dir /app/config --wal-dir /app/events \
     --ibkr-host "$IBKR_HOST" --ibkr-port "$IBKR_PORT" "$@"
