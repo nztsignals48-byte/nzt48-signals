@@ -1602,11 +1602,18 @@ def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, co
         conf += 3.0
     if hurst_regime == "trending":
         conf += 5.0  # Momentum works best in trending regime
+    # Book 21: D-VPIN bonus — if informed buying detected, boost confidence
+    d_vpin_val = common_fields.get("d_vpin", 0)
+    if d_vpin_val > 0.30:
+        conf += 4.0  # Informed buyers on our side
+    # Book 22: Keltner squeeze release — 67% WR breakout signal
+    if common_fields.get("squeeze_release", False):
+        conf += 8.0  # Volatility expanding after compression = strong breakout
     # Penalize if structural score is low (poor tradability)
     ss = ind.get("structural_score", 50)
     if ss < 40:
         conf -= 5.0
-    conf = max(0, min(conf, 92.0))
+    conf = max(0, min(conf, 95.0))
 
     if conf < conf_floor:
         return None
@@ -1890,6 +1897,20 @@ def _system5_overnight(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields)
         if day_of_week == 4:  # Friday
             return None  # Skip Friday overnight — weekend gap risk
 
+    # Book 40: Leverage-specific overnight limit — 5x ETPs = ZERO overnight
+    leverage = msg.get("leverage", 3)
+    if leverage >= 5:
+        return None  # 5x ETPs: intraday only, never overnight
+
+    # Book 186: Day-of-week carry premium adjustment
+    # Mon-Wed: +2pp confidence (positive carry). Thu: neutral. Fri: blocked above.
+    day_conf_adj = 0.0
+    if ts_ns > 0:
+        if day_of_week <= 2:  # Mon-Wed
+            day_conf_adj = 2.0
+        elif day_of_week == 3:  # Thursday
+            day_conf_adj = -2.0  # Slightly reduce (pre-weekend positioning)
+
     # Need positive momentum going into close (don't carry a falling knife)
     bars_5m = ind.get("bars_5m", [])
     if len(bars_5m) < 6:
@@ -1899,7 +1920,7 @@ def _system5_overnight(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields)
     if up_count < 2:
         return None  # Need 2/3 recent bars up
 
-    conf = 56.0
+    conf = 56.0 + day_conf_adj
     if up_count == 3:
         conf += 5.0
     if ind.get("rvol", 1.0) > 1.2:
@@ -2017,18 +2038,80 @@ def _system7_tail_hedge(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
 
 
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
-    """Stage 3: Generate signals from VanguardSniper + Orchestrator + IBS + ORB + VolExpansion + S1."""
+    """Stage 3: Generate signals from all 13 generators with Book-derived pre-gates."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
     bars_5m = ind["bars_5m"]
+
+    # ── BOOK 162: VPIN TOXICITY GATE ──
+    # Block entries when informed flow is toxic. Calibrated thresholds from Book 162.
+    # > 0.60: elevated → raise confidence floor by 10 (harder to enter)
+    # > 0.80: extreme → block all entries (informed traders dominating)
+    vpin = ind.get("vpin", 0.5)
+    if vpin > 0.80:
+        return []  # Block all signals — toxic informed flow
+    vpin_penalty = 10 if vpin > 0.60 else 0
+    effective_floor = conf_floor + vpin_penalty
+
+    # ── BOOK 21: DIRECTIONAL VPIN (D-VPIN) ──
+    # Signed version: positive = informed buying, negative = informed selling
+    d_vpin = 0.0
+    if bars_5m and len(bars_5m) >= 10:
+        buy_v = sum(b["volume"] for b in bars_5m[-10:] if b["close"] > b["open"])
+        sell_v = sum(b["volume"] for b in bars_5m[-10:] if b["close"] <= b["open"])
+        total_v = buy_v + sell_v
+        if total_v > 0:
+            d_vpin = (buy_v - sell_v) / total_v  # -1 to +1
+
+    # ── BOOK 22: KELTNER SQUEEZE DETECTION ──
+    # When Bollinger Bands contract inside Keltner Channel = volatility squeeze.
+    # First bar after squeeze releases → 67% WR breakout signal.
+    squeeze_on = False
+    squeeze_release = False
+    if bars_5m and len(bars_5m) >= 20:
+        closes_20 = [b["close"] for b in bars_5m[-20:]]
+        sma20 = sum(closes_20) / 20
+        std20 = (sum((c - sma20)**2 for c in closes_20) / 20) ** 0.5
+
+        # ATR(20) from bars
+        atr_sum = 0.0
+        for i in range(1, min(20, len(bars_5m))):
+            h, l, pc = bars_5m[-i]["high"], bars_5m[-i]["low"], bars_5m[-i-1]["close"]
+            atr_sum += max(h - l, abs(h - pc), abs(l - pc))
+        atr20 = atr_sum / min(19, len(bars_5m) - 1) if len(bars_5m) > 1 else 0
+
+        if std20 > 0 and atr20 > 0:
+            bb_upper = sma20 + 2.0 * std20
+            keltner_upper = sma20 + 1.5 * atr20
+            squeeze_on = bb_upper < keltner_upper  # BB inside Keltner = squeeze
+            # Check if squeeze just released (was on, now off)
+            if not squeeze_on and len(bars_5m) >= 21:
+                prev_closes = [b["close"] for b in bars_5m[-21:-1]]
+                prev_sma = sum(prev_closes) / 20
+                prev_std = (sum((c - prev_sma)**2 for c in prev_closes) / 20) ** 0.5
+                prev_bb_upper = prev_sma + 2.0 * prev_std
+                prev_keltner_upper = prev_sma + 1.5 * atr20
+                if prev_bb_upper < prev_keltner_upper:
+                    squeeze_release = True  # Just released — 67% WR breakout
+
+    # ── BOOK 118: STUDENT-T KELLY ADJUSTMENT ──
+    # ETP returns have fat tails (ν ≈ 4-6). Standard Kelly overestimates optimal fraction.
+    # Adjustment: multiply Kelly by 1/(1 + 3/ν). For ν=5: factor = 1/1.6 = 0.625.
+    leverage = msg.get("leverage", 3)
+    nu = 5.0 if leverage >= 3 else 7.0  # Fatter tails for higher leverage
+    student_t_factor = 1.0 / (1.0 + 3.0 / nu)  # 0.625 for 3x ETPs
+
     common_fields = {
         "rvol": ind["rvol"], "hurst": hurst, "hurst_regime": hurst_regime,
         "volume_divergence": ind["vol_div"], "adx": ind["adx"],
         "vol_slope": ind["vol_slope"], "vwap_dist_pct": ind["vwap_dist_pct"],
         "structural_score": ind["structural_score"],
+        "d_vpin": round(d_vpin, 3), "squeeze_on": squeeze_on,
+        "squeeze_release": squeeze_release, "vpin_toxic": vpin > 0.60,
     }
 
     # Thompson per-type floors
-    vanguard_floor, orchestrator_floor = conf_floor, conf_floor
+    # Use VPIN-adjusted floor for all strategies
+    vanguard_floor, orchestrator_floor = effective_floor, effective_floor
     if _adaptive_entry_confidence:
         ta = _adaptive_entry_confidence.get("TypeA")
         if ta is not None:
@@ -2078,8 +2161,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         if leverage >= 3 and hurst_regime == "mean_reverting":
             kelly_scale *= 0.7  # 30% reduction for 3x LETF in MR regime
 
-        k["kelly_fraction"] *= kelly_scale
-        k["shares"] = max(1, int(k["shares"] * kelly_scale))
+        # Book 118: Student-t Kelly adjustment for fat-tailed ETP returns.
+        # ν=5 for 3x ETPs → factor = 1/(1+3/5) = 0.625. Prevents Gaussian overestimation.
+        combined = kelly_scale * student_t_factor
+        k["kelly_fraction"] *= combined
+        k["shares"] = max(1, int(k["shares"] * combined))
 
         return k
 
