@@ -558,9 +558,51 @@ def classify_entries(
                     entries.append((i, "TypeE"))
 
         # Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
-        # Matches Rust entry_engine.rs detect_obv_divergence()
         if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
             entries.append((i, "TypeF"))
+
+        # ── S1: Microstructure Momentum (tick-ratio proxy on bars) ──
+        # On bar data: use close-to-close direction as tick proxy + RVOL + spread proxy
+        if i >= 20:
+            up_bars = sum(1 for j in range(i-20, i) if closes[j] > closes[j-1])
+            tick_ratio = up_bars / 20.0
+            # BB z-score for spread compression proxy
+            sma20_val = np.mean(closes[i-20:i])
+            std20_val = np.std(closes[i-20:i])
+            if std20_val > 1e-9:
+                z = (closes[i] - sma20_val) / std20_val
+                # S1 fires: 60%+ up-bars + rvol > 1.0 + price above SMA + not extreme z
+                if tick_ratio > 0.58 and rvol_arr[i] > 1.0 and closes[i] > sma20_val and abs(z) < 2.5:
+                    if not np.isnan(atr[i]) if atr is not None else True:
+                        entries.append((i, "S1_Microstructure"))
+
+        # ── S2: Statistical Reversion (BB z-score + RSI oversold) ──
+        if i >= 20 and regime != "trending":
+            sma20_s2 = np.mean(closes[i-20:i])
+            std20_s2 = np.std(closes[i-20:i])
+            if std20_s2 > 1e-9:
+                z_s2 = (closes[i] - sma20_s2) / std20_s2
+                rsi2 = compute_rsi(closes[max(0,i-10):i+1], period=2)
+                rsi2_val = rsi2[-1] if len(rsi2) > 0 and not np.isnan(rsi2[-1]) else 50.0
+                if z_s2 < -1.5 and rsi2_val < 20.0:
+                    entries.append((i, "S2_Reversion"))
+
+        # ── S3: Macro Trend (SMA crossover + momentum) ──
+        if i >= 20 and regime != "mean_reverting":
+            sma5 = np.mean(closes[i-5:i])
+            sma20_s3 = np.mean(closes[i-20:i])
+            if sma5 > sma20_s3 and closes[i] > sma5:
+                # 12-bar momentum
+                if i >= 12 and closes[i-12] > 0:
+                    mom12 = (closes[i] - closes[i-12]) / closes[i-12]
+                    if mom12 > 0.005:
+                        entries.append((i, "S3_MacroTrend"))
+
+        # ── S6: Catalyst (gap continuation) ──
+        if i > 0 and closes[i-1] > 0:
+            gap = (closes[i] - closes[i-1]) / closes[i-1] * 100.0
+            if gap > 1.5 and rvol_arr[i] > 2.0:
+                entries.append((i, "S6_Catalyst"))
 
     return entries
 
