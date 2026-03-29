@@ -2451,6 +2451,79 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
+    # ETP Rebalancing Flow (Book 36) — 19:00-20:00 GMT window
+    rebal_signal = None
+    try:
+        from python_brain.strategies.rebalancing_flow import predict_rebalancing
+        london_secs = msg.get("london_time_secs", 0)
+        utc_secs = london_secs  # Approximate; DST offset handled elsewhere
+        symbol = msg.get("symbol", "")
+        underlying_ret = msg.get("underlying_intraday_return", 0.0)
+        if underlying_ret != 0 and symbol:
+            rb = predict_rebalancing(underlying_ret, symbol, utc_secs)
+            if rb and rb.confidence >= conf_floor:
+                rebal_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": rb.confidence,
+                    "kelly_fraction": _kelly_for(rb.confidence)["kelly_fraction"],
+                    "shares": _kelly_for(rb.confidence)["shares"],
+                    "strategy": "RebalancingFlow",
+                    "rebal_notional_mm": rb.estimated_rebalancing_notional_mm,
+                    **common_fields,
+                }
+    except Exception:
+        pass
+
+    # NAV Premium/Discount (Book 132) — buy when ETP trades at discount
+    nav_signal = None
+    try:
+        from python_brain.strategies.nav_arbitrage import NAVTracker
+        nav_tracker = getattr(msg, "_nav_tracker", None)
+        if nav_tracker is not None:
+            symbol = msg.get("symbol", "")
+            sig = nav_tracker.check_signal(symbol)
+            if sig and sig.confidence >= conf_floor and sig.direction == "buy":
+                nav_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": sig.confidence,
+                    "kelly_fraction": _kelly_for(sig.confidence)["kelly_fraction"],
+                    "shares": _kelly_for(sig.confidence)["shares"],
+                    "strategy": "NAVArbitrage",
+                    "nav_z_score": sig.z_score,
+                    "nav_premium_pct": sig.premium_pct,
+                    **common_fields,
+                }
+    except Exception:
+        pass
+
+    # Alpha Factory Ensemble (Books 121, 168) — formulaic alpha combination
+    alpha_signal = None
+    try:
+        from python_brain.alphas.alpha_factory import AlphaFactory
+        import numpy as _np
+        closes = ind.get("closes_arr")
+        volumes = ind.get("volumes_arr")
+        if closes is not None and len(closes) >= 20:
+            factory = AlphaFactory()
+            results = factory.evaluate_all(_np.array(closes), _np.array(volumes))
+            ensemble_val = factory.ensemble(results)
+            # Convert ensemble value to signal if strong enough
+            if abs(ensemble_val) > 0.1:  # Threshold for actionable signal
+                alpha_conf = min(85, int(50 + abs(ensemble_val) * 200))
+                if ensemble_val > 0 and alpha_conf >= conf_floor:  # ISA: long only
+                    alpha_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": alpha_conf,
+                        "kelly_fraction": _kelly_for(alpha_conf)["kelly_fraction"],
+                        "shares": _kelly_for(alpha_conf)["shares"],
+                        "strategy": "AlphaFactory",
+                        "ensemble_value": round(ensemble_val, 4),
+                        "n_alphas": len(results),
+                        **common_fields,
+                    }
+    except Exception:
+        pass
+
     # Calendar Anomaly Modifier (Book 171) — applies to ALL signals
     cal_conf_delta = 0
     cal_kelly_mult = 1.0
@@ -2473,7 +2546,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
-        vol_comp_signal,
+        vol_comp_signal, rebal_signal, nav_signal, alpha_signal,
     ] if s]
 
     # Apply calendar anomaly adjustments to ALL signals (Book 171)

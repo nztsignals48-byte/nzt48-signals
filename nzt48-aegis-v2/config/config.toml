@@ -441,6 +441,34 @@ mega_runner_threshold_atr = 3.0       # Profit > 3 ATR → activate bonus
 mega_runner_slope = 0.2               # Widening rate per ATR above threshold
 mega_runner_range = [1.0, 2.0]        # Max 2x trail width for runners
 
+# Book 39: Per-strategy exit overrides. Strategies not listed use global [chandelier] defaults.
+# Each strategy can customize: initial_stop_atr_mult, rung_pct, time_stop_max_minutes, exit_mode.
+[chandelier.per_strategy.S2_Reversion]
+initial_stop_atr_mult = 1.5
+rung_pct = [0.0, 0.005, 0.010, 0.015, 0.020]
+time_stop_max_minutes = 30
+# exit_mode = "hybrid"  # trailing + fixed target at 1.5%
+
+[chandelier.per_strategy.TypeF]
+initial_stop_atr_mult = 1.8
+rung_pct = [0.0, 0.006, 0.012, 0.020, 0.035]
+time_stop_max_minutes = 45
+
+[chandelier.per_strategy.TypeE]
+initial_stop_atr_mult = 1.5
+rung_pct = [0.0, 0.005, 0.010, 0.015, 0.020]
+time_stop_max_minutes = 30
+
+[chandelier.per_strategy.TypeB]
+initial_stop_atr_mult = 2.5
+rung_pct = [0.0, 0.010, 0.020, 0.030, 0.050]
+time_stop_max_minutes = 90
+
+[chandelier.per_strategy.S7_TailHedge]
+initial_stop_atr_mult = 3.0
+rung_pct = [0.0, 0.015, 0.030, 0.050, 0.080]
+time_stop_max_minutes = 120
+
 # Sprint 6: Entry type base confidences — Ouroboros tunes nightly based on rolling Wilson score.
 [entry_types]
 type_a_confidence = 68.0              # DipRecovery — TIGHTENED thresholds (was WR=39%, need more selective entries)
