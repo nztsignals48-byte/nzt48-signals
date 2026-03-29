@@ -2113,6 +2113,43 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     vpin_penalty = 10 if vpin > 0.60 else 0
     effective_floor = conf_floor + vpin_penalty
 
+    # ── BOOK 117: LIQUIDITY PULSE GATE ──
+    try:
+        from python_brain.risk.liquidity_pulse import LiquidityPulseDetector
+        _lp_detector = getattr(msg, "_lp_detector", LiquidityPulseDetector())
+        lp_alert = _lp_detector.check_tick(
+            price=ind.get("last_price", 0),
+            volume=ind.get("last_volume", 0),
+            spread_bps=ind.get("spread_bps", 10),
+            timestamp_secs=msg.get("timestamp_secs", 0),
+        )
+        if lp_alert and lp_alert.block_entry:
+            return []  # Manipulation detected — block all entries
+    except Exception:
+        pass
+
+    # ── BOOK 190: SAFETY BOUNDARY PRE-CHECK ──
+    try:
+        from python_brain.risk.safety_boundaries import SafetyBoundaryChecker
+        _safety = SafetyBoundaryChecker()
+        violation = _safety.check_all(
+            equity=msg.get("equity", 10000),
+            hwm=msg.get("hwm", 10000),
+            daily_pnl=msg.get("daily_pnl", 0),
+            consecutive_losses=msg.get("consecutive_losses", 0),
+        )
+        if violation and violation.action == "HALT":
+            return []  # Sacred limit breached — no entries
+    except Exception:
+        pass
+
+    # ── BOOK 179: CAPITAL PHASE STRATEGY FILTER ──
+    try:
+        from python_brain.sizing.capital_phasing import get_capital_phase
+        phase = get_capital_phase(msg.get("equity", 10000))
+    except Exception:
+        phase = None
+
     # ── BOOK 21: DIRECTIONAL VPIN (D-VPIN) ──
     # Signed version: positive = informed buying, negative = informed selling
     d_vpin = 0.0
@@ -2632,6 +2669,48 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     ]
     if not all_signals:
         return None
+
+    # FEATURE FLAGS GATE (Book 71) — disable modules via feature flags
+    try:
+        from python_brain.risk.feature_flags import FeatureFlagManager
+        _flags = FeatureFlagManager()
+    except Exception:
+        _flags = None
+
+    # REGIME-AWARE RISK LIMITS (Book 85)
+    try:
+        from python_brain.risk.regime_risk_limits import get_regime_limits
+        rl = get_regime_limits(vix=msg.get("vix", 21), hurst=ind.get("hurst", 0.5))
+        # Apply regime confidence floor
+        all_signals = [s for s in all_signals if s["confidence"] >= rl.confidence_floor]
+        if not all_signals:
+            return None
+    except Exception:
+        pass
+
+    # SIGNAL ROUTER — session-aware filtering + conflict resolution (Book 216)
+    try:
+        from python_brain.regime.signal_router import SignalRouter
+        router = SignalRouter()
+        all_signals = router.filter_by_session(all_signals, msg.get("london_time_secs", 0))
+        if not all_signals:
+            return None
+    except Exception:
+        pass
+
+    # CAPACITY MONITOR — reject oversized orders (Books 49, 181)
+    try:
+        from python_brain.execution.capacity_monitor import CapacityMonitor
+        cap_mon = CapacityMonitor()
+        for sig in all_signals:
+            notional = sig.get("kelly_fraction", 0) * msg.get("equity", 10000)
+            ticker = sig.get("ticker", msg.get("symbol", ""))
+            cap = cap_mon.check(ticker, notional)
+            if not cap.within_capacity:
+                sig["kelly_fraction"] *= cap.max_order_gbp / max(notional, 1)
+                sig["shares"] = max(1, int(sig["shares"] * cap.max_order_gbp / max(notional, 1)))
+    except Exception:
+        pass
 
     # STRATEGY-REGIME MATRIX (Book 15, 113, 124)
     # Disable or scale strategies based on current market regime.

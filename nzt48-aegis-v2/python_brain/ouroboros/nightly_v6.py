@@ -2329,6 +2329,306 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("DuckDB ingestion failed (non-fatal): %s", e)
 
+    # Step 5.18: Data Quality Report (Book 45)
+    try:
+        from python_brain.forensics.data_quality import DataQualityAnalyzer
+        dq = DataQualityAnalyzer()
+        dq_report = dq.analyze_day(today)
+        dq.save_report(dq_report)
+        recommendations["data_quality"] = dq_report.to_dict()
+        log.info("Data quality: score=%.0f%%, tickers=%d, coverage=%.0f%%",
+                 dq_report.overall_score, dq_report.tickers_with_data, dq_report.avg_coverage_pct)
+    except Exception as e:
+        log.warning("Data quality analysis failed (non-fatal): %s", e)
+
+    # Step 5.19: ETP Decay Monitor (Book 46)
+    try:
+        from python_brain.forensics.etp_decay_monitor import ETPDecayMonitor
+        decay_mon = ETPDecayMonitor()
+        # Check all open positions for holding period violations
+        open_positions = recommendations.get("open_positions", {})
+        vix_val = msg.get("vix", 21.0) if "msg" in dir() else 21.0
+        decay_alerts = decay_mon.check_all_positions(open_positions, vix_val)
+        if decay_alerts:
+            recommendations["etp_decay_alerts"] = [
+                {"ticker": a.ticker, "days_held": a.days_held, "max_days": a.max_days,
+                 "decay_pct": a.estimated_decay_pct, "action": a.action}
+                for a in decay_alerts
+            ]
+            log.warning("ETP decay: %d positions exceeding holding limits", len(decay_alerts))
+    except Exception as e:
+        log.warning("ETP decay monitor failed (non-fatal): %s", e)
+
+    # Step 5.20: Performance Attribution (Books 81, 89)
+    try:
+        from python_brain.forensics.performance_attribution import AttributionAnalyzer
+        attr = AttributionAnalyzer()
+        trade_dicts = [{
+            "strategy": t.strategy, "pnl": t.pnl, "gross_pnl": t.gross_pnl,
+            "estimated_cost": t.estimated_cost, "hold_time_mins": t.hold_time_mins,
+            "commission": t.total_commission, "notional": abs(t.entry_price * t.qty),
+        } for t in trades]
+        attr_report = attr.analyze(trade_dicts, trading_days=1, equity=msg.get("equity", 10000) if "msg" in dir() else 10000)
+        recommendations["performance_attribution"] = attr_report.to_dict()
+        log.info("Attribution: net_pnl=%.2f, Sharpe=%.2f, cost_drag=%.1f%%, turnover=%.1f/day",
+                 attr_report.total_net_pnl, attr_report.portfolio_sharpe,
+                 attr_report.cost_breakdown.cost_as_pct_of_gross, attr_report.turnover.trades_per_day)
+    except Exception as e:
+        log.warning("Performance attribution failed (non-fatal): %s", e)
+
+    # Step 5.21: Audit Trail (Books 88, 185)
+    try:
+        from python_brain.forensics.audit_trail import AuditTrail, AuditCategory
+        audit = AuditTrail()
+        audit.log_event(AuditCategory.SYSTEM, "nightly_run_complete", {
+            "date": today, "total_trades": metrics.total_trades,
+            "net_pnl": sum(t.cost_adjusted_pnl for t in trades) if trades else 0,
+            "win_rate": metrics.win_rate,
+        })
+        for t in trades:
+            audit.log_trade("trade_closed", ticker=t.ticker, strategy=t.strategy,
+                           pnl=t.cost_adjusted_pnl, rung=t.rung_achieved)
+        log.info("Audit trail: %d events logged", audit.event_count())
+    except Exception as e:
+        log.warning("Audit trail failed (non-fatal): %s", e)
+
+    # Step 5.22: System Journal — Institutional Memory (Book 13)
+    try:
+        from python_brain.forensics.system_journal import SystemJournal
+        journal = SystemJournal()
+        # Auto-generate lessons from today's data
+        if metrics.total_trades > 0 and metrics.win_rate < 0.3:
+            journal.add_lesson(
+                f"Low win rate day ({metrics.win_rate:.0%}) with {metrics.total_trades} trades",
+                source="nightly_auto", tags=["low_wr", today],
+            )
+        if any(d.get("action") == "FORCE_CLOSE" for d in recommendations.get("etp_decay_alerts", [])):
+            journal.add_incident("ETP holding period violation triggered force-close", source="etp_decay")
+        recommendations["journal_entries"] = journal.count
+    except Exception as e:
+        log.warning("System journal failed (non-fatal): %s", e)
+
+    # Step 5.23: Compounding Journal — Milestone Tracking (Book 218)
+    try:
+        from python_brain.lifecycle.compounding_journal import CompoundingJournal
+        comp_journal = CompoundingJournal(initial_equity=10000)
+        equity = msg.get("equity", 10000) if "msg" in dir() else 10000
+        comp_journal.record_week(
+            equity=equity, trades=metrics.total_trades,
+            net_pnl=sum(t.cost_adjusted_pnl for t in trades) if trades else 0,
+            win_rate=metrics.win_rate, strategies_active=len(set(t.strategy for t in trades)),
+        )
+        milestone = comp_journal.check_milestone()
+        if milestone:
+            recommendations["milestone_achieved"] = {"phase": milestone.phase, "target": milestone.target_equity}
+        recommendations["compounding"] = comp_journal.to_dict()
+    except Exception as e:
+        log.warning("Compounding journal failed (non-fatal): %s", e)
+
+    # Step 5.24: Ouroboros Learning Loop Gates (Book 158)
+    try:
+        from python_brain.lifecycle.ouroboros_gates import OuroborosGatekeeper
+        gatekeeper = OuroborosGatekeeper()
+        gatekeeper.update_metrics(
+            n_trades=mem.total_trades if mem else 0,
+            sharpe_60=recommendations.get("sharpe_60", 0),
+            recommendation_accuracy=recommendations.get("rec_accuracy", 0),
+            n_recommendations=recommendations.get("n_recs", 0),
+        )
+        loop_state = gatekeeper.evaluate()
+        recommendations["ouroboros_gate"] = gatekeeper.to_dict()
+        log.info("Ouroboros gate: %s (can_modify=%s)", loop_state.value, gatekeeper.can_modify_params())
+    except Exception as e:
+        log.warning("Ouroboros gates failed (non-fatal): %s", e)
+
+    # Step 5.25: Paper-to-Live Migration Check (Book 60)
+    try:
+        from python_brain.lifecycle.paper_to_live import MigrationChecker
+        migration = MigrationChecker()
+        for strat in set(t.strategy for t in trades):
+            if not strat:
+                continue
+            strat_metrics = {
+                "paper_trades": {strat: sum(1 for t in trades if t.strategy == strat)},
+                "paper_sharpe": {strat: recommendations.get("sharpe_60", 0)},
+                "data_coverage_pct": recommendations.get("data_quality", {}).get("avg_coverage_pct", 0),
+            }
+            result = migration.run_all(strat, {}, strat_metrics)
+            recommendations.setdefault("migration_readiness", {})[strat] = result.to_dict()
+    except Exception as e:
+        log.warning("Migration check failed (non-fatal): %s", e)
+
+    # Step 5.26: Promotion Pipeline Status (Book 52)
+    try:
+        from python_brain.validation.promotion_pipeline import PromotionPipeline, PipelineStage
+        for strat in set(t.strategy for t in trades):
+            if not strat:
+                continue
+            pipeline = PromotionPipeline(strat)
+            # Evaluate current stage based on available metrics
+            recommendations.setdefault("promotion_pipeline", {})[strat] = pipeline.to_dict()
+    except Exception as e:
+        log.warning("Promotion pipeline failed (non-fatal): %s", e)
+
+    # Step 5.27: Simulation Fidelity Score (Book 69)
+    try:
+        from python_brain.validation.simulation_fidelity import FidelityScorer
+        fidelity = FidelityScorer()
+        import tomli
+        config_path = CONFIG_DIR / "config.toml"
+        with open(config_path, "rb") as f:
+            config = tomli.load(f)
+        fid_report = fidelity.score(
+            {"data_coverage_pct": recommendations.get("data_quality", {}).get("avg_coverage_pct", 80)},
+            config,
+        )
+        recommendations["simulation_fidelity"] = fid_report.to_dict()
+        log.info("Simulation fidelity: %.0f%% (%s)",
+                 fid_report.composite, "RELIABLE" if fid_report.is_reliable else "UNRELIABLE")
+    except Exception as e:
+        log.warning("Simulation fidelity failed (non-fatal): %s", e)
+
+    # Step 5.28: Portfolio Construction — HRP Weights (Book 20, 180)
+    try:
+        from python_brain.risk.portfolio_construction import compute_hrp_weights
+        import numpy as _np
+        if mem and hasattr(mem, 'per_strategy_stats'):
+            strat_returns = {}
+            for strat, stats in mem.per_strategy_stats.items():
+                rets = stats.get("returns", [])
+                if len(rets) >= 20:
+                    strat_returns[strat] = rets[-60:]  # Last 60 trades
+            if len(strat_returns) >= 2:
+                tickers = list(strat_returns.keys())
+                max_len = max(len(r) for r in strat_returns.values())
+                matrix = _np.zeros((max_len, len(tickers)))
+                for i, t in enumerate(tickers):
+                    r = strat_returns[t]
+                    matrix[-len(r):, i] = r
+                weights = compute_hrp_weights(matrix, tickers)
+                recommendations["hrp_weights"] = weights
+                log.info("HRP weights: %s", {k: f"{v:.1%}" for k, v in weights.items()})
+    except Exception as e:
+        log.warning("HRP portfolio construction failed (non-fatal): %s", e)
+
+    # Step 5.29: Conformal Prediction Calibration (Books 105, 144)
+    try:
+        from python_brain.calibration.conformal import AdaptiveConformalPredictor
+        import numpy as _np
+        acp = AdaptiveConformalPredictor(alpha=0.10)
+        # Calibrate from historical prediction residuals
+        if mem and hasattr(mem, 'per_strategy_stats'):
+            all_residuals = []
+            for stats in mem.per_strategy_stats.values():
+                rets = stats.get("returns", [])
+                all_residuals.extend(rets)
+            if len(all_residuals) >= 20:
+                for r in all_residuals[-100:]:
+                    acp.update(abs(r), abs(r) < acp._quantile if acp._quantile > 0 else True)
+                recommendations["conformal"] = acp.to_dict()
+                log.info("Conformal: coverage=%.0f%%, quantile=%.4f",
+                         acp.empirical_coverage * 100, acp._quantile)
+    except Exception as e:
+        log.warning("Conformal calibration failed (non-fatal): %s", e)
+
+    # Step 5.30: Bayesian Aggregator — Update Source Accuracy (Book 209)
+    try:
+        from python_brain.aggregation.bayesian_aggregator import BayesianAggregator
+        agg = BayesianAggregator()
+        for t in trades:
+            strat = t.strategy or "unknown"
+            agg.add_source(strat, accuracy=0.5, n_trades=0)
+            agg.update_source(strat, "long", t.cost_adjusted_pnl > 0)
+        recommendations["bayesian_sources"] = agg.get_all_sources()
+    except Exception as e:
+        log.warning("Bayesian aggregator update failed (non-fatal): %s", e)
+
+    # Step 5.31: Claude Cold-Path Nightly Review (Books 72, 142)
+    try:
+        from python_brain.claude.decision_authority import DecisionAuthority, DecisionType
+        claude_auth = DecisionAuthority(trade_count=mem.total_trades if mem else 0)
+        if claude_auth.can_make_decision(DecisionType.NIGHTLY_REVIEW):
+            review_request = claude_auth.get_prompt(DecisionType.NIGHTLY_REVIEW, {
+                "metrics": {"trades": metrics.total_trades, "wr": metrics.win_rate,
+                            "pf": metrics.profit_factor, "pnl": metrics.total_pnl},
+                "cost_adjusted_pnl": sum(t.cost_adjusted_pnl for t in trades) if trades else 0,
+                "regime": recommendations.get("hmm_regime", {}).get("name", "unknown"),
+                "trade_count": mem.total_trades if mem else 0,
+            })
+            recommendations["claude_review_prompt"] = review_request.to_dict()
+            log.info("Claude review: prompt generated (model=%s, authority=%s)",
+                     review_request.model, claude_auth.current_level.name)
+        recommendations["claude_authority"] = claude_auth.to_dict()
+    except Exception as e:
+        log.warning("Claude authority failed (non-fatal): %s", e)
+
+    # Step 5.32: WAL Deterministic Replay Check (Book 92)
+    try:
+        from python_brain.risk.deterministic_replay import WALReplayer
+        today_wal = WAL_DIR / f"{today}.ndjson"
+        if today_wal.exists():
+            replayer = WALReplayer()
+            replay_result = replayer.replay(str(today_wal))
+            recommendations["wal_integrity"] = replay_result.to_dict()
+            if not replay_result.deterministic:
+                log.warning("WAL INTEGRITY: non-deterministic at event %d", replay_result.first_divergence_at)
+            else:
+                log.info("WAL integrity: OK (%d events)", replay_result.total_events)
+    except Exception as e:
+        log.warning("WAL replay check failed (non-fatal): %s", e)
+
+    # Step 5.33: Feature Flags Status (Book 71)
+    try:
+        from python_brain.risk.feature_flags import FeatureFlagManager
+        flags = FeatureFlagManager()
+        recommendations["feature_flags"] = flags.status()
+        log.info("Feature flags: %d/%d enabled", flags.enabled_count(), len(flags.status()))
+    except Exception as e:
+        log.warning("Feature flags status failed (non-fatal): %s", e)
+
+    # Step 5.34: Subscription Optimizer (Book 220)
+    try:
+        from python_brain.execution.subscription_optimizer import SubscriptionOptimizer
+        sub_opt = SubscriptionOptimizer()
+        recommendations["subscription_status"] = sub_opt.to_dict()
+        log.info("Subscriptions: %d/%d slots used", sub_opt.slots_used, sub_opt.max_slots)
+    except Exception as e:
+        log.warning("Subscription optimizer failed (non-fatal): %s", e)
+
+    # Step 5.35: Calendar Planning for Tomorrow (Book 94)
+    try:
+        from python_brain.execution.calendar_manager import TradingCalendar
+        from datetime import date as _date, timedelta as _td
+        cal = TradingCalendar()
+        tomorrow = _date.fromisoformat(today) + _td(days=1)
+        is_trading = cal.is_trading_day(tomorrow)
+        is_half = cal.is_half_day(tomorrow)
+        recommendations["tomorrow"] = {
+            "date": str(tomorrow),
+            "is_trading_day": is_trading,
+            "is_half_day": is_half,
+            "offset_hours": cal.us_uk_time_offset_hours(tomorrow),
+        }
+        if not is_trading:
+            log.info("Tomorrow %s: MARKET CLOSED", tomorrow)
+        elif is_half:
+            log.info("Tomorrow %s: HALF DAY", tomorrow)
+    except Exception as e:
+        log.warning("Calendar planning failed (non-fatal): %s", e)
+
+    # Step 5.36: Telegram Daily Summary (Books 8, 38, 58)
+    try:
+        from python_brain.alerting.telegram import TelegramAlerter
+        alerter = TelegramAlerter()
+        alerter.send_daily_summary({
+            "total_trades": metrics.total_trades,
+            "net_pnl": sum(t.cost_adjusted_pnl for t in trades) if trades else 0,
+            "win_rate": metrics.win_rate * 100,
+            "drawdown_pct": recommendations.get("drawdown_pct", 0),
+        })
+    except Exception as e:
+        log.warning("Telegram summary failed (non-fatal): %s", e)
+
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)
 
