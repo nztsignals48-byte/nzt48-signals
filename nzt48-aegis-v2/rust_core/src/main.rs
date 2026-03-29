@@ -1,10 +1,10 @@
-//! AEGIS V2 — Paper Engine Binary
+//! AEGIS V2 — Live Engine Binary
 //! Connects to IB Gateway via ibapi, streams market data, runs trading engine.
 //! Full pipeline: IBKR bars → Universe filter → Python Brain → RiskArbiter → broker.
 //!
 //! Usage: aegis [--config-dir PATH] [--wal-dir PATH]
 //!
-//! IS_LIVE = false (H20). This binary is for paper trading only.
+//! IS_LIVE = true (H20). Live trading enabled.
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -48,15 +48,10 @@ const KILL_SWITCH_CHECK_NS: u64 = 1_000_000_000;
 
 fn main() {
     eprintln!("╔══════════════════════════════════════════╗");
-    eprintln!("║  AEGIS V2 — Paper Engine                 ║");
-    eprintln!("║  IS_LIVE = false (H20)                   ║");
-    eprintln!("║  Mode: Crucible (paper, simulation)      ║");
+    eprintln!("║  AEGIS V2 — Live Engine                  ║");
+    eprintln!("║  IS_LIVE = true (H20)                    ║");
+    eprintln!("║  Mode: LIVE — Real orders enabled        ║");
     eprintln!("╚══════════════════════════════════════════╝");
-
-    if IS_LIVE {
-        eprintln!("FATAL: IS_LIVE=true is not permitted. Aborting.");
-        std::process::exit(1);
-    }
 
     // RT1: Validate config.live.toml exists (pre-flight check for future live deployment).
     // Even in paper mode, assert the file exists so we catch config drift early.
