@@ -2268,6 +2268,67 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Edge forensics failed (non-fatal): %s", e)
 
+    # Step 5.15: Monte Carlo Simulation (Book 17)
+    # Run 10K-path bootstrap MC on cumulative trade returns for ruin probability.
+    try:
+        from python_brain.validation.monte_carlo import run_monte_carlo
+        import numpy as _np
+        if mem is not None:
+            all_returns = []
+            for strat_stats in getattr(mem, 'per_strategy_stats', {}).values():
+                all_returns.extend(strat_stats.get("returns", []))
+            if len(all_returns) >= 20:
+                mc_result = run_monte_carlo(
+                    _np.array(all_returns, dtype=_np.float64),
+                    n_paths=5000,  # 5K for nightly speed; 10K for deep analysis
+                    horizon_days=252,
+                )
+                recommendations["monte_carlo"] = mc_result.to_dict()
+                log.info(
+                    "Monte Carlo: ruin=%.1f%%, median_DD=%.1f%%, Sharpe=[%.2f,%.2f], P(+)=%.0f%%",
+                    mc_result.ruin_probability * 100,
+                    mc_result.median_max_drawdown_pct,
+                    mc_result.sharpe_ci_low, mc_result.sharpe_ci_high,
+                    mc_result.prob_positive * 100,
+                )
+            else:
+                log.info("Monte Carlo: insufficient returns (%d < 20)", len(all_returns))
+    except Exception as e:
+        log.warning("Monte Carlo simulation failed (non-fatal): %s", e)
+
+    # Step 5.16: Health Check (Book 53)
+    try:
+        from python_brain.watchdog import HealthMonitor
+        monitor = HealthMonitor(
+            ibkr_host=os.environ.get("IBKR_HOST", "localhost"),
+            ibkr_port=int(os.environ.get("IBKR_PORT", "4003")),
+        )
+        health = monitor.check_all()
+        monitor.save_status(health)
+        recommendations["health"] = health.to_dict()
+        if health.healthy:
+            log.info("Health check: ALL PASS (%d checks)", len(health.checks))
+        else:
+            failed = [c.name for c in health.failed_checks]
+            log.warning("Health check: %d FAILED — %s", len(failed), ", ".join(failed))
+    except Exception as e:
+        log.warning("Health check failed (non-fatal): %s", e)
+
+    # Step 5.17: DuckDB Warehouse Ingestion (Book 63)
+    try:
+        from python_brain.warehouse.duckdb_store import DataWarehouse
+        dw = DataWarehouse()
+        today_wal = WAL_DIR / f"{today}.ndjson"
+        if today_wal.exists():
+            counts = dw.ingest_wal(str(today_wal))
+            log.info("DuckDB ingestion: %d trades, %d signals from %s",
+                     counts["trades"], counts["signals"], today)
+        dw.close()
+    except ImportError:
+        log.info("DuckDB not installed — skipping warehouse ingestion")
+    except Exception as e:
+        log.warning("DuckDB ingestion failed (non-fatal): %s", e)
+
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)
 
