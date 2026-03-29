@@ -239,7 +239,7 @@ SIGNAL_COOLDOWN_TICKS = 0 if _SIM_MODE else _load_cooldown_from_config()
 _last_signal_tick = {}  # ticker_id → tick count when last signal was emitted
 
 # Startup audit log: strategy enforcement status
-sys.stderr.write("BRIDGE_STARTUP: Strategy enforcement: TypeA/D=DISABLED, TypeC/E/F=SHADOW, TypeB/VS=LIVE\n")
+sys.stderr.write("BRIDGE_STARTUP: Strategy enforcement: TypeA-F=QUARANTINED, VS/AS/S1-S7=LIVE\n")
 sys.stderr.write(f"BRIDGE_STARTUP: SIM_MODE={_SIM_MODE}, COOLDOWN_TICKS={SIGNAL_COOLDOWN_TICKS}\n")
 sys.stderr.flush()
 
@@ -2876,11 +2876,12 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         )
         best["entry_type"] = entry_type
 
-        # STRATEGY REGISTRY (updated by 730-day backtest 2026-03-29):
-        # TypeA/D RE-ENABLED — 730-day backtest shows 44%/43% WR, PF 1.22/1.28.
-        # Previous disable was based on broken system with fantasy weights.
-        # TypeC disabled — 39% WR, PF 0.81 over 62K trades.
-        _DISABLED_TYPES = {"TypeC"}
+        # STRATEGY REGISTRY (2026-03-29 quarantine per Mega Audit Session 3):
+        # ALL Type A-F QUARANTINED for £10K account. Running 6 legacy signal types
+        # on a capital-constrained account fragments capital and generates noise.
+        # Focus: VanguardSniper + ApexScout + System S1-S7 only.
+        # When account grows to £25K+, re-enable TypeB/F first (highest edge).
+        _DISABLED_TYPES = {"TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"}
         _SHADOW_TYPES = set()
         if entry_type in _DISABLED_TYPES:
             return None

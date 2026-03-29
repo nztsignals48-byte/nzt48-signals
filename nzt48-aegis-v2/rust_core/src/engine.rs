@@ -567,7 +567,16 @@ impl<B: BrokerAdapter> Engine<B> {
                     time_stop_aggressive_trail_atr: config.exit_time_stop.aggressive_trail_atr,
                     ..ExitConfig::default()
                 };
-                ExitEngine::new(exit_config, Box::new(strategy))
+                let mut exit_engine = ExitEngine::new(exit_config, Box::new(strategy));
+                // Book 39: Wire per-strategy Chandelier overrides from config.toml
+                for (name, _ovr) in &ch.per_strategy {
+                    let (rung_pct, init_atr, r3, r4, r5, floor) = ch.params_for_strategy(name);
+                    let ovr_strategy = ChandelierStrategy::from_config(
+                        &rung_pct, init_atr, r3, r4, r5, round_trip_fee, floor,
+                    );
+                    exit_engine.register_strategy_override(name.clone(), ovr_strategy);
+                }
+                exit_engine
             },
             wal,
             clock,

@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -263,6 +265,139 @@ class DecisionAuthority:
             "You are an AEGIS V2 analyst. "
             f"Context: {json.dumps(ctx, indent=2, default=str)}\n"
             "Provide structured analysis."
+        )
+
+    def execute(self, request: DecisionRequest) -> DecisionResponse:
+        """Execute a decision request via Claude CLI or Gemini SDK.
+
+        Checks authority level, budget, then calls the appropriate API.
+        Falls back to Gemini if Claude CLI is unavailable.
+        Returns structured DecisionResponse.
+        """
+        if not self.can_make_decision(request.decision_type):
+            log.warning(
+                "Insufficient authority for %s (have %s, need %s)",
+                request.decision_type.value,
+                self.current_level.name,
+                DECISION_AUTHORITY[request.decision_type].name,
+            )
+            return DecisionResponse(
+                decision_type=request.decision_type,
+                recommendation="BLOCKED: insufficient authority",
+                requires_human_approval=True,
+            )
+
+        # Estimate cost: ~$0.003/1K input tokens, $0.015/1K output for Sonnet
+        estimated_cost = (request.max_tokens / 1000) * 0.015
+        if not self.check_budget(estimated_cost):
+            log.warning("Daily budget exhausted ($%.2f / $%.2f)", self._daily_cost, self._max_daily_cost)
+            return DecisionResponse(
+                decision_type=request.decision_type,
+                recommendation="BLOCKED: daily budget exhausted",
+                requires_human_approval=True,
+            )
+
+        # Try Claude CLI first, then Gemini fallback
+        response = self._call_claude_cli(request)
+        if response is None:
+            response = self._call_gemini(request)
+        if response is None:
+            log.error("Both Claude CLI and Gemini API failed")
+            return DecisionResponse(
+                decision_type=request.decision_type,
+                recommendation="ERROR: all API calls failed",
+                requires_human_approval=True,
+            )
+
+        self.record_cost(response.cost_usd)
+        self._decision_log.append(response.to_dict())
+        return response
+
+    def _call_claude_cli(self, request: DecisionRequest) -> Optional[DecisionResponse]:
+        """Call Claude via `claude -p` CLI (Book 142: Claude as subprocess)."""
+        try:
+            result = subprocess.run(
+                ["claude", "-p", request.prompt],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "CLAUDE_MODEL": request.model},
+            )
+            if result.returncode != 0:
+                log.warning("Claude CLI failed: %s", result.stderr[:200])
+                return None
+
+            raw = result.stdout.strip()
+            return self._parse_response(request, raw, model_used=request.model, source="claude")
+        except FileNotFoundError:
+            log.info("Claude CLI not found, falling back to Gemini")
+            return None
+        except subprocess.TimeoutExpired:
+            log.warning("Claude CLI timed out after 120s")
+            return None
+        except Exception as e:
+            log.error("Claude CLI error: %s", e)
+            return None
+
+    def _call_gemini(self, request: DecisionRequest) -> Optional[DecisionResponse]:
+        """Call Gemini API (google-generativeai SDK) as fallback."""
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            log.info("GEMINI_API_KEY not set, skipping Gemini fallback")
+            return None
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(
+                request.prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=request.max_tokens,
+                    temperature=0.2,
+                ),
+            )
+            raw = response.text.strip()
+            return self._parse_response(request, raw, model_used="gemini-2.5-flash", source="gemini")
+        except Exception as e:
+            log.error("Gemini API error: %s", e)
+            return None
+
+    def _parse_response(
+        self, request: DecisionRequest, raw: str, model_used: str, source: str,
+    ) -> DecisionResponse:
+        """Parse raw LLM output into structured DecisionResponse."""
+        # Try to parse as JSON (our prompts request JSON output)
+        try:
+            # Handle markdown code blocks
+            clean = raw
+            if "```json" in clean:
+                clean = clean.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean:
+                clean = clean.split("```")[1].split("```")[0].strip()
+            data = json.loads(clean)
+        except (json.JSONDecodeError, IndexError):
+            # Fallback: use raw text as recommendation
+            data = {"recommendation": raw[:500], "confidence": 0.5}
+
+        # Estimate tokens and cost
+        prompt_tokens = len(request.prompt.split()) * 1.3  # rough estimate
+        output_tokens = len(raw.split()) * 1.3
+        if "gemini" in model_used:
+            cost = (prompt_tokens * 0.00015 + output_tokens * 0.0006) / 1000
+        else:
+            cost = (prompt_tokens * 0.003 + output_tokens * 0.015) / 1000
+
+        return DecisionResponse(
+            decision_type=request.decision_type,
+            recommendation=data.get("recommendation", data.get("assessment", raw[:200])),
+            confidence=float(data.get("confidence", 0.5)),
+            proposed_changes=data.get("proposed_changes", []),
+            reasoning=data.get("reasoning", ""),
+            requires_human_approval=self.current_level.value < AuthorityLevel.L2.value,
+            model_used=f"{source}/{model_used}",
+            tokens_used=int(prompt_tokens + output_tokens),
+            cost_usd=round(cost, 4),
         )
 
     def to_dict(self) -> dict:

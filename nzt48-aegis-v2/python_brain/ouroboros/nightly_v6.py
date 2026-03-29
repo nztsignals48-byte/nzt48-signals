@@ -2558,6 +2558,11 @@ def run_nightly() -> int:
             recommendations["claude_review_prompt"] = review_request.to_dict()
             log.info("Claude review: prompt generated (model=%s, authority=%s)",
                      review_request.model, claude_auth.current_level.name)
+            # Execute the review via Claude CLI or Gemini SDK (not just prompt generation)
+            review_response = claude_auth.execute(review_request)
+            recommendations["claude_review_response"] = review_response.to_dict()
+            log.info("Claude review: executed (model=%s, confidence=%.2f, cost=$%.4f)",
+                     review_response.model_used, review_response.confidence, review_response.cost_usd)
         recommendations["claude_authority"] = claude_auth.to_dict()
     except Exception as e:
         log.warning("Claude authority failed (non-fatal): %s", e)

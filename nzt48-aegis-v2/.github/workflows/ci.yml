@@ -84,25 +84,27 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Pytest — validation suite
-        run: pytest validation/ -v --cov=validation --cov-report=xml || true
+        run: pytest validation/ -v --cov=validation --cov-report=xml
 
       - name: Pytest — core module tests (Book 55)
         run: |
           cd nzt48-aegis-v2
-          python -m pytest python_brain/tests/test_core_modules.py -v --tb=short || true
+          python -m pytest python_brain/tests/test_core_modules.py -v --tb=short
 
       - name: Python compile check — all 58 modules
         run: |
           cd nzt48-aegis-v2
+          FAIL=0
           find python_brain -name "*.py" -not -name "__init__.py" -not -path "*__pycache__*" | while read f; do
-            python -m py_compile "$f" || echo "FAIL: $f"
+            python -m py_compile "$f" || { echo "FAIL: $f"; FAIL=1; }
           done
+          exit $FAIL
 
       - name: Black formatter
-        run: black --check validation/ python_brain/ || true
+        run: black --check validation/ python_brain/
 
       - name: MyPy type check
-        run: mypy validation/ python_brain/ --ignore-missing-imports || true
+        run: mypy validation/ python_brain/ --ignore-missing-imports
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3

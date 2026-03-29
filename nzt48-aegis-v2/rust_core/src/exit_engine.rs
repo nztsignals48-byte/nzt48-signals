@@ -240,11 +240,19 @@ impl Default for ExitConfig {
 pub struct ExitEngine {
     pub config: ExitConfig,
     strategy: Box<dyn ExitStrategy>,
+    /// Book 39: Per-strategy Chandelier overrides. Key = entry_type (e.g., "TypeF", "S2").
+    /// When a position's entry_type matches, that strategy's params are used instead of global.
+    per_strategy_overrides: std::collections::HashMap<String, ChandelierStrategy>,
 }
 
 impl ExitEngine {
     pub fn new(config: ExitConfig, strategy: Box<dyn ExitStrategy>) -> Self {
-        Self { config, strategy }
+        Self { config, strategy, per_strategy_overrides: std::collections::HashMap::new() }
+    }
+
+    /// Book 39: Register per-strategy Chandelier override.
+    pub fn register_strategy_override(&mut self, name: String, strategy: ChandelierStrategy) {
+        self.per_strategy_overrides.insert(name, strategy);
     }
 
     pub fn with_default_chandelier() -> Self {
@@ -442,10 +450,14 @@ impl ExitEngine {
         if current_price > position.highest_high {
             position.highest_high = current_price;
         }
+        // Book 39: Use per-strategy override if available, else global strategy.
+        let strat: &dyn ExitStrategy = if let Some(ovr) = self.per_strategy_overrides.get(&position.entry_type) {
+            ovr as &dyn ExitStrategy
+        } else {
+            self.strategy.as_ref()
+        };
         // Compute new rung (can only increase)
-        let new_rung = self
-            .strategy
-            .compute_rung(position, position.highest_high, atr);
+        let new_rung = strat.compute_rung(position, position.highest_high, atr);
         let rung_advanced = if new_rung > position.trailing_rung {
             let old = position.trailing_rung;
             position.trailing_rung = new_rung;
@@ -454,9 +466,7 @@ impl ExitEngine {
             None
         };
         // Compute new stop (H68: can NEVER decrease)
-        let new_stop = self
-            .strategy
-            .compute_stop(position, position.highest_high, atr);
+        let new_stop = strat.compute_stop(position, position.highest_high, atr);
         if new_stop > position.stop_price {
             position.stop_price = new_stop;
         }

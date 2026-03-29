@@ -132,7 +132,7 @@ impl RiskArbiter {
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
             simulation_mode: false,
-            paper_uses_live_gates: false,
+            paper_uses_live_gates: true, // BUG-006 FIX: default to true so backtests/replay enforce risk gates
             ticker_blacklist: Vec::new(),
             vix_high: false,
             vix_extreme: false,
@@ -175,9 +175,11 @@ impl RiskArbiter {
         }
 
         // CHECK 6: Max Positions — filled + pending >= max (H34)
-        // PAPER VALIDATION: Skip position limit entirely in simulation mode.
-        // This maximises trade data for Ouroboros learning. Revert for live.
-        if !self.simulation_mode {
+        // BUG-001 FIX: Was using !self.simulation_mode which bypassed position limits
+        // in paper mode. Now uses enforce_live_gates so paper respects live limits
+        // when paper_uses_live_gates=true (the default). This ensures paper data
+        // is structurally transferable to live.
+        if enforce_live_gates {
             let max_positions = match self.regime {
                 RiskRegime::Reduce => (self.config.max_positions / 2).max(1),
                 RiskRegime::Flatten | RiskRegime::Halt => 0,
