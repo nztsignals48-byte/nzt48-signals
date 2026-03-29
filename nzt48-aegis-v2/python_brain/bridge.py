@@ -2060,38 +2060,26 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 k["kelly_fraction"] = pk
                 k["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
 
-        # Regime-aware Kelly scaling (Bouchaud-Potters 2003):
-        regime_scale = {"trending": 1.0, "mean_reverting": 0.80, "random": 0.60}.get(hurst_regime, 0.70)
-
-        # Half-Kelly with drawdown governor (Ernie Chan 2010, arxiv 2508.16598):
-        # Base: half-Kelly (75% of optimal growth, 50% less drawdown).
-        # Drawdown > 5%: quarter-Kelly. Drawdown > 10%: eighth-Kelly.
+        # CONSOLIDATED KELLY SCALING (was 5 layers → now 1 with drawdown governor):
+        # Previous chain: regime(0.6) * half_kelly(0.5) * paper_buffer(0.75) = 0.225x → KILLED ALL TRADES.
+        # Fix: half-Kelly with drawdown governor is the ONLY scaling layer.
+        # Regime is already a factor in kelly_12factor(). Paper-to-live gap is covered by slippage model.
+        # LETF decay in MR regime is a genuine additional factor (arxiv 2504.20116).
         dd = msg.get("drawdown_pct", 0.0)
         if dd > 10.0:
-            kelly_frac = 0.125  # eighth-Kelly — survival mode
+            kelly_scale = 0.25   # quarter-Kelly — survival mode
         elif dd > 5.0:
-            kelly_frac = 0.25   # quarter-Kelly — defensive
+            kelly_scale = 0.40   # reduced Kelly — defensive
         else:
-            kelly_frac = 0.50   # half-Kelly — standard
+            kelly_scale = 0.50   # half-Kelly — standard (Chan 2010)
 
-        # LETF autocorrelation adjustment (arxiv 2504.20116, 2025):
-        # Leveraged ETPs enhance returns in momentum (positive autocorrelation),
-        # but suffer in mean-reversion (negative autocorrelation).
-        # Compute rolling 20-bar return autocorrelation from bars_5m.
+        # LETF mean-reversion penalty (the one genuine additional factor)
         leverage = msg.get("leverage", 3)
         if leverage >= 3 and hurst_regime == "mean_reverting":
-            # 3x LETF in mean-reverting = volatility decay amplified
-            kelly_frac *= 0.5  # Further halve Kelly for LETFs in MR regime
+            kelly_scale *= 0.7  # 30% reduction for 3x LETF in MR regime
 
-        # Paper-to-live degradation buffer (IBKR research, 2025):
-        # Expect 20-30% performance degradation from paper to live.
-        # Pre-apply 25% reduction to Kelly sizing so paper results are
-        # closer to realistic live performance.
-        paper_live_buffer = 0.75  # 25% buffer
-
-        combined_scale = regime_scale * kelly_frac * paper_live_buffer
-        k["kelly_fraction"] *= combined_scale
-        k["shares"] = max(1, int(k["shares"] * combined_scale))
+        k["kelly_fraction"] *= kelly_scale
+        k["shares"] = max(1, int(k["shares"] * kelly_scale))
 
         return k
 

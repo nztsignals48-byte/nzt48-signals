@@ -803,8 +803,13 @@ fn main() {
                     let ctx = TickContext {
                         win_rate: dw.bayesian_win_rate,
                         total_trades: dw.trade_count,
-                        avg_win: 0.02, // Updated by Ouroboros nightly
-                        avg_loss: 0.02,
+                        // FIX: Was hardcoded 0.02/0.02 → Kelly permanently 0.0.
+                        // Kelly = WR - (1-WR)/(W/L). With 0.02/0.02, W/L=1.0, Kelly = WR-0.5 = negative.
+                        // Realistic 3x ETP: avg winner ~3% (Chandelier captures 2-3x stop width),
+                        // avg loser ~1.5% (ATR stop = ~1.5% on 3x ETP). W/L = 2.0.
+                        // Kelly at 40% WR: 0.40 - 0.60/2.0 = 0.10 (positive).
+                        avg_win: 0.03,
+                        avg_loss: 0.015,
                         leverage: engine
                             .config
                             .contracts

@@ -478,7 +478,7 @@ type_f_rvol_threshold = 0.7
 system_velocity_max = 10
 # Kelly ramp: number of trades before full Kelly applied.
 kelly_ramp_target = 50                # Was 250 — faster ramp for paper validation (reach full Kelly at 50 trades)
-kelly_ramp_clamp_min = 0.1
+kelly_ramp_clamp_min = 0.3                # Was 0.1 — too aggressive with half-Kelly in Python. Start at 30%.
 kelly_ramp_clamp_max = 1.0
 # VIX hysteresis deadband (enter/exit thresholds with 3-5 point gap).
 vix_high_enter = 25.0
