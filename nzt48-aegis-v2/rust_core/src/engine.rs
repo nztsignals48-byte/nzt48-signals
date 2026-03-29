@@ -318,7 +318,7 @@ pub struct Engine<B: BrokerAdapter> {
     pub tracked_orders: Vec<String>,
     pub last_prices: HashMap<TickerId, f64>,
     pub positions: HashMap<TickerId, PositionState>,
-    gap_cooldowns: HashMap<TickerId, u64>,
+    pub gap_cooldowns: HashMap<TickerId, u64>,
     /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
     halted_tickers: std::collections::HashSet<TickerId>,
     /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.

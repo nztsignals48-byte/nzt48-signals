@@ -829,6 +829,16 @@ fn main() {
                         time_fraction,
                         heat_pct: engine.portfolio.portfolio_heat_pct(),
                         equity: engine.portfolio.equity,
+                        // P8+: Fields for S4-S7 strategies
+                        vix: engine.macro_regime.indicator().vix,
+                        london_time_secs: engine.clock.now_london_secs(engine.now_ns),
+                        gap_pct: if engine.gap_cooldowns.contains_key(&t.ticker_id) { 2.0 } else { 0.0 },
+                        symbol: engine.config.contracts
+                            .get(t.ticker_id.0 as usize)
+                            .map(|c| c.symbol.clone())
+                            .unwrap_or_default(),
+                        open_positions: engine.portfolio.filled_count() as u32,
+                        trades_today: engine.portfolio.daily_trade_count,
                     };
 
                     // Evaluate via Python Brain (if available)

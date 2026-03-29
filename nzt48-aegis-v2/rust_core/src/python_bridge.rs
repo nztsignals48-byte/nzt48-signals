@@ -127,6 +127,24 @@ pub struct TickContext {
     pub heat_pct: f64,
     #[pyo3(get, set)]
     pub equity: f64,
+    /// P8+: VIX value for S4/S7 volatility strategies.
+    #[pyo3(get, set)]
+    pub vix: f64,
+    /// P8+: London local time in seconds from midnight for S5 overnight carry.
+    #[pyo3(get, set)]
+    pub london_time_secs: u32,
+    /// P9: Gap percentage for S6 catalyst rotation.
+    #[pyo3(get, set)]
+    pub gap_pct: f64,
+    /// P8+: Ticker symbol name for inverse detection (S4/S7).
+    #[pyo3(get, set)]
+    pub symbol: String,
+    /// P9: Number of open positions for Claude context.
+    #[pyo3(get, set)]
+    pub open_positions: u32,
+    /// P9: Trades executed today for Claude context.
+    #[pyo3(get, set)]
+    pub trades_today: u32,
 }
 
 #[pymethods]
@@ -165,6 +183,12 @@ impl TickContext {
             time_fraction,
             heat_pct,
             equity,
+            vix: 0.0,
+            london_time_secs: 0,
+            gap_pct: 0.0,
+            symbol: String::new(),
+            open_positions: 0,
+            trades_today: 0,
         }
     }
 }
@@ -186,6 +210,12 @@ impl Default for TickContext {
             time_fraction: 0.5,
             heat_pct: 0.0,
             equity: 10_000.0,
+            vix: 0.0,
+            london_time_secs: 0,
+            gap_pct: 0.0,
+            symbol: String::new(),
+            open_positions: 0,
+            trades_today: 0,
         }
     }
 }
@@ -320,7 +350,7 @@ impl PythonBridge {
             .copied()
             .unwrap_or(ctx.leverage);
 
-        // Build JSON message
+        // Build JSON message — includes S4-S7 fields (vix, london_time_secs, gap_pct, symbol)
         let msg = format!(
             concat!(
                 r#"{{"type":"tick","ticker_id":{},"last":{:.6},"high":{:.6},"low":{:.6},"#,
@@ -328,7 +358,9 @@ impl PythonBridge {
                 r#""win_rate":{:.4},"total_trades":{},"avg_win":{:.4},"avg_loss":{:.4},"#,
                 r#""leverage":{},"realized_vol":{:.4},"correlation":{:.4},"drawdown_pct":{:.4},"#,
                 r#""amihud":{:.4},"regime":"{}","spread_pct":{:.4},"time_fraction":{:.4},"#,
-                r#""heat_pct":{:.4},"equity":{:.2}}}"#
+                r#""heat_pct":{:.4},"equity":{:.2},"#,
+                r#""vix":{:.2},"london_time_secs":{},"gap_pct":{:.4},"symbol":"{}","#,
+                r#""open_positions":{},"trades_today":{}}}"#
             ),
             tick.ticker_id.0,
             tick.last,
@@ -352,6 +384,12 @@ impl PythonBridge {
             ctx.time_fraction,
             ctx.heat_pct,
             ctx.equity,
+            ctx.vix,
+            ctx.london_time_secs,
+            ctx.gap_pct,
+            ctx.symbol,
+            ctx.open_positions,
+            ctx.trades_today,
         );
 
         // Send — broken pipe means Python process is dead, flag for respawn.
