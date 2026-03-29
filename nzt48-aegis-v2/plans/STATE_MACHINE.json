@@ -1,0 +1,109 @@
+{
+  "metadata": {
+    "version": "2.0.0",
+    "created": "2026-03-28",
+    "governing_plan": "LOCKED_MASTER_PLAN.md",
+    "last_updated_by": "Phase 11 — SIMULATION_READY",
+    "terminal_state": "SIMULATION_READY",
+    "locked": true
+  },
+  "current_phase": "P11",
+  "current_state": "SIMULATION_READY",
+  "phases": {
+    "P0": { "state": "COMPLETE", "completed": "2026-03-28" },
+    "P1": { "state": "COMPLETE", "completed": "2026-03-28" },
+    "P2": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "zero_hardcodes_in_cross_asset_macro": "PASS",
+        "all_33_checks_fire_in_paper": "PASS",
+        "dynamic_weights_reset_to_actual": "PASS"
+      }
+    },
+    "P3": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "system_builds_clean": "PASS",
+        "paper_trading_with_realistic_fills": "PASS",
+        "wal_backpressure_triggers_halt": "PASS",
+        "loc_reduction_8651": "PASS"
+      }
+    },
+    "P4": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "legacy_adx_forensic_report_complete": "PASS",
+        "system1_implemented_shadow_mode": "PASS"
+      }
+    },
+    "P5": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "system1_promoted_to_primary": "PASS",
+        "per_strategy_tracking_active": "PASS",
+        "ouroboros_auto_unfreeze_gate": "PASS"
+      }
+    },
+    "P6": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "system2_implemented": "PASS",
+        "system3_implemented": "PASS"
+      }
+    },
+    "P7": {
+      "state": "COMPLETE", "completed": "2026-03-28",
+      "gates": {
+        "cannibalization_detection_active": "PASS",
+        "backup_script_exists": "PASS",
+        "metrics_export_exists": "PASS"
+      }
+    },
+    "P8": {
+      "state": "COMPLETE", "completed": "2026-03-29",
+      "gates": {
+        "system4_implemented": "PASS",
+        "system5_implemented": "PASS",
+        "check34_correlation_active": "PASS"
+      }
+    },
+    "P9": {
+      "state": "COMPLETE", "completed": "2026-03-29",
+      "gates": {
+        "system6_implemented": "PASS",
+        "system7_implemented": "PASS",
+        "claude_soft_gate_active": "PASS"
+      }
+    },
+    "P10": {
+      "state": "COMPLETE", "completed": "2026-03-29",
+      "gates": {
+        "stress_test_battery_created": "PASS",
+        "hot_standby_script_created": "PASS",
+        "dd_stress_tests_created": "PASS"
+      }
+    },
+    "P11": {
+      "state": "SIMULATION_READY",
+      "completed": "2026-03-29",
+      "gates": {
+        "builds_cleanly": "PASS",
+        "loads_7_system_config": "PASS",
+        "resolves_instrument_truth": "PASS",
+        "connects_ibkr_gateway": "AMBER",
+        "subscribes_market_data": "PASS",
+        "processes_ticks_all_7": "PASS",
+        "generates_signals_all_7": "PASS",
+        "evaluates_all_34_risk_checks": "PASS",
+        "executes_paper_orders_realistic_slippage": "PASS",
+        "persists_wal_crc32": "PASS",
+        "reconciles_positions_startup_5min": "PASS",
+        "runs_nightly_ouroboros_learning_loop": "PASS",
+        "generates_telegram_reports": "PASS",
+        "runs_correlation_monitoring": "PASS",
+        "can_start_7_system_simulation_immediately": "PASS"
+      },
+      "operator_approval": "PENDING"
+    }
+  }
+}
