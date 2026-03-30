@@ -194,6 +194,206 @@ except Exception as e:
 " >> "$LOG" 2>&1
 log "STEP 13: conformal calibration DONE"
 
+# ── STEP 14: Book 6 — Strategy statistical validation ──
+log "STEP 14: statistical validation — live strategy assessment"
+python3 -c "
+try:
+    from python_brain.validation.statistical_tests import run_strategy_validation
+    report = run_strategy_validation()
+    s = report.get('summary', {})
+    print(f'Validation: {s.get(\"passed\", 0)} passed, '
+          f'{s.get(\"failed\", 0)} failed, '
+          f'{s.get(\"insufficient_data\", 0)} insufficient data')
+except Exception as e:
+    print(f'Validation skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 14: statistical validation DONE"
+
+# ── STEP 15: Book 8 — Live metrics summary ──
+log "STEP 15: live metrics summary"
+python3 -c "
+try:
+    from python_brain.metrics.live_metrics import get_metrics_collector
+    mc = get_metrics_collector()
+    s = mc.summary()
+    mc.save()
+    print(f'Metrics: signals={s.get(\"signals_total\", 0)}, '
+          f'exits={s.get(\"total_exits\", 0)}, '
+          f'net_pnl={s.get(\"net_pnl\", 0):.2f}, '
+          f'WR={s.get(\"win_rate_50\", 0):.1f}%')
+except Exception as e:
+    print(f'Metrics skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 15: live metrics DONE"
+
+# ── STEP 16: Book 11 — Capital phase check ──
+log "STEP 16: capital phase detector"
+python3 -c "
+try:
+    from python_brain.sizing.phase_detector import run_phase_check
+    result = run_phase_check()
+    print(f'Phase: {result.get(\"status\", \"unknown\")}, '
+          f'phase={result.get(\"phase\", {}).get(\"label\", \"?\")}')
+except Exception as e:
+    print(f'Phase check skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 16: phase detector DONE"
+
+# ── STEP 17: Book 13 — Journal generation ──
+log "STEP 17: daily journal generation"
+python3 -c "
+try:
+    from python_brain.ouroboros.journal_generator import run_journal_generation
+    result = run_journal_generation()
+    print(f'Journal: date={result.get(\"date\", \"\")}, '
+          f'trades={result.get(\"trades\", 0)}, '
+          f'pnl={result.get(\"pnl\", 0):.2f}, '
+          f'insights={result.get(\"insights\", 0)}')
+except Exception as e:
+    print(f'Journal skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 17: journal generation DONE"
+
+# ── STEP 18: Book 14 — Alpha decay analysis ──
+log "STEP 18: alpha decay analysis"
+python3 -c "
+try:
+    from python_brain.lifecycle.alpha_decay import run_decay_analysis
+    report = run_decay_analysis()
+    s = report.get('summary', {})
+    print(f'Decay: {s.get(\"healthy\", 0)} healthy, '
+          f'{s.get(\"decaying\", 0)} decaying, '
+          f'{s.get(\"kill\", 0)} kill')
+    for a in report.get('alerts', []):
+        print(f'  ALERT: {a}')
+except Exception as e:
+    print(f'Decay analysis skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 18: alpha decay DONE"
+
+# ── STEP 19: Book 16 — Tilt detection ──
+log "STEP 19: tilt detection"
+python3 -c "
+try:
+    from python_brain.lifecycle.tilt_detector import run_tilt_analysis
+    result = run_tilt_analysis()
+    print(f'Tilt: score={result.get(\"score\", 0)}, '
+          f'level={result.get(\"status\", \"CALM\")}, '
+          f'triggers={result.get(\"triggers\", [])}')
+except Exception as e:
+    print(f'Tilt analysis skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 19: tilt detection DONE"
+
+# ── STEP 20: Book 17 — Monte Carlo risk analysis ──
+log "STEP 20: Monte Carlo simulation"
+python3 -c "
+try:
+    from python_brain.monte_carlo.engine import run_monte_carlo_nightly
+    report = run_monte_carlo_nightly()
+    print(f'MC: status={report.get(\"status\", \"?\")}, '
+          f'P(ruin)={report.get(\"bootstrap_p_ruin\", 0):.2%}, '
+          f'P(SR>0)={report.get(\"bootstrap_p_sharpe_positive\", 0):.2%}')
+except Exception as e:
+    print(f'Monte Carlo skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 20: Monte Carlo DONE"
+
+# ── STEP 21: Book 19 — Transaction cost analysis ──
+log "STEP 21: TCA analysis"
+python3 -c "
+try:
+    from python_brain.execution.tca_analyzer import run_tca_nightly
+    report = run_tca_nightly()
+    print(f'TCA: trades={report.get(\"trade_count\", 0)}, '
+          f'avg_cost={report.get(\"avg_total_shortfall_bps\", 0):.1f}bps, '
+          f'compliance={report.get(\"benchmark_compliance_pct\", 0):.0f}%')
+except Exception as e:
+    print(f'TCA skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 21: TCA DONE"
+
+# ── STEP 22: Book 20 — Portfolio rebalance ──
+log "STEP 22: portfolio rebalance"
+python3 -c "
+try:
+    from python_brain.portfolio.portfolio_optimizer import run_portfolio_rebalance
+    report = run_portfolio_rebalance()
+    print(f'Portfolio: strategies={report.get(\"metrics\", {}).get(\"num_strategies\", 0)}, '
+          f'max_weight={report.get(\"metrics\", {}).get(\"max_weight\", 0):.1%}, '
+          f'constrained={report.get(\"constraints_satisfied\", False)}')
+except Exception as e:
+    print(f'Portfolio rebalance skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 22: portfolio rebalance DONE"
+
+# ── STEP 23: Book 24 — Event calendar refresh ──
+log "STEP 23: event calendar refresh"
+python3 -c "
+try:
+    from python_brain.events.event_calendar import run_event_refresh
+    report = run_event_refresh()
+    print(f'Events: total={report.get(\"total_events\", 0)}, '
+          f'upcoming_7d={report.get(\"upcoming_7d\", 0)}, '
+          f'next_high={report.get(\"next_high_impact\", \"none\")}')
+except Exception as e:
+    print(f'Event calendar skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 23: event calendar DONE"
+
+# ── STEP 24: Book 26 — Compounding velocity ──
+log "STEP 24: compounding velocity"
+python3 -c "
+try:
+    from python_brain.sizing.compounding_velocity import run_velocity_nightly
+    report = run_velocity_nightly()
+    print(f'Velocity: 5d={report.get(\"velocity_5d_gbp_per_day\", 0):.2f} GBP/day, '
+          f'freq_ratio={report.get(\"frequency_ratio\", 0):.2f}x, '
+          f'efficiency={report.get(\"cash_efficiency\", 0):.1%}')
+except Exception as e:
+    print(f'Velocity skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 24: velocity DONE"
+
+# ── STEP 25: Book 27 — Leverage optimization ──
+log "STEP 25: leverage optimization"
+python3 -c "
+try:
+    from python_brain.sizing.leverage_selector import run_leverage_nightly
+    report = run_leverage_nightly()
+    print(f'Leverage: tickers={report.get(\"n_tickers_updated\", 0)}, '
+          f'VIX={report.get(\"vix_level\", 0):.1f}')
+except Exception as e:
+    print(f'Leverage optimization skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 25: leverage DONE"
+
+# ── STEP 26: Book 28 — Daily scorecard ──
+log "STEP 26: daily scorecard"
+python3 -c "
+try:
+    from python_brain.metrics.daily_scorecard import run_scorecard_nightly
+    report = run_scorecard_nightly()
+    print(f'Scorecard: grade={report.get(\"grade\", \"?\")}, '
+          f'net_pnl={report.get(\"net_pnl\", 0):.2f}, '
+          f'gates={report.get(\"gates_passed\", 0)}/{report.get(\"gates_total\", 10)}')
+except Exception as e:
+    print(f'Scorecard skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 26: scorecard DONE"
+
+# ── STEP 27: Book 23 — ML entry timing check ──
+log "STEP 27: ML entry timing nightly"
+python3 -c "
+try:
+    from python_brain.ml.entry_timing.ensemble import run_ml_nightly
+    run_ml_nightly()
+    print('ML nightly check complete')
+except Exception as e:
+    print(f'ML nightly skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 27: ML nightly DONE"
+
 log "=========================================="
-log "NIGHTLY PIPELINE COMPLETE"
+log "NIGHTLY PIPELINE COMPLETE (27 steps)"
 log "=========================================="

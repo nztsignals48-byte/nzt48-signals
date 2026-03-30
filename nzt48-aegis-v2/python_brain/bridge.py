@@ -1638,6 +1638,34 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
             elif direction == "below" and val > threshold:
                 return False, "indicator_gate", "{} {:.2f} > {:.2f} limit".format(g_ind, val, threshold)
 
+    # ── BOOK 7: CONCENTRATION RISK CHECKS (33-36) ──
+    # Pre-signal gates: correlation, country, session, time-of-day
+    if not _SIM_MODE:
+        try:
+            from python_brain.risk.concentration_checks import (
+                check_time_of_day_risk, get_spike_detector,
+            )
+            from datetime import datetime as _dt_cc, timezone as _tz_cc
+            ts_ns = msg.get("timestamp_ns", 0)
+            if ts_ns > 0:
+                utc_hour = _dt_cc.fromtimestamp(ts_ns / 1_000_000_000, tz=_tz_cc.utc).hour
+                tod_result = check_time_of_day_risk(utc_hour)
+                # Store scaling factor for later confidence adjustment
+                msg["_tod_scale"] = tod_result.value
+
+            # Correlation spike detector — feeds per-tick returns
+            symbol = ticker_symbols.get(ticker_id, "")
+            bars = list(bar_history[ticker_id])
+            if len(bars) >= 2 and bars[-2].get("last", 0) > 0:
+                ret = (bars[-1]["last"] - bars[-2]["last"]) / bars[-2]["last"]
+                spike_action = get_spike_detector().on_tick(symbol, ret, msg.get("timestamp_ns", 0))
+                if spike_action == "FLATTEN":
+                    return False, "corr_spike_flatten", "correlation spike: FLATTEN action"
+                elif spike_action == "REDUCE":
+                    msg["_corr_spike_reduce"] = True
+        except ImportError:
+            pass
+
     return True, None, None
 
 
@@ -3034,6 +3062,65 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     except Exception:
         pass
 
+    # ── BOOK 10: ROLLING KELLY + DRAWDOWN STAGING ──
+    # Dynamic Kelly based on recent performance + 4-stage drawdown response.
+    try:
+        from python_brain.sizing.rolling_kelly import get_drawdown_stager
+        dd_stager = get_drawdown_stager()
+        dd_stager.update(msg.get("equity", 10000.0))
+        dd_kelly_scale = dd_stager.kelly_scale()
+        dd_conf_add = dd_stager.confidence_floor_add()
+        if dd_stager.should_block_new_entries():
+            return None  # FLATTEN stage: exit-only mode
+        if dd_kelly_scale < 1.0:
+            for sig in all_signals:
+                sig["kelly_fraction"] *= dd_kelly_scale
+                sig["shares"] = max(1, int(sig["shares"] * dd_kelly_scale))
+        if dd_conf_add > 0:
+            all_signals = [s for s in all_signals if s["confidence"] >= (50 + dd_conf_add)]
+            if not all_signals:
+                return None
+    except ImportError:
+        pass
+
+    # ── BOOK 12: REALISTIC SLIPPAGE MODEL ──
+    # Replace flat 0.5% slippage with dynamic model (RVOL, ToD, order-size).
+    try:
+        from python_brain.execution.slippage_model import total_round_trip_cost
+        from datetime import datetime as _dt_slip, timezone as _tz_slip
+        ts_ns_slip = msg.get("timestamp_ns", 0)
+        utc_hour_slip = 12
+        if ts_ns_slip > 0:
+            utc_hour_slip = _dt_slip.fromtimestamp(ts_ns_slip / 1e9, tz=_tz_slip.utc).hour
+        for sig in all_signals:
+            eq = msg.get("equity", 10000.0)
+            notional = sig["kelly_fraction"] * eq
+            sym = sig.get("ticker", msg.get("symbol", ""))
+            exch = msg.get("exchange", "LSE")
+            ccy = msg.get("currency", "GBP")
+            cost_est = total_round_trip_cost(
+                notional_gbp=notional, symbol=sym, exchange=exch,
+                currency=ccy, rvol=ind.get("rvol", 1.0),
+                utc_hour=utc_hour_slip,
+            )
+            sig["sim_total_cost_gbp"] = round(cost_est.total_gbp, 2)
+            sig["sim_breakeven_pct"] = round(cost_est.breakeven_move_pct, 3)
+    except ImportError:
+        pass
+
+    # ── BOOK 7: TIME-OF-DAY CONFIDENCE SCALING ──
+    tod_scale = msg.get("_tod_scale", 1.0)
+    if tod_scale < 1.0:
+        for sig in all_signals:
+            sig["confidence"] = max(0, min(100, int(sig["confidence"] * tod_scale)))
+
+    # ── BOOK 7: CORRELATION SPIKE REDUCE ──
+    if msg.get("_corr_spike_reduce"):
+        for sig in all_signals:
+            sig["kelly_fraction"] *= 0.5
+            sig["shares"] = max(1, int(sig["shares"] * 0.5))
+            sig["corr_spike_reduce"] = True
+
     # ── BOOK 144: CONFORMAL PREDICTION — Calibrate confidence to empirical reality ──
     # Raw confidence ≠ actual win probability. Adjust using historical outcomes.
     # Only applies when we have 20+ calibration samples.
@@ -3202,6 +3289,42 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             pr = max(msg["last"], 1e-9)
             best["shares"] = max(1, int(_adaptive_kelly_cap * eq / pr))
         best["adaptive_kelly_cap"] = _adaptive_kelly_cap
+
+    # ── BOOK 24: EVENT PROXIMITY CHECK ──
+    # Reduce sizing near high-impact events (FOMC, CPI, NFP)
+    try:
+        from python_brain.events.event_calendar import get_event_calendar
+        _evt_cal = get_event_calendar()
+        _near_event = _evt_cal.is_near_event(msg.get("timestamp_ns", 0))
+        if _near_event:
+            _evt_sizing = _evt_cal.get_sizing_modifier(_near_event)
+            best["kelly_fraction"] *= _evt_sizing
+            best["shares"] = max(1, int(best["shares"] * _evt_sizing))
+            best["event_near"] = _near_event.name
+            best["event_sizing_mult"] = _evt_sizing
+    except ImportError:
+        pass
+
+    # ── BOOK 27: LEVERAGE-OPTIMAL ALLOCATION ──
+    # Adjust position size based on Kelly-optimal leverage L*
+    try:
+        from python_brain.sizing.leverage_selector import get_leverage_selector
+        _lev_sel = get_leverage_selector()
+        _sym = ticker_symbols.get(ticker_id, "")
+        _etp_lev = msg.get("leverage", 1)
+        _regime_str = hurst_regime if hurst_regime in ("STEADY", "INFLATION", "WOI", "CRISIS") else "STEADY"
+        if _etp_lev > 1 and _sym:
+            _lev_result = _lev_sel.get_allocation(_sym, _etp_lev, _regime_str)
+            if _lev_result.allocation_fraction < 1.0:
+                best["kelly_fraction"] *= _lev_result.allocation_fraction
+                best["shares"] = max(1, int(best["shares"] * _lev_result.allocation_fraction))
+                best["leverage_l_star"] = _lev_result.l_star
+                best["leverage_alloc"] = round(_lev_result.allocation_fraction, 3)
+                best["leverage_drag_pct"] = round(_lev_result.drag_pct, 3)
+            if _lev_result.warning:
+                best["leverage_warning"] = _lev_result.warning
+    except ImportError:
+        pass
 
     # VPIN shadow fields
     best["vpin"] = round(ind["vpin"], 4)
@@ -3613,6 +3736,41 @@ def main():
                             record_trade_outcome(exit_strategy, entry_conf, exit_pnl > 0)
                     except ImportError:
                         pass
+
+                    # Book 8: Record exit in live metrics
+                    try:
+                        from python_brain.metrics.live_metrics import get_metrics_collector
+                        get_metrics_collector().record_exit(
+                            exit_strategy, pnl=exit_pnl,
+                            cost=msg.get("commission", 0.0),
+                            holding_bars=msg.get("holding_bars", 0),
+                        )
+                    except ImportError:
+                        pass
+
+                    # Book 10: Record trade return for rolling Kelly
+                    try:
+                        from python_brain.sizing.rolling_kelly import get_rolling_kelly
+                        if msg.get("entry_price", 0) > 0:
+                            trade_ret = (exit_price - msg["entry_price"]) / msg["entry_price"]
+                            get_rolling_kelly().record_trade(exit_strategy, trade_ret)
+                    except ImportError:
+                        pass
+
+                    # Book 26: Record trade for compounding velocity
+                    try:
+                        from python_brain.sizing.compounding_velocity import get_velocity_tracker, TradeRecord
+                        from datetime import datetime
+                        get_velocity_tracker().record_trade(TradeRecord(
+                            timestamp=datetime.utcnow(),
+                            net_pnl=exit_pnl,
+                            gross_pnl=exit_pnl + msg.get("commission", 0.0),
+                            cost=msg.get("commission", 0.0),
+                            deployed_capital=msg.get("entry_price", 0) * msg.get("shares", 0),
+                            duration_seconds=msg.get("holding_bars", 0) * 5.0,
+                        ))
+                    except ImportError:
+                        pass
             except Exception as e:
                 sys.stderr.write(f"Bridge: exit tracking error: {e}\n")
                 sys.stderr.flush()
@@ -3642,6 +3800,22 @@ def main():
                 from python_brain.analytics.conformal_calibrator import get_calibrators
                 get_calibrators().save()
                 sys.stderr.write("BOOK144: conformal calibration saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            # Book 8: Save live metrics on shutdown
+            try:
+                from python_brain.metrics.live_metrics import get_metrics_collector
+                get_metrics_collector().save()
+                sys.stderr.write("BOOK8: live metrics saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            # Book 10: Save rolling Kelly state on shutdown
+            try:
+                from python_brain.sizing.rolling_kelly import get_rolling_kelly
+                get_rolling_kelly().save()
+                sys.stderr.write("BOOK10: rolling Kelly saved on shutdown\n")
                 sys.stderr.flush()
             except Exception:
                 pass

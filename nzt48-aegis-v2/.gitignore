@@ -13,20 +13,28 @@ __pycache__/
 *.swp
 *.swo
 
-# Environment
+# Environment (plaintext secrets — NEVER commit)
 .env
 .env.production
 .env.local
+.env.age
+.env.production.age
+.age-key.txt
 
 # Data (runtime generated)
 data/
-events/
+/events/
 logs/
 *.log
 
 # Config with secrets
 config/sheets_service_account.json
 config/*.tmp
+
+# B0.1: Credential and secret files — NEVER commit
+docs/AEGIS_V2_CREDENTIALS.md
+**/CREDENTIALS*
+**/credentials*
 
 # OS
 .DS_Store
