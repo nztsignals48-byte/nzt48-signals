@@ -292,6 +292,21 @@ _last_vwap_date = {}  # ticker_id → date string "YYYY-MM-DD"
 # Ticker ID → symbol mapping (populated from tick messages)
 ticker_symbols = {}
 
+# ── BOOK 77: CROSS-MARKET LEAD-LAG BUFFER ──
+# Stores recent 5-bar returns per leader symbol for cross-ticker lag detection.
+# Key: leader symbol (e.g. "SPY", "QQQ"), Value: list of last N bar closes.
+_leader_bar_closes = {}  # symbol → deque of close prices (max 20)
+# Reverse map: follower symbol → list of (leader_symbol, pair_name)
+_FOLLOWER_TO_LEADERS = {}
+try:
+    from python_brain.strategies.lead_lag import LEAD_LAG_PAIRS
+    for pair_name, pair_info in LEAD_LAG_PAIRS.items():
+        follower = pair_info["follower"]
+        leader = pair_info["leader"]
+        _FOLLOWER_TO_LEADERS.setdefault(follower, []).append((leader, pair_name))
+except ImportError:
+    pass
+
 # Tick counters for diagnostic logging (per-ticker)
 _tick_counts = {}
 
@@ -2643,6 +2658,56 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
+    # ── BOOK 77: CROSS-MARKET LEAD-LAG ──
+    # When this ticker is a known follower (e.g. 3USL.L), check if its leader (e.g. SPY)
+    # has moved significantly and the follower is lagging.
+    lead_lag_signal = None
+    try:
+        symbol = ticker_symbols.get(ticker_id, "")
+        pairs_for_follower = _FOLLOWER_TO_LEADERS.get(symbol, [])
+        if pairs_for_follower and bars_5m and len(bars_5m) >= 5:
+            from python_brain.strategies.lead_lag import detect_lead_lag_signal
+            follower_returns = []
+            for i in range(1, min(6, len(bars_5m))):
+                if bars_5m[i - 1]["close"] > 0:
+                    follower_returns.append(
+                        (bars_5m[i]["close"] - bars_5m[i - 1]["close"]) / bars_5m[i - 1]["close"]
+                    )
+            for leader_sym, pair_name in pairs_for_follower:
+                leader_closes = list(_leader_bar_closes.get(leader_sym, []))
+                if len(leader_closes) >= 6:
+                    leader_returns = []
+                    for i in range(1, min(6, len(leader_closes))):
+                        if leader_closes[i - 1] > 0:
+                            leader_returns.append(
+                                (leader_closes[i] - leader_closes[i - 1]) / leader_closes[i - 1]
+                            )
+                    if leader_returns and follower_returns:
+                        sig = detect_lead_lag_signal(
+                            leader_returns=leader_returns,
+                            follower_returns=follower_returns,
+                            pair_name=pair_name,
+                        )
+                        if sig and sig.confidence >= effective_floor:
+                            kelly = _kelly_for(sig.confidence)
+                            lead_lag_signal = {
+                                "type": "signal", "ticker_id": ticker_id,
+                                "direction": "Long",
+                                "confidence": sig.confidence,
+                                "kelly_fraction": kelly["kelly_fraction"],
+                                "shares": kelly["shares"],
+                                "strategy": "LeadLag",
+                                "leader": sig.leader_ticker,
+                                "follower": sig.follower_ticker,
+                                "leader_move_pct": sig.leader_move_pct,
+                                "follower_lag_pct": sig.follower_lag_pct,
+                                "expected_catchup_pct": sig.estimated_catch_up_pct,
+                                **common_fields,
+                            }
+                            break  # Take the first valid lead-lag signal
+    except Exception:
+        pass
+
     # Calendar Anomaly Modifier (Book 171) — applies to ALL signals
     cal_conf_delta = 0
     cal_kelly_mult = 1.0
@@ -2665,7 +2730,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
-        vol_comp_signal, rebal_signal, nav_signal, alpha_signal,
+        vol_comp_signal, rebal_signal, nav_signal, alpha_signal, lead_lag_signal,
     ] if s]
 
     # Apply calendar anomaly adjustments to ALL signals (Book 171)
@@ -2690,6 +2755,47 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # P2-#7: LSE confidence boost DELETED — was +20 blanket boost that inflated
     # marginal signals (conf 45-49) above floor, causing false entries.
+
+    # ── BOOK 82: ENSEMBLE REGIME DETECTION (Fast-Noisy + Slow-Accurate) ──
+    try:
+        from python_brain.risk.regime_ensemble import get_regime_ensemble, regime_confidence_adjustment
+        _regime_result = get_regime_ensemble().on_tick(
+            hurst=ind.get("hurst", 0.5),
+            vpin=ind.get("vpin", 0.5),
+            rvol=ind.get("rvol", 1.0),
+            adx=ind.get("adx", 15.0),
+            spread_pct=ind.get("spread_pct", 0.1),
+            drawdown_pct=msg.get("drawdown_pct", 0.0),
+            timestamp_secs=msg.get("timestamp_ns", 0) / 1e9 if msg.get("timestamp_ns") else 0,
+        )
+        regime_penalty = regime_confidence_adjustment(_regime_result)
+        if regime_penalty != 0:
+            for sig in all_signals:
+                sig["confidence"] = max(0, min(100, sig["confidence"] + regime_penalty))
+                sig["regime_alert"] = _regime_result.action
+    except ImportError:
+        pass
+
+    # ── BOOK 124: VOL REGIME CLUSTERING (5-state) ──
+    # Provides richer regime classification and sizing multiplier.
+    _vol_regime_sizing = 1.0
+    try:
+        from python_brain.risk.vol_regime_cluster import get_vol_regime
+        _vol_result = get_vol_regime(
+            hurst=ind.get("hurst", 0.5),
+            rvol=ind.get("rvol", 1.0),
+            vpin=ind.get("vpin", 0.5),
+            adx=ind.get("adx", 15.0),
+            spread_pct=ind.get("spread_pct", 0.1),
+            vol_slope=ind.get("vol_slope", 0.0),
+        )
+        _vol_regime_sizing = _vol_result.sizing_mult
+        for sig in all_signals:
+            sig["vol_regime"] = _vol_result.regime
+            sig["vol_regime_confidence"] = _vol_result.confidence
+            sig["vol_regime_stress"] = _vol_result.regime_score
+    except ImportError:
+        pass
 
     symbol = ticker_symbols.get(ticker_id, "")
 
@@ -2751,6 +2857,12 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     ]
     if not all_signals:
         return None
+
+    # ── BOOK 124: Apply vol regime sizing multiplier to Kelly ──
+    if _vol_regime_sizing < 1.0:
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _vol_regime_sizing
+            sig["shares"] = max(1, int(sig["shares"] * _vol_regime_sizing))
 
     # NEWS/SENTIMENT ENRICHMENT — same-time-as-hedge-funds data
     # Enrich each signal with news sentiment, dark pool flow, options flow, Congress trades.
@@ -2920,6 +3032,24 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             )
             sig["shares"] = max(1, int(sig["kelly_fraction"] * msg.get("equity", 10000) / max(sig.get("price", 1), 0.01)))
     except Exception:
+        pass
+
+    # ── BOOK 144: CONFORMAL PREDICTION — Calibrate confidence to empirical reality ──
+    # Raw confidence ≠ actual win probability. Adjust using historical outcomes.
+    # Only applies when we have 20+ calibration samples.
+    try:
+        from python_brain.analytics.conformal_calibrator import get_calibrators
+        _cals = get_calibrators()
+        if _cals._global._total_recorded >= 20:
+            for sig in all_signals:
+                strat = sig.get("strategy", "")
+                raw = sig["confidence"]
+                cal_result = _cals.calibrate(strat, raw)
+                if cal_result.n_samples >= 5:
+                    sig["raw_confidence"] = raw
+                    sig["confidence"] = cal_result.calibrated_confidence
+                    sig["calibration_bucket"] = cal_result.bucket
+    except ImportError:
         pass
 
     # Select best signal after all adjustments
@@ -3252,6 +3382,14 @@ def process_tick(msg):
     # Stage 1: Compute indicators
     ind = _compute_indicators(ticker_id, ticks, msg)
 
+    # ── BOOK 77: Update leader bar closes for cross-market lead-lag ──
+    symbol = ticker_symbols.get(ticker_id, "")
+    if symbol and ind.get("bars_5m"):
+        from collections import deque
+        if symbol not in _leader_bar_closes:
+            _leader_bar_closes[symbol] = deque(maxlen=20)
+        _leader_bar_closes[symbol].append(ind["bars_5m"][-1]["close"])
+
     # Build indicator dict for gate veto logging
     _ind = {
         "hurst": ind["hurst"], "adx": ind["adx"], "rvol": ind["rvol"],
@@ -3460,12 +3598,19 @@ def main():
                         pass  # Module not deployed yet
 
                     # Book 1: Feed confidence + return for IC tracking
+                    entry_conf = _entry_confidences.pop((exit_tid, exit_strategy), 0)
                     try:
                         from python_brain.metrics.fundamental_law import get_tracker
-                        entry_conf = _entry_confidences.pop((exit_tid, exit_strategy), 0)
                         if entry_conf > 0:
-                            # exit_pnl from Rust is the actual return (fractional)
                             get_tracker().record_signal(exit_strategy, entry_conf / 100.0, exit_pnl)
+                    except ImportError:
+                        pass
+
+                    # Book 144: Feed outcome to conformal calibrator
+                    try:
+                        from python_brain.analytics.conformal_calibrator import record_trade_outcome
+                        if entry_conf > 0:
+                            record_trade_outcome(exit_strategy, entry_conf, exit_pnl > 0)
                     except ImportError:
                         pass
             except Exception as e:
@@ -3489,6 +3634,14 @@ def main():
                 from python_brain.metrics.fundamental_law import get_tracker
                 get_tracker().save()
                 sys.stderr.write("BOOK1: fundamental law state saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            # Book 144: Save conformal calibration on clean shutdown
+            try:
+                from python_brain.analytics.conformal_calibrator import get_calibrators
+                get_calibrators().save()
+                sys.stderr.write("BOOK144: conformal calibration saved on shutdown\n")
                 sys.stderr.flush()
             except Exception:
                 pass

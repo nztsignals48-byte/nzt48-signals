@@ -164,6 +164,36 @@ except Exception as e:
 " >> "$LOG" 2>&1
 log "STEP 11: bayesian calibration DONE"
 
+# ── STEP 12: Book 119 — MI-based feature importance analysis ──
+log "STEP 12: MI signal selection analysis"
+python3 -c "
+try:
+    from python_brain.analytics.mi_signal_selector import run_mi_analysis
+    report = run_mi_analysis()
+    print(f'MI analysis: {report[\"status\"]}, '
+          f'{report.get(\"n_outcomes\", 0)} outcomes, '
+          f'top features: {report.get(\"top_5\", [])}')
+except Exception as e:
+    print(f'MI analysis skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 12: MI analysis DONE"
+
+# ── STEP 13: Book 144 — Conformal calibration summary ──
+log "STEP 13: Conformal calibration report"
+python3 -c "
+try:
+    from python_brain.analytics.conformal_calibrator import get_calibrators
+    cals = get_calibrators()
+    s = cals.summary
+    g = s.get('global', {})
+    print(f'Conformal: {g.get(\"total_recorded\", 0)} outcomes, '
+          f'ECE={g.get(\"calibration_error_pct\", 0):.1f}%')
+    cals.save()
+except Exception as e:
+    print(f'Conformal skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 13: conformal calibration DONE"
+
 log "=========================================="
 log "NIGHTLY PIPELINE COMPLETE"
 log "=========================================="

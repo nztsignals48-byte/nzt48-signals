@@ -144,7 +144,40 @@ TelegramAlerter.send() → [Book 58: register_alert if WARNING/CRITICAL]
 ## ALL SYNTAX VERIFIED
 7 Python files + 1 bash script pass syntax checks.
 
+### Book 1: Fundamental Law of Active Management — COMPLETE
+**New file:** `python_brain/metrics/fundamental_law.py`, `python_brain/metrics/__init__.py`
+**Modified:** `python_brain/bridge.py`, `python_brain/ouroboros/nightly_v6.py`
+**Commit:** `40ce9a0`
+
+- `FundamentalLawTracker` class with per-strategy IC (Spearman rank correlation), breadth counter, portfolio Sharpe (√N + ρ correction), variance drag (σ²/2), Kelly-optimal growth (g* = ½Σ SR_i²)
+- Bridge.py: entry confidence tracked in `_entry_confidences` dict, paired with P&L on exit for IC
+- Bridge.py: daily portfolio return fed from equity snapshots for variance drag
+- nightly_v6.py: Step 5.20b computes full report → nightly_output.json
+- State persisted to `/app/data/fundamental_law.json`, saved on shutdown + nightly
+- Deployed to EC2, verified import OK
+
+### Book Status After This Session
+
+| Book | Status | Notes |
+|------|--------|-------|
+| 1 | DONE | Fundamental Law tracker, deployed |
+| 2 | 95% DONE | All Claude/Gemini wired (prev session). Only gap: Gemini pick accuracy tracking |
+| 3 | DONE | Reference doc — code already implements ISA gate, cost model, instrument universe |
+| 58 | DONE | Escalation timeouts + N10a KILL flatten |
+| 72 | DONE | 14 Claude decision types + dispatcher |
+| 207 | DONE | NormalizedSignal schema validation |
+| 208 | DONE | Quality gates (PAPER→LIVE lifecycle) |
+| 209 | DONE | Bayesian multi-source aggregation |
+
+**73+ books implemented in code.** Next: Book 4 onwards (continue sequential scan).
+
 ## WHAT REMAINS (Next Session)
-- **Deploy to EC2:** `git add` new files, commit, push, Docker rebuild
-- **IBKR connection:** Monday deadline — engine should start clean with all new modules
-- **Verify kill_switch listener starts on EC2:** Ensure `--listen` mode runs in Docker (check supervisord/entrypoint)
+- **IBKR connection:** Monday — engine is deployed, will connect when market opens
+- **Continue book-by-book scan:** Resume from Book 4 (Implementation Roadmap)
+- **High-value unimplemented books to prioritize:**
+  - Book 8/38: Telegram bot enhancements (partial)
+  - Book 10: Compounding engine capital allocation
+  - Book 14: Signal research lab
+  - Book 113: HMM regime detection (advanced)
+  - Book 131: Dynamic capital reallocation (meta-allocator)
+- **Gemini pick accuracy tracking** (Book 2 gap)
