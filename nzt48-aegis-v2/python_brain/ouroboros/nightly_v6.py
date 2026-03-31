@@ -2315,6 +2315,44 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Strategy lifecycle evaluation failed (non-fatal): %s", e)
 
+    # Step 5.12b: Alpha Persistence Check (Book 133)
+    # Test if each strategy's alpha is persistent or decaying.
+    try:
+        from python_brain.analytics.causal_alpha import run_alpha_persistence_check
+        _alpha_results = run_alpha_persistence_check(trades)
+        if _alpha_results:
+            recommendations["alpha_persistence"] = _alpha_results
+            _decaying = [s for s, v in _alpha_results.items()
+                         if v.get("verdict") in ("DECAYING", "DEAD")]
+            if _decaying:
+                log.warning("ALPHA_DECAY: %d strategies decaying: %s",
+                            len(_decaying), ", ".join(_decaying))
+            else:
+                log.info("Alpha persistence: %d strategies checked, all healthy", len(_alpha_results))
+    except ImportError:
+        log.info("Causal alpha module not installed — skipping")
+    except Exception as e:
+        log.warning("Alpha persistence check failed (non-fatal): %s", e)
+
+    # Step 5.12c: Factor Attribution (Book 18)
+    # Decompose P&L by alpha factor category.
+    try:
+        from python_brain.analytics.factor_zoo import compute_factor_attribution
+        _factor_pnl = compute_factor_attribution(trades)
+        if _factor_pnl:
+            recommendations["factor_attribution"] = _factor_pnl
+            for _fname, _fstats in _factor_pnl.items():
+                _fwr = _fstats.get("win_rate", 0)
+                _fpnl = _fstats.get("total_pnl", 0)
+                _fn = _fstats.get("count", 0)
+                if _fn >= 3:
+                    log.info("  Factor %s: n=%d WR=%.0f%% PnL=%.2f",
+                             _fname, _fn, _fwr * 100, _fpnl)
+    except ImportError:
+        log.info("Factor zoo module not installed — skipping")
+    except Exception as e:
+        log.warning("Factor attribution failed (non-fatal): %s", e)
+
     # Step 5.13: Validation Gates Check (Books 6, 31, 192)
     # Run DSR and PBO on each strategy's cumulative returns.
     try:

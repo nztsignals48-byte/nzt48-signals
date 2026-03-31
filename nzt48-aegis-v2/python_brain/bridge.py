@@ -5766,6 +5766,30 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["etp_hold_rule"] = f"earnings_T-1_{_earn_ul}"
             sig["suggested_max_hold_hours"] = min(sig.get("suggested_max_hold_hours", 999), 4)
 
+    # ── BOOK 130: IV SURFACE SIZING MODIFIER ──
+    # Adjust position size based on implied volatility regime.
+    # Backwardation + high IV → reduce size. Contango + low IV → can size up.
+    try:
+        from python_brain.analytics.iv_surface import compute_iv_regime, iv_sizing_modifier
+        _vix = msg.get("vix", 20)
+        _vix_1m = msg.get("vix_1m", _vix)
+        _vix_3m = msg.get("vix_3m", _vix)
+        _iv_regime = compute_iv_regime(_vix, _vix_1m, _vix_3m)
+        _iv_mult = iv_sizing_modifier(_iv_regime)
+        if abs(_iv_mult - 1.0) > 0.01:
+            for sig in all_signals:
+                _orig_kelly = sig.get("kelly_fraction", 0.20)
+                sig["kelly_fraction"] = round(_orig_kelly * _iv_mult, 4)
+                _orig_shares = sig.get("shares", 0)
+                if _orig_shares > 0:
+                    sig["shares"] = max(1, int(_orig_shares * _iv_mult))
+                sig["iv_sizing_mult"] = _iv_mult
+                sig["iv_regime"] = _iv_regime.get("label", "unknown")
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
     # ── TURN-OF-MONTH (TOM) SIZING OVERLAY (Book 171) ──
     # Unlike the confidence boost in _generate_signals, this applies to Kelly sizing.
     # TOM captures 75% of monthly returns in 25% of trading days.
@@ -7059,6 +7083,46 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if _tick_counts.get(ticker_id, 0) % 100 == 0:
                 sys.stderr.write(f"BAYES_ERR: {bayes_err}\n")
                 sys.stderr.flush()
+
+    # ── BOOK 18: FACTOR CONCENTRATION GATE ──
+    # Block signals when portfolio overexposed to single alpha factor (>60%).
+    if best.get("type") == "signal" and not _SIM_MODE:
+        try:
+            from python_brain.analytics.factor_zoo import classify_signal, get_factor_exposure, factor_concentration_gate
+            _new_factor = classify_signal(best.get("strategy", ""))
+            _active_pos = msg.get("active_positions", [])
+            if _active_pos:
+                _exposure = get_factor_exposure(_active_pos)
+                _blocked, _block_reason = factor_concentration_gate(_new_factor, _exposure)
+                if _blocked:
+                    return {"type": "no_signal", "ticker_id": ticker_id,
+                            "reason": f"factor_concentration: {_block_reason}"}
+            best["factor_category"] = _new_factor.value if hasattr(_new_factor, 'value') else str(_new_factor)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    # ── BOOK 188: PRE-TRADE RISK CHECKS ──
+    # 5-point risk validation: notional, correlation, sector, intraday P&L, order ratio.
+    if best.get("type") == "signal" and not _SIM_MODE:
+        try:
+            from python_brain.risk.pre_trade_checks import pre_trade_risk_check
+            _portfolio = {
+                "equity": msg.get("account_equity", 10000),
+                "positions": msg.get("active_positions", []),
+                "daily_pnl_pct": msg.get("daily_pnl_pct", 0),
+                "orders_today": msg.get("orders_today", 0),
+                "fills_today": msg.get("fills_today", 0),
+            }
+            _passed, _reason = pre_trade_risk_check(best, _portfolio, {"vix": msg.get("vix", 20)})
+            if not _passed:
+                return {"type": "no_signal", "ticker_id": ticker_id,
+                        "reason": f"pre_trade_188: {_reason}"}
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     # ── BOOKS 151/152: AGENT SWARM CONSENSUS ──
     # 10 micro-agents each vote on signal quality. Low consensus → dampen/block.
