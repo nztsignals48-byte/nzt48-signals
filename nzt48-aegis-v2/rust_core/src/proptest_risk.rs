@@ -82,6 +82,12 @@ mod tests {
                 daily_trade_number: 0,
                 entry_type: String::new(),
                 active_trading_ticks: 0,
+                max_hold_hours: None,
+                exit_urgency_ramp_hours: None,
+                suggested_initial_stop_atr_mult: None,
+                suggested_rung3_atr: None,
+                min_profit_target_pct: None,
+                partial_exits_done: 0,
                 };
                 portfolio.add_position(pos);
             }

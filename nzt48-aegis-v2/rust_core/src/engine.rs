@@ -321,6 +321,10 @@ pub struct Engine<B: BrokerAdapter> {
     pub gap_cooldowns: HashMap<TickerId, u64>,
     /// COMPOUNDING: Exit events queued for Python bridge notification (live Sharpe tracking).
     pub pending_exit_notifications: Vec<(u32, f64, f64, String)>, // (ticker_id, exit_price, pnl, strategy)
+    /// Book 39: Cache exit hints from BrainSignal between order submission and fill.
+    /// Consumed when creating PositionState on live fill.
+    pub pending_exit_hints: HashMap<TickerId, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>)>,
+    // Fields: (max_hold_hours, exit_urgency_ramp_hours, suggested_initial_stop_atr_mult, suggested_rung3_atr, min_profit_target_pct)
     /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
     halted_tickers: std::collections::HashSet<TickerId>,
     /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.
@@ -586,6 +590,7 @@ impl<B: BrokerAdapter> Engine<B> {
             positions: HashMap::new(),
             gap_cooldowns: HashMap::new(),
             pending_exit_notifications: Vec::new(),
+            pending_exit_hints: HashMap::new(),
             halted_tickers: std::collections::HashSet::new(),
             economic_calendar: Vec::new(),
             now_ns: 0,
@@ -2078,17 +2083,21 @@ impl<B: BrokerAdapter> Engine<B> {
 
             // Track as position for exit management (Chandelier ladder)
             let entry_price_gbp = tick.ask;
-            // AUDIT-FIX: Use 1.5×ATR for initial stop (matches Chandelier Rung 1).
-            // Fallback to 5% if ATR unavailable (cold start).
+            // AUDIT-FIX: Use per-signal ATR mult for initial stop (Book 39).
+            // Falls back to config default, then 5% if ATR unavailable (cold start).
             let atr_val = self.bar_history.get(&tid).map(|h| h.atr(14)).unwrap_or(0.0);
+            // Book 39: Per-signal Chandelier calibration — use signal hint if available
+            let effective_atr_mult = sig.suggested_initial_stop_atr_mult
+                .unwrap_or(self.config.chandelier.initial_stop_atr_mult);
             let stop_pct = if atr_val > 0.0 && entry_price_gbp > 0.0 {
-                // P2-#11/#13: Read ATR mult and clamp from config (was hardcoded 1.5, 0.01-0.10)
-                (self.config.chandelier.initial_stop_atr_mult * atr_val / entry_price_gbp)
+                (effective_atr_mult * atr_val / entry_price_gbp)
                     .clamp(self.config.hardening.sizing.stop_pct_clamp_min, self.config.hardening.sizing.stop_pct_clamp_max)
             } else {
-                self.config.hardening.sizing.cold_start_stop_pct // P2-#12: Was hardcoded 0.05
+                self.config.hardening.sizing.cold_start_stop_pct
             };
             let stop = initial_stop_price(entry_price_gbp, stop_pct);
+            // Resolve max_hold_hours: prefer max_hold_hours, fall back to suggested_max_hold_hours
+            let resolved_max_hold = sig.max_hold_hours.or(sig.suggested_max_hold_hours);
             self.positions.insert(tid, PositionState {
                 ticker_id: tid,
                 qty,
@@ -2109,6 +2118,13 @@ impl<B: BrokerAdapter> Engine<B> {
                 daily_trade_number: 0,
                 entry_type: entry_type.clone(),
                 active_trading_ticks: 0,
+                // Book 39/94: Copy exit hints from BrainSignal → consumed by exit_engine
+                max_hold_hours: resolved_max_hold,
+                exit_urgency_ramp_hours: sig.exit_urgency_ramp_hours,
+                suggested_initial_stop_atr_mult: sig.suggested_initial_stop_atr_mult,
+                suggested_rung3_atr: sig.suggested_rung3_atr,
+                min_profit_target_pct: sig.min_profit_target_pct,
+                partial_exits_done: 0,
             });
 
             self.simulated_trades.push(sim_trade);
@@ -2151,6 +2167,13 @@ impl<B: BrokerAdapter> Engine<B> {
                 daily_trade_number: 0,
                 entry_type: entry_type.clone(),
                 active_trading_ticks: 0,
+                // Book 39/94: Copy exit hints from BrainSignal
+                max_hold_hours: resolved_max_hold,
+                exit_urgency_ramp_hours: sig.exit_urgency_ramp_hours,
+                suggested_initial_stop_atr_mult: sig.suggested_initial_stop_atr_mult,
+                suggested_rung3_atr: sig.suggested_rung3_atr,
+                min_profit_target_pct: sig.min_profit_target_pct,
+                partial_exits_done: 0,
             };
             self.portfolio.add_position(pos_copy);
 
@@ -2158,7 +2181,14 @@ impl<B: BrokerAdapter> Engine<B> {
             self.telemetry.orders_filled.inc();
 
         } else {
-            // LIVE MODE: Submit to broker
+            // LIVE MODE: Submit to broker, cache exit hints for fill handler
+            self.pending_exit_hints.insert(tid, (
+                sig.max_hold_hours.or(sig.suggested_max_hold_hours),
+                sig.exit_urgency_ramp_hours,
+                sig.suggested_initial_stop_atr_mult,
+                sig.suggested_rung3_atr,
+                sig.min_profit_target_pct,
+            ));
             if let Err(e) = self
                 .broker
                 .submit_order(&order_id, tid, OrderSide::Buy, qty, limit_price)
@@ -3151,10 +3181,15 @@ impl<B: BrokerAdapter> Engine<B> {
                     self.broker_health.record_fill_success(self.now_ns);
                     // P18: Record WAL event in compressor.
                     self.wal_compressor.record_event();
-                    // AUDIT-FIX: Use ATR-based stop (1.5× ATR), fallback to 5%
+                    // Book 39: Retrieve cached exit hints from pending_exit_hints
+                    let hints = self.pending_exit_hints.remove(ticker_id)
+                        .unwrap_or((None, None, None, None, None));
+                    // AUDIT-FIX: Use per-signal ATR mult for initial stop (Book 39)
                     let atr_val = self.bar_history.get(ticker_id).map(|h| h.atr(14)).unwrap_or(0.0);
+                    let effective_atr_mult = hints.2 // suggested_initial_stop_atr_mult
+                        .unwrap_or(self.config.chandelier.initial_stop_atr_mult);
                     let stop_pct = if atr_val > 0.0 && *price > 0.0 {
-                        (1.5 * atr_val / *price).clamp(0.01, 0.10)
+                        (effective_atr_mult * atr_val / *price).clamp(0.01, 0.10)
                     } else {
                         0.05
                     };
@@ -3173,12 +3208,19 @@ impl<B: BrokerAdapter> Engine<B> {
                         state: OrderState::ExitRegistered,
                         origin_order_id: order_id.clone(),
                         is_carried: false,
-                mae: 0.0,
-                mfe: 0.0,
-                spread_at_entry_pct: 0.0,
-                daily_trade_number: 0,
-                entry_type: String::new(),  // Not available during WAL replay
-                active_trading_ticks: 0,
+                        mae: 0.0,
+                        mfe: 0.0,
+                        spread_at_entry_pct: 0.0,
+                        daily_trade_number: 0,
+                        entry_type: String::new(),
+                        active_trading_ticks: 0,
+                        // Book 39/94: Consume cached exit hints from BrainSignal
+                        max_hold_hours: hints.0,
+                        exit_urgency_ramp_hours: hints.1,
+                        suggested_initial_stop_atr_mult: hints.2,
+                        suggested_rung3_atr: hints.3,
+                        min_profit_target_pct: hints.4,
+                        partial_exits_done: 0,
                     };
                     self.portfolio.add_position(pos.clone());
                     self.positions.insert(*ticker_id, pos);

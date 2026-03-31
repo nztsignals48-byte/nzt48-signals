@@ -136,6 +136,19 @@ pub struct PositionState {
     /// Unlike wall-clock time, this pauses during exchange halts (no ticks = no increment).
     #[pyo3(get)]
     pub active_trading_ticks: u32,
+    // ── EXIT HINT FIELDS (from BrainSignal, consumed by exit_engine) ──
+    /// Max holding period in hours (time-stop). None = no time limit.
+    pub max_hold_hours: Option<f64>,
+    /// Hours after which to start tightening stops (urgency ramp).
+    pub exit_urgency_ramp_hours: Option<f64>,
+    /// Per-signal initial Chandelier stop ATR multiplier.
+    pub suggested_initial_stop_atr_mult: Option<f64>,
+    /// Per-signal Rung 3 trailing ATR multiplier.
+    pub suggested_rung3_atr: Option<f64>,
+    /// Minimum profit target % (don't advance to breakeven below this).
+    pub min_profit_target_pct: Option<f64>,
+    /// Number of partial exits completed (0, 1, 2 max).
+    pub partial_exits_done: u8,
 }
 
 #[pymethods]
@@ -170,6 +183,12 @@ impl PositionState {
             daily_trade_number: 0,
             entry_type: String::new(),
             active_trading_ticks: 0,
+            max_hold_hours: None,
+            exit_urgency_ramp_hours: None,
+            suggested_initial_stop_atr_mult: None,
+            suggested_rung3_atr: None,
+            min_profit_target_pct: None,
+            partial_exits_done: 0,
         }
     }
 }
@@ -238,6 +257,10 @@ pub struct ExitSignal {
     /// The OrderId of the position being exited (as String for PyO3)
     #[pyo3(get)]
     pub position_order_id: String,
+    /// Partial exit: sell only this many shares (None = sell all).
+    /// Used for profit laddering: 25% at Rung 3, 25% at Rung 4, 50% trails.
+    #[pyo3(get)]
+    pub partial_qty: Option<u32>,
 }
 
 #[pymethods]
@@ -259,6 +282,7 @@ impl ExitSignal {
             priority,
             order_type,
             position_order_id,
+            partial_qty: None,
         }
     }
 }

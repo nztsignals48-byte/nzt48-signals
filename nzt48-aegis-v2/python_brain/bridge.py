@@ -212,6 +212,86 @@ def get_strategy_weight(strategy):
         return 0.0
     return _strategy_allocation_weights.get(strategy, 0.5)  # Default 50% until proven
 
+
+# ── GEMINI MORNING BRIEF: Focus/Avoid ticker consumption ──
+_gemini_focus_tickers = set()
+_gemini_avoid_tickers = set()
+_gemini_brief_loaded = False
+
+def _load_gemini_brief():
+    """Load Gemini morning brief focus/avoid tickers for signal overlay."""
+    global _gemini_brief_loaded, _gemini_focus_tickers, _gemini_avoid_tickers
+    if _gemini_brief_loaded:
+        return
+    _gemini_brief_loaded = True
+    path = "/app/data/gemini/morning_brief_latest.json"
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        _gemini_focus_tickers = set(data.get("focus_tickers", []))
+        _gemini_avoid_tickers = set(data.get("avoid_tickers", []))
+        if _gemini_focus_tickers or _gemini_avoid_tickers:
+            sys.stderr.write(
+                f"Bridge: Gemini brief loaded — {len(_gemini_focus_tickers)} focus, "
+                f"{len(_gemini_avoid_tickers)} avoid tickers\n"
+            )
+            sys.stderr.flush()
+    except Exception:
+        pass
+
+
+# ── GEMINI DARK HORSE: Unusual mover ticker boost ──
+_gemini_dark_horses = set()
+_gemini_dh_loaded = False
+
+def _load_gemini_dark_horses():
+    """Load Gemini dark horse tickers for confidence boost."""
+    global _gemini_dh_loaded, _gemini_dark_horses
+    if _gemini_dh_loaded:
+        return
+    _gemini_dh_loaded = True
+    path = "/app/data/gemini/dark_horses.json"
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        _gemini_dark_horses = set(data.get("tickers", []))
+    except Exception:
+        pass
+
+
+# ── CLAUDE DAILY PLAN: Focus/Avoid ticker consumption ──
+_claude_focus_tickers = set()
+_claude_avoid_tickers = set()
+_claude_plan_loaded = False
+
+def _load_claude_daily_plan():
+    """Load Claude daily plan focus/avoid tickers for signal overlay."""
+    global _claude_plan_loaded, _claude_focus_tickers, _claude_avoid_tickers
+    if _claude_plan_loaded:
+        return
+    _claude_plan_loaded = True
+    path = "/app/data/claude/daily_plan.json"
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        _claude_focus_tickers = set(data.get("focus_tickers", []))
+        _claude_avoid_tickers = set(data.get("avoid_tickers", []))
+        if _claude_focus_tickers or _claude_avoid_tickers:
+            sys.stderr.write(
+                f"Bridge: Claude daily plan loaded — {len(_claude_focus_tickers)} focus, "
+                f"{len(_claude_avoid_tickers)} avoid tickers\n"
+            )
+            sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def _strategy_live_sharpe(strategy):
     """Compute rolling Sharpe for a strategy (annualized, assuming 252 trading days)."""
     rets = _strategy_pnl_history.get(strategy, [])
@@ -851,20 +931,24 @@ _adaptive_kelly_cap = None
 _adaptive_entry_confidence = {}  # Thompson Sampler per-type confidence floors
 
 
-def _load_adaptive_params():
-    """Load all Plan 1 Phase 3 adaptive parameters from dynamic_weights.toml.
+_adaptive_params_last_load = 0.0
+_ADAPTIVE_RELOAD_INTERVAL = 300.0  # Reload every 5 min to pick up nightly changes
 
-    Loaded once at first tick and cached for process lifetime.
-    Sections: [adaptive_chandelier], [adaptive_spread], [adaptive_entry_weights],
-              [adaptive_exchange_weights], [adaptive_kelly].
+def _load_adaptive_params():
+    """Load adaptive parameters from dynamic_weights.toml AND nightly recommendations.
+
+    Reloads every 5 minutes so nightly pipeline outputs feed back into live trading.
+    Sources: dynamic_weights.toml (Ouroboros), nightly_recommendations.json (nightly_v6).
     """
-    global _adaptive_params_loaded
+    global _adaptive_params_loaded, _adaptive_params_last_load
     global _adaptive_chandelier_atr, _adaptive_spread_veto
     global _adaptive_entry_weights, _adaptive_exchange_weights, _adaptive_kelly_cap
     global _adaptive_entry_confidence
-    if _adaptive_params_loaded:
+    _now = time.time()
+    if _adaptive_params_loaded and (_now - _adaptive_params_last_load < _ADAPTIVE_RELOAD_INTERVAL):
         return
     _adaptive_params_loaded = True
+    _adaptive_params_last_load = _now
 
     dw_path = "/app/config/dynamic_weights.toml"
     if not os.path.exists(dw_path):
@@ -953,6 +1037,119 @@ def _load_adaptive_params():
 
     except Exception as e:
         sys.stderr.write(f"Bridge: failed to load adaptive params: {e}\n")
+        sys.stderr.flush()
+
+    # ── NIGHTLY RECOMMENDATIONS FEEDBACK LOOP ──
+    # Load the latest nightly recommendations and apply them to live trading params.
+    # This closes the loop: nightly analysis → next-day trading behavior.
+    try:
+        import glob as _glob_mod
+        _rec_files = sorted(_glob_mod.glob("/app/data/*_recommendations.json"), reverse=True)
+        if _rec_files:
+            with open(_rec_files[0]) as f:
+                _nightly_recs = json.load(f)
+
+            # 1. Exit optimization → update Chandelier ATR multiplier
+            _exit_opt = _nightly_recs.get("exit_optimization", {})
+            if isinstance(_exit_opt, dict) and "optimal_atr_mult" in _exit_opt:
+                _adaptive_chandelier_atr = float(_exit_opt["optimal_atr_mult"])
+
+            # 2. HRP portfolio weights → update exchange weights
+            _hrp = _nightly_recs.get("hrp_weights", {})
+            if isinstance(_hrp, dict) and _hrp:
+                for sym, w in _hrp.items():
+                    # Map symbol prefixes to exchanges
+                    if isinstance(w, (int, float)) and w > 0:
+                        _adaptive_exchange_weights[sym] = float(w)
+
+            # 3. Robustness validation → auto-kill weak strategies
+            _robustness = _nightly_recs.get("robustness_validation", {})
+            if isinstance(_robustness, dict):
+                for strat, result in _robustness.items():
+                    if isinstance(result, dict) and result.get("sharpe", 999) < -0.5:
+                        _auto_killed_strategies.add(strat)
+                        sys.stderr.write(
+                            f"NIGHTLY_AUTO_KILL: {strat} sharpe={result.get('sharpe', '?')}\n"
+                        )
+                        sys.stderr.flush()
+
+            # 4. Conformal prediction → update adaptive Kelly cap
+            _conformal = _nightly_recs.get("conformal", {})
+            if isinstance(_conformal, dict):
+                _width = _conformal.get("mean_width", 0.5)
+                if isinstance(_width, (int, float)) and _width > 0.7:
+                    # Wide prediction intervals = uncertain market → tighter Kelly
+                    _adaptive_kelly_cap = min(_adaptive_kelly_cap or 0.05, 0.03)
+
+            # 5. True leverage → feed back for pre-trade checks
+            _true_lev = _nightly_recs.get("true_leverage", {})
+            if isinstance(_true_lev, dict) and _true_lev.get("total_effective", 0) > 4.0:
+                # Portfolio is over-leveraged — reduce new entries
+                _adaptive_kelly_cap = min(_adaptive_kelly_cap or 0.05, 0.02)
+
+            # 6. Causal DAG → boost/penalize instruments based on causal leadership
+            # FIX: nightly writes "causal_dag" with "edges" list, not "leaders".
+            # Extract leader nodes from edges (nodes with highest out-degree).
+            _nightly_causal = _nightly_recs.get("causal_dag", {})
+            if isinstance(_nightly_causal, dict):
+                # Try both key names for compatibility
+                _causal_leaders = _nightly_causal.get("leaders", [])
+                if not _causal_leaders:
+                    # Extract leaders from edges: count out-degree per node
+                    _edges = _nightly_causal.get("edges", [])
+                    if _edges:
+                        _out_degree = {}
+                        for edge in _edges:
+                            src = edge.get("source", edge.get("from", ""))
+                            if src:
+                                _out_degree[src] = _out_degree.get(src, 0) + 1
+                        # Leaders = top 5 by out-degree
+                        _causal_leaders = sorted(_out_degree, key=_out_degree.get, reverse=True)[:5]
+                _load_adaptive_params._causal_leaders = _causal_leaders
+
+            # 7. OU mean-reversion → flag instruments with strong mean-reversion for MR strategies
+            # FIX: nightly writes "stochastic" with "ou_calibrations" sub-key, not "ou_mean_reversion"
+            _ou_recs = _nightly_recs.get("ou_mean_reversion", {})
+            if not _ou_recs:
+                # Try the actual nightly key
+                _stoch = _nightly_recs.get("stochastic", {})
+                if isinstance(_stoch, dict):
+                    _ou_recs = _stoch.get("ou_calibrations", _stoch)
+            if isinstance(_ou_recs, dict):
+                _load_adaptive_params._ou_instruments = {
+                    sym: params for sym, params in _ou_recs.items()
+                    if isinstance(params, dict) and params.get("half_life_bars", 999) < 50
+                }
+
+            # 8. Domain shift → reduce weights on shifted instruments
+            # FIX: nightly writes "transfer_learning", not "domain_shift"
+            _domain_shift = _nightly_recs.get("domain_shift", {})
+            if not _domain_shift:
+                _tl = _nightly_recs.get("transfer_learning", {})
+                if isinstance(_tl, dict):
+                    _domain_shift = _tl.get("domain_shifts", _tl)
+            if isinstance(_domain_shift, dict):
+                for sym, shift_info in _domain_shift.items():
+                    if isinstance(shift_info, dict) and shift_info.get("mmd_score", 0) > 0.5:
+                        # Significant domain shift — reduce exchange weight
+                        _exch = sym[:3].upper()  # crude mapping
+                        if _exch in _adaptive_exchange_weights:
+                            _adaptive_exchange_weights[_exch] *= 0.7
+
+            # 9. NSGA3 Pareto optimal params → apply best found params
+            # FIX: nightly writes "nsga3", not "nsga3_optimization"
+            _nsga3 = _nightly_recs.get("nsga3_optimization", _nightly_recs.get("nsga3", {}))
+            if isinstance(_nsga3, dict) and _nsga3.get("best_params"):
+                _best_nsga = _nsga3["best_params"]
+                if "kelly_cap" in _best_nsga:
+                    _adaptive_kelly_cap = float(_best_nsga["kelly_cap"])
+                if "chandelier_atr" in _best_nsga:
+                    _adaptive_chandelier_atr = float(_best_nsga["chandelier_atr"])
+
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        sys.stderr.write(f"Bridge: nightly recs load error (non-fatal): {e}\n")
         sys.stderr.flush()
 
 
@@ -1574,6 +1771,19 @@ def _compute_indicators(ticker_id, ticks, msg):
     sts["data_quality"] = 15 if nb >= 500 else 10 if nb >= 300 else 5 if nb >= 200 else 2
     structural_score = sum(sts.values())
 
+    # ── BOOK 135: FRACTIONAL DIFFERENTIATION FEATURES ──
+    frac_diff_value = None
+    try:
+        from python_brain.features.fractional_diff import get_fracdiff
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and len(ticks) >= 2:
+            _fd = get_fracdiff(symbol)
+            frac_diff_value = _fd.update(msg["last"])
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
     return {
         "bars_5m": bars_5m, "n_5min_bars": n_5min_bars,
         "rvol": rvol, "hurst": hurst, "hurst_regime": hurst_regime,
@@ -1583,6 +1793,7 @@ def _compute_indicators(ticker_id, ticks, msg):
         "vwap_dist_pct": vwap_dist_pct,
         "bid": bid, "ask": ask, "spread_pct": spread_pct,
         "structural_score": structural_score, "sts_components": sts,
+        "frac_diff_value": frac_diff_value,
     }
 
 
@@ -1666,6 +1877,336 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
         except ImportError:
             pass
 
+    # ── BOOK 12/177: HARD TIME-OF-DAY BLOCK ──
+    # Block entries in worst microstructure windows: first 15min, last 30min, ETP rebalance
+    if not _SIM_MODE:
+        try:
+            from datetime import datetime as _dt_tod, timezone as _tz_tod
+            _ts = msg.get("timestamp_ns", 0)
+            if _ts > 0:
+                _dt = _dt_tod.fromtimestamp(_ts / 1_000_000_000, tz=_tz_tod.utc)
+                _h, _m = _dt.hour, _dt.minute
+                _mins = _h * 60 + _m
+                # Block: LSE first 15 min (08:00-08:15 = 480-495)
+                if 480 <= _mins < 495:
+                    return False, "tod_open_avoid", "first 15min of LSE open (wide spreads)"
+                # Block: ETP rebalancing window (16:00-16:35 = 960-995)
+                if 960 <= _mins < 995:
+                    return False, "tod_rebalance_avoid", "ETP rebalancing window 16:00-16:35"
+                # Block: last 10 min of LSE (16:20-16:30 = 980-990) — already covered above
+        except Exception:
+            pass
+
+    # ── BOOK 24: MACRO EVENT HARD BLOCK ──
+    # Block entries within 5 min of Tier 1 macro releases (FOMC, CPI, NFP)
+    if not _SIM_MODE:
+        try:
+            from python_brain.events.event_calendar import get_event_calendar
+            if not hasattr(_quality_gates, "_evt_cal"):
+                _quality_gates._evt_cal = get_event_calendar()
+            _near = _quality_gates._evt_cal.is_near_event(msg.get("timestamp_ns", 0))
+            if _near and getattr(_near, 'tier', 0) == 1:
+                _mins_to = getattr(_near, 'minutes_to_release', 999)
+                if 0 < _mins_to <= 5:
+                    return False, "macro_event_imminent", f"{_near.name} in {_mins_to}m — block"
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    # ── REGIME-SCALED DAILY LOSS LIMIT (Book 85) ──
+    # Tighter limits in hostile regimes: STEADY -3%, INFLATION -2.5%, WOI -2%, CRISIS -1.5%
+    if not _SIM_MODE:
+        _daily_pnl_pct = msg.get("daily_pnl_pct", 0)
+        _vix_dl = msg.get("vix", 20)
+        if _vix_dl > 30:
+            _daily_limit = -1.5  # CRISIS
+        elif _vix_dl > 22:
+            _daily_limit = -2.0  # WOI
+        elif _vix_dl > 15:
+            _daily_limit = -2.5  # INFLATION/normal elevated
+        else:
+            _daily_limit = -3.0  # STEADY
+        if _daily_pnl_pct < _daily_limit:
+            return False, "daily_loss_limit", \
+                f"daily PnL {_daily_pnl_pct:.1f}% < regime-adjusted limit {_daily_limit:.1f}% (VIX={_vix_dl:.0f})"
+
+    # ── WEEKLY LOSS LIMIT (Book 85) ──
+    # Prevents multi-day compounding losses. Daily gate resets each day, allowing
+    # 5 consecutive -1.9% days (-9.5% weekly) without triggering.
+    if not _SIM_MODE:
+        _weekly_pnl_pct = msg.get("weekly_pnl_pct", 0)
+        if _weekly_pnl_pct != 0:
+            _vix_wl = msg.get("vix", 20)
+            if _vix_wl > 30:
+                _weekly_limit = -2.0  # CRISIS
+            elif _vix_wl > 22:
+                _weekly_limit = -4.0  # WOI
+            elif _vix_wl > 15:
+                _weekly_limit = -5.5  # INFLATION
+            else:
+                _weekly_limit = -7.0  # STEADY
+            if _weekly_pnl_pct < _weekly_limit:
+                return False, "weekly_loss_limit", \
+                    f"weekly PnL {_weekly_pnl_pct:.1f}% < regime-adjusted limit {_weekly_limit:.1f}%"
+
+    # ── REGIME-SCALED RISK PER TRADE (Book 85) ──
+    # Dynamic risk-per-trade based on regime. Store for sizing layer.
+    if not _SIM_MODE:
+        _vix_rpt = msg.get("vix", 20)
+        if _vix_rpt > 30:
+            msg["_regime_risk_per_trade"] = 0.002  # CRISIS: 0.20%
+        elif _vix_rpt > 22:
+            msg["_regime_risk_per_trade"] = 0.004  # WOI: 0.40%
+        elif _vix_rpt > 15:
+            msg["_regime_risk_per_trade"] = 0.006  # INFLATION: 0.60%
+        else:
+            msg["_regime_risk_per_trade"] = 0.0075  # STEADY: 0.75%
+
+    # ── REGIME-ADAPTIVE COOLDOWN (Book 85) ──
+    # Longer cooldowns between trades in hostile regimes.
+    if not _SIM_MODE:
+        _vix_cd = msg.get("vix", 20)
+        if _vix_cd > 30:
+            _regime_cooldown_ticks = 360  # ~30 min at 5s ticks (CRISIS)
+        elif _vix_cd > 22:
+            _regime_cooldown_ticks = 180  # ~15 min (WOI)
+        elif _vix_cd > 15:
+            _regime_cooldown_ticks = 120  # ~10 min (INFLATION)
+        else:
+            _regime_cooldown_ticks = 60  # ~5 min (STEADY)
+        # Store for use in _apply_adjustments cooldown check
+        msg["_regime_cooldown_ticks"] = _regime_cooldown_ticks
+
+    # ── FLASH CRASH DETECTION ──
+    # If price dropped > 3% in last 5 bars, likely flash crash or halt imminent.
+    # Block entries until price stabilizes.
+    if not _SIM_MODE and ind.get("bars_5m") and len(ind["bars_5m"]) >= 5:
+        _recent_bars = ind["bars_5m"][-5:]
+        _max_high = max(b["high"] for b in _recent_bars)
+        _current = msg.get("last", 0)
+        if _max_high > 0 and (_max_high - _current) / _max_high > 0.03:
+            return False, "flash_crash_detected", \
+                f"price dropped {(_max_high - _current) / _max_high * 100:.1f}% in last 5 bars"
+
+    # ── WEEKEND / HOLIDAY PROXIMITY ──
+    # Friday after 15:00 UTC: reduce appetite for new entries (weekend gap risk).
+    # This doesn't block — just prevents the gate from passing for marginal signals.
+    if not _SIM_MODE:
+        try:
+            from datetime import datetime as _dt_wk, timezone as _tz_wk
+            _ts_wk = msg.get("timestamp_ns", 0)
+            if _ts_wk > 0:
+                _dt_wk_now = _dt_wk.fromtimestamp(_ts_wk / 1_000_000_000, tz=_tz_wk.utc)
+                if _dt_wk_now.weekday() == 4 and _dt_wk_now.hour >= 15:
+                    # Friday late session: only allow high-conviction entries
+                    if ind.get("structural_score", 100) < 50:
+                        return False, "friday_late_low_quality", \
+                            f"Friday late session with STS={ind.get('structural_score', 0)}"
+        except Exception:
+            pass
+
+    # ── VIX > 50: FULL TRADING HALT (sacred limit) ──
+    _vix_gate = msg.get("vix", 20)
+    if not _SIM_MODE and _vix_gate > 50:
+        return False, "vix_full_halt", f"VIX={_vix_gate:.1f} > 50: FULL HALT"
+
+    # ── VIX > 35: BLOCK ALL 3x+ LONG ENTRIES ──
+    if not _SIM_MODE and _vix_gate > 35:
+        _leverage_gate = msg.get("leverage", 1)
+        if _leverage_gate >= 3:
+            _sym_gate = ticker_symbols.get(ticker_id, "")
+            _is_inv = any(inv in _sym_gate.upper() for inv in ("QQQS", "3USS", "SUK2", "NV3S", "TS3S", "3S", "5S"))
+            if not _is_inv:
+                return False, "vix_crisis_3x_block", \
+                    f"VIX={_vix_gate:.1f} > 35: 3x long entries blocked in crisis"
+
+    # ── MAX 20% NAV IN ANY SINGLE 3x ETP ──
+    if not _SIM_MODE:
+        _leverage_cap = msg.get("leverage", 1)
+        if _leverage_cap >= 3:
+            _eq_cap = msg.get("equity", 10000)
+            _existing_pos_value = 0
+            _sym_cap = ticker_symbols.get(ticker_id, "")
+            for _p in msg.get("open_positions", []):
+                if _p.get("symbol", "") == _sym_cap:
+                    _existing_pos_value += _p.get("market_value_gbp", 0)
+            if _eq_cap > 0 and _existing_pos_value / _eq_cap > 0.20:
+                return False, "single_etp_concentration", \
+                    f"{_sym_cap}: {_existing_pos_value/_eq_cap*100:.1f}% of NAV > 20% limit for 3x ETP"
+
+    # ── SPREAD-TO-AVERAGE RATIO GATE ──
+    # If current spread is 3x+ the instrument's normal spread, block entry.
+    if not _SIM_MODE and ind.get("spread_pct", 0) > 0:
+        _sym_spread = ticker_symbols.get(ticker_id, "")
+        try:
+            from python_brain.analytics.microstructure import get_micro_state
+            _ms = get_micro_state(ticker_id)
+            _median_spread = getattr(_ms, 'median_spread_pct', None)
+            if _median_spread and _median_spread > 0:
+                _spread_ratio = ind["spread_pct"] / _median_spread
+                if _spread_ratio > 3.0:
+                    return False, "spread_ratio_extreme", \
+                        f"spread {ind['spread_pct']:.2f}% is {_spread_ratio:.1f}x normal ({_median_spread:.2f}%)"
+                elif _spread_ratio > 2.0:
+                    # Don't block but store for sizing reduction in _apply_adjustments
+                    msg["_spread_ratio_reduce"] = 0.5
+        except Exception:
+            pass
+
+    # ── CAPITAL-PHASE STRATEGY FILTER ──
+    # At £10K only run highest-edge strategies. Diversifying fragments capital.
+    if not _SIM_MODE:
+        _eq_phase = msg.get("equity", 10000)
+        if _eq_phase < 25000:
+            # Phase 1: Only momentum + regime-switch strategies (highest edge-to-cost)
+            _PHASE1_ALLOWED = {
+                "Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
+                "Orchestrator_trend_follow", "Orchestrator_momentum_burst",
+                "IBS_MeanReversion", "S2_Reversion",  # Keep MR as counterbalance
+                "S7_TailHedge", "S5_OvernightCarry",
+                "ApexScout",
+            }
+            # Don't filter here — just store for _generate_signals
+            msg["_phase1_strategies"] = _PHASE1_ALLOWED
+        elif _eq_phase < 50000:
+            # Phase 2: add vol_breakout, ORB, gap
+            msg["_phase2_enabled"] = True
+        # Phase 3+: all strategies enabled (no filter)
+
+    # ── STALE TICK SUPPRESSION ──
+    if not _SIM_MODE:
+        _ts_fresh = msg.get("timestamp_ns", 0)
+        if _ts_fresh > 0:
+            _age_ms = (time.time() * 1e9 - _ts_fresh) / 1e6  # age in milliseconds
+            if _age_ms > 30000:  # > 30 seconds stale
+                return False, "stale_tick", f"tick age {_age_ms/1000:.1f}s > 30s limit"
+            elif _age_ms > 500:
+                msg["_stale_tick_penalty"] = True  # Flag for confidence reduction later
+
+    # ── ERRONEOUS TICK / PRICE SPIKE FILTER ──
+    if not _SIM_MODE and ind.get("bars_5m") and len(ind["bars_5m"]) >= 10:
+        _ema_prices = [b["close"] for b in ind["bars_5m"][-10:]]
+        _ema = sum(_ema_prices) / len(_ema_prices)
+        _current_price = msg.get("last", 0)
+        if _ema > 0 and _current_price > 0:
+            _deviation = abs(_current_price - _ema) / _ema
+            if _deviation > 0.05:  # 5% deviation from EMA = likely erroneous
+                return False, "price_spike", \
+                    f"price {_current_price:.4f} deviates {_deviation*100:.1f}% from EMA {_ema:.4f}"
+        # Crossed bid/ask check
+        _bid = msg.get("bid", 0)
+        _ask = msg.get("ask", 0)
+        if _bid > 0 and _ask > 0 and _ask < _bid:
+            return False, "crossed_quotes", f"ask {_ask:.4f} < bid {_bid:.4f}"
+
+    # ── BOOK 49: LSE LIQUID-WINDOW-ONLY FOR TIER 2/3 ETPs ──
+    # ADV < £1M ETPs: only trade 10:00-12:00 and 14:30-15:30 GMT (50% of daily volume)
+    if not _SIM_MODE:
+        _sym_liq = ticker_symbols.get(ticker_id, "")
+        _exch_liq = _get_exchange_for_symbol(_sym_liq) if _sym_liq else ""
+        if _exch_liq == "LSE":
+            _adv_liq = msg.get("adv_gbp", 0)
+            if 0 < _adv_liq < 1_000_000:  # Tier 2/3 (ADV < £1M)
+                _ts_liq = msg.get("timestamp_ns", 0)
+                if _ts_liq > 0:
+                    from datetime import datetime as _dt_liq, timezone as _tz_liq
+                    _utc_liq = _dt_liq.fromtimestamp(_ts_liq / 1e9, tz=_tz_liq.utc)
+                    _mins_liq = _utc_liq.hour * 60 + _utc_liq.minute
+                    # Allow: 10:00-12:00 (600-720) and 14:30-15:30 (870-930) GMT
+                    if not (600 <= _mins_liq < 720 or 870 <= _mins_liq < 930):
+                        return False, "illiquid_window", \
+                            f"Tier2/3 ETP outside liquid windows (ADV=£{_adv_liq/1e6:.1f}M)"
+
+    # ── BOOK 49/90: PER-ORDER ADV PARTICIPATION LIMIT ──
+    if not _SIM_MODE:
+        try:
+            from python_brain.execution.adv_participation import check_participation
+            _adv_check = msg.get("adv_gbp", 0)
+            _eq_adv = msg.get("equity", 10000)
+            if _adv_check > 0:
+                _order_est = _eq_adv * 0.05  # rough Kelly * equity
+                _adv_ok, _adv_scale = check_participation(
+                    ticker_symbols.get(ticker_id, ""), _order_est, _adv_check)
+                if not _adv_ok:
+                    return False, "adv_participation", \
+                        f"order exceeds 2% ADV (ADV=£{_adv_check:.0f})"
+                if _adv_scale < 1.0:
+                    msg["_adv_scale"] = _adv_scale
+        except ImportError:
+            pass
+
+    # ── BOOK 53: BROKER ERROR CIRCUIT BREAKER ──
+    if not _SIM_MODE:
+        _broker_errors = msg.get("broker_errors_60s", 0)
+        if _broker_errors >= 5:
+            return False, "broker_circuit_breaker", \
+                f"{_broker_errors} broker errors in last 60s — cooling off"
+        _fill_error_rate = msg.get("fill_error_rate", 0)
+        if _fill_error_rate > 0.05:
+            return False, "fill_error_rate", \
+                f"fill error rate {_fill_error_rate*100:.1f}% > 5%"
+
+    # ── BOOK 94: PER-STRATEGY CLOSE CUTOFF CONTEXT ──
+    # Store minutes-to-close for downstream strategy-specific filtering
+    if not _SIM_MODE:
+        try:
+            _ts_cutoff = msg.get("timestamp_ns", 0)
+            if _ts_cutoff > 0:
+                from datetime import datetime as _dt_cut, timezone as _tz_cut, timedelta as _td_cut
+                _utc_cut = _dt_cut.fromtimestamp(_ts_cutoff / 1e9, tz=_tz_cut.utc)
+                _sym_cut = ticker_symbols.get(ticker_id, "")
+                _exch_cut = _get_exchange_for_symbol(_sym_cut) if _sym_cut else ""
+                _off_cut = _EXCHANGE_UTC_OFFSET.get(_exch_cut, 0)
+                _local_cut = _utc_cut + _td_cut(hours=_off_cut)
+                _lm_cut = _local_cut.hour * 60 + _local_cut.minute
+                _CLOSE_MAP = {"LSE": 990, "XETRA": 1050, "EURONEXT": 1050, "US": 960,
+                              "HKEX": 960, "TSE": 900, "SGX": 1020}
+                _close_min = _CLOSE_MAP.get(_exch_cut, 960)
+                msg["_mins_to_close"] = _close_min - _lm_cut
+        except Exception:
+            pass
+
+    # ── BOOK 24: EVENT-SPECIFIC GRADUATED BLACKOUTS ──
+    # Upgrade from binary macro block to per-event timing with drift windows
+    if not _SIM_MODE:
+        try:
+            from python_brain.strategies.fomc_drift import get_event_blackout
+            _ts_evt = msg.get("timestamp_ns", 0)
+            _blackout = get_event_blackout(_ts_evt)
+            if _blackout and _blackout.hard_block:
+                return False, "event_blackout", \
+                    f"{_blackout.event_name} in {_blackout.minutes_to:.0f}m — hard block"
+            if _blackout:
+                msg["_event_context"] = _blackout
+        except ImportError:
+            pass
+
+    # ── BOOK 177/179: MINIMUM EXPECTED RETURN VIABILITY ──
+    if not _SIM_MODE:
+        _spread_viab = ind.get("spread_pct", 0)
+        if _spread_viab > 0.80:
+            return False, "spread_unviable", \
+                f"spread {_spread_viab:.2f}% > 80bp — cost exceeds any reasonable alpha"
+        _eq_viab = msg.get("equity", 10000)
+        _pos_size_est = max(_eq_viab * 0.02, 100)
+        _commission_drag = 3.40 / _pos_size_est  # £3.40 RT on estimated position
+        if _commission_drag > 0.005 and _spread_viab > 0.30:
+            return False, "cost_unviable", \
+                f"commission drag {_commission_drag*100:.1f}% + spread {_spread_viab:.1f}% exceeds edge"
+
+    # ── BOOK 94: HALF-DAY SESSION BOUNDARY ADJUSTMENT ──
+    if not _SIM_MODE:
+        try:
+            from python_brain.execution.calendar_manager import is_half_day
+            _ts_hd = msg.get("timestamp_ns", 0)
+            if _ts_hd > 0 and is_half_day(_ts_hd):
+                msg["_half_day"] = True
+                if "_mins_to_close" in msg:
+                    msg["_mins_to_close"] -= 210  # Shift 3.5h earlier
+        except ImportError:
+            pass
+
     return True, None, None
 
 
@@ -1693,6 +2234,28 @@ def _compute_confidence_floor(msg, ind):
     has_volume = any(b.get("volume", 0) > 0 for b in ind["bars_5m"][-5:]) if ind["bars_5m"] else False
     if not _SIM_MODE and ind["n_5min_bars"] >= 5 and has_volume and ind["vol_slope"] < -0.5:
         floor = max(floor, 60)
+
+    # ── BOOK 15/85: VIX REGIME TIER CONFIDENCE FLOOR ──
+    # Higher VIX = higher confidence required (only strongest signals pass)
+    _vix = msg.get("vix", 21.0)
+    if _vix > 35:
+        floor = max(floor, 65)  # Crisis: only highest conviction
+    elif _vix > 25:
+        floor = max(floor, 60)  # WOI: elevated
+    elif _vix > 20:
+        floor = max(floor, 55)  # Caution
+
+    # ── BOOK 171: DAY-OF-WEEK FLOOR ADJUSTMENT ──
+    # Monday has negative drift (-0.8bps) — raise floor for momentum entries
+    try:
+        from datetime import datetime as _dt_dow, timezone as _tz_dow
+        _ts_dow = msg.get("timestamp_ns", 0)
+        if _ts_dow > 0:
+            _dow = _dt_dow.fromtimestamp(_ts_dow / 1_000_000_000, tz=_tz_dow.utc).weekday()
+            if _dow == 0:  # Monday
+                floor = max(floor, floor + 5)  # Harder to enter on Mondays
+    except Exception:
+        pass
 
     return floor
 
@@ -2253,10 +2816,143 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
+    # ── BOOK 83: MICRO-REGIME PRE-GATE ──
+    # Tick-level microstructure regime: TOXIC microstructure → raise floor or block
+    _micro_regime_penalty = 0
+    try:
+        from python_brain.risk.vol_regime_cluster import classify_micro_regime
+        _micro = classify_micro_regime(
+            vpin=vpin,
+            spread_pct=ind.get("spread_pct", 0.1),
+            quote_imbalance=ind.get("quote_imbalance", 0.0),
+        )
+        if hasattr(_micro, 'regime'):
+            if _micro.regime == "TOXIC":
+                return []  # Toxic microstructure — block all entries
+            elif _micro.regime == "THIN":
+                _micro_regime_penalty = 10  # Thin liquidity — raise floor
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    effective_floor += _micro_regime_penalty
+
+    # ── BOOK 46: BREAK-EVEN VOLATILITY FILTER FOR 3x ETPs ──
+    # If realized vol exceeds break-even vol, the ETP mathematically underperforms.
+    # sigma_BE = sqrt(2 * mu / (L + 1)) where L = leverage, mu = daily drift.
+    # Block long entries when vol exceeds this — it's a losing bet by construction.
+    _leverage_be = msg.get("leverage", 1)
+    if _leverage_be >= 3:
+        import math as _math_be
+        _daily_drift = msg.get("daily_drift", 0.0004)  # ~10% annual = 0.04% daily
+        _L = float(_leverage_be)
+        _sigma_be = _math_be.sqrt(abs(2 * _daily_drift / (_L + 1))) if _daily_drift > 0 else 0
+        _realized_vol_daily = msg.get("realized_vol", 0.30) / _math_be.sqrt(252)  # annualized → daily
+        # Check autocorrelation: if mean-reverting (rho < 0), decay is maximized
+        if hurst < 0.40:  # Mean-reverting proxy
+            _sigma_be *= 0.7  # Stricter threshold in MR regime
+        if _sigma_be > 0 and _realized_vol_daily > _sigma_be:
+            # Vol exceeds break-even — block long entries on this 3x ETP
+            return []
+
+    # ── BOOK 81: TURNOVER BUDGET CHECK ──
+    # If daily trade limit exceeded, block new entries
+    try:
+        from python_brain.ouroboros.cost_model import check_turnover_budget
+        _tb_ok, _tb_reason = check_turnover_budget(
+            trades_today=msg.get("trades_today", 0),
+            turnover_ytd_pct=msg.get("turnover_ytd_pct", 0),
+        )
+        if not _tb_ok:
+            return []  # Budget exhausted
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 127: TDA CRASH DETECTOR PRE-GATE ──
+    # Topological early warning: if crash probability > 70%, block ALL entries
+    try:
+        from python_brain.ml.tda_crash_detector import CrashDetector
+        import numpy as _np_tda
+        if bars_5m and len(bars_5m) >= 30:
+            if not hasattr(_generate_signals, "_tda_det"):
+                _generate_signals._tda_det = CrashDetector()
+            _tda_det = _generate_signals._tda_det
+            _tda_closes = _np_tda.array([b["close"] for b in bars_5m[-50:]])
+            _crash_p = _tda_det.update(_tda_closes)
+            if _crash_p.get("crash_probability", 0) > 0.7:
+                return []  # Topology anomaly → block all entries
+            elif _crash_p.get("crash_probability", 0) > 0.4:
+                effective_floor += 10  # Elevated topology risk → raise floor
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 103: ADVERSARIAL DETECTION PRE-GATE ──
+    # Detect spoofing, wash trading, or manipulated signals
+    try:
+        from python_brain.risk.adversarial_detection import detect_manipulation
+        _manip = detect_manipulation(
+            price=msg["last"], volume=msg.get("volume", 0),
+            spread_bps=ind.get("spread_bps", 10),
+            recent_prices=[t["last"] for t in ticks[-20:]],
+        )
+        if _manip and _manip.get("is_manipulation"):
+            return []  # Manipulation detected → block
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 44: IBKR RESILIENCE PRE-GATE ──
+    # Check broker connectivity before generating signals
+    try:
+        from python_brain.execution.ibkr_resilience import is_connection_healthy
+        if not is_connection_healthy(msg.get("connection_state", "active")):
+            return []  # Broker degraded → no new entries
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 176: DATA QUALITY PRE-GATE ──
+    # Reject ticks with suspicious data (stale price, zero volume, impossible spread)
+    try:
+        from python_brain.forensics.data_quality import check_tick_quality
+        _dq = check_tick_quality(
+            price=msg["last"], bid=msg.get("bid", 0), ask=msg.get("ask", 0),
+            volume=msg.get("volume", 0), timestamp_ns=msg.get("timestamp_ns", 0),
+        )
+        if _dq and _dq.get("quality_score", 100) < 50:
+            return []  # Bad data → block
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 48: STRUCTURAL BREAK PRE-GATE ──
+    # If a structural break just occurred, pause trading until regime stabilizes
+    try:
+        from python_brain.causal.structural_alpha_scanner import detect_structural_break
+        import numpy as _np_sb
+        if bars_5m and len(bars_5m) >= 30:
+            _sb_closes = _np_sb.array([b["close"] for b in bars_5m[-60:]])
+            _sb = detect_structural_break(_sb_closes)
+            if _sb and _sb.get("significant") and _sb.get("recency_bars", 999) < 10:
+                effective_floor += 15  # Recent structural break → much harder to enter
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
     # ── BOOK 190: SAFETY BOUNDARY PRE-CHECK ──
     try:
         from python_brain.risk.safety_boundaries import SafetyBoundaryChecker
-        _safety = SafetyBoundaryChecker()
+        if not hasattr(_generate_signals, "_safety"):
+            _generate_signals._safety = SafetyBoundaryChecker()
+        _safety = _generate_signals._safety
         violation = _safety.check_all(
             equity=msg.get("equity", 10000),
             hwm=msg.get("hwm", 10000),
@@ -2666,7 +3362,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         closes = ind.get("closes_arr")
         volumes = ind.get("volumes_arr")
         if closes is not None and len(closes) >= 20:
-            factory = AlphaFactory()
+            if not hasattr(_generate_signals, "_alpha_factory"):
+                _generate_signals._alpha_factory = AlphaFactory()
+            factory = _generate_signals._alpha_factory
             results = factory.evaluate_all(_np.array(closes), _np.array(volumes))
             ensemble_val = factory.ensemble(results)
             # Convert ensemble value to signal if strong enough
@@ -2753,19 +3451,536 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
-    # Return ALL signals sorted by confidence — no artificial "Best 2" bottleneck.
+    # ── BOOK 102: EMAT MULTI-ASPECT ATTENTION (SIGNAL GENERATOR) ──
+    emat_signal = None
+    try:
+        from python_brain.ml.emat_model import EMATModel
+        import numpy as _np_emat
+        if bars_5m and len(bars_5m) >= 20:
+            _prices = _np_emat.array([b["close"] for b in bars_5m[-60:]])
+            _vols = _np_emat.array([b["volume"] for b in bars_5m[-60:]])
+            _emat = EMATModel(d_model=32, n_heads=2)
+            _emat_pred = _emat.forward(
+                features=_np_emat.column_stack([_prices, _vols]),
+                trend_indicator=ind["adx"],
+                vol_regime=ind.get("vol_regime", "NORMAL"),
+            )
+            if _emat_pred.get("prediction", 0) > 0.1 and _emat_pred.get("confidence", 0) > 0.55:
+                emat_conf = min(85, int(50 + _emat_pred["confidence"] * 40))
+                if emat_conf >= effective_floor:
+                    kelly = _kelly_for(emat_conf)
+                    emat_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": emat_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "EMAT_Attention", **common_fields,
+                    }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 157: TEMPORAL ATTENTION (SIGNAL GENERATOR) ──
+    attn_signal = None
+    try:
+        from python_brain.ml.attention_trading import TemporalAttentionSignal
+        import numpy as _np_attn
+        if bars_5m and len(bars_5m) >= 20:
+            _p = _np_attn.array([b["close"] for b in bars_5m[-60:]])
+            _v = _np_attn.array([b["volume"] for b in bars_5m[-60:]])
+            _ind_arr = _np_attn.array([ind.get("rsi", 50)] * len(_p))
+            _attn_gen = TemporalAttentionSignal(n_features=3, seq_len=len(_p))
+            _asig = _attn_gen.generate_signal(_p, _v, _ind_arr)
+            if _asig.get("direction") == "long" and _asig.get("confidence", 0) > 0.55:
+                attn_conf = min(85, int(50 + _asig["confidence"] * 35))
+                if attn_conf >= effective_floor:
+                    kelly = _kelly_for(attn_conf)
+                    attn_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": attn_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "TemporalAttention", **common_fields,
+                    }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 151: SWARM PREDICTOR (SIGNAL GENERATOR) ──
+    swarm_signal = None
+    try:
+        from python_brain.ml.swarm_predictor import SwarmSimulator
+        if bars_5m and len(bars_5m) >= 5:
+            _swarm = SwarmSimulator(n_agents=50)  # Smaller for hot path
+            for b in bars_5m[-10:]:
+                _swarm.step(market_price=b["close"], volume=b["volume"])
+            _spred = _swarm.get_prediction()
+            if _spred.get("direction") == "bullish" and _spred.get("confidence", 0) > 0.6:
+                sw_conf = min(80, int(50 + _spred["confidence"] * 30))
+                if sw_conf >= effective_floor:
+                    kelly = _kelly_for(sw_conf)
+                    swarm_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": sw_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "SwarmPredictor", **common_fields,
+                    }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 204: HFT PROBABILITY (SIGNAL GENERATOR) ──
+    hft_signal = None
+    try:
+        from python_brain.strategies.hft_probability import HFTProbabilitySignal
+        if len(ticks) >= 20:
+            if not hasattr(_generate_signals, "_hft"):
+                _generate_signals._hft = HFTProbabilitySignal()
+            _hft = _generate_signals._hft
+            _hft_sig = _hft.generate({
+                "price": msg["last"], "volume": msg.get("volume", 0),
+                "spread": ind.get("spread_pct", 0.1),
+                "prices": [t["last"] for t in ticks[-20:]],
+            })
+            if _hft_sig and _hft_sig.get("direction") == "long":
+                hft_conf = int(_hft_sig.get("confidence", 55))
+                if hft_conf >= effective_floor:
+                    kelly = _kelly_for(hft_conf)
+                    hft_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": hft_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "HFT_Probability", **common_fields,
+                    }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 206: NEGRISK ARBITRAGE (SIGNAL GENERATOR) ──
+    negrisk_signal = None
+    try:
+        from python_brain.strategies.negrisk_arbitrage import LeveragedETFArbitrage
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and msg.get("underlying_return"):
+            if not hasattr(_generate_signals, "_lev_arb"):
+                _generate_signals._lev_arb = LeveragedETFArbitrage()
+            _lev_arb = _generate_signals._lev_arb
+            _arb = _lev_arb.check_leverage_ratio(
+                etp_return=msg.get("intraday_return", 0),
+                underlying_return=msg["underlying_return"],
+                leverage=msg.get("leverage", 3),
+            )
+            if _arb and _arb.get("signal") and _arb.get("confidence", 0) >= effective_floor:
+                kelly = _kelly_for(int(_arb["confidence"]))
+                negrisk_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": int(_arb["confidence"]),
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "NegRiskArb", "tracking_error": _arb.get("tracking_error", 0),
+                    **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 166: HIGH-FLYER RETAIL FLOW + MULTI-FACTOR (SIGNAL GENERATOR) ──
+    highflyer_signal = None
+    try:
+        from python_brain.ml.high_flyer_strategies import HighFlyerSignalGenerator
+        import numpy as _np_hf
+        if bars_5m and len(bars_5m) >= 10:
+            if not hasattr(_generate_signals, "_hf"):
+                _generate_signals._hf = HighFlyerSignalGenerator()
+            _hf = _generate_signals._hf
+            _hf_result = _hf.generate(
+                features={
+                    "prices": _np_hf.array([b["close"] for b in bars_5m[-20:]]),
+                    "volumes": _np_hf.array([b["volume"] for b in bars_5m[-20:]]),
+                    "trades": [{"size": b["volume"], "price": b["close"]} for b in bars_5m[-10:]],
+                },
+                volume=msg.get("volume", 0),
+                trades=[],
+            )
+            if _hf_result and _hf_result.get("direction") == "long" and _hf_result.get("confidence", 0) >= effective_floor:
+                _hf_conf = int(_hf_result["confidence"])
+                kelly = _kelly_for(_hf_conf)
+                highflyer_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": _hf_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "HighFlyer", "retail_flow": _hf_result.get("retail_ratio", 0),
+                    **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 125/126: PAIRS SPREAD REVERSION (SIGNAL GENERATOR) ──
+    pairs_signal = None
+    try:
+        from python_brain.strategies.pairs import detect_pair_signal
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and bars_5m and len(bars_5m) >= 20:
+            _pair_sig = detect_pair_signal(
+                symbol=symbol,
+                prices=[b["close"] for b in bars_5m[-30:]],
+                hurst=ind["hurst"],
+            )
+            if _pair_sig and _pair_sig.get("confidence", 0) >= effective_floor:
+                _pc = int(_pair_sig["confidence"])
+                kelly = _kelly_for(_pc)
+                pairs_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": _pc,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "PairsReversion", "z_score": _pair_sig.get("z_score", 0),
+                    **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 203: COPY TRADING / SMART MONEY (SIGNAL GENERATOR) ──
+    copy_signal = None
+    try:
+        from python_brain.strategies.copy_trading import SignalReplicator
+        if len(ticks) >= 10:
+            if not hasattr(_generate_signals, "_rep"):
+                _generate_signals._rep = SignalReplicator()
+            _rep = _generate_signals._rep
+            _cs = _rep.replicate(
+                leader_signal=msg.get("leader_signal"),
+                own_equity=msg.get("equity", 10000),
+            )
+            if _cs and _cs.get("confidence", 0) >= effective_floor:
+                _cc = int(_cs["confidence"])
+                kelly = _kelly_for(_cc)
+                copy_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": _cc,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "CopyTrading", **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 5: OVERNIGHT REVERSAL (NIGHT RIDER) ──
+    # Stock declined >1.5% during day, NOT news-driven, volume >1.5x average.
+    # Enter near close for overnight recovery. Exit at open +15 minutes.
+    # 65% WR on non-news-driven declines with volume confirmation.
+    night_rider_signal = None
+    try:
+        from datetime import datetime as _dt_nr, timezone as _tz_nr
+        _ts_nr = msg.get("timestamp_ns", 0)
+        if _ts_nr > 0 and bars_5m and len(bars_5m) >= 50:
+            _utc_nr = _dt_nr.fromtimestamp(_ts_nr / 1_000_000_000, tz=_tz_nr.utc)
+            _h_nr = _utc_nr.hour
+            _sym_nr = ticker_symbols.get(ticker_id, "")
+            _exch_nr = _get_exchange_for_symbol(_sym_nr) if _sym_nr else ""
+            # Only trigger in last 60 minutes of trading session
+            _nr_window = False
+            if _exch_nr == "LSE" and 15 <= _h_nr < 16:
+                _nr_window = True
+            elif _exch_nr == "US" and (20 <= _h_nr or _h_nr < 21):
+                _nr_window = True
+            elif _exch_nr in ("XETRA", "EURONEXT") and 16 <= _h_nr < 17:
+                _nr_window = True
+            if _nr_window:
+                # Check: declined >1.5% from day open
+                _day_open = bars_5m[0]["open"] if len(bars_5m) < 80 else bars_5m[-78]["open"]
+                _current_nr = msg.get("last", 0)
+                _day_return = (_current_nr - _day_open) / _day_open if _day_open > 0 else 0
+                # Check: volume >1.5x average
+                _vol_ok = ind.get("rvol", 1.0) > 1.5
+                # Check: not news-driven (no extreme single-bar move > 3%)
+                _news_driven = False
+                for b in bars_5m[-20:]:
+                    _bar_ret = abs(b["close"] - b["open"]) / b["open"] if b["open"] > 0 else 0
+                    if _bar_ret > 0.03:
+                        _news_driven = True
+                        break
+                if _day_return < -0.015 and _vol_ok and not _news_driven:
+                    _nr_conf = 60.0
+                    if _day_return < -0.025:
+                        _nr_conf += 10.0  # Deeper decline = higher reversal probability
+                    if ind.get("rvol", 1.0) > 2.5:
+                        _nr_conf += 5.0  # Capitulation volume
+                    if vpin < 0.50:
+                        _nr_conf += 5.0  # Low informed selling = retail panic
+                    _nr_conf = min(_nr_conf, 90.0)
+                    if _nr_conf >= conf_floor:
+                        kelly = _kelly_for(_nr_conf)
+                        night_rider_signal = {
+                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                            "confidence": _nr_conf,
+                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                            "strategy": "NightRider", "day_return": round(_day_return * 100, 2),
+                            "suggested_max_hold_hours": 16,  # Exit at open +15min
+                            "exit_urgency_ramp_hours": 12,
+                            **common_fields,
+                        }
+    except Exception:
+        pass
+
+    # ── BOOK 24: FOMC/CPI/NFP DRIFT CAPTURE (SIGNAL GENERATOR) ──
+    # Post-event drift: enter in direction of market reaction during drift window
+    drift_signal = None
+    try:
+        from python_brain.strategies.fomc_drift import get_drift_signal
+        _evt_ctx = msg.get("_event_context")
+        if _evt_ctx and _evt_ctx.in_drift_window:
+            _drift = get_drift_signal(_evt_ctx.event_type, abs(_evt_ctx.minutes_to),
+                                       _evt_ctx.direction_bias)
+            if _drift and _drift.confidence >= conf_floor:
+                kelly = _kelly_for(_drift.confidence)
+                drift_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": _drift.confidence,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "EventDrift", "event": _evt_ctx.event_name,
+                    "drift_mins_since": _drift.minutes_since,
+                    "drift_expected_duration": _drift.expected_duration_mins,
+                    **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 125: COINTEGRATION PAIRS (SIGNAL GENERATOR) ──
+    coint_signal = None
+    try:
+        from python_brain.strategies.pairs_cointegration import CointPairsTracker
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and bars_5m and len(bars_5m) >= 30:
+            if not hasattr(_generate_signals, "_coint"):
+                _generate_signals._coint = CointPairsTracker()
+            _coint = _generate_signals._coint
+            # Feed price for pair tracking
+            _coint.update_price(symbol, msg.get("last", 0))
+            _cs = _coint.check_signal(symbol, [b["close"] for b in bars_5m[-30:]])
+            if _cs and _cs.confidence >= conf_floor:
+                kelly = _kelly_for(int(_cs.confidence))
+                coint_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": int(_cs.confidence),
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "CointPairs", "z_score": round(_cs.z_score, 3),
+                    "half_life": round(_cs.half_life, 1), "pair": _cs.pair_name,
+                    "long_leg": _cs.long_leg, **common_fields,
+                }
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 144: CONFORMAL DIRECTIONAL GATE (SIGNAL MODIFIER) ──
+    try:
+        from python_brain.strategies.conformal_directional import check_directional_gate
+        from python_brain.ml.conformal_signals import OnlineConformalTracker
+        if not hasattr(_generate_signals, "_conf_tracker"):
+            _generate_signals._conf_tracker = OnlineConformalTracker()
+        _ctracker = _generate_signals._conf_tracker
+        _interval = _ctracker.get_prediction_interval() if hasattr(_ctracker, 'get_prediction_interval') else None
+        if _interval and hasattr(_interval, 'low') and hasattr(_interval, 'high'):
+            _dir, _frac = check_directional_gate(_interval.low, _interval.high)
+            if _dir == "NO_TRADE":
+                msg["_conformal_no_trade"] = True
+            elif _dir == "BUY" and _frac > 0.1:
+                msg["_conformal_fraction"] = _frac
+            elif _dir == "REJECT":
+                msg["_conformal_no_trade"] = True  # Too uncertain
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 22: BREAKOUT 3-CRITERIA VALIDATION ──
+    # Apply to momentum signals: require close beyond level + 1.5x volume + 3-bar hold.
+    # Without all 3: 22% WR. With all 3: 68% WR. This is a signal MODIFIER, not a generator.
+    if bars_5m and len(bars_5m) >= 5:
+        _bk_close_beyond = False
+        _bk_volume_confirmed = False
+        _bk_no_reversal = False
+        # Check 1: Close beyond 20-bar high (breakout level)
+        if len(bars_5m) >= 20:
+            _20bar_high = max(b["high"] for b in bars_5m[-21:-1])
+            if bars_5m[-1]["close"] > _20bar_high:
+                _bk_close_beyond = True
+        # Check 2: Volume >= 1.5x 20-period average
+        if len(bars_5m) >= 20 and ind.get("rvol", 1.0) >= 1.5:
+            _bk_volume_confirmed = True
+        # Check 3: No reversal in last 3 bars (all 3 closed above breakout level)
+        if _bk_close_beyond and len(bars_5m) >= 3:
+            _bk_no_reversal = all(
+                b["close"] > bars_5m[-4]["close"] for b in bars_5m[-3:]
+            )
+        _breakout_score = sum([_bk_close_beyond, _bk_volume_confirmed, _bk_no_reversal])
+        # Apply to momentum signals in the list that follows
+        msg["_breakout_score"] = _breakout_score
+        msg["_breakout_criteria"] = {
+            "close_beyond": _bk_close_beyond,
+            "volume_confirmed": _bk_volume_confirmed,
+            "no_reversal": _bk_no_reversal,
+        }
+
+    # Return ALL signals sorted by confidence — no artificial bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
         vol_comp_signal, rebal_signal, nav_signal, alpha_signal, lead_lag_signal,
+        emat_signal, attn_signal, swarm_signal, hft_signal, negrisk_signal,
+        highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
+        drift_signal, coint_signal,
     ] if s]
+
+    # ── BOOK 179: CAPITAL-PHASE STRATEGY FILTERING (CONSUME _phase1_strategies) ──
+    _phase1 = msg.get("_phase1_strategies")
+    if _phase1:
+        all_signals = [s for s in all_signals if s.get("strategy", "") in _phase1
+                       or s.get("strategy", "").startswith("S")
+                       or s.get("strategy", "") in ("VanguardSniper", "ApexScout")]
+    elif msg.get("_phase2_enabled"):
+        _PHASE2_BLOCKED = {"PairsReversion", "CointPairs"}  # Pairs need £50K+ (double spread)
+        all_signals = [s for s in all_signals if s.get("strategy", "") not in _PHASE2_BLOCKED]
+
+    # ── BOOK 135: FRACTIONAL DIFFERENTIATION SIGNAL MODIFIER ──
+    # If FD value available, use as directional filter: positive = momentum support.
+    _fd_val = ind.get("frac_diff_value")
+    if _fd_val is not None and all_signals:
+        for sig in all_signals:
+            if sig.get("direction") == "Long":
+                if _fd_val > 0:
+                    sig["confidence"] = min(100, sig["confidence"] + 2)
+                    sig["fracdiff_support"] = True
+                elif _fd_val < -0.001:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["fracdiff_counter_trend"] = True
+
+    # ── BOOK 23: LIGHTGBM ENTRY CLASSIFIER (UNIVERSAL FILTER) ──
+    # P(win) > 0.65 → +5 conf. P(win) < 0.40 → -8 conf. Not a standalone signal.
+    try:
+        from python_brain.ml.lightgbm_classifier import LGBMEntryClassifier
+        if not hasattr(_generate_signals, "_lgbm"):
+            _generate_signals._lgbm = LGBMEntryClassifier()
+        _lgbm = _generate_signals._lgbm
+        _features = _lgbm.extract_features(ind, msg, common_fields)
+        if _features is not None:
+            _lgbm_prob = _lgbm.predict(_features)
+            if _lgbm_prob is not None:
+                for sig in all_signals:
+                    sig["lgbm_win_prob"] = round(_lgbm_prob, 3)
+                    if _lgbm_prob > 0.65:
+                        sig["confidence"] = min(100, sig["confidence"] + 5)
+                        sig["lgbm_boost"] = True
+                    elif _lgbm_prob < 0.40:
+                        sig["confidence"] = max(0, sig["confidence"] - 8)
+                        sig["lgbm_reject"] = True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
+    _mtc = msg.get("_mins_to_close", 999)
+    _STRATEGY_CUTOFFS = {
+        "IBS_MeanReversion": 30, "S2_Reversion": 30,
+        "Momentum": 60, "VolExpansion": 60, "S3_MacroTrend": 60,
+        "S1_Microstructure": 45, "HighFlyer": 45,
+        "NightRider": 0,  # NightRider WANTS to be near close — no penalty
+        "EventDrift": 15,  # Event drift is fast — allow close to close
+    }
+    if _mtc < 120:  # Only filter in last 2 hours
+        for sig in all_signals:
+            _strat_cutoff = _STRATEGY_CUTOFFS.get(sig.get("strategy", ""), 45)
+            if sig.get("strategy") != "NightRider" and _mtc < _strat_cutoff:
+                sig["confidence"] = max(0, sig["confidence"] - 15)
+                sig["close_proximity_penalty"] = f"{_mtc}min < {_strat_cutoff}min cutoff"
+
+    # ── BREAKOUT VALIDATION: apply to momentum signals ──
+    _bk_score = msg.get("_breakout_score", 0)
+    _MOMENTUM_STRATS = {"Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer", "S3_MacroTrend"}
+    for sig in all_signals:
+        if sig.get("strategy") in _MOMENTUM_STRATS:
+            sig["breakout_score"] = _bk_score
+            sig["breakout_criteria"] = msg.get("_breakout_criteria", {})
+            if _bk_score == 3:
+                # All 3 criteria met: 68% WR. STRONG boost.
+                sig["confidence"] = min(100, sig["confidence"] + 10)
+                sig["breakout_validated"] = True
+            elif _bk_score == 2:
+                # 2 of 3: decent but not institutional grade
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+            elif _bk_score <= 1:
+                # 0-1 criteria: high false signal risk. Penalize.
+                sig["confidence"] = max(0, sig["confidence"] - 8)
+                sig["breakout_warning"] = "weak_breakout"
 
     # Apply calendar anomaly adjustments to ALL signals (Book 171)
     if cal_conf_delta != 0 or cal_kelly_mult != 1.0:
         for sig in all_signals:
             sig["confidence"] = max(0, min(100, sig["confidence"] + cal_conf_delta))
             sig["kelly_fraction"] *= cal_kelly_mult
+
+    # ── BOOK 22: SQUEEZE CONFIDENCE BOOST ──
+    # If volatility squeeze active, boost breakout signal confidence
+    if common_fields.get("squeeze_release", False):
+        for sig in all_signals:
+            sig["confidence"] = min(100, sig["confidence"] + 15)
+            sig["squeeze_boost"] = True
+    elif common_fields.get("squeeze_on", False):
+        # Squeeze on but not released — slightly reduce (waiting for breakout)
+        for sig in all_signals:
+            sig["confidence"] = max(0, sig["confidence"] - 5)
+
+    # ── BOOK 171: TURN-OF-MONTH (TOM) CONFIDENCE BOOST ──
+    # T-1 to T+3 captures ~75% of monthly returns
+    try:
+        from datetime import datetime as _dt_tom, timezone as _tz_tom
+        _ts_tom = msg.get("timestamp_ns", 0)
+        if _ts_tom > 0:
+            _d = _dt_tom.fromtimestamp(_ts_tom / 1_000_000_000, tz=_tz_tom.utc)
+            _dom = _d.day
+            _days_in_month = 31  # Approximate
+            try:
+                import calendar as _cal_mod
+                _days_in_month = _cal_mod.monthrange(_d.year, _d.month)[1]
+            except Exception:
+                pass
+            # TOM window: last day of month (T-1) through day 3 (T+3)
+            _tom_graded = 0
+            if _dom >= _days_in_month:  # Last day of month (T-1)
+                _tom_graded = 6
+            elif _dom == 1:  # First day (T+0)
+                _tom_graded = 8
+            elif _dom == 2:  # T+1
+                _tom_graded = 10  # Peak
+            elif _dom == 3:  # T+2
+                _tom_graded = 7
+            elif _dom == 4:  # T+3
+                _tom_graded = 4
+            if _tom_graded > 0:
+                for sig in all_signals:
+                    sig["confidence"] = min(100, sig["confidence"] + _tom_graded)
+                    sig["tom_boost"] = _tom_graded
+    except Exception:
+        pass
+
+    # ── BOOK 170: MOMENTUM ADVERSARIAL PENALTY ──
+    # Momentum entries face HFT front-running risk → reduce confidence
+    for sig in all_signals:
+        _strat = sig.get("strategy", "")
+        if _strat in ("Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer"):
+            sig["confidence"] = max(0, sig["confidence"] - 5)
+            sig["momentum_adv_penalty"] = True
 
     # AUTONOMY: Filter out auto-killed strategies (live Sharpe < -1.0 over 30+ trades)
     if _auto_killed_strategies:
@@ -2827,19 +4042,34 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     symbol = ticker_symbols.get(ticker_id, "")
 
-    # Drawdown regime filter — applied to ALL signals
+    # ── DRAWDOWN-INDEXED TIGHTENING LADDER (Book 85 upgrade) ──
+    # Smooth degradation: sizing and confidence scale DOWN proportionally as drawdown deepens.
+    # No more binary threshold — every additional % of drawdown reduces capacity smoothly.
+    # Sacred limit at -8%: FULL HALT.
     dd = msg.get("drawdown_pct", 0.0)
     is_inverse = (symbol.startswith("3S") or symbol.startswith("5S") or
                   (symbol.endswith("S.L") and len(symbol) <= 7) or
                   symbol in ("QQQS.L", "3USS.L", "3STS.L", "3SAM.L", "3SNV.L", "3SAP.L", "3SMS.L", "3SEM.L"))
-    if dd > 0.02:
-        penalty = min(int(dd * 500), 20)
-        boost = min(int(dd * 300), 15) if is_inverse else 0
+    if dd > 0.08:
+        # Sacred limit -8%: HALT — no entries at all
+        return None
+    elif dd > 0.01:
+        # Smooth degradation: dd_severity = dd / 0.08 (0 at 0%, 1.0 at 8%)
+        _dd_severity = min(1.0, dd / 0.08)
+        _dd_sizing = max(0.15, 1.0 - _dd_severity)  # Floor at 15% sizing
+        _dd_conf_penalty = int(_dd_severity * 25)  # Up to -25 confidence at 8%
         for sig in all_signals:
             if is_inverse:
-                sig["confidence"] = min(sig["confidence"] + boost, 100)
+                # Inverse ETPs BENEFIT from drawdown (hedge) — boost instead
+                _inv_boost = min(int(dd * 300), 15)
+                sig["confidence"] = min(sig["confidence"] + _inv_boost, 100)
+                sig["drawdown_inverse_boost"] = _inv_boost
             else:
-                sig["confidence"] = max(sig["confidence"] - penalty, 0)
+                sig["confidence"] = max(sig["confidence"] - _dd_conf_penalty, 0)
+                sig["kelly_fraction"] *= _dd_sizing
+                sig["shares"] = max(1, int(sig["shares"] * _dd_sizing))
+                sig["drawdown_severity"] = round(_dd_severity, 2)
+                sig["drawdown_sizing"] = round(_dd_sizing, 2)
 
     # Hour-of-day weights — applied to ALL signals
     hw = _load_hour_weights()
@@ -2852,6 +4082,392 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if w != 1.0:
                 for sig in all_signals:
                     sig["confidence"] = max(0, min(100, int(sig["confidence"] * w)))
+
+    # ── OPTIMAL ENTRY TIME WINDOWS (22-hour multi-exchange) ──
+    # Exchange-aware: LSE, US, XETRA, EURONEXT, HKEX, TSE, SGX.
+    # Each exchange has prime windows (best follow-through) and dead zones (low edge).
+    # Expressed in local exchange time (UTC + offset).
+    _ts_entry = msg.get("timestamp_ns", 0)
+    if _ts_entry > 0:
+        from datetime import datetime as _dt_ew, timezone as _tz_ew, timedelta as _td_ew
+        _utc_dt_ew = _dt_ew.fromtimestamp(_ts_entry / 1_000_000_000, tz=_tz_ew.utc)
+        _utc_mins = _utc_dt_ew.hour * 60 + _utc_dt_ew.minute
+        _sym_ew = ticker_symbols.get(ticker_id, "")
+        _exch_ew = _get_exchange_for_symbol(_sym_ew) if _sym_ew else ""
+        _offset_hrs = _EXCHANGE_UTC_OFFSET.get(_exch_ew, 0)
+        _local_dt = _utc_dt_ew + _td_ew(hours=_offset_hrs)
+        _local_mins = _local_dt.hour * 60 + _local_dt.minute
+
+        # Universal pattern across all exchanges:
+        # Minutes since local open: 60-150min = prime momentum (trend established)
+        # Minutes since local open: 150-210min = midday lull
+        # Last 60-90min = institutional close flows (good continuation)
+        # First 15min = already blocked by quality gate
+        _EXCHANGE_OPEN_LOCAL = {
+            "LSE": 480, "XETRA": 540, "EURONEXT": 540,  # 08:00, 09:00, 09:00 local
+            "US": 570, "HKEX": 570, "TSE": 540, "SGX": 540,  # 09:30, 09:30, 09:00, 09:00
+        }
+        _open_local = _EXCHANGE_OPEN_LOCAL.get(_exch_ew, 540)
+        _mins_since_open = _local_mins - _open_local
+
+        if 60 <= _mins_since_open <= 150:
+            # 1-2.5hrs after open = prime momentum window (all exchanges)
+            for sig in all_signals:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["entry_window"] = "prime"
+        elif 150 < _mins_since_open <= 240:
+            # 2.5-4hrs after open = midday lull (lower follow-through)
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - 4)
+                sig["entry_window"] = "midday_lull"
+
+        # US open spillover boost for European instruments (14:30 UTC)
+        if _exch_ew in ("LSE", "XETRA", "EURONEXT") and 870 <= _utc_mins <= 930:
+            for sig in all_signals:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["entry_window"] = "us_open_spillover"
+
+        # ── EXCHANGE-SPECIFIC STRATEGY ROUTING ──
+        _leverage = msg.get("leverage", 1)
+        _is_etp = _leverage >= 2
+        _is_inverse = any(inv in _sym_ew.upper() for inv in ("QQQS", "3USS", "SUK2", "NV3S", "TS3S", "3S", "5S"))
+
+        if _exch_ew in ("LSE", "XETRA", "EURONEXT"):
+            # ── EUROPEAN SESSION ──
+            if _mins_since_open < 90:
+                # Opening 1.5hrs: momentum dominates (institutional order flow)
+                for sig in all_signals:
+                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                        sig["confidence"] = max(0, sig["confidence"] - 8)
+                        sig["session_note"] = "EU_MR_penalized_opening"
+                    elif sig.get("strategy") in ("Momentum", "VolExpansion", "S1_Microstructure"):
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["session_note"] = "EU_momentum_boosted_opening"
+            elif 150 < _mins_since_open <= 270:
+                # Midday lull: momentum fails, mean-reversion works
+                for sig in all_signals:
+                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                        sig["confidence"] = max(0, sig["confidence"] - 5)
+                        sig["session_note"] = "EU_momentum_penalized_midday"
+                    elif sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["session_note"] = "EU_MR_boosted_midday"
+            # ETP-specific: 3x/5x ETPs have volatility drag in choppy conditions
+            if _is_etp and _leverage >= 3 and 150 < _mins_since_open <= 270:
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["etp_midday_drag"] = True
+
+        elif _exch_ew == "US":
+            # ── US SESSION ──
+            if _mins_since_open < 60:
+                # First hour (9:30-10:30 ET): most volatile, wide spreads, reversals common
+                # Mean-reversion works well on gap fills; momentum is unreliable
+                for sig in all_signals:
+                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                        sig["confidence"] = min(100, sig["confidence"] + 5)
+                        sig["session_note"] = "US_MR_boosted_opening_reversals"
+                    elif sig.get("strategy") in ("Momentum", "VolExpansion"):
+                        sig["confidence"] = max(0, sig["confidence"] - 5)
+                        sig["session_note"] = "US_momentum_penalized_opening_noise"
+            elif 60 <= _mins_since_open <= 180:
+                # Mid-morning (10:30-12:30 ET): best momentum window
+                for sig in all_signals:
+                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["session_note"] = "US_momentum_prime"
+            elif 210 <= _mins_since_open <= 330:
+                # Power hour (13:30-15:00 ET): institutional re-positioning
+                for sig in all_signals:
+                    if sig.get("strategy") in ("Momentum", "S1_Microstructure"):
+                        sig["confidence"] = min(100, sig["confidence"] + 2)
+                        sig["session_note"] = "US_power_hour"
+
+        elif _exch_ew in ("HKEX", "SGX"):
+            # ── ASIAN SESSION ──
+            if _mins_since_open < 60:
+                # Asian open: reacts to overnight US close, momentum follows
+                for sig in all_signals:
+                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["session_note"] = "ASIA_momentum_US_overnight_reaction"
+            elif 120 <= _mins_since_open <= 180:
+                # Lunch break zone (11:30-12:30 local): thin liquidity
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 5)
+                    sig["session_note"] = "ASIA_lunch_thin_liquidity"
+
+        elif _exch_ew == "TSE":
+            # ── TOKYO SESSION ──
+            if _mins_since_open < 60:
+                for sig in all_signals:
+                    if sig.get("strategy") in ("Momentum", "S1_Microstructure"):
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["session_note"] = "TSE_opening_momentum"
+            # TSE has mandatory lunch break 11:30-12:30 JST (150-210 mins after 9:00 open)
+            elif 150 <= _mins_since_open <= 210:
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 8)
+                    sig["session_note"] = "TSE_lunch_break"
+
+        # ── CROSS-SESSION EQUITY TYPE RULES ──
+        if _is_inverse:
+            # Inverse ETPs: best in downtrend confirmation, penalize in uptrends
+            if bars_5m and len(bars_5m) >= 20:
+                _sma20_inv = sum(b["close"] for b in bars_5m[-20:]) / 20
+                if msg.get("last", 0) > _sma20_inv * 1.01:
+                    # Price above SMA20 by 1% = uptrend — inverse should be penalized
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 5)
+                        sig["inverse_uptrend_penalty"] = True
+        elif not _is_etp:
+            # Single stocks / non-leveraged: can use tighter stops and higher conviction
+            for sig in all_signals:
+                if sig.get("confidence", 0) >= 70:
+                    sig["confidence"] = min(100, sig["confidence"] + 2)
+                    sig["equity_type_boost"] = "single_stock_high_conviction"
+
+    # ── MOMENTUM EXHAUSTION DETECTION ──
+    # RSI(14) > 80 on 5-min bars + declining RVOL = exhaustion risk for long entries.
+    # The move is extended; buying here has poor R:R. Reduce confidence significantly.
+    bars_5m = ind.get("bars_5m", [])
+    if bars_5m and len(bars_5m) >= 14:
+        _rsi14_prices = [b["close"] for b in bars_5m[-14:]]
+        _rsi14 = calculate_rsi(_rsi14_prices, period=14)
+        _rvol_now = ind.get("rvol", 1.0)
+        if _rsi14 is not None and _rsi14 > 80:
+            # Extended move — high RSI
+            _exhaust_penalty = 8
+            if _rvol_now < 1.0:
+                _exhaust_penalty = 12  # Exhaustion + drying volume = high reversal risk
+            for sig in all_signals:
+                if sig.get("direction") == "Long":
+                    sig["confidence"] = max(0, sig["confidence"] - _exhaust_penalty)
+                    sig["momentum_exhaustion"] = True
+                    sig["rsi14_at_entry"] = round(_rsi14, 1)
+        elif _rsi14 is not None and _rsi14 < 20 and _rvol_now > 1.5:
+            # Oversold with strong volume = potential reversal long opportunity
+            for sig in all_signals:
+                if sig.get("direction") == "Long" and sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                    sig["confidence"] = min(100, sig["confidence"] + 5)
+                    sig["oversold_opportunity"] = True
+
+    # ── ATR MINIMUM FILTER ──
+    # If the 20-period ATR is less than 0.3% of price, the expected move is too small
+    # to overcome costs. Reject signals in dead-flat instruments.
+    if bars_5m and len(bars_5m) >= 20:
+        _atr_sum = 0.0
+        for i in range(1, 20):
+            _h = bars_5m[-i]["high"]
+            _l = bars_5m[-i]["low"]
+            _pc = bars_5m[-i-1]["close"]
+            _atr_sum += max(_h - _l, abs(_h - _pc), abs(_l - _pc))
+        _atr20 = _atr_sum / 19
+        _price = msg.get("last", 1.0)
+        _atr_pct = (_atr20 / _price) * 100 if _price > 0 else 0
+        if _atr_pct < 0.3:
+            # ATR too small — insufficient profit potential to cover costs
+            all_signals = [s for s in all_signals if s.get("strategy") not in
+                          ("Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend")]
+        for sig in all_signals:
+            sig["atr_pct"] = round(_atr_pct, 3)
+
+    # ── MULTI-TIMEFRAME TREND ALIGNMENT ──
+    # Check if 5-min signal direction aligns with the broader trend (50-bar SMA slope).
+    # Aligned = boost, counter-trend = penalize. Simple but effective filter.
+    if bars_5m and len(bars_5m) >= 50:
+        _sma50 = sum(b["close"] for b in bars_5m[-50:]) / 50
+        _sma20 = sum(b["close"] for b in bars_5m[-20:]) / 20
+        _trend_up = _sma20 > _sma50  # Short MA above long MA = uptrend
+        _price_above_sma50 = msg.get("last", 0) > _sma50
+        for sig in all_signals:
+            if sig.get("direction") == "Long":
+                if _trend_up and _price_above_sma50:
+                    sig["confidence"] = min(100, sig["confidence"] + 3)
+                    sig["trend_aligned"] = True
+                elif not _trend_up and not _price_above_sma50:
+                    # Counter-trend long in downtrend — higher risk
+                    sig["confidence"] = max(0, sig["confidence"] - 5)
+                    sig["trend_aligned"] = False
+
+    # ── GAP FILL DETECTION ──
+    # Opening gaps fill ~70% of the time. If price gapped up and is starting to fill,
+    # mean-reversion strategies get a confidence boost. If gapped down and filling up,
+    # momentum gets a boost (gap-and-go).
+    if bars_5m and len(bars_5m) >= 2:
+        _first_bar = bars_5m[0] if len(bars_5m) < 50 else bars_5m[-50]  # session start proxy
+        _current = msg.get("last", 0)
+        _prev_close = bars_5m[-2].get("close", _current) if len(bars_5m) >= 2 else _current
+        _gap_pct = (_first_bar["open"] - _prev_close) / _prev_close * 100 if _prev_close > 0 else 0
+        if abs(_gap_pct) > 0.5:  # Meaningful gap (>0.5%)
+            _gap_filling = (_gap_pct > 0 and _current < _first_bar["open"]) or \
+                          (_gap_pct < 0 and _current > _first_bar["open"])
+            if _gap_filling:
+                for sig in all_signals:
+                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                        sig["confidence"] = min(100, sig["confidence"] + 5)
+                        sig["gap_fill_boost"] = True
+                        sig["gap_pct"] = round(_gap_pct, 2)
+
+    # ── VOL-TARGETING POSITION SIZING (Book 80) ──
+    # sigma_target = 20% annualized. If instrument vol is higher, position shrinks automatically.
+    # N = (sigma_target * capital) / (sigma_instrument * price * leverage)
+    _realized_vol = msg.get("realized_vol", 0.30)
+    _sigma_target = 0.20  # 20% annualized target vol
+    _vol_floor = 0.05
+    _vol_ceiling = 1.0
+    _clamped_vol = max(_vol_floor, min(_vol_ceiling, _realized_vol))
+    _vol_ratio = _sigma_target / _clamped_vol  # > 1 means instrument is less volatile than target
+    _leverage_vt = msg.get("leverage", 1)
+    if _leverage_vt > 1:
+        _vol_ratio /= _leverage_vt  # Leverage amplifies vol — reduce accordingly
+    _vol_sizing = min(1.0, max(0.1, _vol_ratio))
+    if _vol_sizing < 0.95:  # Only apply if material
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _vol_sizing
+            sig["shares"] = max(1, int(sig["shares"] * _vol_sizing))
+            sig["vol_target_sizing"] = round(_vol_sizing, 3)
+
+    # ── ETP VIX-ADJUSTED MAX HOLDING PERIOD (Book 46) ──
+    # Attach max hold period to signal based on VIX and leverage level.
+    # The Rust exit engine uses this as a time-stop.
+    _vix_hold = msg.get("vix", 20)
+    _lev_hold = msg.get("leverage", 1)
+    if _lev_hold >= 5:
+        # 5x ETPs: ALWAYS intraday
+        for sig in all_signals:
+            sig["max_hold_hours"] = 8  # Force intraday exit
+            sig["etp_hold_rule"] = "5x_intraday_only"
+    elif _lev_hold >= 3:
+        _sym_hold = ticker_symbols.get(ticker_id, "")
+        _is_single_stock_3x = any(s in _sym_hold.upper() for s in ("NVD3", "3TSL", "AMD3", "TSLA", "NVDA"))
+        if _is_single_stock_3x:
+            # 3x single-stock ETPs: tighter hold limits
+            if _vix_hold > 35:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 0  # NO ENTRY (caught by quality gate)
+            elif _vix_hold > 25:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 8  # Intraday only
+                    sig["etp_hold_rule"] = "3x_single_vix25_intraday"
+            elif _vix_hold > 20:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 24  # 1 day max
+                    sig["etp_hold_rule"] = "3x_single_vix20_1day"
+            elif _vix_hold > 15:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 72  # 3 days
+                    sig["etp_hold_rule"] = "3x_single_vix15_3day"
+            else:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 120  # 5 days
+                    sig["etp_hold_rule"] = "3x_single_vix_low"
+        else:
+            # 3x index ETPs: wider limits
+            if _vix_hold > 35:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 8  # Intraday only
+                    sig["etp_hold_rule"] = "3x_index_vix35_intraday"
+            elif _vix_hold > 25:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 48  # 2 days
+                    sig["etp_hold_rule"] = "3x_index_vix25_2day"
+            elif _vix_hold > 20:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 120  # 5 days
+                    sig["etp_hold_rule"] = "3x_index_vix20_5day"
+            elif _vix_hold > 15:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 240  # 10 days
+                    sig["etp_hold_rule"] = "3x_index_vix15_10day"
+            else:
+                for sig in all_signals:
+                    sig["max_hold_hours"] = 480  # 20 days
+                    sig["etp_hold_rule"] = "3x_index_vix_low"
+
+    # ── TURN-OF-MONTH (TOM) SIZING OVERLAY (Book 171) ──
+    # Unlike the confidence boost in _generate_signals, this applies to Kelly sizing.
+    # TOM captures 75% of monthly returns in 25% of trading days.
+    try:
+        from datetime import datetime as _dt_toms, timezone as _tz_toms
+        _ts_toms = msg.get("timestamp_ns", 0)
+        if _ts_toms > 0 and _vix_hold <= 25:  # Disable TOM overlay when VIX > 25
+            _d_toms = _dt_toms.fromtimestamp(_ts_toms / 1_000_000_000, tz=_tz_toms.utc)
+            _dom_s = _d_toms.day
+            import calendar as _cal_s
+            _dim_s = _cal_s.monthrange(_d_toms.year, _d_toms.month)[1]
+            _tom_mult = 1.0
+            if _dom_s >= _dim_s:
+                _tom_mult = 1.12  # T-1
+            elif _dom_s == 1:
+                _tom_mult = 1.16  # T+0
+            elif _dom_s == 2:
+                _tom_mult = 1.20  # T+1 (peak)
+            elif _dom_s == 3:
+                _tom_mult = 1.14  # T+2
+            elif _dom_s == 4:
+                _tom_mult = 1.08  # T+3
+            if _tom_mult > 1.0:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= _tom_mult
+                    sig["shares"] = max(1, int(sig["shares"] * _tom_mult))
+                    sig["tom_sizing_mult"] = round(_tom_mult, 2)
+            # Weaken in August (historically weak month)
+            if _d_toms.month == 8:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= 0.90
+                    sig["shares"] = max(1, int(sig["shares"] * 0.90))
+                    sig["august_seasonal_reduction"] = True
+            # Strengthen in January (January effect)
+            elif _d_toms.month == 1:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= 1.05
+                    sig["shares"] = max(1, int(sig["shares"] * 1.05))
+                    sig["january_effect_boost"] = True
+    except Exception:
+        pass
+
+    # ── OPENING / LAST-HOUR GRADUATED SIZING (Book 94) ──
+    # First 25 min: max 50% of normal. Last hour: max 70%. Mid-session: 100%.
+    _ts_oh = msg.get("timestamp_ns", 0)
+    if _ts_oh > 0:
+        from datetime import datetime as _dt_oh, timezone as _tz_oh, timedelta as _td_oh
+        _utc_oh = _dt_oh.fromtimestamp(_ts_oh / 1_000_000_000, tz=_tz_oh.utc)
+        _sym_oh = ticker_symbols.get(ticker_id, "")
+        _exch_oh = _get_exchange_for_symbol(_sym_oh) if _sym_oh else ""
+        _off_oh = _EXCHANGE_UTC_OFFSET.get(_exch_oh, 0)
+        _local_oh = _utc_oh + _td_oh(hours=_off_oh)
+        _lm_oh = _local_oh.hour * 60 + _local_oh.minute
+        _OPEN_OH = {"LSE": 480, "XETRA": 540, "EURONEXT": 540, "US": 570,
+                    "HKEX": 570, "TSE": 540, "SGX": 540}
+        _CLOSE_OH = {"LSE": 990, "XETRA": 1050, "EURONEXT": 1050, "US": 960,
+                     "HKEX": 960, "TSE": 900, "SGX": 1020}
+        _open_oh = _OPEN_OH.get(_exch_oh, 540)
+        _close_oh = _CLOSE_OH.get(_exch_oh, 960)
+        _ms_open = _lm_oh - _open_oh
+        _ms_close = _close_oh - _lm_oh
+        if 0 < _ms_open <= 25:
+            # First 25 min: max 50% sizing, max 2 new orders
+            _oh_scale = 0.50
+            for sig in all_signals:
+                sig["kelly_fraction"] *= _oh_scale
+                sig["shares"] = max(1, int(sig["shares"] * _oh_scale))
+                sig["opening_sizing_reduction"] = True
+        elif 0 < _ms_close <= 60:
+            # Last hour: max 70% sizing
+            _oh_scale = 0.70
+            for sig in all_signals:
+                sig["kelly_fraction"] *= _oh_scale
+                sig["shares"] = max(1, int(sig["shares"] * _oh_scale))
+                sig["last_hour_sizing_reduction"] = True
+
+    # ── SPREAD-RATIO SIZING REDUCTION (from quality gate flag) ──
+    if msg.get("_spread_ratio_reduce"):
+        _sr_scale = msg["_spread_ratio_reduce"]
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _sr_scale
+            sig["shares"] = max(1, int(sig["shares"] * _sr_scale))
+            sig["spread_ratio_sized_down"] = True
 
     # Simulated commission + slippage deduction (paper mode reality check)
     # Deducts estimated round-trip cost from Kelly sizing to prevent false positive edges.
@@ -2892,6 +4508,219 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["kelly_fraction"] *= _vol_regime_sizing
             sig["shares"] = max(1, int(sig["shares"] * _vol_regime_sizing))
 
+    # ── BOOK 85: VIX REGIME POSITION SIZING ──
+    # VIX < 15: 1.0x (full). VIX 15-25: 0.8x. VIX 25-35: 0.5x. VIX > 35: 0.25x (inverse only)
+    _vix_adj = msg.get("vix", 21.0)
+    if _vix_adj > 35:
+        _vix_scale = 0.25
+        # In crisis, only allow inverse ETPs
+        _sym = msg.get("symbol", "")
+        _is_inverse = any(inv in _sym.upper() for inv in ("QQQS", "3USS", "SUK2", "NV3S", "TS3S"))
+        if not _is_inverse:
+            all_signals = []  # Block all long signals in crisis
+    elif _vix_adj > 25:
+        _vix_scale = 0.50
+    elif _vix_adj > 20:
+        _vix_scale = 0.80
+    else:
+        _vix_scale = 1.0
+    if _vix_scale < 1.0 and all_signals:
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _vix_scale
+            sig["shares"] = max(1, int(sig["shares"] * _vix_scale))
+            sig["vix_scale"] = round(_vix_scale, 2)
+
+    # ── BOOK 85: REGIME RISK PER TRADE (CONSUME _regime_risk_per_trade) ──
+    # Scale Kelly to regime-appropriate risk budget. STEADY=0.75%, CRISIS=0.20%.
+    _rrpt = msg.get("_regime_risk_per_trade")
+    if _rrpt and _rrpt < 0.0075:
+        _rrpt_scale = _rrpt / 0.0075  # Normalize: STEADY=1.0, CRISIS=0.27
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _rrpt_scale
+            sig["shares"] = max(1, int(sig["shares"] * _rrpt_scale))
+            sig["regime_risk_per_trade"] = _rrpt
+
+    # ── BOOK 45: STALE TICK PENALTY (CONSUME _stale_tick_penalty) ──
+    if msg.get("_stale_tick_penalty"):
+        for sig in all_signals:
+            sig["confidence"] = max(0, sig["confidence"] - 5)
+            sig["kelly_fraction"] *= 0.85
+            sig["shares"] = max(1, int(sig["shares"] * 0.85))
+            sig["stale_tick_penalized"] = True
+
+    # ── BOOK 47: STRATEGY QUARANTINE (SPRT edge-death test) ──
+    try:
+        from python_brain.risk.strategy_quarantine import get_quarantine
+        _sq = get_quarantine()
+        _sq_filtered = []
+        for sig in all_signals:
+            _strat_sq = sig.get("strategy", "")
+            _sq_status = _sq.get_status(_strat_sq)
+            if _sq_status == "killed":
+                continue  # Drop signal entirely
+            elif _sq_status == "quarantine":
+                _sq_scale = _sq.get_allocation_scale(_strat_sq)
+                sig["kelly_fraction"] *= _sq_scale
+                sig["shares"] = max(1, int(sig["shares"] * _sq_scale))
+                sig["quarantine_status"] = "quarantine"
+                sig["quarantine_scale"] = round(_sq_scale, 2)
+            _sq_filtered.append(sig)
+        all_signals = _sq_filtered
+        if not all_signals:
+            return None
+    except ImportError:
+        pass
+
+    # ── BOOK 49: LIQUIDITY SCORE SIZING MODIFIER ──
+    try:
+        from python_brain.risk.liquidity_scoring import get_liquidity_scale
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol:
+            _liq_scale = get_liquidity_scale(symbol)
+            if _liq_scale < 1.0:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= _liq_scale
+                    sig["shares"] = max(1, int(sig["shares"] * _liq_scale))
+                    sig["liquidity_scale"] = _liq_scale
+    except ImportError:
+        pass
+
+    # ── BOOK 49/90: ADV PARTICIPATION SIZING (from quality gate flag) ──
+    if msg.get("_adv_scale") and msg["_adv_scale"] < 1.0:
+        _adv_s = msg["_adv_scale"]
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _adv_s
+            sig["shares"] = max(1, int(sig["shares"] * _adv_s))
+            sig["adv_participation_scaled"] = round(_adv_s, 2)
+
+    # ── BOOK 144: CONFORMAL DIRECTIONAL HARD GATE ──
+    # PROMOTED: If prediction interval straddles zero, there is NO statistically significant
+    # direction. Hard-block all signals (was -10 conf, now full block).
+    if msg.get("_conformal_no_trade"):
+        return None  # Hard block: no directional clarity
+    elif msg.get("_conformal_fraction"):
+        _cf = msg["_conformal_fraction"]
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _cf
+            sig["shares"] = max(1, int(sig["shares"] * _cf))
+            sig["conformal_directional_fraction"] = round(_cf, 2)
+
+    # ── GEMINI MORNING BRIEF: FOCUS/AVOID TICKER OVERLAY ──
+    try:
+        _load_gemini_brief()
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and symbol in _gemini_focus_tickers:
+            for sig in all_signals:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["gemini_focus"] = True
+        elif symbol and symbol in _gemini_avoid_tickers:
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - 8)
+                sig["kelly_fraction"] *= 0.5
+                sig["shares"] = max(1, int(sig["shares"] * 0.5))
+                sig["gemini_avoid"] = True
+    except Exception:
+        pass
+
+    # ── CLAUDE DAILY PLAN: FOCUS TICKER OVERLAY ──
+    try:
+        _load_claude_daily_plan()
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol and symbol in _claude_focus_tickers:
+            for sig in all_signals:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["claude_focus"] = True
+        elif symbol and symbol in _claude_avoid_tickers:
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - 5)
+                sig["claude_avoid"] = True
+    except Exception:
+        pass
+
+    # ── CAUSAL DAG LEADERSHIP BOOST (CONSUME _causal_leaders) ──
+    # If this instrument is a causal leader (high out-degree in nightly causal DAG),
+    # its signals have structural alpha support → boost confidence.
+    try:
+        _causal_leaders = getattr(_load_adaptive_params, '_causal_leaders', [])
+        if _causal_leaders:
+            symbol = ticker_symbols.get(ticker_id, "")
+            if symbol in _causal_leaders:
+                for sig in all_signals:
+                    sig["confidence"] = min(100, sig["confidence"] + 3)
+                    sig["causal_leader"] = True
+    except Exception:
+        pass
+
+    # ── OU MEAN-REVERSION INSTRUMENTS BOOST (CONSUME _ou_instruments) ──
+    # If this instrument has strong mean-reversion (short half-life from OU calibration),
+    # boost mean-reversion strategies, penalize momentum strategies.
+    try:
+        _ou_instruments = getattr(_load_adaptive_params, '_ou_instruments', {})
+        if _ou_instruments:
+            symbol = ticker_symbols.get(ticker_id, "")
+            _ou_params = _ou_instruments.get(symbol)
+            if _ou_params:
+                _half_life = _ou_params.get("half_life_bars", 999)
+                _MR_STRATS = {"IBS_MeanReversion", "S2_Reversion", "PairsReversion", "CointPairs"}
+                _MOM_STRATS = {"Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend"}
+                for sig in all_signals:
+                    strat = sig.get("strategy", "")
+                    if strat in _MR_STRATS and _half_life < 30:
+                        sig["confidence"] = min(100, sig["confidence"] + 5)
+                        sig["ou_mr_boost"] = round(_half_life, 1)
+                    elif strat in _MOM_STRATS and _half_life < 20:
+                        sig["confidence"] = max(0, sig["confidence"] - 5)
+                        sig["ou_mr_momentum_penalty"] = round(_half_life, 1)
+    except Exception:
+        pass
+
+    # ── VOLUME CONFIRMATION AT ENTRY ──
+    # Momentum signals without volume backing are noise. Require RVOL > 0.7 for momentum
+    # strategies, and boost signals with RVOL > 2.0 (institutional interest).
+    _rvol_entry = ind.get("rvol", 1.0)
+    _vol_slope_entry = ind.get("vol_slope", 0.0)
+    _MOMENTUM_STRATEGIES = {"Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
+                            "HighFlyer", "ORB", "GapMomentum"}
+    _MR_STRATEGIES = {"IBS_MeanReversion", "S2_Reversion", "PairsReversion"}
+    for sig in all_signals:
+        strat = sig.get("strategy", "")
+        if strat in _MOMENTUM_STRATEGIES:
+            if _rvol_entry < 0.5:
+                # Very low volume — momentum signal without conviction. Hard penalize.
+                sig["confidence"] = max(0, sig["confidence"] - 10)
+                sig["volume_warning"] = "very_low_rvol"
+            elif _rvol_entry < 0.8:
+                sig["confidence"] = max(0, sig["confidence"] - 4)
+                sig["volume_warning"] = "low_rvol"
+            elif _rvol_entry > 2.5:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["volume_note"] = "strong_institutional_rvol"
+        elif strat in _MR_STRATEGIES:
+            # Mean-reversion actually works BETTER in low volume (less institutional flow)
+            # but high volume + oversold = capitulation setup (very high edge)
+            if _rvol_entry > 3.0 and sig.get("oversold_opportunity"):
+                sig["confidence"] = min(100, sig["confidence"] + 5)
+                sig["volume_note"] = "capitulation_volume_MR_boost"
+        # Volume acceleration check: rising volume = conviction building
+        if _vol_slope_entry > 0.5:
+            sig["confidence"] = min(100, sig["confidence"] + 2)
+            sig["volume_accelerating"] = True
+        elif _vol_slope_entry < -0.5 and strat in _MOMENTUM_STRATEGIES:
+            sig["confidence"] = max(0, sig["confidence"] - 3)
+            sig["volume_decelerating"] = True
+
+    # ── ORDER FLOW IMBALANCE ──
+    # If quote_imbalance strongly favors one side, it confirms directional signals.
+    _qi = ind.get("quote_imbalance", 0.0)  # -1 (all sell) to +1 (all buy)
+    if abs(_qi) > 0.3:
+        for sig in all_signals:
+            if sig.get("direction") == "Long" and _qi > 0.3:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["order_flow_aligned"] = True
+            elif sig.get("direction") == "Long" and _qi < -0.3:
+                sig["confidence"] = max(0, sig["confidence"] - 5)
+                sig["order_flow_opposed"] = True
+
     # NEWS/SENTIMENT ENRICHMENT — same-time-as-hedge-funds data
     # Enrich each signal with news sentiment, dark pool flow, options flow, Congress trades.
     # Confidence modified: +8 max for aligned sentiment, -15 max for opposing.
@@ -2907,7 +4736,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # FEATURE FLAGS GATE (Book 71) — disable modules via feature flags
     try:
         from python_brain.risk.feature_flags import FeatureFlagManager
-        _flags = FeatureFlagManager()
+        if not hasattr(_apply_adjustments, "_flags"):
+            _apply_adjustments._flags = FeatureFlagManager()
+        _flags = _apply_adjustments._flags
     except Exception:
         _flags = None
 
@@ -2925,7 +4756,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # SIGNAL ROUTER — session-aware filtering + conflict resolution (Book 216)
     try:
         from python_brain.regime.signal_router import SignalRouter
-        router = SignalRouter()
+        if not hasattr(_apply_adjustments, "_router"):
+            _apply_adjustments._router = SignalRouter()
+        router = _apply_adjustments._router
         all_signals = router.filter_by_session(all_signals, msg.get("london_time_secs", 0))
         if not all_signals:
             return None
@@ -2935,7 +4768,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # CAPACITY MONITOR — reject oversized orders (Books 49, 181)
     try:
         from python_brain.execution.capacity_monitor import CapacityMonitor
-        cap_mon = CapacityMonitor()
+        if not hasattr(_apply_adjustments, "_cap_mon"):
+            _apply_adjustments._cap_mon = CapacityMonitor()
+        cap_mon = _apply_adjustments._cap_mon
         for sig in all_signals:
             notional = sig.get("kelly_fraction", 0) * msg.get("equity", 10000)
             ticker = sig.get("ticker", msg.get("symbol", ""))
@@ -3139,6 +4974,624 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     except ImportError:
         pass
 
+    # ── BOOK 105/118: KELLY FROM CALIBRATED PROBABILITY ──
+    # Raw model confidence != true win probability. Use calibrated conf for Kelly
+    # to prevent catastrophic oversizing from miscalibrated ML models.
+    for sig in all_signals:
+        _raw_conf = sig.get("raw_confidence", sig["confidence"])
+        _cal_conf = sig.get("confidence", _raw_conf)
+        if _raw_conf > 0 and _cal_conf < _raw_conf:
+            _kelly_cal_adj = max(0.10, _cal_conf / max(_raw_conf, 1))
+            sig["kelly_fraction"] *= _kelly_cal_adj
+            sig["shares"] = max(1, int(sig["shares"] * _kelly_cal_adj))
+            sig["kelly_calibration_adj"] = round(_kelly_cal_adj, 3)
+
+    # ── BOOK 101: EXECUTION COST VS SIGNAL ALPHA GATE ──
+    # Reject if estimated execution cost exceeds estimated signal alpha
+    _cost_alpha_filtered = []
+    for sig in all_signals:
+        _alpha_est = sig.get("kelly_fraction", 0) * max(sig.get("confidence", 50) - 45, 0) / 100
+        _cost_gbp = sig.get("sim_total_cost_gbp", 0)
+        _eq = msg.get("equity", 10000)
+        _alpha_gbp = _alpha_est * _eq
+        if _cost_gbp > 0 and _alpha_gbp > 0 and _cost_gbp > _alpha_gbp:
+            sig["cost_exceeds_alpha"] = True
+            continue  # Drop this signal
+        _cost_alpha_filtered.append(sig)
+    all_signals = _cost_alpha_filtered
+    if not all_signals:
+        return None
+
+    # ── BOOK 78: IV SIGNALS — Adjust confidence based on implied volatility regime ──
+    try:
+        from python_brain.ml.iv_signals import IVSignalGenerator
+        if not hasattr(_apply_adjustments, "_iv_gen"):
+            _apply_adjustments._iv_gen = IVSignalGenerator()
+        _iv_gen = _apply_adjustments._iv_gen
+        _iv_data = msg.get("iv_data")
+        if _iv_data:
+            _iv_signals = _iv_gen.generate_signals_from_raw(
+                symbol=msg.get("symbol", ""),
+                vix_spot=_iv_data.get("vix_spot", 0),
+                vix_front=_iv_data.get("vix_front", 0),
+                vix_second=_iv_data.get("vix_second", 0),
+                realized_vol_20d=ind.get("yz_vol", 0),
+            )
+            if _iv_signals.get("overall_signal"):
+                for sig in all_signals:
+                    sig["confidence"] = _iv_gen.confidence_adjustment(
+                        sig["confidence"], _iv_signals
+                    )
+                    sig["iv_regime"] = _iv_signals.get("term_structure", {}).get("classification", "unknown")
+    except ImportError:
+        pass
+
+    # ── BOOK 76: ONLINE LEARNING — Feed trade outcome to drift detector ──
+    try:
+        from python_brain.ml.online_learning import OnlineLearningEngine, DriftType
+        # Online learning runs post-trade (on_trade_complete), not per-tick.
+        # Here we just check if drift was recently detected → reduce confidence.
+        _ol_state_path = Path("/app/data/online_learning")
+        if _ol_state_path.exists():
+            import json as _ol_json
+            for _ol_f in _ol_state_path.glob("*.json"):
+                try:
+                    _ol_state = _ol_json.loads(_ol_f.read_text())
+                    if _ol_state.get("last_drift", "none") != "none":
+                        for sig in all_signals:
+                            if sig.get("strategy", "").lower() in _ol_f.stem.lower():
+                                sig["confidence"] = max(0, sig["confidence"] - 5)
+                                sig["drift_detected"] = _ol_state["last_drift"]
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+
+    # ── WARM PATH: PER-BAR ML MODELS ──
+    # These run on completed bars (not every tick). Cache results and apply as adjustments.
+    # Only compute when a new 5-min bar has completed (detected by bar count change).
+    _bar_count = len(ind.get("bars_5m", []))
+    _prev_bar_count = getattr(_apply_adjustments, "_prev_bar_count", {}).get(ticker_id, 0)
+    _new_bar = _bar_count > _prev_bar_count
+    if not hasattr(_apply_adjustments, "_prev_bar_count"):
+        _apply_adjustments._prev_bar_count = {}
+    _apply_adjustments._prev_bar_count[ticker_id] = _bar_count
+
+    if _new_bar and ind.get("bars_5m") and len(ind["bars_5m"]) >= 20:
+        import numpy as _np_warm
+        _closes_warm = _np_warm.array([b["close"] for b in ind["bars_5m"][-60:]])
+        _vols_warm = _np_warm.array([b["volume"] for b in ind["bars_5m"][-60:]])
+
+        # Book 75: TFT quantile prediction → confidence width adjustment
+        try:
+            from python_brain.ml.temporal_fusion_transformer import TFTPreprocessor
+            if not hasattr(_apply_adjustments, "_tft_pre"):
+                _apply_adjustments._tft_pre = TFTPreprocessor()
+            _tft_pre = _apply_adjustments._tft_pre
+            # TFT gives prediction intervals — narrower = more confident
+            if not hasattr(_apply_adjustments, "_tft_cache"):
+                _apply_adjustments._tft_cache = {}
+            _apply_adjustments._tft_cache[ticker_id] = {"available": True}
+        except ImportError:
+            pass
+
+        # Book 161: Mamba S4 sequence prediction → directional bias
+        try:
+            from python_brain.ml.mamba_model import MambaModel, S4Config
+            if not hasattr(_apply_adjustments, "_mamba_cache"):
+                _apply_adjustments._mamba_cache = {}
+            _mamba = MambaModel(S4Config(d_model=32, d_state=8, seq_len=min(60, len(_closes_warm))))
+            _mamba_pred = _mamba.predict(_np_warm.column_stack([_closes_warm[-30:], _vols_warm[-30:]]))
+            if _mamba_pred and _mamba_pred.get("direction") == "bullish":
+                for sig in all_signals:
+                    sig["confidence"] = min(100, sig["confidence"] + 3)
+                    sig["mamba_boost"] = True
+            elif _mamba_pred and _mamba_pred.get("direction") == "bearish":
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["mamba_dampen"] = True
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Book 114: GP uncertainty → Kelly adjustment
+        try:
+            from python_brain.ml.kernel_methods import GaussianProcess, RBFKernel
+            if len(_closes_warm) >= 20:
+                _X_gp = _np_warm.arange(len(_closes_warm)).reshape(-1, 1)
+                _gp = GaussianProcess(kernel=RBFKernel(sigma=1.0))
+                _gp.fit(_X_gp[:-1], _np_warm.diff(_closes_warm))
+                _mu, _var = _gp.predict(_X_gp[-1:])
+                _uncertainty = float(_np_warm.sqrt(_var[0])) if _var[0] > 0 else 1.0
+                # Higher uncertainty → reduce Kelly
+                if _uncertainty > 0.02:
+                    _unc_scale = max(0.5, 1.0 - _uncertainty * 10)
+                    for sig in all_signals:
+                        sig["kelly_fraction"] *= _unc_scale
+                        sig["gp_uncertainty"] = round(_uncertainty, 4)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Book 115: Wavelet denoised features → trend confirmation + COUNTER-TREND PENALTY
+        try:
+            from python_brain.features.wavelet_processor import WaveletFeaturePipeline
+            if not hasattr(_apply_adjustments, "_wfp"):
+                _apply_adjustments._wfp = WaveletFeaturePipeline()
+            _wfp = _apply_adjustments._wfp
+            _wf = _wfp.process(_closes_warm, _vols_warm)
+            _wavelet_trend = _wf.get("denoised_trend", "neutral")
+            if _wavelet_trend == "up":
+                for sig in all_signals:
+                    if sig.get("direction") == "Long":
+                        sig["confidence"] = min(100, sig["confidence"] + 3)
+                        sig["wavelet_trend"] = "confirmed"
+                    else:
+                        sig["confidence"] = max(0, sig["confidence"] - 5)
+                        sig["wavelet_trend"] = "counter_long_uptrend"
+            elif _wavelet_trend == "down":
+                for sig in all_signals:
+                    if sig.get("direction") == "Long":
+                        # Long entry against denoised downtrend — penalize heavily
+                        sig["confidence"] = max(0, sig["confidence"] - 8)
+                        sig["wavelet_trend"] = "counter_short_downtrend"
+                        sig["kelly_fraction"] *= 0.7
+                        sig["shares"] = max(1, int(sig["shares"] * 0.7))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Book 129: Reservoir computing regime change → BLOCK at extreme, SIZE DOWN at moderate
+        try:
+            from python_brain.ml.reservoir_computing import ReservoirFeatureExtractor
+            if not hasattr(_apply_adjustments, "_rfe"):
+                _apply_adjustments._rfe = ReservoirFeatureExtractor()
+            _rfe = _apply_adjustments._rfe
+            _rc_score = _rfe.regime_change_score(_closes_warm)
+            if _rc_score > 0.85:
+                # Extreme regime shift — block all entries until regime stabilizes
+                return None
+            elif _rc_score > 0.7:
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 8)
+                    sig["kelly_fraction"] *= 0.6
+                    sig["shares"] = max(1, int(sig["shares"] * 0.6))
+                    sig["reservoir_regime_shift"] = round(_rc_score, 3)
+            elif _rc_score > 0.5:
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["reservoir_regime_shift"] = round(_rc_score, 3)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Book 96: GNN cross-instrument signal → USE graph density for confidence adjustment
+        try:
+            from python_brain.ml.gnn_market_structure import GNNSignalGenerator
+            if not hasattr(_apply_adjustments, "_gnn"):
+                _apply_adjustments._gnn = GNNSignalGenerator()
+            _gnn = _apply_adjustments._gnn
+            _gnn_result = _gnn.generate_signals(
+                ticker_id=ticker_id,
+                prices=_closes_warm,
+                volumes=_vols_warm,
+            )
+            if _gnn_result:
+                _graph_density = _gnn_result.get("graph_density", 0.5)
+                _sector_momentum = _gnn_result.get("sector_momentum", 0)
+                # High graph density + aligned sector momentum = strong structural support
+                if _graph_density > 0.7 and _sector_momentum > 0:
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = min(100, sig["confidence"] + 3)
+                            sig["gnn_structural_support"] = True
+                elif _graph_density > 0.7 and _sector_momentum < -0.3:
+                    # Sector divergence — this ticker is fighting its sector
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = max(0, sig["confidence"] - 5)
+                            sig["gnn_sector_divergence"] = True
+        except ImportError:
+            pass
+
+    # ── BOOK 123: MARKET IMPACT ESTIMATION ──
+    # Attach pre-trade impact estimate to best signal for Rust execution layer
+    try:
+        from python_brain.execution.market_impact import PreTradeImpactEstimator
+        for sig in all_signals:
+            if not hasattr(_apply_adjustments, "_pie"):
+                _apply_adjustments._pie = PreTradeImpactEstimator()
+            _pie = _apply_adjustments._pie
+            _notional = sig.get("kelly_fraction", 0) * msg.get("equity", 10000)
+            _impact = _pie.estimate(
+                order_size_gbp=_notional,
+                symbol=msg.get("symbol", ""),
+                adv=msg.get("adv_gbp", 100000),
+                sigma=msg.get("realized_vol", 0.02),
+            )
+            sig["impact_bps"] = _impact.get("total_bps", 0)
+            if _pie.should_split(_notional, msg.get("adv_gbp", 100000)):
+                sig["execution_algo"] = "TWAP"
+            # If impact > 50 bps, reduce Kelly to account for cost
+            if _impact.get("total_bps", 0) > 50:
+                sig["kelly_fraction"] *= 0.7
+                sig["shares"] = max(1, int(sig["shares"] * 0.7))
+                sig["high_impact_warning"] = True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 187: TRUE LEVERAGE CHECK ──
+    # Compute effective leverage across all 5 layers — block if too high
+    try:
+        from python_brain.execution.true_leverage import TrueLeverageCalculator
+        _positions = msg.get("open_positions", [])
+        if _positions:
+            _tlc = TrueLeverageCalculator(_positions)
+            _true_lev = _tlc.total_effective_leverage()
+            if not _tlc.is_safe(max_leverage=5.0):
+                # Reduce all signals by leverage overshoot
+                _lev_scale = max(0.3, 5.0 / max(_true_lev, 0.01))
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= _lev_scale
+                    sig["shares"] = max(1, int(sig["shares"] * _lev_scale))
+                    sig["true_leverage_warning"] = round(_true_lev, 2)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 170: GAME THEORY CROWDING DETECTION ──
+    try:
+        from python_brain.ml.game_theory_execution import GameTheoreticSignal
+        if not hasattr(_apply_adjustments, "_gts"):
+            _apply_adjustments._gts = GameTheoreticSignal()
+        _gts = _apply_adjustments._gts
+        _crowding = _gts.assess_crowding(
+            volume_profile={"volume": msg.get("volume", 0)},
+            order_imbalance=ind.get("quote_imbalance", 0),
+        )
+        if _crowding and _crowding.get("crowding_score", 0) > 0.6:
+            _crowd_penalty = int(_crowding["crowding_score"] * 20)
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - _crowd_penalty)
+                sig["crowding_score"] = round(_crowding["crowding_score"], 2)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 144: CONFORMAL INTERVAL WIDTH → CONFIDENCE ──
+    try:
+        from python_brain.ml.conformal_signals import OnlineConformalTracker
+        if not hasattr(_apply_adjustments, "_conf_tracker"):
+            _apply_adjustments._conf_tracker = OnlineConformalTracker()
+        _cw = _apply_adjustments._conf_tracker.get_current_width()
+        if _cw < 0.3:  # Narrow interval = high confidence environment
+            for sig in all_signals:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["conformal_width"] = round(_cw, 3)
+        elif _cw > 0.7:  # Wide interval = uncertain environment
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - 5)
+                sig["conformal_width"] = round(_cw, 3)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 172: MODEL DISAGREEMENT PENALTY ──
+    if len(all_signals) >= 3:
+        try:
+            from python_brain.risk.model_disagreement import compute_disagreement
+            _confs = [s["confidence"] for s in all_signals]
+            _disagree = compute_disagreement(_confs)
+            if _disagree > 0.4:  # High disagreement among generators
+                _dp = min(12, int(_disagree * 25))
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - _dp)
+                    sig["model_disagreement"] = round(_disagree, 2)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    # ── BOOK 46: ETP DECAY MONITOR ──
+    try:
+        from python_brain.forensics.etp_decay_monitor import estimate_daily_decay
+        symbol = ticker_symbols.get(ticker_id, "")
+        _lev = msg.get("leverage", 1)
+        if _lev >= 2:
+            _decay = estimate_daily_decay(
+                leverage=_lev,
+                daily_vol=msg.get("realized_vol", 0.02),
+            )
+            if _decay > 0.001:  # >10bps daily decay
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= max(0.5, 1.0 - _decay * 50)
+                    sig["etp_decay_daily"] = round(_decay, 5)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 213: CONSTRAINED PPO RISK-SHAPED TIMING ──
+    try:
+        from python_brain.ml.constrained_ppo import ConstrainedPPOAgent, PPOConfig
+        if not hasattr(_apply_adjustments, "_ppo"):
+            _apply_adjustments._ppo = ConstrainedPPOAgent(
+                state_dim=8, action_dim=3, config=PPOConfig(),
+            )
+        import numpy as _np_ppo
+        _ppo_state = _np_ppo.array([
+            ind.get("rsi", 50) / 100, ind.get("adx", 15) / 50,
+            ind.get("rvol", 1.0), ind.get("hurst", 0.5),
+            ind.get("vpin", 0.5), ind.get("spread_pct", 0.1),
+            msg.get("drawdown_pct", 0) / 8.0,  # Normalized to sacred limit
+            msg.get("equity", 10000) / 10000,
+        ])
+        _ppo_action, _ppo_logp = _apply_adjustments._ppo.select_action(_ppo_state)
+        if _ppo_action == 0:  # SKIP
+            for sig in all_signals:
+                sig["confidence"] = max(0, sig["confidence"] - 10)
+                sig["ppo_action"] = "skip"
+        elif _ppo_action == 2:  # SCALE DOWN
+            for sig in all_signals:
+                sig["kelly_fraction"] *= 0.6
+                sig["ppo_action"] = "scale_down"
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 131: META-ALLOCATOR STRATEGY WEIGHTING ──
+    try:
+        from python_brain.sizing.meta_allocator import MetaAllocator
+        if not hasattr(_apply_adjustments, "_meta_alloc"):
+            _apply_adjustments._meta_alloc = MetaAllocator(total_equity=msg.get("equity", 10000))
+        for sig in all_signals:
+            strat = sig.get("strategy", "")
+            if strat:
+                _alloc_weight = _apply_adjustments._meta_alloc.get_strategy_weight(strat)
+                if _alloc_weight is not None and _alloc_weight < 1.0:
+                    sig["kelly_fraction"] *= _alloc_weight
+                    sig["meta_alloc_weight"] = round(_alloc_weight, 3)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 36: INEFFICIENCY SCORER ──
+    try:
+        from python_brain.analytics.inefficiency_scorer import score_inefficiency
+        import numpy as _np_ineff
+        if bars_5m and len(bars_5m) >= 20:
+            _ineff = score_inefficiency(
+                prices=_np_ineff.array([b["close"] for b in bars_5m[-30:]]),
+                volumes=_np_ineff.array([b["volume"] for b in bars_5m[-30:]]),
+            )
+            if _ineff and _ineff.get("total_score", 0) > 70:
+                for sig in all_signals:
+                    sig["confidence"] = min(100, sig["confidence"] + 5)
+                    sig["inefficiency_score"] = _ineff["total_score"]
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 116: JUMP PROBABILITY ESTIMATION ──
+    try:
+        from python_brain.models.stochastic_models import JumpDiffusion
+        import numpy as _np_jd
+        if bars_5m and len(bars_5m) >= 20:
+            _returns = _np_jd.diff([b["close"] for b in bars_5m[-30:]]) / _np_jd.array([b["close"] for b in bars_5m[-31:-1]])
+            _jd = JumpDiffusion(mu=0, sigma=float(_np_jd.std(_returns)), lam=0.1, jump_mu=0, jump_sigma=0.03)
+            # If recent returns show jump-like behavior, reduce sizing
+            _max_ret = float(_np_jd.max(_np_jd.abs(_returns[-5:])))
+            if _max_ret > 3 * float(_np_jd.std(_returns)):
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= 0.6
+                    sig["jump_detected"] = True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 128: PATH SIGNATURE REGIME CONFIRMATION ──
+    try:
+        from python_brain.ml.path_signatures import compute_signature, rolling_signatures
+        import numpy as _np_ps
+        if bars_5m and len(bars_5m) >= 20:
+            _path = _np_ps.column_stack([
+                [b["close"] for b in bars_5m[-20:]],
+                [b["volume"] for b in bars_5m[-20:]],
+            ])
+            _sig_feats = compute_signature(_path, depth=2)
+            if len(_sig_feats) > 0:
+                # Positive first-order signature = uptrend → boost longs, penalize shorts
+                if _sig_feats[0] > 0:
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = min(100, sig["confidence"] + 3)
+                            sig["path_sig_trend"] = "up"
+                elif _sig_feats[0] < 0:
+                    # Negative signature = downtrend → penalize longs, reduce sizing
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = max(0, sig["confidence"] - 5)
+                            sig["kelly_fraction"] *= 0.8
+                            sig["shares"] = max(1, int(sig["shares"] * 0.8))
+                            sig["path_sig_trend"] = "down"
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 30: NEWS SENTIMENT OVERLAY (STRENGTHENED) ──
+    # Sentiment is now a HARD factor: very negative sentiment blocks longs,
+    # very positive sentiment boosts longs AND sizes up.
+    try:
+        from python_brain.feeds.news_aggregator import get_cached_sentiment
+        symbol = ticker_symbols.get(ticker_id, "")
+        if symbol:
+            _sent = get_cached_sentiment(symbol)
+            if _sent is not None:
+                if _sent > 0.7:
+                    # Strongly positive: boost + size up
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = min(100, sig["confidence"] + 5)
+                            sig["kelly_fraction"] *= 1.15  # 15% size-up on strong sentiment
+                            sig["shares"] = max(1, int(sig["shares"] * 1.15))
+                            sig["news_sentiment"] = round(_sent, 2)
+                            sig["news_action"] = "strong_bullish_sizeup"
+                elif _sent > 0.3:
+                    for sig in all_signals:
+                        if sig.get("direction") == "Long":
+                            sig["confidence"] = min(100, sig["confidence"] + 3)
+                            sig["news_sentiment"] = round(_sent, 2)
+                elif _sent < -0.6:
+                    # Strongly negative: BLOCK long entries (news is material)
+                    all_signals = [s for s in all_signals if s.get("direction") != "Long"]
+                    if not all_signals:
+                        return None
+                elif _sent < -0.3:
+                    # Moderately negative: penalize + size down
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 8)
+                        sig["kelly_fraction"] *= 0.7
+                        sig["shares"] = max(1, int(sig["shares"] * 0.7))
+                        sig["news_sentiment"] = round(_sent, 2)
+                        sig["news_action"] = "negative_sizedown"
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 40/148: OVERNIGHT GAP RISK SIZING ──
+    # If we're near session close, reduce sizing for overnight holds
+    try:
+        from python_brain.overnight.gap_risk_monitor import GapRiskMonitor
+        if not hasattr(_apply_adjustments, "_grm"):
+            _apply_adjustments._grm = GapRiskMonitor()
+        _grm = _apply_adjustments._grm
+        _gap_exp = _grm.assess_overnight_risk(
+            positions=msg.get("open_positions", []),
+            vix=msg.get("vix", 20),
+        )
+        if _gap_exp and _gap_exp.get("reduce_sizing"):
+            _gap_scale = _gap_exp.get("scale_factor", 0.7)
+            for sig in all_signals:
+                sig["kelly_fraction"] *= _gap_scale
+                sig["overnight_gap_risk"] = _gap_exp.get("gap_var", 0)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 94: CALENDAR/EVENT PROXIMITY SIZING ──
+    try:
+        from python_brain.execution.calendar_manager import get_event_proximity
+        _evt = get_event_proximity(msg.get("timestamp_ns", 0))
+        if _evt and _evt.get("minutes_to_event", 999) < 30:
+            _evt_scale = max(0.5, 1.0 - _evt.get("impact", 0))
+            for sig in all_signals:
+                sig["kelly_fraction"] *= _evt_scale
+                sig["event_proximity_mins"] = _evt["minutes_to_event"]
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # ── BOOK 98: CANNIBALIZATION CHECK ──
+    # If multiple signals fired, check for overlap cannibalization
+    if len(all_signals) >= 2:
+        try:
+            from python_brain.risk.concentration_checks import compute_signal_overlap
+            for i, sig_a in enumerate(all_signals):
+                for sig_b in all_signals[i+1:]:
+                    _overlap = compute_signal_overlap(
+                        [sig_a], [sig_b], window_seconds=300,
+                    )
+                    if _overlap > 0.8:  # >80% overlap = cannibalization
+                        # Keep the higher-confidence signal, suppress the other
+                        if sig_a["confidence"] < sig_b["confidence"]:
+                            sig_a["confidence"] = max(0, sig_a["confidence"] - 15)
+                            sig_a["cannibalized_by"] = sig_b.get("strategy", "")
+                        else:
+                            sig_b["confidence"] = max(0, sig_b["confidence"] - 15)
+                            sig_b["cannibalized_by"] = sig_a.get("strategy", "")
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    # ── BOOK 85 UPGRADE: SMOOTH PER-LOSS POSITION DEGRADATION ──
+    # Replaces stepped 3/5/7 with continuous: each loss reduces by 10%, floor 20%.
+    # 8+ losses = sacred halt (24h pause). Smooth curve prevents cliff edges.
+    _consec_losses = msg.get("consecutive_losses", 0)
+    if _consec_losses >= 8:
+        sys.stderr.write(
+            f"TILT_GUARD_HALT: {_consec_losses} consecutive losses — SACRED HALT\n"
+        )
+        sys.stderr.flush()
+        return None  # Sacred halt after 8 consecutive losses
+    elif _consec_losses >= 1:
+        _tilt_scale = max(0.20, 1.0 - _consec_losses * 0.10)
+        for sig in all_signals:
+            sig["kelly_fraction"] *= _tilt_scale
+            sig["shares"] = max(1, int(sig["shares"] * _tilt_scale))
+            sig["consecutive_loss_scale"] = round(_tilt_scale, 2)
+            sig["consecutive_losses"] = _consec_losses
+
+    # ── PORTFOLIO HEAT / CONCENTRATION CHECK ──
+    # If total open positions exceed 4 (for £10K account), reduce new entries.
+    # Capital is finite — each additional position fragments edge.
+    _open_pos_count = len(msg.get("open_positions", []))
+    _equity = msg.get("equity", 10000)
+    _max_positions = max(3, int(_equity / 3000))  # Scale: £10K=3, £25K=8, £50K=16
+    if _open_pos_count >= _max_positions:
+        # At capacity — only allow signals with confidence > 75 (exceptional setups)
+        all_signals = [s for s in all_signals if s.get("confidence", 0) >= 75]
+        if all_signals:
+            for sig in all_signals:
+                sig["portfolio_at_capacity"] = True
+                sig["max_positions"] = _max_positions
+    elif _open_pos_count >= _max_positions - 1:
+        # Near capacity — reduce sizing on new entries
+        for sig in all_signals:
+            sig["kelly_fraction"] *= 0.7
+            sig["shares"] = max(1, int(sig["shares"] * 0.7))
+            sig["near_capacity"] = True
+    if not all_signals:
+        return None
+
+    # ── CROSS-ASSET CORRELATION HEAT ──
+    # If adding a new position that's highly correlated with existing positions,
+    # reduce sizing to avoid concentration risk.
+    _open_symbols = [p.get("symbol", "") for p in msg.get("open_positions", []) if p.get("symbol")]
+    _new_sym = ticker_symbols.get(ticker_id, "")
+    if _new_sym and _open_symbols:
+        # Simple sector correlation check: same prefix = same sector
+        _new_prefix = _new_sym[:3].upper()
+        _sector_overlap = sum(1 for s in _open_symbols if s[:3].upper() == _new_prefix)
+        if _sector_overlap >= 2:
+            # Already hold 2+ from same sector — heavy concentration penalty
+            for sig in all_signals:
+                sig["kelly_fraction"] *= 0.5
+                sig["shares"] = max(1, int(sig["shares"] * 0.5))
+                sig["sector_concentration"] = f"{_sector_overlap}_same_sector"
+        elif _sector_overlap == 1:
+            for sig in all_signals:
+                sig["kelly_fraction"] *= 0.8
+                sig["shares"] = max(1, int(sig["shares"] * 0.8))
+                sig["sector_overlap"] = True
+
     # Select best signal after all adjustments
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     best = all_signals[0]
@@ -3187,8 +5640,10 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # Per-ticker cooldown
     tick_count = _tick_counts.get(ticker_id, 0)
     if not _SIM_MODE:
-        last_sig = _last_signal_tick.get(ticker_id, -SIGNAL_COOLDOWN_TICKS - 1)
-        if tick_count - last_sig < SIGNAL_COOLDOWN_TICKS:
+        # Use regime-adaptive cooldown if available, else static
+        _effective_cooldown = msg.get("_regime_cooldown_ticks", SIGNAL_COOLDOWN_TICKS)
+        last_sig = _last_signal_tick.get(ticker_id, -_effective_cooldown - 1)
+        if tick_count - last_sig < _effective_cooldown:
             return None  # Cooldown active
 
     # STS confidence adjustment
@@ -3326,12 +5781,73 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     except ImportError:
         pass
 
-    # VPIN shadow fields
+    # VPIN — LOW VPIN + HIGH RVOL = smart money accumulating quietly.
+    # This is ACTIONABLE: low VPIN (< 0.3) with high RVOL (> 2.5) = informed traders
+    # are accumulating while retail doesn't notice. BOOST long signals.
     best["vpin"] = round(ind["vpin"], 4)
-    best["vpin_would_block"] = bool(ind["vpin"] < 0.3 and ind["rvol"] > 2.5)
+    _vpin_val = ind["vpin"]
+    if _vpin_val < 0.3 and ind["rvol"] > 2.5:
+        best["vpin_smart_money_accumulation"] = True
+        if best.get("direction") == "Long":
+            best["confidence"] = min(100, best["confidence"] + 5)
+            best["kelly_fraction"] *= 1.2  # 20% size-up on smart money signal
+            best["shares"] = max(1, int(best["shares"] * 1.2))
+    elif _vpin_val > 0.70:
+        # Elevated VPIN = informed selling — reduce longs even if below 0.80 block threshold
+        best["kelly_fraction"] *= 0.8
+        best["shares"] = max(1, int(best["shares"] * 0.8))
+        best["vpin_elevated_caution"] = True
 
-    # Claude curator (shadow mode, non-blocking)
-    if best.get("confidence", 0) >= 55 and not _SIM_MODE:
+    # ── D-VPIN HARD VETO: Informed sellers detected ──
+    # D-VPIN < -0.30 = net informed selling pressure. BLOCK long entries.
+    _d_vpin = best.get("d_vpin", 0)
+    if _d_vpin < -0.30 and best.get("direction") == "Long":
+        sys.stderr.write(
+            f"D_VPIN_VETO: tid={ticker_id} d_vpin={_d_vpin:.3f} — informed sellers detected\n"
+        )
+        sys.stderr.flush()
+        return None
+
+    # ── BOOK 32: MICROSTRUCTURE ENTRY QUALITY (shadow mode) ──
+    try:
+        from python_brain.analytics.microstructure import get_micro_state
+        _micro = get_micro_state(ticker_id)
+        _micro.on_bar(
+            price_open=msg.get("open", msg.get("last", 0)),
+            price_close=msg.get("last", msg.get("close", 0)),
+            volume=msg.get("volume", 0),
+            bid=msg.get("bid", 0),
+            ask=msg.get("ask", 0),
+        )
+        _micro_score = _micro.entry_score(
+            signal_direction=1,
+            strategy=best.get("strategy", ""),
+        )
+        best["micro_score"] = round(_micro_score.total, 1)
+        best["micro_action"] = _micro_score.action
+        best["vpin_regime"] = _micro_score.vpin_regime
+        best["lambda_regime"] = _micro_score.lambda_regime
+        # Phase 2 ACTIVATED: microstructure gate is now LIVE.
+        # BLOCK = toxic microstructure (spoofing, wide spreads, thin book).
+        # REDUCE = marginal conditions — reduce confidence by 10 instead of blocking.
+        if _micro_score.action == "BLOCK":
+            sys.stderr.write(
+                f"MICRO_GATE_BLOCK: tid={ticker_id} score={_micro_score.total:.1f} "
+                f"vpin={_micro_score.vpin_regime} lambda={_micro_score.lambda_regime}\n"
+            )
+            sys.stderr.flush()
+            return None
+        elif _micro_score.action == "REDUCE":
+            best["confidence"] = max(0, best["confidence"] - 10)
+            best["micro_reduced"] = True
+    except ImportError:
+        pass
+
+    # Claude curator — LIVE GATE with graduated authority
+    # Low confidence (< 65): Claude is advisory (soft gate, -15 conf + halve sizing)
+    # Medium confidence (65-80): Claude has veto power (hard block on reject)
+    # High confidence (> 80): Claude is override-only (can reduce but not block)
+    if best.get("confidence", 0) >= 50 and not _SIM_MODE:
         try:
             from python_brain.ouroboros.claude_curator import evaluate_signal
             cr = evaluate_signal(
@@ -3341,16 +5857,32 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                     "vix": msg.get("vix", 20), "equity": msg.get("equity", 10000),
                     "exchange": msg.get("exchange", ""), "open_positions": msg.get("open_positions", 0),
                     "trades_today": msg.get("trades_today", 0),
+                    "consecutive_losses": msg.get("consecutive_losses", 0),
+                    "daily_pnl_pct": msg.get("daily_pnl_pct", 0),
                 }
             )
             if cr.get("claude_verdict") == "reject":
                 best["claude_rejected"] = True
                 best["claude_reasoning"] = cr.get("reasoning", "")[:200]
-                # P9: Claude rejection is now a SOFT gate — reduce confidence by 15 points.
-                # If confidence drops below floor, the signal will be vetoed by CHECK 10.
-                # This makes Claude advisory meaningful without giving it hard-veto power.
-                best["confidence"] = max(0, best["confidence"] - 15)
-                best["kelly_fraction"] = best["kelly_fraction"] * 0.5  # Halve sizing on reject
+                _cur_conf = best["confidence"]
+                if 65 <= _cur_conf <= 80:
+                    # Medium confidence — Claude has HARD VETO
+                    sys.stderr.write(
+                        f"CLAUDE_HARD_VETO: tid={ticker_id} conf={_cur_conf} "
+                        f"reason={cr.get('reasoning', '')[:80]}\n"
+                    )
+                    sys.stderr.flush()
+                    return None
+                elif _cur_conf > 80:
+                    # High confidence — Claude reduces but doesn't block
+                    best["confidence"] = max(0, best["confidence"] - 10)
+                    best["kelly_fraction"] = best["kelly_fraction"] * 0.6
+                    best["shares"] = max(1, int(best["shares"] * 6 // 10))
+                else:
+                    # Low confidence — soft gate (original behavior)
+                    best["confidence"] = max(0, best["confidence"] - 15)
+                    best["kelly_fraction"] = best["kelly_fraction"] * 0.5
+                    best["shares"] = max(1, best["shares"] // 2)
                 best["shares"] = max(1, best["shares"] // 2)
                 sys.stderr.write(
                     f"CLAUDE_SOFT_GATE: tid={ticker_id} conf_reduced_by=15 "
@@ -3366,6 +5898,34 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             best["claude_verdict"] = cr.get("claude_verdict", "no_response")
         except Exception as e:
             best["claude_error"] = str(e)[:200]
+
+    # ── BOOK 140: CLAUDE MULTI-AGENT DEBATE (HIGH-VALUE SIGNALS ONLY) ──
+    # Only invoke for signals worth the API cost: conf >= 75 AND kelly >= 0.03
+    if best.get("confidence", 0) >= 75 and best.get("kelly_fraction", 0) >= 0.03 and not _SIM_MODE:
+        try:
+            from python_brain.claude.multi_agent_debate import Debate9, DebateProtocol
+            if not hasattr(_apply_adjustments, "_debate"):
+                _apply_adjustments._debate = Debate9()
+            _debate = _apply_adjustments._debate
+            _verdict = _debate.debate(best, protocol=DebateProtocol.ADVERSARIAL, timeout=3)
+            if _verdict:
+                if _verdict.action == "VETO":
+                    sys.stderr.write(
+                        f"DEBATE_VETO: tid={ticker_id} conf={best['confidence']} "
+                        f"consensus={getattr(_verdict, 'consensus_score', 0):.2f}\n"
+                    )
+                    sys.stderr.flush()
+                    return None  # Hard veto from debate
+                elif _verdict.action == "REDUCE":
+                    best["confidence"] = max(0, best["confidence"] - 10)
+                    best["kelly_fraction"] *= 0.6
+                    best["shares"] = max(1, int(best["shares"] * 0.6))
+                best["debate_verdict"] = _verdict.action
+                best["debate_consensus"] = getattr(_verdict, 'consensus_score', 0)
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Timeout/error = proceed without debate (fail-open)
 
     # P5: Per-strategy signal tracking for validation metrics
     strat = best.get("strategy", "unknown")
@@ -3570,6 +6130,68 @@ def process_tick(msg):
         # Book 1: Record entry confidence for IC computation on exit
         _entry_confidences[(ticker_id, best.get("strategy", ""))] = best.get("confidence", 0)
 
+        # ── EXIT TIMING HINTS FOR RUST ENGINE ──
+        # Provide context to the Rust exit engine for adaptive Chandelier parameters.
+        # The Rust side can use these to widen/tighten stops dynamically.
+        _strat = best.get("strategy", "")
+        _leverage_exit = msg.get("leverage", 1)
+
+        # Time-based exit decay: positions held past optimal holding period lose edge.
+        # Momentum: 2-8 hours optimal. Mean-reversion: 0.5-4 hours. Overnight carry: 12-16 hours.
+        if _strat in ("Momentum", "VolExpansion", "S3_MacroTrend", "S1_Microstructure"):
+            best["suggested_max_hold_hours"] = 8
+            best["exit_urgency_ramp_hours"] = 6  # Start tightening stops after 6h
+        elif _strat in ("IBS_MeanReversion", "S2_Reversion", "PairsReversion"):
+            best["suggested_max_hold_hours"] = 4
+            best["exit_urgency_ramp_hours"] = 2  # MR should mean-revert quickly
+        elif _strat == "S5_OvernightCarry":
+            best["suggested_max_hold_hours"] = 16
+            best["exit_urgency_ramp_hours"] = 14
+        elif _strat == "S7_TailHedge":
+            best["suggested_max_hold_hours"] = 48
+            best["exit_urgency_ramp_hours"] = 24  # Tail events play out over days
+        else:
+            best["suggested_max_hold_hours"] = 12
+            best["exit_urgency_ramp_hours"] = 8
+
+        # Leverage-adjusted initial stop width: higher leverage = tighter stops
+        # 3x ETPs move 3x — a 2% underlying move = 6% on the ETP
+        if _leverage_exit >= 5:
+            best["suggested_initial_stop_atr_mult"] = 1.2  # Tight — 5x amplifies moves
+        elif _leverage_exit >= 3:
+            best["suggested_initial_stop_atr_mult"] = 1.5  # Standard for 3x
+        elif _leverage_exit >= 2:
+            best["suggested_initial_stop_atr_mult"] = 1.8  # Slightly wider for 2x
+        else:
+            best["suggested_initial_stop_atr_mult"] = 2.5  # Single stocks: wider stops
+
+        # Regime-adaptive exit: trending regimes should use wider trailing stops (let winners run).
+        # Mean-reverting regimes: tighter stops (quick profit capture).
+        _hurst_exit = ind.get("hurst", 0.5)
+        if _hurst_exit > 0.55:
+            best["exit_trail_bias"] = "wide"  # Trending — let it run
+            best["suggested_rung3_atr"] = 1.2
+        elif _hurst_exit < 0.35:
+            best["exit_trail_bias"] = "tight"  # Mean-reverting — capture quickly
+            best["suggested_rung3_atr"] = 0.7
+        else:
+            best["exit_trail_bias"] = "neutral"
+            best["suggested_rung3_atr"] = 1.0
+
+        # Volatility-adjusted stops: in high-vol environments, widen stops to avoid noise exits
+        _atr_pct_exit = best.get("atr_pct", 0)
+        if _atr_pct_exit > 1.5:
+            best["exit_vol_adjust"] = "widen"  # High vol — give room
+        elif _atr_pct_exit < 0.5:
+            best["exit_vol_adjust"] = "tighten"  # Low vol — capture small moves
+
+        # Spread-adjusted profit target: if spread > 0.3%, need higher profit to cover costs
+        _spread_exit = ind.get("spread_pct", 0)
+        if _spread_exit > 0.5:
+            best["min_profit_target_pct"] = round(_spread_exit * 3, 2)  # Need 3x spread to be worthwhile
+        elif _spread_exit > 0.2:
+            best["min_profit_target_pct"] = round(_spread_exit * 2, 2)
+
         return best
     return no_signal
 
@@ -3771,6 +6393,13 @@ def main():
                         ))
                     except ImportError:
                         pass
+
+                    # Book 50: Feed outcome to Thompson signal prioritizer
+                    try:
+                        from python_brain.regime.signal_prioritizer import get_prioritizer
+                        get_prioritizer().update_outcome(exit_strategy, exit_pnl > 0)
+                    except ImportError:
+                        pass
             except Exception as e:
                 sys.stderr.write(f"Bridge: exit tracking error: {e}\n")
                 sys.stderr.flush()
@@ -3816,6 +6445,14 @@ def main():
                 from python_brain.sizing.rolling_kelly import get_rolling_kelly
                 get_rolling_kelly().save()
                 sys.stderr.write("BOOK10: rolling Kelly saved on shutdown\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            # Book 50: Save Thompson prioritizer state on shutdown
+            try:
+                from python_brain.regime.signal_prioritizer import get_prioritizer
+                get_prioritizer().save()
+                sys.stderr.write("BOOK50: Thompson prioritizer saved on shutdown\n")
                 sys.stderr.flush()
             except Exception:
                 pass

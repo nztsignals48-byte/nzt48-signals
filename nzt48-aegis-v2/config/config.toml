@@ -646,7 +646,7 @@ gemini_log_file = "/app/data/gemini_scanner.ndjson"
 # Tier 3: Claude
 claude_enabled = true
 claude_challenge_min_confidence = 70   # Only challenge signals >= this confidence
-claude_shadow_mode = true              # Log verdicts but don't block trades yet
+claude_shadow_mode = false             # PROMOTED TO LIVE: Claude verdicts now gate trades (3-tier authority)
 claude_promote_after_n = 100           # Promote to hard gate after 100 shadow verdicts
 claude_log_file = "/app/data/claude_curator.ndjson"
 

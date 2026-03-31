@@ -1054,6 +1054,45 @@ def generate_daily_report(
     else:
         lines += ["", "8. ALPHA DECAY: No decay detected"]
 
+    # 9. TRUE LEVERAGE
+    tl = recommendations.get("true_leverage", {})
+    if tl and tl.get("total_effective_leverage"):
+        lines += ["", "9. TRUE LEVERAGE"]
+        lines.append(f"   Effective leverage: {tl.get('total_effective_leverage', 0):.2f}x")
+        lines.append(f"   Safe: {tl.get('is_safe', '?')}")
+    # 10. DOMAIN SHIFT (Transfer Learning)
+    tl_shift = recommendations.get("transfer_learning", {})
+    if tl_shift.get("drifting_instruments"):
+        lines += ["", "10. DOMAIN SHIFT ALERTS"]
+        for sym in tl_shift["drifting_instruments"]:
+            _sv = tl_shift.get("shifts", {}).get(sym, 0)
+            lines.append(f"   DRIFT: {sym} (MMD={_sv:.3f})")
+    # 11. CAUSAL EDGES
+    cd = recommendations.get("causal_dag", {})
+    if cd.get("edges"):
+        lines += ["", "11. CAUSAL STRUCTURE"]
+        lines.append(f"   {cd.get('n_edges', 0)} edges among {cd.get('n_variables', 0)} instruments")
+        for e in cd["edges"][:5]:
+            lines.append(f"   {e['from']} -> {e['to']}  strength={e['strength']}")
+    # 12. STOCHASTIC (OU half-lives)
+    ou = recommendations.get("stochastic", {})
+    if ou.get("ou_calibrations"):
+        lines += ["", "12. OU MEAN-REVERSION"]
+        for sym, cal in list(ou["ou_calibrations"].items())[:5]:
+            lines.append(f"   {sym:12s}  theta={cal['theta']:.4f}  half_life={cal['half_life']:.1f}d")
+    # 13. VPIN TOXICITY
+    vpin = recommendations.get("vpin", {})
+    if vpin.get("current_vpin") is not None:
+        lines += ["", "13. VPIN FLOW TOXICITY"]
+        lines.append(f"   Current VPIN: {vpin['current_vpin']:.4f}")
+        lines.append(f"   Toxic: {vpin.get('is_toxic', False)}  Elevated: {vpin.get('is_elevated', False)}")
+        lines.append(f"   Percentile: {vpin.get('percentile', 0):.0f}%")
+    # 14. MARKET IMPACT
+    mi = recommendations.get("market_impact", {})
+    if mi.get("n_estimates", 0) > 0:
+        lines += ["", "14. MARKET IMPACT"]
+        lines.append(f"   Avg impact: {mi['avg_impact_bps']:.1f}bps across {mi['n_estimates']} trades")
+
     lines += ["", f"{'=' * 60}", ""]
 
     report_path.write_text("\n".join(lines))
@@ -1071,6 +1110,27 @@ def generate_daily_report(
     }
     metrics_path.write_text(json.dumps(metrics_data, indent=2))
     log.info("Metrics sidecar written: %s", metrics_path)
+
+    # Save full recommendations as machine-readable JSON
+    try:
+        recs_path = REPORTS_DIR / f"{date_str}_recommendations.json"
+        # Filter out non-serializable values
+        _safe_recs = {}
+        for k, v in recommendations.items():
+            try:
+                json.dumps(v)
+                _safe_recs[k] = v
+            except (TypeError, ValueError):
+                _safe_recs[k] = str(v)
+        recs_path.write_text(json.dumps(_safe_recs, indent=2, default=str))
+        log.info("Recommendations JSON written: %s (%d keys)", recs_path, len(_safe_recs))
+        # Also write to /app/data/ where bridge.py adaptive params loader reads from.
+        # This closes the nightly→bridge feedback loop.
+        _data_recs_path = DATA_DIR / f"{date_str}_recommendations.json"
+        _data_recs_path.write_text(json.dumps(_safe_recs, indent=2, default=str))
+        log.info("Recommendations JSON copied to data dir for bridge: %s", _data_recs_path)
+    except Exception as _e_recs:
+        log.warning("Failed to write recommendations JSON: %s", _e_recs)
 
     return report_path
 
@@ -1196,6 +1256,42 @@ def generate_battle_plan(
             "  If many vetoes WOULD have been winners, loosen that gate.",
             "  If most vetoes were correct, gate is working — keep it.",
         ]
+
+    # True leverage warning
+    tl_bp = recommendations.get("true_leverage", {})
+    if tl_bp.get("total_effective_leverage", 0) > 3.0:
+        lines += ["", "WARNING: TRUE LEVERAGE"]
+        lines.append(f"  Effective leverage: {tl_bp['total_effective_leverage']:.2f}x — REDUCE EXPOSURE")
+    # Domain shift warnings
+    tl_shift_bp = recommendations.get("transfer_learning", {})
+    if tl_shift_bp.get("drifting_instruments"):
+        lines += ["", "DOMAIN SHIFT WARNINGS:"]
+        for sym in tl_shift_bp["drifting_instruments"]:
+            lines.append(f"  {sym}: distribution shift detected — reduce confidence or skip")
+    # VPIN toxicity warning
+    vpin_bp = recommendations.get("vpin", {})
+    if vpin_bp.get("is_toxic"):
+        lines += ["", "VPIN TOXICITY: ELEVATED — widen stops, reduce size"]
+    # OU mean-reversion opportunities
+    ou_bp = recommendations.get("stochastic", {})
+    if ou_bp.get("ou_calibrations"):
+        _fast_revert = [(s, c) for s, c in ou_bp["ou_calibrations"].items() if c.get("half_life", 999) < 5]
+        if _fast_revert:
+            lines += ["", "MEAN-REVERSION OPPORTUNITIES (OU half-life < 5d):"]
+            for sym, cal in _fast_revert:
+                lines.append(f"  {sym:12s}  half_life={cal['half_life']:.1f}d")
+    # Causal leads
+    cd_bp = recommendations.get("causal_dag", {})
+    if cd_bp.get("edges"):
+        lines += ["", "CAUSAL LEADS (use as entry timing):"]
+        for e in cd_bp["edges"][:3]:
+            lines.append(f"  {e['from']} -> {e['to']}  (strength={e['strength']})")
+    # NSGA3 optimal params
+    nsga_bp = recommendations.get("nsga3", {})
+    if nsga_bp.get("best_params"):
+        lines += ["", "NSGA-III OPTIMAL PARAMS:"]
+        for k, v in nsga_bp["best_params"].items():
+            lines.append(f"  {k}: {v}")
 
     lines += [
         "",
@@ -2655,6 +2751,933 @@ def run_nightly() -> int:
         })
     except Exception as e:
         log.warning("Telegram summary failed (non-fatal): %s", e)
+
+    # Step 5.37: Robustness Validation — DSR, CPCV, Walk-Forward, Noise Injection (Book 31)
+    try:
+        from python_brain.validation.robustness import RobustnessValidator
+        _rv = RobustnessValidator()
+        # Build per-strategy returns from trade history
+        _strat_returns = {}
+        for t in (trades or []):
+            s = getattr(t, "strategy", None) or "unknown"
+            _strat_returns.setdefault(s, []).append(getattr(t, "cost_adjusted_pnl", 0) or 0)
+        import numpy as _np
+        _strat_np = {k: _np.array(v) for k, v in _strat_returns.items() if len(v) >= 30}
+        if _strat_np:
+            _val_results = _rv.run_nightly(_strat_np)
+            recommendations["robustness_validation"] = _val_results
+            log.info("Robustness validation: %d strategies assessed", len(_val_results))
+        else:
+            log.info("Robustness validation: insufficient trades for assessment")
+    except ImportError:
+        log.info("Robustness validation module not installed — skipping")
+    except Exception as e:
+        log.warning("Robustness validation failed (non-fatal): %s", e)
+
+    # Step 5.38: Inefficiency Scoring — 5-dimension instrument rating (Book 36)
+    try:
+        from python_brain.analytics.inefficiency_scorer import run_nightly_inefficiency_scan
+        _ineff = run_nightly_inefficiency_scan()
+        recommendations["inefficiency_scores"] = _ineff
+        log.info("Inefficiency scan: %d tradeable instruments", _ineff.get("tradeable_count", 0))
+    except ImportError:
+        log.info("Inefficiency scorer not installed — skipping")
+    except Exception as e:
+        log.warning("Inefficiency scoring failed (non-fatal): %s", e)
+
+    # Step 5.39: Exit Optimization — MFE/MAE-based Chandelier calibration (Book 39)
+    try:
+        from python_brain.ouroboros.exit_optimizer import run_nightly_exit_optimization
+        _exit_opt = run_nightly_exit_optimization()
+        recommendations["exit_optimization"] = _exit_opt
+        log.info("Exit optimization: %s", _exit_opt.get("status", "unknown"))
+    except ImportError:
+        log.info("Exit optimizer not installed — skipping")
+    except Exception as e:
+        log.warning("Exit optimization failed (non-fatal): %s", e)
+
+    # Step 5.40: Ensemble Stacking — ML model training + ONNX export (Book 37)
+    try:
+        from python_brain.ml.ensemble_stacker import run_nightly_ensemble
+        _ens = run_nightly_ensemble()
+        recommendations["ensemble_stacking"] = _ens
+        log.info("Ensemble stacking: %s (phase %s)", _ens.get("status", "?"), _ens.get("phase", "?"))
+    except ImportError:
+        log.info("Ensemble stacker not installed — skipping")
+    except Exception as e:
+        log.warning("Ensemble stacking failed (non-fatal): %s", e)
+
+    # Step 5.41: Health Monitor — 15-point system health check (Book 38)
+    try:
+        from python_brain.monitoring.health_monitor import run_nightly_health_check
+        _health = run_nightly_health_check(autonomy_level=0)
+        recommendations["health_check"] = _health
+        log.info("Health check: %s (%d alerts)", _health.get("overall_status", "?"), _health.get("n_alerts", 0))
+    except ImportError:
+        log.info("Health monitor not installed — skipping")
+    except Exception as e:
+        log.warning("Health check failed (non-fatal): %s", e)
+
+    # Step 5.42: RL Portfolio Agent — Shadow mode tracking (Book 33)
+    try:
+        from python_brain.rl_agent.portfolio_env import check_promotion_readiness, ShadowTracker
+        # Shadow tracker is persistent; this step just reports current status
+        log.info("RL agent: shadow mode (authority=0, observe only)")
+    except ImportError:
+        log.info("RL agent not installed — skipping")
+    except Exception as e:
+        log.warning("RL agent check failed (non-fatal): %s", e)
+
+    # Step 5.43: Synthetic Data — Generator calibration + validation (Book 34)
+    try:
+        from python_brain.synthetic.data_generator import run_nightly_synthetic
+        _synth = run_nightly_synthetic()
+        recommendations["synthetic_data"] = _synth
+        log.info("Synthetic data: %s", _synth.get("status", _synth.get("validation", {}).get("verdict", "?")))
+    except ImportError:
+        log.info("Synthetic data generator not installed — skipping")
+    except Exception as e:
+        log.warning("Synthetic data generation failed (non-fatal): %s", e)
+
+    # Step 5.44: Granger Causality Scan — causal precedence tests (Book 48)
+    try:
+        from python_brain.causal.granger_causality import run_nightly_granger
+        _granger = run_nightly_granger()
+        recommendations["granger_causality"] = _granger
+        log.info("Granger: %s (%d significant)",
+                 _granger.get("status", "?"), _granger.get("significant", 0))
+    except ImportError:
+        log.info("Granger causality module not installed — skipping")
+    except Exception as e:
+        log.warning("Granger causality scan failed (non-fatal): %s", e)
+
+    # Step 5.45: Structural Alpha Scan — 10 mechanistic sources (Book 48)
+    try:
+        from python_brain.causal.structural_alpha_scanner import run_nightly_structural_scan
+        _struct = run_nightly_structural_scan(vix=msg.get("vix", 21.0) if "msg" in dir() else 21.0)
+        recommendations["structural_alpha"] = _struct
+        log.info("Structural alpha: %d sources active, %d signals, top=%s",
+                 _struct.get("active_sources", 0), _struct.get("total_signals", 0),
+                 _struct.get("top_opportunity", "none"))
+    except ImportError:
+        log.info("Structural alpha scanner not installed — skipping")
+    except Exception as e:
+        log.warning("Structural alpha scan failed (non-fatal): %s", e)
+
+    # Step 5.46: Thompson Signal Prioritizer — save state + report (Book 50)
+    try:
+        from python_brain.regime.signal_prioritizer import run_nightly_thompson
+        _thompson = run_nightly_thompson()
+        recommendations["thompson_prioritizer"] = _thompson
+        log.info("Thompson: %d strategies tracked, %d with data",
+                 _thompson.get("n_strategies", 0), _thompson.get("strategies_with_data", 0))
+    except ImportError:
+        log.info("Thompson prioritizer not installed — skipping")
+    except Exception as e:
+        log.warning("Thompson prioritizer report failed (non-fatal): %s", e)
+
+    # Step 5.47: Model Registry Health — check drift scores, retire stale models (Book 65)
+    try:
+        from python_brain.ml.model_registry import ModelRegistry, ModelStage
+        _reg = ModelRegistry()
+        _reg_summary = _reg.summary()
+        recommendations["model_registry"] = _reg_summary
+        log.info("Model registry: %d total, %d production, %d staging",
+                 _reg_summary.get("total", 0),
+                 _reg_summary.get("by_stage", {}).get("production", 0),
+                 _reg_summary.get("by_stage", {}).get("staging", 0))
+    except ImportError:
+        log.info("Model registry not installed — skipping")
+    except Exception as e:
+        log.warning("Model registry check failed (non-fatal): %s", e)
+
+    # Step 5.48: Online Learning — drift detection + parameter proposals (Book 76)
+    try:
+        from python_brain.ml.online_learning import OnlineLearningEngine, DriftType
+        _ol_results = {}
+        for strat_name in ["vanguard_sniper", "apex_scout", "autonomous"]:
+            _ole = OnlineLearningEngine(strat_name, {})
+            drift = _ole.check_drift()
+            _ol_results[strat_name] = {"drift": drift.value, "n_trades": len(_ole._trade_results)}
+            if drift != DriftType.NONE:
+                log.info("Drift detected for %s: %s", strat_name, drift.value)
+        recommendations["online_learning"] = _ol_results
+        log.info("Online learning: %d strategies checked", len(_ol_results))
+    except ImportError:
+        log.info("Online learning module not installed — skipping")
+    except Exception as e:
+        log.warning("Online learning check failed (non-fatal): %s", e)
+
+    # Step 5.49: IV Signal Analysis — VIX term structure + VRP scan (Book 78)
+    try:
+        from python_brain.ml.iv_signals import IVSignalGenerator
+        _iv = IVSignalGenerator()
+        _iv_report = _iv.nightly_report()
+        recommendations["iv_signals"] = _iv_report
+        log.info("IV signals: VRP=%.2f, term_structure=%s",
+                 _iv_report.get("vrp", 0), _iv_report.get("term_structure", "unknown"))
+    except ImportError:
+        log.info("IV signals module not installed — skipping")
+    except Exception as e:
+        log.warning("IV signal analysis failed (non-fatal): %s", e)
+
+    # Step 5.50: NSGA-III Pareto Optimization — multi-objective param search (Book 79)
+    try:
+        from python_brain.ml.nsga3_optimizer import NSGA3Optimizer, OptimizationConfig
+        from datetime import datetime as _dt_nsga
+        if _dt_nsga.now().weekday() == 4:  # Friday only
+            import numpy as _np_nsga
+            # Build PnL series from recent trades for objective functions
+            _trade_pnls = [getattr(t, "cost_adjusted_pnl", 0) for t in (trades or [])]
+            if len(_trade_pnls) >= 10:
+                _pnl_arr = _np_nsga.array(_trade_pnls)
+                def _obj_sharpe(params):
+                    _frac = params.get("kelly_fraction", 0.2)
+                    _scaled = _pnl_arr * _frac / 0.2
+                    return float(_np_nsga.mean(_scaled) / max(_np_nsga.std(_scaled), 1e-9))
+                def _obj_drawdown(params):
+                    _frac = params.get("kelly_fraction", 0.2)
+                    _scaled = _pnl_arr * _frac / 0.2
+                    _cum = _np_nsga.cumsum(_scaled)
+                    _dd = float((_cum - _np_nsga.maximum.accumulate(_cum)).min())
+                    return _dd  # minimize (more negative = worse)
+                _nsga = NSGA3Optimizer(
+                    parameter_bounds={"kelly_fraction": (0.05, 0.40), "chandelier_atr": (2.0, 5.0)},
+                    objective_functions=[_obj_sharpe, _obj_drawdown],
+                    objective_directions=["max", "max"],
+                    config=OptimizationConfig(pop_size=50, n_generations=25),
+                )
+                if hasattr(_nsga, 'run'):
+                    _result = _nsga.run()
+                    recommendations["nsga3"] = {
+                        "status": "completed",
+                        "pareto_front_size": len(_result.get("pareto_front", [])) if isinstance(_result, dict) else 0,
+                        "best_params": _result.get("best", {}) if isinstance(_result, dict) else {},
+                    }
+                    log.info("NSGA-III: optimization completed, %d Pareto solutions",
+                             recommendations["nsga3"]["pareto_front_size"])
+                else:
+                    recommendations["nsga3"] = {"status": "no_run_method"}
+            else:
+                recommendations["nsga3"] = {"status": "insufficient_trades", "n_trades": len(_trade_pnls)}
+                log.info("NSGA-III: only %d trades, need >=10 for optimization", len(_trade_pnls))
+        else:
+            recommendations["nsga3"] = {"status": "skipped", "reason": "not_friday"}
+    except ImportError:
+        log.info("NSGA-III optimizer not installed — skipping")
+    except Exception as e:
+        log.warning("NSGA-III optimization failed (non-fatal): %s", e)
+
+    # Step 5.51: Transfer Learning — domain shift monitoring (Book 93)
+    try:
+        from python_brain.ml.transfer_learner import DomainShiftDetector
+        import numpy as _np_tl
+        _prices_path_tl = Path("/app/data/prices/combined.npy")
+        if _prices_path_tl.exists():
+            _all_p_tl = _np_tl.load(str(_prices_path_tl), allow_pickle=True)
+            if hasattr(_all_p_tl, 'item'):
+                _all_p_tl = _all_p_tl.item()
+            _tl_results = {}
+            for _sym in list(PRIMARY_TICKERS)[:5]:
+                _p = _all_p_tl.get(_sym, _np_tl.array([])) if isinstance(_all_p_tl, dict) else _np_tl.array([])
+                if len(_p) >= 120:
+                    _rets = _np_tl.diff(_np_tl.log(_p.clip(1e-9)))
+                    _ref = _rets[:60]
+                    _tgt = _rets[-60:]
+                    _ref_stats = {"mean": _np_tl.array([_ref.mean()]), "std": _np_tl.array([_ref.std()]),
+                                  "samples": _ref.reshape(-1, 1)}
+                    _dsd = DomainShiftDetector(_ref_stats)
+                    _shift = _dsd.compute_shift(_tgt.reshape(-1, 1))
+                    _tl_results[_sym] = round(_shift, 4)
+            _drifting = {k: v for k, v in _tl_results.items() if v > 0.5}
+            recommendations["transfer_learning"] = {
+                "shifts": _tl_results,
+                "drifting_instruments": list(_drifting.keys()),
+                "n_drifting": len(_drifting),
+            }
+            log.info("Transfer learning: %d/%d instruments drifting", len(_drifting), len(_tl_results))
+        else:
+            recommendations["transfer_learning"] = {"status": "no_price_data"}
+    except ImportError:
+        log.info("Transfer learner not installed — skipping")
+    except Exception as e:
+        log.warning("Transfer learning check failed (non-fatal): %s", e)
+
+    # Step 5.52: GNN Market Structure — rebuild daily graph (Book 96)
+    try:
+        from python_brain.ml.gnn_market_structure import MarketGraphBuilder
+        _sector_map = {}  # Populated from config if available
+        try:
+            _sector_path = Path("/app/data/config/sectors.json")
+            if _sector_path.exists():
+                import json as _json_gnn
+                _sector_map = _json_gnn.loads(_sector_path.read_text())
+        except Exception:
+            pass
+        _gnn_builder = MarketGraphBuilder(list(PRIMARY_TICKERS), _sector_map)
+        _sector_adj = _gnn_builder.build_sector_graph()
+        _gnn_report = {
+            "n_nodes": len(PRIMARY_TICKERS),
+            "sector_edges": int((_sector_adj > 0).sum()) if _sector_adj is not None else 0,
+            "density": round(float((_sector_adj > 0).mean()), 4) if _sector_adj is not None else 0,
+        }
+        if hasattr(_gnn_builder, 'generate_signals'):
+            _gnn_sigs = _gnn_builder.generate_signals()
+            _gnn_report["signals"] = _gnn_sigs
+        recommendations["gnn_graph"] = _gnn_report
+        log.info("GNN: graph built — %d nodes, %d sector edges",
+                 _gnn_report["n_nodes"], _gnn_report["sector_edges"])
+    except ImportError:
+        log.info("GNN market structure not installed — skipping")
+    except Exception as e:
+        log.warning("GNN graph build failed (non-fatal): %s", e)
+
+    # Step 5.53: MAML Meta-Learning — check adaptation quality (Book 97)
+    try:
+        from python_brain.ml.maml_trainer import MAMLSignalGenerator
+        _maml = MAMLSignalGenerator()
+        _aq = _maml.get_adaptation_quality()
+        recommendations["maml"] = {"adaptation_quality": _aq, "status": "monitoring"}
+        log.info("MAML: adaptation quality = %.3f", _aq)
+    except ImportError:
+        log.info("MAML trainer not installed — skipping")
+    except Exception as e:
+        log.warning("MAML check failed (non-fatal): %s", e)
+
+    # Step 5.54: TFT Model — check if retraining needed (Book 75)
+    try:
+        from python_brain.ml.temporal_fusion_transformer import TFTConfig
+        _tft_cfg = TFTConfig()
+        _tft_model_path = Path("/app/data/ml/tft_model.pt")
+        _tft_age_days = -1
+        if _tft_model_path.exists():
+            import os as _os_tft
+            _tft_mtime = _os_tft.path.getmtime(str(_tft_model_path))
+            _tft_age_days = (time.time() - _tft_mtime) / 86400.0
+        _needs_retrain = _tft_age_days < 0 or _tft_age_days > 7  # Retrain weekly
+        recommendations["tft"] = {
+            "seq_len": _tft_cfg.seq_len,
+            "pred_horizon": _tft_cfg.pred_horizon,
+            "model_age_days": round(_tft_age_days, 1),
+            "needs_retrain": _needs_retrain,
+        }
+        log.info("TFT: seq_len=%d, model_age=%.1fd, needs_retrain=%s",
+                 _tft_cfg.seq_len, _tft_age_days, _needs_retrain)
+    except ImportError:
+        log.info("TFT module not installed — skipping")
+    except Exception as e:
+        log.warning("TFT check failed (non-fatal): %s", e)
+
+    # Step 5.55: Debate Framework — calibration review (Book 62)
+    try:
+        from python_brain.claude.debate_framework import DebateFramework
+        _debate = DebateFramework()
+        _debate_report = {"framework": "available"}
+        if hasattr(_debate, "get_calibration_stats"):
+            _debate_report.update(_debate.get_calibration_stats())
+        if hasattr(_debate, "debate_count"):
+            _debate_report["debate_count"] = _debate.debate_count
+        recommendations["debate"] = _debate_report
+        log.info("Debate framework: %s", _debate_report)
+    except ImportError:
+        log.info("Debate framework not installed — skipping")
+    except Exception as e:
+        log.warning("Debate framework check failed (non-fatal): %s", e)
+
+    # Step 5.56: VPIN Flow Toxicity (Book 162)
+    try:
+        from python_brain.analytics.vpin_calculator import VPINCalculator
+        _vpin_calc = VPINCalculator()
+        _vpin_state_path = "/app/data/vpin/state.json"
+        if Path(_vpin_state_path).exists():
+            _vpin_calc.load(_vpin_state_path)
+        _vpin_summary = _vpin_calc.summary()
+        _vpin_val = _vpin_calc.current_vpin()
+        _vpin_report = {
+            "current_vpin": round(_vpin_val, 4) if _vpin_val is not None else None,
+            "is_toxic": _vpin_calc.is_toxic(_vpin_val) if _vpin_val is not None else False,
+            "is_elevated": _vpin_calc.is_elevated() if _vpin_val is not None else False,
+            "percentile": round(_vpin_calc.get_percentile(), 2) if _vpin_val is not None else 0,
+        }
+        _vpin_report.update(_vpin_summary)
+        recommendations["vpin"] = _vpin_report
+        log.info("VPIN: current=%.4f, toxic=%s, elevated=%s",
+                 _vpin_val or 0, _vpin_report["is_toxic"], _vpin_report["is_elevated"])
+    except ImportError:
+        log.info("VPIN not installed — skipping")
+    except Exception as e:
+        log.warning("VPIN failed (non-fatal): %s", e)
+
+    # Step 5.57: Gap Risk Monitor (Book 148)
+    try:
+        from python_brain.overnight.gap_risk_monitor import GapRiskMonitor
+        _grm = GapRiskMonitor()
+        _gap = _grm.run_nightly_gap_report()
+        recommendations["gap_risk"] = _gap
+        log.info("Gap risk: %s", _gap.get("status", "?"))
+    except ImportError:
+        log.info("Gap risk monitor not installed — skipping")
+    except Exception as e:
+        log.warning("Gap risk failed (non-fatal): %s", e)
+
+    # Step 5.58: True Leverage audit (Book 187)
+    try:
+        from python_brain.execution.true_leverage import TrueLeverageCalculator
+        _open_pos = recommendations.get("open_positions", {})
+        _pos_list = [{"symbol": sym, "notional": abs(p.get("notional", 0)),
+                      "leverage_factor": p.get("leverage_factor", 1),
+                      "beta": p.get("beta", 1.0)}
+                     for sym, p in _open_pos.items() if p.get("notional", 0) != 0]
+        if _pos_list:
+            _tlc = TrueLeverageCalculator(_pos_list)
+            _tl_report = _tlc.compute()
+            _tlc.save_report()
+            recommendations["true_leverage"] = _tl_report
+            log.info("True leverage: effective=%.2fx, safe=%s",
+                     _tl_report.get("total_effective_leverage", 0),
+                     _tl_report.get("is_safe", "?"))
+        else:
+            recommendations["true_leverage"] = {"status": "no_positions", "total_effective_leverage": 0}
+            log.info("True leverage: no open positions")
+    except ImportError:
+        log.info("True leverage not installed — skipping")
+    except Exception as e:
+        log.warning("True leverage failed (non-fatal): %s", e)
+
+    # Step 5.59: Stochastic Models — OU calibration (Book 116)
+    try:
+        from python_brain.models.stochastic_models import OUProcess
+        import numpy as _np_ou
+        _prices_path = Path("/app/data/prices/combined.npy")
+        if _prices_path.exists():
+            _all_prices = _np_ou.load(str(_prices_path), allow_pickle=True)
+            if hasattr(_all_prices, 'item'):
+                _all_prices = _all_prices.item()
+            _ou_results = {}
+            for _sym in list(PRIMARY_TICKERS)[:10]:  # Top 10 instruments
+                _p = _all_prices.get(_sym, _np_ou.array([])) if isinstance(_all_prices, dict) else _np_ou.array([])
+                if len(_p) >= 60:
+                    _ou = OUProcess()
+                    _cal = _ou.calibrate(_p[-252:])  # Last year
+                    _ou_results[_sym] = {"theta": round(_cal.get("theta", 0), 4),
+                                         "mu": round(_cal.get("mu", 0), 4),
+                                         "half_life": round(_cal.get("half_life", 0), 1)}
+            recommendations["stochastic"] = {"ou_calibrations": _ou_results, "n_instruments": len(_ou_results)}
+            log.info("Stochastic: OU calibrated for %d instruments", len(_ou_results))
+        else:
+            recommendations["stochastic"] = {"status": "no_price_data"}
+            log.info("Stochastic: no price data file found")
+    except ImportError:
+        log.info("Stochastic models not installed — skipping")
+    except Exception as e:
+        log.warning("Stochastic models failed (non-fatal): %s", e)
+
+    # Step 5.60: Market Impact estimates (Book 123)
+    try:
+        from python_brain.execution.market_impact import PreTradeImpactEstimator
+        _pie = PreTradeImpactEstimator()
+        _mi_summary = {"avg_impact_bps": 0.0, "worst_ticker": None, "n_estimates": 0}
+        for _t in (trades or []):
+            _notional = abs(getattr(_t, "entry_price", 0) * getattr(_t, "qty", 0))
+            _ticker = getattr(_t, "ticker", getattr(_t, "symbol", ""))
+            if _notional > 0 and _ticker:
+                _est = _pie.estimate(_ticker, _notional) if hasattr(_pie, "estimate") else {}
+                _impact = _est.get("impact_bps", 0)
+                _mi_summary["n_estimates"] += 1
+                _mi_summary["avg_impact_bps"] += _impact
+        if _mi_summary["n_estimates"] > 0:
+            _mi_summary["avg_impact_bps"] /= _mi_summary["n_estimates"]
+            _mi_summary["avg_impact_bps"] = round(_mi_summary["avg_impact_bps"], 2)
+        recommendations["market_impact"] = _mi_summary
+        log.info("Market impact: avg=%.1fbps across %d trades",
+                 _mi_summary["avg_impact_bps"], _mi_summary["n_estimates"])
+    except ImportError:
+        log.info("Market impact not installed — skipping")
+    except Exception as e:
+        log.warning("Market impact failed (non-fatal): %s", e)
+
+    # Step 5.61: TDA Crash Detector (Book 127)
+    try:
+        from python_brain.ml.tda_crash_detector import CrashDetector
+        _tda = CrashDetector()
+        _cp = _tda.get_crash_probability()
+        recommendations["tda_crash"] = {"crash_probability": _cp}
+        log.info("TDA: P(crash)=%.3f", _cp)
+    except ImportError:
+        log.info("TDA crash detector not installed — skipping")
+    except Exception as e:
+        log.warning("TDA failed (non-fatal): %s", e)
+
+    # Step 5.62: Causal Discovery DAG (Book 134)
+    try:
+        from python_brain.causal.causal_discovery import PCAlgorithm
+        import numpy as _np_pc
+        _prices_path_pc = Path("/app/data/prices/combined.npy")
+        if _prices_path_pc.exists():
+            _all_p = _np_pc.load(str(_prices_path_pc), allow_pickle=True)
+            if hasattr(_all_p, 'item'):
+                _all_p = _all_p.item()
+            _syms = [s for s in PRIMARY_TICKERS[:8] if isinstance(_all_p, dict) and s in _all_p
+                     and len(_all_p[s]) >= 60]
+            if len(_syms) >= 3:
+                _returns = _np_pc.column_stack([_np_pc.diff(_np_pc.log(_all_p[s][-120:].clip(1e-9)))[1:]
+                                                for s in _syms])
+                _pc = PCAlgorithm(alpha=0.05, max_cond_set=2)
+                _pc.fit(_returns, variable_names=_syms)
+                _causal_edges = []
+                for i, s1 in enumerate(_syms):
+                    for s2 in _pc.get_children(s1):
+                        _strength = _pc.causal_strength(s1, s2)
+                        if _strength > 0.1:
+                            _causal_edges.append({"from": s1, "to": s2, "strength": round(_strength, 3)})
+                _spurious = _pc.confounded_pairs()
+                recommendations["causal_dag"] = {
+                    "n_variables": len(_syms),
+                    "n_edges": len(_causal_edges),
+                    "edges": _causal_edges[:20],
+                    "confounded_pairs": len(_spurious),
+                }
+                log.info("Causal DAG: %d edges among %d instruments, %d confounded",
+                         len(_causal_edges), len(_syms), len(_spurious))
+            else:
+                recommendations["causal_dag"] = {"status": "insufficient_data", "n_syms": len(_syms)}
+        else:
+            recommendations["causal_dag"] = {"status": "no_price_data"}
+    except ImportError:
+        log.info("Causal discovery not installed — skipping")
+    except Exception as e:
+        log.warning("Causal discovery failed (non-fatal): %s", e)
+
+    # Step 5.63: Alpha Discovery Agent (Book 108) — weekly only
+    try:
+        from python_brain.alphas.alpha_discovery_agent import AlphaDiscoveryAgent
+        from datetime import datetime as _dt_alpha
+        if _dt_alpha.now().weekday() == 6:  # Sunday
+            import numpy as _np_alpha
+            _prices_path_alpha = Path("/app/data/prices/combined.npy")
+            if _prices_path_alpha.exists():
+                _ap = _np_alpha.load(str(_prices_path_alpha), allow_pickle=True)
+                if hasattr(_ap, 'item'):
+                    _ap = _ap.item()
+                if isinstance(_ap, dict) and len(_ap) > 0:
+                    _first_key = next(iter(_ap))
+                    _data = {"close": _ap.get(_first_key, _np_alpha.array([])),
+                             "returns": _np_alpha.diff(_np_alpha.log(_ap.get(_first_key, _np_alpha.array([1.0])).clip(1e-9))),
+                             "volume": _np_alpha.ones(len(_ap.get(_first_key, [])))}
+                    _agent = AlphaDiscoveryAgent()
+                    _disc = _agent.run_weekly_discovery(_data)
+                    recommendations["alpha_discovery"] = _disc
+                    log.info("Alpha discovery: %d proposed, %d survived",
+                             _disc.get("proposed", 0), _disc.get("survived", 0))
+                else:
+                    recommendations["alpha_discovery"] = {"status": "no_data"}
+            else:
+                recommendations["alpha_discovery"] = {"status": "no_price_file"}
+        else:
+            _agent_stats = AlphaDiscoveryAgent()
+            recommendations["alpha_discovery"] = _agent_stats.get_stats() if hasattr(_agent_stats, "get_stats") else {"status": "weekday_skip"}
+            log.info("Alpha discovery: weekday — skipping full run, reporting stats")
+    except ImportError:
+        log.info("Alpha discovery not installed — skipping")
+    except Exception as e:
+        log.warning("Alpha discovery failed (non-fatal): %s", e)
+
+    # Step 5.64: Wavelet Features (Book 115)
+    try:
+        from python_brain.features.wavelet_processor import WaveletFeaturePipeline
+        import numpy as _np_wav
+        _wfp = WaveletFeaturePipeline()
+        _wav_report = {"n_features": 0, "active_in_bridge": True}
+        _prices_path_wav = Path("/app/data/prices/combined.npy")
+        if _prices_path_wav.exists():
+            _all_p_wav = _np_wav.load(str(_prices_path_wav), allow_pickle=True)
+            if hasattr(_all_p_wav, 'item'):
+                _all_p_wav = _all_p_wav.item()
+            _sample_sym = next((s for s in PRIMARY_TICKERS if isinstance(_all_p_wav, dict) and s in _all_p_wav
+                                and len(_all_p_wav[s]) >= 60), None)
+            if _sample_sym and hasattr(_wfp, 'transform'):
+                _feats = _wfp.transform(_all_p_wav[_sample_sym][-120:])
+                _wav_report["n_features"] = _feats.shape[1] if hasattr(_feats, 'shape') and len(_feats.shape) > 1 else len(_feats)
+                _wav_report["sample_symbol"] = _sample_sym
+        recommendations["wavelets"] = _wav_report
+        log.info("Wavelet pipeline: %d features extracted", _wav_report["n_features"])
+    except ImportError:
+        log.info("Wavelet processor not installed — skipping")
+    except Exception as e:
+        log.warning("Wavelet failed (non-fatal): %s", e)
+
+    # Step 5.65: Swarm Predictor — multi-agent market prediction (Book 151)
+    try:
+        from python_brain.ml.swarm_predictor import SwarmSimulator
+        import numpy as _np_swarm
+        _swarm = SwarmSimulator(n_agents=100)
+        _swarm_report = {"active_in_bridge": True, "n_agents": 100}
+        _prices_path_sw = Path("/app/data/prices/combined.npy")
+        if _prices_path_sw.exists():
+            _all_p_sw = _np_swarm.load(str(_prices_path_sw), allow_pickle=True)
+            if hasattr(_all_p_sw, 'item'):
+                _all_p_sw = _all_p_sw.item()
+            _sample = next((s for s in PRIMARY_TICKERS if isinstance(_all_p_sw, dict) and s in _all_p_sw
+                            and len(_all_p_sw[s]) >= 60), None)
+            if _sample and hasattr(_swarm, 'predict'):
+                _pred = _swarm.predict(_all_p_sw[_sample][-60:])
+                _swarm_report["sample_prediction"] = round(float(_pred), 4) if _pred is not None else None
+                _swarm_report["sample_symbol"] = _sample
+        recommendations["swarm"] = _swarm_report
+        log.info("Swarm predictor: %s", _swarm_report)
+    except ImportError:
+        log.info("Swarm predictor not installed — skipping")
+    except Exception as e:
+        log.warning("Swarm predictor failed (non-fatal): %s", e)
+
+    # Step 5.66: ABM Microstructure — flash crash simulation (Book 154)
+    try:
+        from python_brain.ml.abm_microstructure import ABMSimulator
+        _abm = ABMSimulator()
+        _abm_report = {"active": True}
+        if hasattr(_abm, 'run_flash_crash_risk'):
+            _fcr = _abm.run_flash_crash_risk()
+            _abm_report.update(_fcr if isinstance(_fcr, dict) else {"flash_crash_risk": _fcr})
+        elif hasattr(_abm, 'simulate'):
+            _sim = _abm.simulate(n_steps=100)
+            _abm_report["simulation_steps"] = 100
+            if isinstance(_sim, dict):
+                _abm_report["max_drawdown"] = _sim.get("max_drawdown", None)
+        recommendations["abm"] = _abm_report
+        log.info("ABM microstructure: %s", _abm_report)
+    except ImportError:
+        log.info("ABM not installed — skipping")
+    except Exception as e:
+        log.warning("ABM failed (non-fatal): %s", e)
+
+    # Step 5.67: Lambda Field Theory — vol regime PDE (Book 169)
+    try:
+        from python_brain.ml.lambda_field_theory import RegimeFieldDetector
+        _lft = RegimeFieldDetector()
+        _lft_report = {"active": True}
+        if hasattr(_lft, 'detect_regime'):
+            _vix_val = recommendations.get("macro_context", {}).get("vix", 21.0)
+            _regime = _lft.detect_regime(vix=_vix_val)
+            _lft_report.update(_regime if isinstance(_regime, dict) else {"regime": str(_regime)})
+        elif hasattr(_lft, 'solve'):
+            _sol = _lft.solve()
+            _lft_report.update(_sol if isinstance(_sol, dict) else {"solution": str(_sol)})
+        recommendations["lambda_field"] = _lft_report
+        log.info("Lambda field theory: %s", _lft_report)
+    except ImportError:
+        log.info("Lambda field theory not installed — skipping")
+    except Exception as e:
+        log.warning("Lambda field failed (non-fatal): %s", e)
+
+    # Step 5.68: Game Theory Execution — crowding detection (Book 170)
+    try:
+        from python_brain.ml.game_theory_execution import GameTheoreticSignal
+        _gts_nightly = GameTheoreticSignal()
+        _gt_report = {"active_in_bridge": True}
+        if hasattr(_gts_nightly, 'get_stats'):
+            _gt_report.update(_gts_nightly.get_stats())
+        elif hasattr(_gts_nightly, 'summary'):
+            _gt_report.update(_gts_nightly.summary())
+        # Assess crowding for top traded tickers today
+        _traded_today = set(getattr(t, "ticker", getattr(t, "symbol", "")) for t in (trades or []))
+        _crowding_alerts = []
+        for _tt in list(_traded_today)[:5]:
+            if hasattr(_gts_nightly, 'assess_crowding'):
+                _cr = _gts_nightly.assess_crowding(volume_profile={"volume": 0}, order_imbalance=0)
+                if _cr and _cr.get("crowding_score", 0) > 0.4:
+                    _crowding_alerts.append({"ticker": _tt, "score": _cr["crowding_score"]})
+        _gt_report["crowding_alerts"] = _crowding_alerts
+        recommendations["game_theory"] = _gt_report
+        log.info("Game theory: %d crowding alerts", len(_crowding_alerts))
+    except ImportError:
+        log.info("Game theory not installed — skipping")
+    except Exception as e:
+        log.warning("Game theory failed (non-fatal): %s", e)
+
+    # Step 5.69: Graph Signal Processing — spectral alpha (Book 174)
+    try:
+        from python_brain.features.graph_signal_processor import GraphSignalFeatures
+        _gsf = GraphSignalFeatures()
+        _gs_report = {"active": True}
+        if hasattr(_gsf, 'compute_spectral_features'):
+            import numpy as _np_gs
+            _prices_path_gs = Path("/app/data/prices/combined.npy")
+            if _prices_path_gs.exists():
+                _all_p_gs = _np_gs.load(str(_prices_path_gs), allow_pickle=True)
+                if hasattr(_all_p_gs, 'item'):
+                    _all_p_gs = _all_p_gs.item()
+                _sample_gs = next((s for s in PRIMARY_TICKERS if isinstance(_all_p_gs, dict)
+                                   and s in _all_p_gs and len(_all_p_gs[s]) >= 60), None)
+                if _sample_gs:
+                    _sf = _gsf.compute_spectral_features(_all_p_gs[_sample_gs][-120:])
+                    _gs_report["n_features"] = len(_sf) if _sf is not None else 0
+                    _gs_report["sample_symbol"] = _sample_gs
+        recommendations["graph_signal"] = _gs_report
+        log.info("Graph signal: %s", _gs_report)
+    except ImportError:
+        log.info("Graph signal processor not installed — skipping")
+    except Exception as e:
+        log.warning("Graph signal failed (non-fatal): %s", e)
+
+    # Step 5.70: Data Scarcity Toolkit — augmentation advisor (Book 183)
+    try:
+        from python_brain.ml.data_scarcity_toolkit import DataScarcityPipeline
+        _dsp = DataScarcityPipeline()
+        _n_trades_total = len(trades or [])
+        _n_features_est = 20  # Approximate feature count
+        _sufficiency = _dsp.assess_data_sufficiency(_n_trades_total * 30, _n_features_est)  # ~30 days of history
+        _ds_report = {
+            "data_sufficiency": _sufficiency,
+            "n_samples_approx": _n_trades_total * 30,
+            "n_features": _n_features_est,
+            "recommended_approach": _sufficiency.get("recommendation", "unknown"),
+        }
+        recommendations["data_scarcity"] = _ds_report
+        log.info("Data scarcity: ratio=%.1f, recommendation=%s",
+                 _sufficiency.get("effective_ratio", 0), _sufficiency.get("recommendation", "?"))
+    except ImportError:
+        log.info("Data scarcity toolkit not installed — skipping")
+    except Exception as e:
+        log.warning("Data scarcity failed (non-fatal): %s", e)
+
+    # Step 5.71: Market Maker — Avellaneda-Stoikov quotes (Book 202)
+    try:
+        from python_brain.execution.market_maker import MarketMakingSignal
+        _mms = MarketMakingSignal()
+        _mm_report = _mms.summary()
+        _mms.save_state()
+        recommendations["market_maker"] = _mm_report
+        log.info("Market maker: %d evals, adverse_ratio=%.3f",
+                 _mm_report.get("eval_count", 0),
+                 _mm_report.get("fill_stats", {}).get("adverse_ratio", 0))
+    except ImportError:
+        log.info("Market maker not installed — skipping")
+    except Exception as e:
+        log.warning("Market maker failed (non-fatal): %s", e)
+
+    # Step 5.72: Agent Mesh — self-healing monitor (Book 211)
+    try:
+        from python_brain.ml.agent_mesh import SelfHealingMesh
+        _mesh = SelfHealingMesh()
+        _mesh_cycle = _mesh.monitor_cycle()
+        _mesh_status = _mesh.mesh_status()
+        _mesh_report = {
+            "cycle_result": _mesh_cycle,
+            "status": _mesh_status,
+            "n_agents": _mesh_status.get("total_agents", 0),
+            "n_healthy": _mesh_status.get("status_counts", {}).get("healthy", 0),
+            "n_failed": _mesh_status.get("status_counts", {}).get("failed", 0),
+        }
+        _mesh.save_state()
+        recommendations["agent_mesh"] = _mesh_report
+        log.info("Agent mesh: %d agents, %d healthy, %d failed",
+                 _mesh_report["n_agents"], _mesh_report["n_healthy"], _mesh_report["n_failed"])
+    except ImportError:
+        log.info("Agent mesh not installed — skipping")
+    except Exception as e:
+        log.warning("Agent mesh failed (non-fatal): %s", e)
+
+    # Step 5.73: NL Trading Rules — rule engine status (Book 214)
+    try:
+        from python_brain.ml.nl_trading_rules import RuleEngine
+        _re = RuleEngine(auto_load=True)
+        _re_stats = _re.stats()
+        _re_rules = _re.list_rules() if hasattr(_re, 'list_rules') else []
+        _re_report = {
+            "rule_count": _re_stats.get("rule_count", 0),
+            "eval_count": _re_stats.get("eval_count", 0),
+            "signal_history_count": _re_stats.get("signal_history_count", 0),
+            "active_rules": len([r for r in _re_rules if r.get("enabled", True)]) if _re_rules else 0,
+        }
+        recommendations["nl_rules"] = _re_report
+        log.info("NL rules: %d rules, %d evals", _re_report["rule_count"], _re_report["eval_count"])
+    except ImportError:
+        log.info("NL trading rules not installed — skipping")
+    except Exception as e:
+        log.warning("NL rules failed (non-fatal): %s", e)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # NEW NIGHTLY STEPS (Book-by-book implementation)
+    # ════════════════════════════════════════════════════════════════════════
+
+    # Step N1: Per-instrument liquidity scoring (Book 49)
+    try:
+        from python_brain.risk.liquidity_scoring import compute_liquidity_score
+        _liq_scores = {}
+        for sym, bars in bar_data.items() if hasattr(bar_data, 'items') else []:
+            _adv = sum(b.get("volume", 0) * b.get("close", 0) for b in bars[-20:]) / max(len(bars[-20:]), 1)
+            _spreads = [b.get("spread_pct", 0.1) for b in bars[-20:] if b.get("spread_pct", 0) > 0]
+            _avg_spread = sum(_spreads) / len(_spreads) if _spreads else 0.1
+            _liq_scores[sym] = compute_liquidity_score(_adv, _avg_spread)
+        if _liq_scores:
+            _liq_path = "/app/data/liquidity_scores.json"
+            with open(_liq_path, "w") as f:
+                json.dump(_liq_scores, f, indent=2)
+            log.info("Liquidity scoring: %d instruments scored", len(_liq_scores))
+            recommendations["liquidity_scores"] = {"count": len(_liq_scores)}
+    except ImportError:
+        log.info("Liquidity scoring module not installed — skipping")
+    except Exception as e:
+        log.warning("Liquidity scoring failed (non-fatal): %s", e)
+
+    # Step N2: Strategy quarantine health update (Book 47)
+    try:
+        from python_brain.risk.strategy_quarantine import get_quarantine
+        _sq = get_quarantine()
+        # Feed today's trade outcomes
+        for trade in today_trades:
+            strat = trade.get("strategy", "")
+            pnl = trade.get("net_pnl", 0)
+            if strat:
+                _sq.update(strat, pnl)
+        _sq.save()
+        _statuses = {s: _sq.get_status(s) for s in set(t.get("strategy", "") for t in today_trades if t.get("strategy"))}
+        _quarantined = [s for s, st in _statuses.items() if st != "live"]
+        if _quarantined:
+            log.info("Strategy quarantine: %s", _quarantined)
+        recommendations["strategy_quarantine"] = _statuses
+    except ImportError:
+        log.info("Strategy quarantine module not installed — skipping")
+    except Exception as e:
+        log.warning("Strategy quarantine update failed (non-fatal): %s", e)
+
+    # Step N3: Per-instrument fractional differentiation d calibration (Book 135)
+    try:
+        from python_brain.features.fractional_diff import calibrate_d
+        _fd_params = {}
+        for sym, bars in bar_data.items() if hasattr(bar_data, 'items') else []:
+            prices = [b.get("close", 0) for b in bars if b.get("close", 0) > 0]
+            if len(prices) >= 100:
+                d = calibrate_d(prices)
+                _fd_params[sym] = {"d": d, "n_bars": len(prices)}
+        if _fd_params:
+            _fd_path = "/app/data/fracdiff_params.json"
+            with open(_fd_path, "w") as f:
+                json.dump(_fd_params, f, indent=2)
+            log.info("FracDiff calibration: %d instruments calibrated", len(_fd_params))
+    except ImportError:
+        log.info("FracDiff calibration module not installed — skipping")
+    except Exception as e:
+        log.warning("FracDiff calibration failed (non-fatal): %s", e)
+
+    # Step N4: Nightly lead-lag recalibration (Book 136)
+    try:
+        import numpy as _np_ll
+        _LEAD_LAG_PAIRS = {
+            "ES_3USL": {"leader": "ES", "follower": "3USL.L", "default_lag_bars": 12},
+            "NQ_QQQ3": {"leader": "NQ", "follower": "QQQ3.L", "default_lag_bars": 15},
+            "GC_3GOL": {"leader": "GC", "follower": "3GOL.L", "default_lag_bars": 8},
+            "VIX_3LVO": {"leader": "VIX", "follower": "3LVO.L", "default_lag_bars": 36},
+        }
+        _ll_params = {}
+        for pair_key, pair_info in _LEAD_LAG_PAIRS.items():
+            leader_bars = bar_data.get(pair_info["leader"], []) if hasattr(bar_data, 'get') else []
+            follower_bars = bar_data.get(pair_info["follower"], []) if hasattr(bar_data, 'get') else []
+            if len(leader_bars) >= 50 and len(follower_bars) >= 50:
+                _lr = _np_ll.array([b.get("close", 0) for b in leader_bars[-200:]])
+                _fr = _np_ll.array([b.get("close", 0) for b in follower_bars[-200:]])
+                if len(_lr) > 1 and len(_fr) > 1:
+                    _lr_ret = _np_ll.diff(_lr) / _lr[:-1]
+                    _fr_ret = _np_ll.diff(_fr) / _fr[:-1]
+                    _n = min(len(_lr_ret), len(_fr_ret))
+                    # Find lag with max cross-correlation
+                    _best_lag = pair_info["default_lag_bars"]
+                    _best_corr = 0
+                    for lag in range(1, min(50, _n - 10)):
+                        _corr = float(_np_ll.corrcoef(_lr_ret[:_n-lag], _fr_ret[lag:_n])[0, 1])
+                        if abs(_corr) > abs(_best_corr):
+                            _best_corr = _corr
+                            _best_lag = lag
+                    _ll_params[pair_key] = {
+                        "lag_bars": _best_lag,
+                        "correlation": round(_best_corr, 4),
+                        "leader": pair_info["leader"],
+                        "follower": pair_info["follower"],
+                        "enabled": abs(_best_corr) > 0.15,  # Disable if correlation too weak
+                    }
+        if _ll_params:
+            _ll_path = "/app/data/lead_lag_params.json"
+            with open(_ll_path, "w") as f:
+                json.dump(_ll_params, f, indent=2)
+            log.info("Lead-lag calibration: %d pairs calibrated", len(_ll_params))
+    except ImportError:
+        log.info("Lead-lag calibration skipped (numpy not available)")
+    except Exception as e:
+        log.warning("Lead-lag calibration failed (non-fatal): %s", e)
+
+    # Step N5: Gap prediction beta calibration (Book 148)
+    try:
+        import numpy as _np_gap
+        _gap_betas = {}
+        _sp_bars = bar_data.get("SPY", bar_data.get("3USL.L", [])) if hasattr(bar_data, 'get') else []
+        if len(_sp_bars) >= 30:
+            _sp_overnight = []
+            for i in range(1, len(_sp_bars)):
+                if _sp_bars[i].get("open", 0) > 0 and _sp_bars[i-1].get("close", 0) > 0:
+                    _sp_overnight.append((_sp_bars[i]["open"] - _sp_bars[i-1]["close"]) / _sp_bars[i-1]["close"])
+            for sym, bars in bar_data.items() if hasattr(bar_data, 'items') else []:
+                if sym in ("SPY",) or len(bars) < 30:
+                    continue
+                _sym_overnight = []
+                for i in range(1, len(bars)):
+                    if bars[i].get("open", 0) > 0 and bars[i-1].get("close", 0) > 0:
+                        _sym_overnight.append((bars[i]["open"] - bars[i-1]["close"]) / bars[i-1]["close"])
+                _n = min(len(_sp_overnight), len(_sym_overnight))
+                if _n >= 20:
+                    _x = _np_gap.array(_sp_overnight[:_n])
+                    _y = _np_gap.array(_sym_overnight[:_n])
+                    _cov = _np_gap.cov(_x, _y)
+                    _beta = float(_cov[0, 1] / _cov[0, 0]) if _cov[0, 0] > 1e-12 else 1.0
+                    _gap_betas[sym] = {"beta": round(_beta, 3), "n_obs": _n}
+        if _gap_betas:
+            _gb_path = "/app/data/gap_betas.json"
+            with open(_gb_path, "w") as f:
+                json.dump(_gap_betas, f, indent=2)
+            log.info("Gap beta calibration: %d instruments", len(_gap_betas))
+    except ImportError:
+        pass
+    except Exception as e:
+        log.warning("Gap beta calibration failed (non-fatal): %s", e)
+
+    # Step N6: Claude daily plan (Book 142)
+    try:
+        from python_brain.ouroboros.claude_curator import curate_daily_plan
+        _ticker_scores = recommendations.get("ticker_scoreboard", {})
+        _regime_str = recommendations.get("regime", {}).get("current", "STEADY")
+        _perf = recommendations.get("performance", {})
+        _plan = curate_daily_plan(
+            ticker_scores=_ticker_scores,
+            market_regime=_regime_str,
+            recent_performance=_perf,
+        )
+        if _plan:
+            _plan_path = "/app/data/claude/daily_plan.json"
+            os.makedirs(os.path.dirname(_plan_path), exist_ok=True)
+            with open(_plan_path, "w") as f:
+                json.dump(_plan, f, indent=2)
+            recommendations["claude_daily_plan"] = {"status": "generated", "focus_count": len(_plan.get("focus_tickers", []))}
+            log.info("Claude daily plan: %d focus tickers", len(_plan.get("focus_tickers", [])))
+    except ImportError:
+        log.info("Claude daily plan module not available — skipping")
+    except Exception as e:
+        log.warning("Claude daily plan failed (non-fatal): %s", e)
+
+    # Step N7: Gemini effectiveness feedback (Book 142)
+    try:
+        _gemini_alpha = recommendations.get("tier_effectiveness", {}).get("gemini_alpha_vs_random", 0)
+        _consec_neg = system_memory.get("gemini_consecutive_negative", 0)
+        if _gemini_alpha < 0:
+            _consec_neg += 1
+            system_memory["gemini_consecutive_negative"] = _consec_neg
+            if _consec_neg >= 5:
+                recommendations["gemini_weight_override"] = 0.5
+                log.warning("Gemini negative alpha for %d consecutive days — halving weight", _consec_neg)
+        else:
+            system_memory["gemini_consecutive_negative"] = 0
+    except Exception as e:
+        log.warning("Gemini feedback failed (non-fatal): %s", e)
+
+    # ════════════════════════════════════════════════════════════════════════
 
     # Step 6: Daily report
     report_path = generate_daily_report(today, metrics, regime_acc, recommendations, decay_signals)

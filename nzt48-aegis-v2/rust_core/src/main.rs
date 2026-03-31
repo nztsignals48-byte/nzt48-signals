@@ -1004,6 +1004,14 @@ fn main() {
                                             entry_type: String::new(),
                                             rsi: 0.0,
                                             ibs: 0.0,
+                                            suggested_initial_stop_atr_mult: None,
+                                            suggested_rung3_atr: None,
+                                            exit_trail_bias: None,
+                                            max_hold_hours: None,
+                                            suggested_max_hold_hours: None,
+                                            exit_urgency_ramp_hours: None,
+                                            min_profit_target_pct: None,
+                                            execution_algo: None,
                                         };
                                         let ticker_id = t.ticker_id;
                                         engine.process_tick_with_signal(t, Some(brain_signal));

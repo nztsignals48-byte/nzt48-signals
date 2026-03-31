@@ -56,6 +56,31 @@ pub struct BrainSignal {
     /// IBS (Internal Bar Strength) at signal time.
     #[pyo3(get)]
     pub ibs: f64,
+    // ── EXIT HINT FIELDS (consumed by exit_engine.rs) ──
+    /// Per-strategy initial Chandelier stop ATR multiplier (Book 39).
+    #[pyo3(get)]
+    pub suggested_initial_stop_atr_mult: Option<f64>,
+    /// Per-strategy Rung 3 trailing ATR multiplier (regime-adaptive).
+    #[pyo3(get)]
+    pub suggested_rung3_atr: Option<f64>,
+    /// Qualitative trail bias: "wide", "tight", or "neutral".
+    #[pyo3(get)]
+    pub exit_trail_bias: Option<String>,
+    /// Strategy-specific max holding period in hours.
+    #[pyo3(get)]
+    pub max_hold_hours: Option<f64>,
+    /// Strategy-suggested max holding period (overrides leverage-based).
+    #[pyo3(get)]
+    pub suggested_max_hold_hours: Option<f64>,
+    /// Hours after which to start tightening stops (urgency ramp).
+    #[pyo3(get)]
+    pub exit_urgency_ramp_hours: Option<f64>,
+    /// Minimum profit target % to justify breakeven stop (spread-adjusted).
+    #[pyo3(get)]
+    pub min_profit_target_pct: Option<f64>,
+    /// Execution algorithm hint: "TWAP" for high-impact orders.
+    #[pyo3(get)]
+    pub execution_algo: Option<String>,
 }
 
 #[pymethods]
@@ -90,6 +115,14 @@ impl BrainSignal {
             entry_type: String::new(),
             rsi: 0.0,
             ibs: 0.0,
+            suggested_initial_stop_atr_mult: None,
+            suggested_rung3_atr: None,
+            exit_trail_bias: None,
+            max_hold_hours: None,
+            suggested_max_hold_hours: None,
+            exit_urgency_ramp_hours: None,
+            min_profit_target_pct: None,
+            execution_algo: None,
         }
     }
 }
@@ -479,6 +512,15 @@ impl PythonBridge {
             entry_type: resp.get("entry_type").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             rsi: resp.get("rsi").and_then(|v| v.as_f64()).unwrap_or(0.0),
             ibs: resp.get("ibs").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            // Exit hint fields — consumed by exit_engine for per-signal Chandelier config
+            suggested_initial_stop_atr_mult: resp.get("suggested_initial_stop_atr_mult").and_then(|v| v.as_f64()),
+            suggested_rung3_atr: resp.get("suggested_rung3_atr").and_then(|v| v.as_f64()),
+            exit_trail_bias: resp.get("exit_trail_bias").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            max_hold_hours: resp.get("max_hold_hours").and_then(|v| v.as_f64()),
+            suggested_max_hold_hours: resp.get("suggested_max_hold_hours").and_then(|v| v.as_f64()),
+            exit_urgency_ramp_hours: resp.get("exit_urgency_ramp_hours").and_then(|v| v.as_f64()),
+            min_profit_target_pct: resp.get("min_profit_target_pct").and_then(|v| v.as_f64()),
+            execution_algo: resp.get("execution_algo").and_then(|v| v.as_str()).map(|s| s.to_string()),
         })
     }
 
@@ -566,6 +608,15 @@ impl PythonBridge {
             entry_type: resp.get("entry_type").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             rsi: resp.get("rsi").and_then(|v| v.as_f64()).unwrap_or(0.0),
             ibs: resp.get("ibs").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            // Apex signals don't carry exit hints — use defaults
+            suggested_initial_stop_atr_mult: None,
+            suggested_rung3_atr: None,
+            exit_trail_bias: None,
+            max_hold_hours: None,
+            suggested_max_hold_hours: None,
+            exit_urgency_ramp_hours: None,
+            min_profit_target_pct: None,
+            execution_algo: None,
         })
     }
 
@@ -674,6 +725,14 @@ mod tests {
             entry_type: "TypeB".into(),
             rsi: 45.0,
             ibs: 0.3,
+            suggested_initial_stop_atr_mult: Some(1.5),
+            suggested_rung3_atr: Some(1.0),
+            exit_trail_bias: Some("neutral".into()),
+            max_hold_hours: Some(8.0),
+            suggested_max_hold_hours: Some(8.0),
+            exit_urgency_ramp_hours: Some(6.0),
+            min_profit_target_pct: Some(0.3),
+            execution_algo: None,
         };
         assert_eq!(signal.shares, 50);
         assert_eq!(signal.confidence, 78.5);

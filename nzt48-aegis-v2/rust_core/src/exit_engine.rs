@@ -43,6 +43,7 @@ pub trait ExitStrategy: Send {
 ///   Rung 4: +6% from entry → Trail 0.75x ATR below peak (NO partial sell)
 ///   Rung 5: +8% from entry → Trail 0.5x ATR below peak (NO partial sell)
 ///   Beyond: every +2% more → keep trailing at 0.5x ATR below peak
+#[derive(Clone)]
 pub struct ChandelierStrategy {
     /// Percentage gain thresholds to reach each rung [0.0, 0.02, 0.04, 0.06, 0.08].
     pub rung_pct_thresholds: [f64; 5],
@@ -132,6 +133,40 @@ impl ChandelierStrategy {
         self.exhaustion_rvol_mult = rvol_mult;
         self.exhaustion_tight_atr = tight_atr;
     }
+
+    /// Book 39: Create a per-signal override of Chandelier parameters.
+    /// Returns a modified copy with signal-specific stop widths.
+    pub fn with_signal_hints(
+        &self,
+        suggested_initial_stop_atr_mult: Option<f64>,
+        suggested_rung3_atr: Option<f64>,
+        exit_trail_bias: Option<&str>,
+    ) -> Self {
+        let mut s = self.clone();
+        // Override initial stop ATR multiplier (leverage-adjusted from bridge.py)
+        if let Some(mult) = suggested_initial_stop_atr_mult {
+            s.initial_stop_atr_mult = mult.clamp(0.5, 5.0);
+        }
+        // Override rung 3 trail ATR (regime-adaptive from bridge.py)
+        if let Some(r3) = suggested_rung3_atr {
+            s.rung3_trail_atr = r3.clamp(0.3, 3.0);
+        }
+        // Apply trail bias: "wide" = 1.3x all ATRs, "tight" = 0.7x
+        match exit_trail_bias {
+            Some("wide") => {
+                s.rung3_trail_atr *= 1.3;
+                s.rung4_trail_atr *= 1.3;
+                s.rung5_trail_atr *= 1.3;
+            }
+            Some("tight") => {
+                s.rung3_trail_atr *= 0.7;
+                s.rung4_trail_atr *= 0.7;
+                s.rung5_trail_atr *= 0.7;
+            }
+            _ => {}
+        }
+        s
+    }
 }
 
 impl ExitStrategy for ChandelierStrategy {
@@ -145,9 +180,18 @@ impl ExitStrategy for ChandelierStrategy {
             // Rung 1: entry. Stop = entry - Nx ATR (configurable, default 1.5)
             1 => pos.avg_entry - self.initial_stop_atr_mult * atr,
             // Rung 2: +2% gain. Stop = breakeven INCLUDING round-trip fees.
-            // You literally cannot lose money once this rung is reached.
+            // Book 177: Don't advance to breakeven unless unrealized P&L > min_profit_target_pct.
+            // On wide-spread instruments, premature breakeven stops get hit by spread noise.
             2 => {
                 let fee_amount = pos.avg_entry * self.round_trip_fee_pct;
+                // Check min_profit_target: if set and gain hasn't reached it, stay at Rung 1
+                if let Some(min_pct) = pos.min_profit_target_pct {
+                    let gain_pct = (high - pos.avg_entry) / pos.avg_entry;
+                    if gain_pct < min_pct / 100.0 {
+                        // Not enough profit to justify breakeven — stay at Rung 1 stop
+                        return pos.avg_entry - self.initial_stop_atr_mult * atr;
+                    }
+                }
                 pos.avg_entry + fee_amount
             }
             // Rung 3: +4% gain. Trail 1.0x ATR below peak. NO partial sell.
@@ -367,6 +411,22 @@ impl ExitEngine {
             }
         }
 
+        // Priority 2.7: MAX HOLD HOURS TIME-STOP (Book 39/94)
+        // Force exit if position held past strategy-specific max holding period.
+        // Also applies urgency ramp: tighten stops progressively after ramp_hours.
+        if let Some(max_hours) = position.max_hold_hours {
+            let hold_hours = position.active_trading_ticks as f64 / 720.0; // 720 ticks/hour at 5s
+            if hold_hours > max_hours {
+                checks.push(ExitCheck {
+                    reason: ExitReason::TimeStop,
+                    priority: ExitPriority::TimeStop,
+                    order_type: ExitOrderType::MarketSell,
+                    limit_price: None,
+                    tif: TimeInForce::Day,
+                });
+            }
+        }
+
         // Priority 2.5: Time-stop — if position hasn't reached rung 2 within max_minutes,
         // tighten stop aggressively to force exit. Prevents capital lock in sideways trades.
         if self.config.time_stop_enabled
@@ -433,6 +493,7 @@ impl ExitEngine {
                 order_type,
                 position_order_id: position.origin_order_id.clone(),
                 limit_price,
+                partial_qty: None,
             },
             tif,
             suppressed_count: checks.len() - 1,
@@ -524,6 +585,7 @@ impl ExitEngine {
                 order_type: ExitOrderType::MarketSell,
                 position_order_id: position.origin_order_id.clone(),
                 limit_price: None,
+                partial_qty: None,
             },
             tif: TimeInForce::Day,
             suppressed_count: 0,
