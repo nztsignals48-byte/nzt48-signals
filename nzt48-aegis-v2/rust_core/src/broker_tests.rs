@@ -121,6 +121,7 @@ mod tests {
             broker_connected: broker.is_connected(),
             wal_available: true,
             now_ns: 62_000_000_000,
+            exchange_mic: "XLON".to_string(),
             ..EvalContext::default()
         };
         let decision =

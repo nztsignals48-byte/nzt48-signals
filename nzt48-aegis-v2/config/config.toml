@@ -15,12 +15,12 @@ velocity_check_window_secs = 1
 velocity_check_max_intents = 5
 
 [position]
-# AUDIT-ADJUSTED (2026-03-18): Max 3 at £10k equity.
+# AUDIT-ADJUSTED (2026-03-31): Max 3 at £10k equity (applies to BOTH paper and live).
+# Paper mode now mirrors live via paper_uses_live_gates=true (see [crucible] section).
 # Fund manager: "Max 2-3 at £10k. £9,000 committed = 90% is suicidal."
 # Risk officer: "committed capital must never exceed 75% of equity"
-# P2-B0.6: Paper values now match live limits (paper_uses_live_gates=true).
-# Previously relaxed to 999/50/80/5 — made paper results non-transferable to live.
-max_simultaneous_positions = 3    # Live value. Was 999 in paper.
+# Prior bug: was 999 in paper, 3 in live (333x divergence). NOW FIXED.
+max_simultaneous_positions = 3    # Paper + Live: both use 3 concurrent positions.
 # Portfolio heat = sum((entry_price - stop_price) * qty / total_equity)
 portfolio_heat_limit_pct = 10.0   # Live value. Was 50 in paper.
 sector_heat_cap_pct = 33.0        # Live value. Was 80 in paper.
@@ -468,6 +468,49 @@ time_stop_max_minutes = 90
 initial_stop_atr_mult = 3.0
 rung_pct = [0.0, 0.015, 0.030, 0.050, 0.080]
 time_stop_max_minutes = 120
+
+# Book 39: Per-strategy calibrations added 2026-03-31
+# These replace one-size-fits-all stops (40% of losses from premature stop-outs on momentum, too-wide on MR)
+
+[chandelier.per_strategy.IBS_MeanReversion]
+initial_stop_atr_mult = 1.2       # Tight: MR trades need close stops (wider gives back mean reversion)
+rung3_trail_atr = 0.8             # Custom: trail tighter on MR
+rung5_trail_atr = 0.3             # Custom: trail very tight (Book 39 rule)
+rung_pct = [0.0, 0.005, 0.010, 0.015, 0.020]
+time_stop_max_minutes = 30        # Book 39: MR has short half-life
+exit_mode = "fixed_target"        # MR: exit at target, not trailing (Book 39)
+
+[chandelier.per_strategy.VolExpansion]
+initial_stop_atr_mult = 2.5       # Book 39: wide initial for momentum capture
+rung3_trail_atr = 1.0             # Standard trailing
+rung5_trail_atr = 0.5             # Standard
+rung_pct = [0.0, 0.010, 0.020, 0.035, 0.050]
+time_stop_max_minutes = 120       # Book 39: vol expansion needs time
+exit_mode = "trailing"            # Momentum: use trailing stops (Book 39)
+
+[chandelier.per_strategy.Momentum]
+initial_stop_atr_mult = 2.5       # Book 39: wide for momentum capture
+rung3_trail_atr = 1.0
+rung5_trail_atr = 0.5
+rung_pct = [0.0, 0.010, 0.020, 0.035, 0.050]
+time_stop_max_minutes = 90        # Book 39: medium-term momentum
+exit_mode = "trailing"
+
+[chandelier.per_strategy.S1_Microstructure]
+initial_stop_atr_mult = 2.0       # Book 39: medium initial (microstructure = fast exits)
+rung3_trail_atr = 0.8
+rung5_trail_atr = 0.4
+rung_pct = [0.0, 0.008, 0.015, 0.025, 0.040]
+time_stop_max_minutes = 20        # Book 39: microstructure signal half-life 30s-5min
+exit_mode = "hybrid"              # Blended approach for fast signals
+
+[chandelier.per_strategy.ORB_Breakout]
+initial_stop_atr_mult = 2.5       # Book 39: wide for breakout confirmation (not wick fakes)
+rung3_trail_atr = 1.0
+rung5_trail_atr = 0.5
+rung_pct = [0.0, 0.010, 0.020, 0.035, 0.050]
+time_stop_max_minutes = 120       # ORB: opening range bias lasts all session
+exit_mode = "trailing"
 
 # Sprint 6: Entry type base confidences — Ouroboros tunes nightly based on rolling Wilson score.
 [entry_types]

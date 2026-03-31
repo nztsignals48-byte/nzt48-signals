@@ -1433,13 +1433,14 @@ mod tests {
             .expect("parent dir")
             .join("config");
         let cfg = EngineConfig::load(&config_dir).expect("load config");
-        assert_eq!(cfg.risk.max_positions, 15);  // PAPER VALIDATION: maximise trade data
+        assert_eq!(cfg.risk.max_positions, 3);  // Paper now mirrors live: 3 positions at £10k
         assert_eq!(cfg.risk.confidence_floor, 65.0);  // N0c: raised from 45
         assert_eq!(cfg.risk.daily_drawdown_pct, 4.0);
         assert_eq!(cfg.risk.isa_annual_limit_gbp, 20_000.0);
         assert!(cfg.crucible.paper_mode);
         assert_eq!(cfg.crucible.starting_equity_gbp, 10_000.0);
-        assert_eq!(cfg.crucible.max_positions_override, 15); // PAPER VALIDATION: maximise trade data
+        assert_eq!(cfg.crucible.max_positions_override, 3); // Paper mirrors live (paper_uses_live_gates=true)
+        assert!(cfg.crucible.paper_uses_live_gates); // Verify paper gates are enforced
     }
 
     #[test]

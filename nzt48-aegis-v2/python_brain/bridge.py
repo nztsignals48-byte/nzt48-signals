@@ -42,6 +42,12 @@ from brain.gap_detector import calculate_gap_pct
 from python_brain.ouroboros.cost_model import costs as _cost_model
 from python_brain.ouroboros.bridge_watchdog import write_heartbeat as _write_heartbeat
 
+try:
+    from python_brain.strategies.entry_classifier import EntryClassifier as _EntryClassifier
+    _HAS_ENTRY_CLF = True
+except ImportError:
+    _HAS_ENTRY_CLF = False
+
 MAX_BARS = 500
 
 # Heartbeat: write every 30s so the watchdog knows we're alive
@@ -53,6 +59,17 @@ bar_history = defaultdict(lambda: deque(maxlen=MAX_BARS))
 # P5: Per-strategy signal counter for validation tracking.
 _strategy_signal_counts = defaultdict(int)
 _strategy_total_confidence = defaultdict(float)
+
+# ── BOOK 217: COST-ADJUSTED P&L TRACKING ──
+# Accumulates per-trade cost decomposition for nightly reporting.
+_cost_tracking = {
+    "total_trades": 0,
+    "total_cost_bps": 0.0,
+    "total_cost_usd": 0.0,
+    "avg_cost_per_trade_bps": 0.0,
+    "cost_by_ticker": defaultdict(float),    # ticker -> cumulative bps
+    "cost_by_component": defaultdict(float),  # component -> cumulative bps
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # THE COMPOUNDING MACHINE
@@ -147,6 +164,125 @@ def _track_strategy_exit(ticker_id, strategy, exit_price):
         sys.stderr.write(f"COMPOUND_STATE: exits={total_exits} killed={list(_auto_killed_strategies)} "
                          f"weights={{{', '.join(f'{s}:{w:.2f}' for s, w in sorted(_strategy_allocation_weights.items()))}}}\n")
         sys.stderr.flush()
+
+# ── BOOK 217: COST DECOMPOSITION CALCULATOR ──
+
+def _calculate_trade_costs(signal, fill_price, shares, ticker):
+    """Decompose per-trade costs into spread, commission, slippage, market impact.
+
+    Returns a dict with all cost components in basis points and USD.
+    Fail-open: returns zeroed dict on any error so signal flow is never blocked.
+    """
+    try:
+        bid = signal.get("bid", fill_price)
+        ask = signal.get("ask", fill_price)
+        spread_pct = signal.get("spread_pct", 0.0)
+
+        # 1. Spread cost: half the bid-ask spread in bps
+        if bid > 0 and ask > 0 and ask > bid:
+            spread_cost_bps = ((ask - bid) / ((ask + bid) / 2.0)) * 10000.0 / 2.0
+        elif spread_pct > 0:
+            spread_cost_bps = spread_pct * 100.0 / 2.0  # spread_pct is in % → bps, half-spread
+        else:
+            spread_cost_bps = 1.5  # Conservative default: 1.5 bps half-spread
+
+        # 2. Commission: IBKR tiered (exchange-dependent)
+        exchange = _get_exchange_for_symbol(ticker) if ticker else None
+        if exchange in ("LSE", "LSEETF"):
+            commission_bps = 0.50
+        elif exchange in ("TSE", "HKEX", "SGX"):
+            commission_bps = 0.80
+        else:
+            commission_bps = 0.35  # US default (IBKR tiered)
+
+        # 3. Slippage: scaled by VPIN (toxicity) and Amihud (illiquidity)
+        vpin = signal.get("vpin", signal.get("d_vpin", 0.0))
+        if isinstance(vpin, (int, float)) and vpin < 0:
+            vpin = abs(vpin)
+        amihud = signal.get("amihud", 0.0)
+        if not isinstance(amihud, (int, float)):
+            amihud = 0.0
+        # Base slippage 1 bps, scales up with toxicity and illiquidity
+        slippage_bps = 1.0 + (min(vpin, 1.0) * 3.0) + (min(amihud, 1.0) * 2.0)
+
+        # 4. Market impact: Kyle's lambda * sqrt(shares / ADV) * 10000
+        adv = signal.get("adv_shares", 0)
+        if not isinstance(adv, (int, float)) or adv <= 0:
+            # Fallback: estimate ADV from adv_gbp / price
+            adv_gbp = signal.get("adv_gbp", 0)
+            if isinstance(adv_gbp, (int, float)) and adv_gbp > 0 and fill_price > 0:
+                adv = adv_gbp / fill_price
+            else:
+                adv = 0
+        if adv > 0 and shares > 0:
+            participation = shares / adv
+            # Kyle's lambda: ~0.1 for liquid stocks, higher for illiquid
+            kyles_lambda = 0.1 + min(amihud, 1.0) * 0.4
+            market_impact_bps = kyles_lambda * math.sqrt(participation) * 10000.0
+        else:
+            market_impact_bps = 0.5  # Conservative default when ADV unknown
+
+        # Totals
+        total_cost_bps = spread_cost_bps + commission_bps + slippage_bps + market_impact_bps
+        notional = fill_price * shares if fill_price > 0 and shares > 0 else 0.0
+        total_cost_usd = (total_cost_bps / 10000.0) * notional
+
+        result = {
+            "spread_cost_bps": round(spread_cost_bps, 2),
+            "commission_bps": round(commission_bps, 2),
+            "slippage_bps": round(slippage_bps, 2),
+            "market_impact_bps": round(market_impact_bps, 2),
+            "total_cost_bps": round(total_cost_bps, 2),
+            "total_cost_usd": round(total_cost_usd, 4),
+        }
+
+        # Accumulate into tracking
+        _cost_tracking["total_trades"] += 1
+        _cost_tracking["total_cost_bps"] += total_cost_bps
+        _cost_tracking["total_cost_usd"] += total_cost_usd
+        n = _cost_tracking["total_trades"]
+        _cost_tracking["avg_cost_per_trade_bps"] = _cost_tracking["total_cost_bps"] / n if n > 0 else 0.0
+        if ticker:
+            _cost_tracking["cost_by_ticker"][ticker] += total_cost_bps
+        _cost_tracking["cost_by_component"]["spread"] += spread_cost_bps
+        _cost_tracking["cost_by_component"]["commission"] += commission_bps
+        _cost_tracking["cost_by_component"]["slippage"] += slippage_bps
+        _cost_tracking["cost_by_component"]["market_impact"] += market_impact_bps
+
+        return result
+    except Exception as e:
+        sys.stderr.write(f"COST_CALC_ERR: {e} (fail-open, returning zeros)\n")
+        sys.stderr.flush()
+        return {
+            "spread_cost_bps": 0.0, "commission_bps": 0.0,
+            "slippage_bps": 0.0, "market_impact_bps": 0.0,
+            "total_cost_bps": 0.0, "total_cost_usd": 0.0,
+        }
+
+
+def _get_cost_report():
+    """Return accumulated cost tracking stats for nightly pipeline.
+
+    Returns a plain dict (JSON-serialisable). Fail-open: returns empty stats on error.
+    """
+    try:
+        n = _cost_tracking["total_trades"]
+        return {
+            "total_trades": n,
+            "total_cost_bps": round(_cost_tracking["total_cost_bps"], 2),
+            "total_cost_usd": round(_cost_tracking["total_cost_usd"], 4),
+            "avg_cost_per_trade_bps": round(_cost_tracking["avg_cost_per_trade_bps"], 2),
+            "cost_by_ticker": dict(_cost_tracking["cost_by_ticker"]),
+            "cost_by_component": dict(_cost_tracking["cost_by_component"]),
+        }
+    except Exception as e:
+        sys.stderr.write(f"COST_REPORT_ERR: {e}\n")
+        sys.stderr.flush()
+        return {
+            "total_trades": 0, "total_cost_bps": 0.0, "total_cost_usd": 0.0,
+            "avg_cost_per_trade_bps": 0.0, "cost_by_ticker": {}, "cost_by_component": {},
+        }
+
 
 _gemini_weights_loaded = False
 
@@ -373,9 +509,10 @@ _last_vwap_date = {}  # ticker_id → date string "YYYY-MM-DD"
 ticker_symbols = {}
 
 # ── BOOK 77: CROSS-MARKET LEAD-LAG BUFFER ──
-# Stores recent 5-bar returns per leader symbol for cross-ticker lag detection.
-# Key: leader symbol (e.g. "SPY", "QQQ"), Value: list of last N bar closes.
-_leader_bar_closes = {}  # symbol → deque of close prices (max 20)
+# Stores recent bar closes per leader symbol for cross-ticker lag detection.
+# Key: leader symbol (e.g. "SPY", "QQQ"), Value: deque of last N bar closes.
+# Book 136: Expanded from 20 to 120 for rolling 100-bar R² correlation calc.
+_leader_bar_closes = {}  # symbol → deque of close prices (max 120)
 # Reverse map: follower symbol → list of (leader_symbol, pair_name)
 _FOLLOWER_TO_LEADERS = {}
 try:
@@ -386,6 +523,17 @@ try:
         _FOLLOWER_TO_LEADERS.setdefault(follower, []).append((leader, pair_name))
 except ImportError:
     pass
+
+# ── BOOK 136: LEAD-LAG R² RECALIBRATION STATE ──
+# Rolling R² per pair, recalibrated every 5 minutes from 100-bar returns.
+_lead_lag_r2 = {}  # pair_name → {"r2": float, "status": "active"|"strong"|"disabled", "updated": float}
+_lead_lag_r2_last_recalib = 0.0  # monotonic timestamp of last R² recalibration
+_LEAD_LAG_R2_INTERVAL = 300.0  # recalibrate every 5 minutes
+_LEAD_LAG_R2_DISABLE_THRESH = 0.50  # R² below this → disable pair
+_LEAD_LAG_R2_STRONG_THRESH = 0.85  # R² above this → "strong" confidence boost
+# Nightly optimal lag overrides: pair_name → optimal_lag_bars (int)
+_lead_lag_optimal_lags = {}  # loaded from /app/data/lead_lag_calibration.json
+_lead_lag_nightly_last_load = 0.0
 
 # Tick counters for diagnostic logging (per-ticker)
 _tick_counts = {}
@@ -779,6 +927,59 @@ def _monitor_hedge_signals(msg, ind):
 
     return vix_backwardation, credit_warning, breadth_declining, breadth_crisis
 
+def _bayesian_hedge_probability(vix_backwardation, credit_warning, breadth_decline):
+    """
+    Bayesian posterior probability of drawdown >15% given active signals (Book 42).
+
+    Combines independent posterior estimates via naive Bayes in log-odds space.
+    Each active signal contributes its odds ratio (OR) relative to the base rate.
+    Inactive signals do not update the posterior (conservative: absence of a
+    warning signal does not reduce risk below the prior).
+
+    Conditional probabilities (Book 42 Table 4.2):
+        P(drawdown>15% | vix_backwardation)  = 0.85
+        P(drawdown>15% | credit_warning)     = 0.60
+        P(drawdown>15% | breadth_decline)    = 0.45
+        P(drawdown>15% | base/unconditional) = 0.08
+
+    Combination formula (log-odds space):
+        log_odds(posterior) = log_odds(prior)
+                            + sum_active[ log(OR_i) ]
+        where OR_i = [P(dd|signal_i)/(1-P(dd|signal_i))] / [prior/(1-prior)]
+
+    Returns:
+        float in [0.0, 1.0] -- posterior probability of significant drawdown.
+        Returns exactly prior (0.08) when no signals are active.
+    """
+    prior = 0.08  # P(drawdown > 15%) unconditional
+    prior_odds = prior / (1.0 - prior)
+
+    # (active_flag, P(drawdown>15% | signal))
+    signals = [
+        (vix_backwardation, 0.85),
+        (credit_warning,    0.60),
+        (breadth_decline,   0.45),
+    ]
+
+    # Start at prior log-odds
+    log_odds = math.log(prior_odds)
+
+    for active, p_dd_given_signal in signals:
+        if active:
+            # Odds ratio: how much does this signal shift the odds of drawdown?
+            signal_odds = p_dd_given_signal / (1.0 - p_dd_given_signal)
+            odds_ratio = signal_odds / prior_odds
+            log_odds += math.log(odds_ratio)
+        # Inactive signals: no update (conservative — absence doesn't reduce risk)
+
+    # Convert log-odds back to probability
+    posterior = 1.0 / (1.0 + math.exp(-log_odds))
+
+    # Clamp to [0, 1] (defensive)
+    posterior = max(0.0, min(1.0, posterior))
+
+    return posterior
+
 def _check_hedge_activation_rules(vix_bw, credit_warn, breadth_decline, breadth_crisis):
     """
     Check if hedge should be activated based on signal counts and rules.
@@ -801,18 +1002,43 @@ def _check_hedge_activation_rules(vix_bw, credit_warn, breadth_decline, breadth_
 
 def _apply_conditional_hedge(msg, all_signals):
     """
-    Apply conditional hedging overlay to signal generation.
+    Apply conditional hedging overlay to signal generation (Book 42 enhanced).
 
-    Hedge Allocation Matrix (Book 42):
-      - All clear: no hedge, full allocation
-      - VIX bw + normal credit: 3% inverse ETP + 2% VIX allocation
-      - VIX bw + credit warn + breadth decline: 5% inverse + 3% VIX + raise 10% cash
-      - All 3 (kill switch): 50%+ cash, max hedge (8% inverse + 5% VIX)
+    Uses Bayesian posterior probability to continuously scale hedge allocation
+    instead of discrete tiers. Cost-benefit filter ensures hedging only when
+    expected drawdown * probability exceeds hedge cost.
 
-    Implementation: Generate new hedge signals (inverse ETP buy, VIX ETP buy)
-    and route them as signals with HEDGE_* strategy names.
+    Graduated Response Curve:
+      - probability < cost_threshold: no hedge (cost exceeds expected benefit)
+      - probability 0.15-0.40: light hedge (scaled inverse + VIX)
+      - probability 0.40-0.70: moderate hedge (scaled inverse + VIX + cash)
+      - probability 0.70+: heavy hedge (approaching max allocations)
+      - kill_switch (all 3 signals OR breadth_crisis): hard override to max
+
+    Max Allocations (caps for continuous scaling):
+      - Inverse ETP: 8%
+      - VIX ETP: 5%
+      - Cash raise: 50%
+
+    Cost-Benefit Filter:
+      - Only hedge when: posterior * expected_drawdown_pct > hedge_cost_bps
+      - Default hedge_cost_bps = 15 (spread + slippage + decay on inverse/VIX ETPs)
+      - Expected drawdown = 15% (the conditional event we model)
     """
     global _hedge_state
+
+    # Cost-benefit parameters (Book 42, Table 4.5)
+    HEDGE_COST_BPS = 15        # bps: spread + slippage + VIX contango decay
+    EXPECTED_DRAWDOWN_PCT = 15  # % drawdown we're hedging against
+    # Cost threshold: minimum posterior to justify hedging
+    # posterior * 1500bps > 15bps => posterior > 0.01
+    # But we want meaningful protection, so effective floor ~ 0.10 from the curve
+    COST_THRESHOLD = HEDGE_COST_BPS / (EXPECTED_DRAWDOWN_PCT * 100)  # 0.01
+
+    # Max allocation caps
+    MAX_INVERSE_PCT = 8.0
+    MAX_VIX_PCT = 5.0
+    MAX_CASH_PCT = 50.0
 
     # Load initial state once per session
     if _hedge_state["status"] == "INACTIVE":
@@ -823,61 +1049,100 @@ def _apply_conditional_hedge(msg, all_signals):
         vix_bw, credit_warn, breadth_dec, breadth_crisis
     )
 
-    # Determine hedge allocation based on signal combination
+    # ── Bayesian posterior probability ──
+    posterior = _bayesian_hedge_probability(vix_bw, credit_warn, breadth_dec)
+
+    # Determine hedge allocation
     inverse_pct, vix_pct, cash_pct = 0.0, 0.0, 0.0
 
     if kill_switch:
-        # All 3 firing → max hedge + 50%+ cash raise
+        # Hard override: all 3 signals OR breadth crisis → max hedge + 50%+ cash
         _hedge_state["status"] = "KILLING"
-        inverse_pct, vix_pct, cash_pct = 8.0, 5.0, 50.0
-        sys.stderr.write("HEDGE_ACTIVATION: kill_switch triggered (all signals firing)\n")
-    elif should_activate:
-        _hedge_state["status"] = "HEDGE_ACTIVE"
-        _hedge_state["activation_count"] = num_signals
-
-        if num_signals == 2:
-            # 2 signals: check which combination
-            if vix_bw and credit_warn:
-                # VIX backwardation + credit warning → 5% inverse + 3% VIX + 10% cash
-                inverse_pct, vix_pct, cash_pct = 5.0, 3.0, 10.0
-                sys.stderr.write("HEDGE_ACTIVATION: VIX_BW + CREDIT_WARN (5% inverse, 3% VIX, 10% cash)\n")
-            elif vix_bw and breadth_dec:
-                # VIX backwardation + breadth decline → 5% inverse + 3% VIX + 10% cash
-                inverse_pct, vix_pct, cash_pct = 5.0, 3.0, 10.0
-                sys.stderr.write("HEDGE_ACTIVATION: VIX_BW + BREADTH_DEC (5% inverse, 3% VIX, 10% cash)\n")
-            else:
-                # Default 2-signal hedge: 3% inverse + 2% VIX
-                inverse_pct, vix_pct, cash_pct = 3.0, 2.0, 0.0
-                sys.stderr.write("HEDGE_ACTIVATION: 2 signals (3% inverse, 2% VIX)\n")
+        inverse_pct, vix_pct, cash_pct = MAX_INVERSE_PCT, MAX_VIX_PCT, MAX_CASH_PCT
+        sys.stderr.write(
+            f"HEDGE_ACTIVATION: kill_switch triggered (posterior={posterior:.3f}, "
+            f"all signals firing)\n"
+        )
         sys.stderr.flush()
     else:
-        # No activation: check if should unwind
-        if _hedge_state["status"] != "INACTIVE":
-            # Track consecutive clear days for unwinding
-            from datetime import datetime, timezone
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            if today != _hedge_state.get("last_clear_date"):
-                _hedge_state["last_clear_date"] = today
-                _hedge_state["consecutive_days_clear"] += 1
-            else:
-                # Same day, same clear state: no increment
-                pass
+        # ── Cost-benefit filter ──
+        # Require at least 1 signal active AND expected loss > hedge cost
+        expected_loss_bps = posterior * EXPECTED_DRAWDOWN_PCT * 100  # in bps
+        no_hedge = (num_signals == 0) or (expected_loss_bps <= HEDGE_COST_BPS)
 
-            if _hedge_state["consecutive_days_clear"] >= 5:
-                # All signals clear for 5+ days → unwind hedge
+        if no_hedge:
+            # No signals firing or hedge cost exceeds expected benefit
+            if _hedge_state["status"] not in ("INACTIVE",):
+                if num_signals == 0:
+                    reason = "no signals active"
+                else:
+                    reason = f"expected_loss={expected_loss_bps:.1f}bps <= cost={HEDGE_COST_BPS}bps"
                 sys.stderr.write(
-                    f"HEDGE_UNWINDING: all signals clear for {_hedge_state['consecutive_days_clear']} days\n"
+                    f"HEDGE_COST_FILTER: posterior={posterior:.3f} {reason} "
+                    f"→ no hedge\n"
                 )
                 sys.stderr.flush()
-                _hedge_state["status"] = "INACTIVE"
-                _hedge_state["activation_count"] = 0
-                _hedge_state["consecutive_days_clear"] = 0
-                _hedge_state["current_allocation"] = {"inverse_etp_pct": 0, "vix_etp_pct": 0, "cash_raised_pct": 0}
-                _save_hedge_state()
-                return []  # No new hedge signals — let existing ones unwind naturally
+
+            # Check if should unwind existing hedge
+            if _hedge_state["status"] != "INACTIVE":
+                from datetime import datetime, timezone
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if today != _hedge_state.get("last_clear_date"):
+                    _hedge_state["last_clear_date"] = today
+                    _hedge_state["consecutive_days_clear"] += 1
+
+                if _hedge_state["consecutive_days_clear"] >= 5:
+                    sys.stderr.write(
+                        f"HEDGE_UNWINDING: all signals clear for "
+                        f"{_hedge_state['consecutive_days_clear']} days\n"
+                    )
+                    sys.stderr.flush()
+                    _hedge_state["status"] = "INACTIVE"
+                    _hedge_state["activation_count"] = 0
+                    _hedge_state["consecutive_days_clear"] = 0
+                    _hedge_state["current_allocation"] = {
+                        "inverse_etp_pct": 0, "vix_etp_pct": 0, "cash_raised_pct": 0
+                    }
+                    _save_hedge_state()
+                    return []
+        else:
+            # ── Graduated response curve (continuous scaling) ──
+            # Scale allocations by posterior probability using a sigmoid-like curve
+            # that maps [COST_THRESHOLD, 1.0] → [0.0, 1.0] smoothly.
+            # Uses a power curve: scale = ((p - threshold) / (1 - threshold)) ^ 0.7
+            # Exponent < 1 makes it concave (ramps up faster at lower probabilities
+            # for earlier protection, saturates near max).
+            _hedge_state["consecutive_days_clear"] = 0  # Reset clear counter
+            norm_p = (posterior - COST_THRESHOLD) / (1.0 - COST_THRESHOLD)
+            norm_p = max(0.0, min(1.0, norm_p))
+            scale = norm_p ** 0.7  # Concave curve: faster ramp, gradual saturation
+
+            inverse_pct = scale * MAX_INVERSE_PCT
+            vix_pct = scale * MAX_VIX_PCT
+            # Cash raise only kicks in at higher probabilities (>0.40 posterior)
+            if posterior > 0.40:
+                cash_scale = ((posterior - 0.40) / 0.60) ** 0.8
+                cash_pct = cash_scale * MAX_CASH_PCT
+            else:
+                cash_pct = 0.0
+
+            _hedge_state["status"] = "HEDGE_ACTIVE"
+            _hedge_state["activation_count"] = num_signals
+
+            sys.stderr.write(
+                f"HEDGE_BAYESIAN: posterior={posterior:.3f} scale={scale:.3f} "
+                f"expected_loss={expected_loss_bps:.1f}bps "
+                f"→ inverse={inverse_pct:.1f}% vix={vix_pct:.1f}% cash={cash_pct:.1f}% "
+                f"(VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec})\n"
+            )
+            sys.stderr.flush()
 
     # Generate hedge signals based on allocations
     hedge_signals = []
+
+    # Confidence derived from posterior (continuous, 55-95 range)
+    hedge_confidence = int(55 + posterior * 40)
+    hedge_confidence = max(55, min(95, hedge_confidence))
 
     if inverse_pct > 0:
         # Inverse ETP signal (e.g., short S&P 500 via PSQ, SH, PSA, PSII)
@@ -885,13 +1150,14 @@ def _apply_conditional_hedge(msg, all_signals):
             "type": "signal",
             "ticker_id": msg.get("ticker_id", 0),
             "direction": "Long",  # Buy inverse (which is short the market)
-            "confidence": 60 + (num_signals * 10),  # Confidence scales with signal count
-            "kelly_fraction": 0.05,  # Conservative sizing for hedges
+            "confidence": hedge_confidence,
+            "kelly_fraction": min(0.05, 0.02 + posterior * 0.04),  # Scale with probability
             "shares": 0,  # Rust-side sizing
             "strategy": "HEDGE_InverseETP",
             "book_reference": 42,
-            "hedge_pct_allocation": inverse_pct,
-            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+            "hedge_pct_allocation": round(inverse_pct, 2),
+            "bayesian_posterior": round(posterior, 4),
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
         })
 
     if vix_pct > 0:
@@ -900,13 +1166,14 @@ def _apply_conditional_hedge(msg, all_signals):
             "type": "signal",
             "ticker_id": msg.get("ticker_id", 0),
             "direction": "Long",  # VIX long (portfolio insurance)
-            "confidence": 60 + (num_signals * 10),
-            "kelly_fraction": 0.03,  # Small VIX position
+            "confidence": hedge_confidence,
+            "kelly_fraction": min(0.03, 0.01 + posterior * 0.03),  # Scale with probability
             "shares": 0,
             "strategy": "HEDGE_VIXAllocation",
             "book_reference": 42,
-            "hedge_pct_allocation": vix_pct,
-            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+            "hedge_pct_allocation": round(vix_pct, 2),
+            "bayesian_posterior": round(posterior, 4),
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
         })
 
     if cash_pct > 0:
@@ -915,13 +1182,14 @@ def _apply_conditional_hedge(msg, all_signals):
             "type": "signal",
             "ticker_id": msg.get("ticker_id", 0),
             "direction": "Flat",  # Special direction for cash raise
-            "confidence": 65 + (num_signals * 10),
+            "confidence": hedge_confidence,
             "kelly_fraction": 0.0,  # No new positions during cash raise
             "shares": 0,
             "strategy": "HEDGE_CashRaise",
             "book_reference": 42,
-            "hedge_pct_allocation": cash_pct,
-            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+            "hedge_pct_allocation": round(cash_pct, 2),
+            "bayesian_posterior": round(posterior, 4),
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
         })
 
     # Update persisted state
@@ -3400,6 +3668,254 @@ def _system7_tail_hedge(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
     }
 
 
+# ============================================================================
+# BOOK 136: CROSS-MARKET LEAD-LAG R² RECALIBRATION
+# ============================================================================
+
+def _recalibrate_lead_lag_correlations():
+    """Recalibrate rolling R² for all lead-lag pairs every 5 minutes.
+
+    For each follower→leader pair, computes rolling 100-bar Pearson correlation
+    of returns (R²). Updates _lead_lag_r2 with correlation strength and status:
+      - R² < 0.50  → "disabled" (pair skipped in signal generation)
+      - R² >= 0.85 → "strong" (confidence boost in signal generation)
+      - else        → "active" (normal operation, confidence scaled by R²)
+    """
+    global _lead_lag_r2, _lead_lag_r2_last_recalib
+    _now = time.time()
+    if _now - _lead_lag_r2_last_recalib < _LEAD_LAG_R2_INTERVAL:
+        return
+    _lead_lag_r2_last_recalib = _now
+
+    try:
+        from python_brain.strategies.lead_lag import LEAD_LAG_PAIRS
+    except ImportError:
+        return
+
+    updated_count = 0
+    for pair_name, pair_info in LEAD_LAG_PAIRS.items():
+        leader_sym = pair_info["leader"]
+        follower_sym = pair_info["follower"]
+
+        leader_closes = list(_leader_bar_closes.get(leader_sym, []))
+        follower_closes = list(_leader_bar_closes.get(follower_sym, []))
+
+        # Need at least 20 bars for meaningful correlation; 100 is ideal
+        min_bars = min(len(leader_closes), len(follower_closes))
+        if min_bars < 20:
+            # Not enough data yet — keep existing state or mark pending
+            if pair_name not in _lead_lag_r2:
+                _lead_lag_r2[pair_name] = {"r2": 1.0, "status": "active", "updated": _now, "n_bars": 0}
+            continue
+
+        # Compute returns from closes (use the overlapping tail)
+        n = min(min_bars, 100)
+        l_closes = leader_closes[-n:]
+        f_closes = follower_closes[-n:]
+
+        l_returns = []
+        f_returns = []
+        for i in range(1, n):
+            if l_closes[i - 1] > 0 and f_closes[i - 1] > 0:
+                l_returns.append((l_closes[i] - l_closes[i - 1]) / l_closes[i - 1])
+                f_returns.append((f_closes[i] - f_closes[i - 1]) / f_closes[i - 1])
+
+        if len(l_returns) < 15:
+            continue
+
+        # Pearson correlation coefficient → R²
+        n_ret = len(l_returns)
+        sum_l = sum(l_returns)
+        sum_f = sum(f_returns)
+        sum_ll = sum(x * x for x in l_returns)
+        sum_ff = sum(x * x for x in f_returns)
+        sum_lf = sum(l_returns[i] * f_returns[i] for i in range(n_ret))
+
+        denom_l = n_ret * sum_ll - sum_l * sum_l
+        denom_f = n_ret * sum_ff - sum_f * sum_f
+
+        if denom_l <= 0 or denom_f <= 0:
+            r_squared = 0.0
+        else:
+            r = (n_ret * sum_lf - sum_l * sum_f) / (denom_l * denom_f) ** 0.5
+            r_squared = r * r
+
+        # Clamp to [0, 1]
+        r_squared = max(0.0, min(1.0, r_squared))
+
+        # Determine status
+        if r_squared < _LEAD_LAG_R2_DISABLE_THRESH:
+            status = "disabled"
+        elif r_squared >= _LEAD_LAG_R2_STRONG_THRESH:
+            status = "strong"
+        else:
+            status = "active"
+
+        prev = _lead_lag_r2.get(pair_name, {})
+        prev_status = prev.get("status", "")
+        _lead_lag_r2[pair_name] = {
+            "r2": round(r_squared, 4),
+            "status": status,
+            "updated": _now,
+            "n_bars": n_ret,
+        }
+        updated_count += 1
+
+        # Log status transitions
+        if prev_status and prev_status != status:
+            sys.stderr.write(
+                f"LEAD_LAG_R2_TRANSITION: {pair_name} {prev_status}->{status} "
+                f"r2={r_squared:.4f} n_bars={n_ret}\n"
+            )
+            sys.stderr.flush()
+
+    if updated_count > 0:
+        sys.stderr.write(
+            f"LEAD_LAG_R2_RECALIB: updated {updated_count} pairs "
+            f"disabled={sum(1 for v in _lead_lag_r2.values() if v.get('status') == 'disabled')} "
+            f"strong={sum(1 for v in _lead_lag_r2.values() if v.get('status') == 'strong')} "
+            f"active={sum(1 for v in _lead_lag_r2.values() if v.get('status') == 'active')}\n"
+        )
+        sys.stderr.flush()
+
+
+def _nightly_recalibrate_lead_lag_optimal_lags():
+    """Nightly hook: compute optimal lag for each pair and persist to disk.
+
+    Sweeps lags from 30s to 180s (in 15s steps = 1 to 6 5-min bars)
+    and picks the lag with highest R² for each pair. Writes results to
+    /app/data/lead_lag_calibration.json for next-day loading.
+
+    Called from _load_adaptive_params() on the same 5-min reload cycle,
+    but only executes once per calendar day.
+    """
+    global _lead_lag_nightly_last_load
+    _now = time.time()
+
+    # Only run once per day (check file mtime)
+    calib_path = "/app/data/lead_lag_calibration.json"
+    try:
+        if os.path.exists(calib_path):
+            mtime = os.path.getmtime(calib_path)
+            # If calibrated today, just load it
+            from datetime import datetime, timezone
+            file_date = datetime.fromtimestamp(mtime, tz=timezone.utc).date()
+            today = datetime.now(timezone.utc).date()
+            if file_date == today:
+                # Load cached calibration
+                if _now - _lead_lag_nightly_last_load < _LEAD_LAG_R2_INTERVAL:
+                    return
+                _lead_lag_nightly_last_load = _now
+                with open(calib_path) as f:
+                    calib = json.load(f)
+                _lead_lag_optimal_lags.clear()
+                for pair_name, info in calib.items():
+                    if isinstance(info, dict) and "optimal_lag_bars" in info:
+                        _lead_lag_optimal_lags[pair_name] = int(info["optimal_lag_bars"])
+                return
+    except Exception:
+        pass
+
+    # Perform fresh calibration
+    try:
+        from python_brain.strategies.lead_lag import LEAD_LAG_PAIRS
+    except ImportError:
+        return
+
+    calib_results = {}
+    for pair_name, pair_info in LEAD_LAG_PAIRS.items():
+        leader_sym = pair_info["leader"]
+        follower_sym = pair_info["follower"]
+
+        leader_closes = list(_leader_bar_closes.get(leader_sym, []))
+        follower_closes = list(_leader_bar_closes.get(follower_sym, []))
+
+        min_bars = min(len(leader_closes), len(follower_closes))
+        if min_bars < 30:
+            continue
+
+        # Compute full return series
+        n = min(min_bars, 100)
+        l_closes = leader_closes[-n:]
+        f_closes = follower_closes[-n:]
+
+        l_rets = []
+        f_rets = []
+        for i in range(1, n):
+            if l_closes[i - 1] > 0 and f_closes[i - 1] > 0:
+                l_rets.append((l_closes[i] - l_closes[i - 1]) / l_closes[i - 1])
+                f_rets.append((f_closes[i] - f_closes[i - 1]) / f_closes[i - 1])
+
+        if len(l_rets) < 20:
+            continue
+
+        # Sweep lags: 1 to 6 bars (30s to 180s in 15s 5-min bar steps)
+        # Lag N means: correlate leader_returns[:-N] with follower_returns[N:]
+        best_r2 = -1.0
+        best_lag = 1
+
+        for lag_bars in range(1, 7):  # 1..6 bars
+            if len(l_rets) <= lag_bars + 10:
+                continue
+
+            # Leader returns shifted by lag_bars ahead of follower
+            shifted_l = l_rets[:len(l_rets) - lag_bars]
+            shifted_f = f_rets[lag_bars:]
+            k = min(len(shifted_l), len(shifted_f))
+            if k < 15:
+                continue
+
+            shifted_l = shifted_l[-k:]
+            shifted_f = shifted_f[-k:]
+
+            # Pearson R²
+            s_l = sum(shifted_l)
+            s_f = sum(shifted_f)
+            s_ll = sum(x * x for x in shifted_l)
+            s_ff = sum(x * x for x in shifted_f)
+            s_lf = sum(shifted_l[j] * shifted_f[j] for j in range(k))
+
+            d_l = k * s_ll - s_l * s_l
+            d_f = k * s_ff - s_f * s_f
+
+            if d_l <= 0 or d_f <= 0:
+                continue
+
+            r = (k * s_lf - s_l * s_f) / (d_l * d_f) ** 0.5
+            r2 = r * r
+
+            if r2 > best_r2:
+                best_r2 = r2
+                best_lag = lag_bars
+
+        calib_results[pair_name] = {
+            "optimal_lag_bars": best_lag,
+            "optimal_lag_secs": best_lag * 30,  # approximate: each bar ~30s for sub-minute
+            "best_r2": round(best_r2, 4),
+            "n_bars_used": len(l_rets),
+            "calibrated_at": _now,
+        }
+
+        _lead_lag_optimal_lags[pair_name] = best_lag
+
+    # Persist to disk
+    if calib_results:
+        try:
+            tmp_path = calib_path + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(calib_results, f, indent=2)
+            os.replace(tmp_path, calib_path)
+            sys.stderr.write(
+                f"LEAD_LAG_NIGHTLY_CALIB: wrote {len(calib_results)} pairs to {calib_path}\n"
+            )
+            sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"LEAD_LAG_NIGHTLY_CALIB_WRITE_ERR: {e}\n")
+            sys.stderr.flush()
+
+    _lead_lag_nightly_last_load = _now
+
+
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     """Stage 3: Generate signals from all 13 generators with Book-derived pre-gates."""
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
@@ -4001,11 +4517,16 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
-    # ── BOOK 77: CROSS-MARKET LEAD-LAG ──
+    # ── BOOK 77 + BOOK 136: CROSS-MARKET LEAD-LAG (with R² recalibration) ──
     # When this ticker is a known follower (e.g. 3USL.L), check if its leader (e.g. SPY)
     # has moved significantly and the follower is lagging.
+    # Book 136: R² recalibration runs every 5 min; disabled pairs are skipped.
     lead_lag_signal = None
     try:
+        # Book 136: trigger periodic R² recalibration + nightly lag reload
+        _recalibrate_lead_lag_correlations()
+        _nightly_recalibrate_lead_lag_optimal_lags()
+
         symbol = ticker_symbols.get(ticker_id, "")
         pairs_for_follower = _FOLLOWER_TO_LEADERS.get(symbol, [])
         if pairs_for_follower and bars_5m and len(bars_5m) >= 5:
@@ -4017,6 +4538,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         (bars_5m[i]["close"] - bars_5m[i - 1]["close"]) / bars_5m[i - 1]["close"]
                     )
             for leader_sym, pair_name in pairs_for_follower:
+                # Book 136: Skip pairs with R² below disable threshold
+                pair_r2_info = _lead_lag_r2.get(pair_name, {})
+                if pair_r2_info.get("status") == "disabled":
+                    continue  # R² < 0.50 — pair temporarily disabled
+
                 leader_closes = list(_leader_bar_closes.get(leader_sym, []))
                 if len(leader_closes) >= 6:
                     leader_returns = []
@@ -4032,11 +4558,17 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             pair_name=pair_name,
                         )
                         if sig and sig.confidence >= effective_floor:
-                            kelly = _kelly_for(sig.confidence)
+                            # Book 136: Scale confidence by R²
+                            r_squared = pair_r2_info.get("r2", 1.0)
+                            scaled_confidence = int(sig.confidence * r_squared)
+                            # Re-check floor after scaling
+                            if scaled_confidence < effective_floor:
+                                continue
+                            kelly = _kelly_for(scaled_confidence)
                             lead_lag_signal = {
                                 "type": "signal", "ticker_id": ticker_id,
                                 "direction": "Long",
-                                "confidence": sig.confidence,
+                                "confidence": scaled_confidence,
                                 "kelly_fraction": kelly["kelly_fraction"],
                                 "shares": kelly["shares"],
                                 "strategy": "LeadLag",
@@ -4045,6 +4577,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                                 "leader_move_pct": sig.leader_move_pct,
                                 "follower_lag_pct": sig.follower_lag_pct,
                                 "expected_catchup_pct": sig.estimated_catch_up_pct,
+                                "lead_lag_r2": r_squared,
+                                "lead_lag_r2_status": pair_r2_info.get("status", "active"),
                                 **common_fields,
                             }
                             break  # Take the first valid lead-lag signal
@@ -4556,6 +5090,24 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         pass
     except Exception:
         pass
+
+    # ── BOOK 23b: STRATEGY-LEVEL ENTRY CLASSIFIER (block/reduce/boost) ──
+    # Applies the 48-feature classifier with hard blocking (P<0.35) and
+    # confidence adjustments. Only active when ONNX model is loaded.
+    if _HAS_ENTRY_CLF and all_signals:
+        try:
+            if not hasattr(_generate_signals, "_entry_clf"):
+                _generate_signals._entry_clf = _EntryClassifier()
+            _eclf = _generate_signals._entry_clf
+            if _eclf._loaded or not _eclf._load_attempted:
+                _filtered = []
+                for _sig in all_signals:
+                    _result = _eclf.apply_to_signal(_sig, ind, msg)
+                    if _result is not None:
+                        _filtered.append(_result)
+                all_signals = _filtered
+        except Exception:
+            pass  # Fail-open: classifier error → no filtering
 
     # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
     _mtc = msg.get("_mins_to_close", 999)
@@ -6849,11 +7401,12 @@ def process_tick(msg):
     ind = _compute_indicators(ticker_id, ticks, msg)
 
     # ── BOOK 77: Update leader bar closes for cross-market lead-lag ──
+    # Book 136: maxlen=120 for rolling 100-bar R² correlation calculation
     symbol = ticker_symbols.get(ticker_id, "")
     if symbol and ind.get("bars_5m"):
         from collections import deque
         if symbol not in _leader_bar_closes:
-            _leader_bar_closes[symbol] = deque(maxlen=20)
+            _leader_bar_closes[symbol] = deque(maxlen=120)
         _leader_bar_closes[symbol].append(ind["bars_5m"][-1]["close"])
 
     # Build indicator dict for gate veto logging
@@ -6992,6 +7545,26 @@ def process_tick(msg):
             best["min_profit_target_pct"] = round(_spread_exit * 3, 2)  # Need 3x spread to be worthwhile
         elif _spread_exit > 0.2:
             best["min_profit_target_pct"] = round(_spread_exit * 2, 2)
+
+        # ── BOOK 217: COST ESTIMATION — inject into signal for Rust Kelly sizing ──
+        try:
+            _cost_ticker = ticker_symbols.get(ticker_id, "")
+            _cost_price = msg["last"]
+            _cost_shares = best.get("shares", 0)
+            # Enrich signal with context needed by cost calculator
+            _cost_sig = dict(best)
+            _cost_sig["bid"] = ind.get("bid", msg.get("bid", _cost_price))
+            _cost_sig["ask"] = ind.get("ask", msg.get("ask", _cost_price))
+            _cost_sig["spread_pct"] = ind.get("spread_pct", 0.0)
+            _cost_sig["vpin"] = ind.get("vpin", 0.0)
+            _cost_sig["amihud"] = msg.get("amihud", 0.0)
+            _cost_sig["adv_gbp"] = msg.get("adv_gbp", 0)
+            _cost_result = _calculate_trade_costs(_cost_sig, _cost_price, _cost_shares, _cost_ticker)
+            best["estimated_cost_bps"] = _cost_result["total_cost_bps"]
+            best["estimated_cost_usd"] = _cost_result["total_cost_usd"]
+            best["cost_decomposition"] = _cost_result
+        except Exception:
+            pass  # Fail-open: missing cost fields won't block signal
 
         return best
     return no_signal

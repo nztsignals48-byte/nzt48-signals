@@ -230,6 +230,7 @@ impl ReplayEngine {
         self.counters.signals_generated += 1;
 
         // 5. Risk arbiter
+        let exchange_mic = self.broker.exchange_for_ticker(&tid).to_string();
         let ctx = EvalContext {
             time_secs: self.time_secs,
             last_tick_age_secs: 1,
@@ -238,6 +239,7 @@ impl ReplayEngine {
             broker_connected: self.broker.is_connected(),
             wal_available: self.wal.is_some(),
             now_ns: self.now_ns,
+            exchange_mic,
             ..EvalContext::default()
         };
         let decision =

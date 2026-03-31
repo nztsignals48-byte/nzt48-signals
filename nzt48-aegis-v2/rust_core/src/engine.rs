@@ -1782,6 +1782,7 @@ impl<B: BrokerAdapter> Engine<B> {
         let leverage_factor = self.config.contracts.get(tid.0 as usize)
             .map(|c| c.leverage as u32)
             .unwrap_or(1);
+        let exchange_mic = self.broker.exchange_for_ticker(&tid).to_string();
         let ctx = EvalContext {
             time_secs,
             last_tick_age_secs: tick_age_secs,
@@ -1805,6 +1806,7 @@ impl<B: BrokerAdapter> Engine<B> {
             kalman_divergence,
             native_spread_bps,
             structural_score: sig.structural_score,
+            exchange_mic,
             ..EvalContext::default()
         };
         // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)

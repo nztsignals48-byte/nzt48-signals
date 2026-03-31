@@ -926,6 +926,7 @@ fn main() {
                                     // Build RiskArbiter evaluation context
                                     let time_secs = engine.clock.now_london_secs(engine.now_ns);
                                     let ticker_score = engine.predictive_scorer.score(t.ticker_id);
+                                    let exchange_mic = engine.broker.exchange_for_ticker(&t.ticker_id).to_string();
                                     let eval_ctx = rust_core::risk_arbiter::EvalContext {
                                         time_secs,
                                         last_tick_age_secs: 0,
@@ -953,6 +954,7 @@ fn main() {
                                             (t.ask - t.bid) / ((t.ask + t.bid) / 2.0) * 10_000.0
                                         } else { 0.0 },
                                         structural_score: apex_signal.structural_score,
+                                        exchange_mic,
                                     };
 
                                     // Check risk arbiter approval

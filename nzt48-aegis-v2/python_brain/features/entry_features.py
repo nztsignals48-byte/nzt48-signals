@@ -670,3 +670,163 @@ class FeatureExtractor:
         if isinstance(tick, dict):
             return float(tick.get('ask', 0.0))
         return float(getattr(tick, 'ask', 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Feature Registry + Lookahead Detection — Book 21-22 extensions
+# ---------------------------------------------------------------------------
+
+import time as _time
+import logging as _logging
+
+_feat_log = _logging.getLogger("feature_registry")
+
+
+@dataclass
+class FeatureMeta:
+    """Metadata for a registered feature."""
+    name: str
+    version: int
+    category: str              # e.g. "price_action", "volume", "momentum", "temporal"
+    lookback_bars: int         # How many bars of history this feature needs
+    staleness_mins: float      # Max age before feature is considered stale
+    importance: float = 0.0    # Permutation importance score (updated by SHAP/GP)
+
+
+class FeatureRegistry:
+    """Dict-backed registry for feature metadata with validation and staleness detection."""
+
+    def __init__(self):
+        self._registry: Dict[str, FeatureMeta] = {}
+        self._last_computed: Dict[str, float] = {}  # feature_name → unix timestamp
+
+    def register(self, meta: FeatureMeta) -> None:
+        """Register a feature. Overwrites if name already exists."""
+        self._registry[meta.name] = meta
+        _feat_log.debug("Registered feature: %s v%d (category=%s, lookback=%d)",
+                        meta.name, meta.version, meta.category, meta.lookback_bars)
+
+    def get(self, name: str) -> FeatureMeta:
+        """Get feature metadata by name. Raises KeyError if not found."""
+        if name not in self._registry:
+            raise KeyError(f"Feature '{name}' not in registry")
+        return self._registry[name]
+
+    def mark_computed(self, name: str, timestamp: float = 0.0) -> None:
+        """Record when a feature was last computed."""
+        self._last_computed[name] = timestamp if timestamp > 0 else _time.time()
+
+    def validate_all(self, feature_dict: Dict[str, float]) -> List[str]:
+        """Validate that all registered features are present in feature_dict.
+
+        Returns:
+            List of missing feature names (empty = all good).
+        """
+        missing = []
+        for name in self._registry:
+            if name not in feature_dict:
+                missing.append(name)
+        if missing:
+            _feat_log.warning("Missing features: %s", ", ".join(missing))
+        return missing
+
+    def detect_stale(self, current_time: float = 0.0) -> List[str]:
+        """Detect features that have exceeded their staleness window.
+
+        Args:
+            current_time: current unix timestamp (defaults to now)
+
+        Returns:
+            List of stale feature names.
+        """
+        now = current_time if current_time > 0 else _time.time()
+        stale = []
+        for name, meta in self._registry.items():
+            last = self._last_computed.get(name, 0.0)
+            if last == 0.0:
+                stale.append(name)  # Never computed
+                continue
+            age_mins = (now - last) / 60.0
+            if age_mins > meta.staleness_mins:
+                stale.append(name)
+        if stale:
+            _feat_log.warning("Stale features (%d): %s", len(stale), ", ".join(stale[:10]))
+        return stale
+
+    @property
+    def names(self) -> List[str]:
+        return list(self._registry.keys())
+
+    def __len__(self) -> int:
+        return len(self._registry)
+
+
+def detect_lookahead_bias(
+    features: Dict[str, float],
+    timestamp_ns: int,
+    data_cutoff_ns: int,
+) -> List[str]:
+    """Flag any feature that may be using future data.
+
+    A feature has lookahead bias if its computation timestamp is after
+    the data cutoff point (i.e., it incorporates data not yet available
+    at signal generation time).
+
+    Args:
+        features: dict of feature_name → value
+        timestamp_ns: signal generation timestamp in nanoseconds
+        data_cutoff_ns: latest allowed data timestamp in nanoseconds
+
+    Returns:
+        List of feature names flagged for potential lookahead bias.
+    """
+    flagged = []
+    if timestamp_ns > data_cutoff_ns:
+        # Signal itself is ahead of data cutoff — all features suspect
+        _feat_log.error("LOOKAHEAD: signal timestamp %d > data cutoff %d — ALL features suspect",
+                        timestamp_ns, data_cutoff_ns)
+        return list(features.keys())
+
+    # Check for features with values that shouldn't exist yet
+    # (e.g., forward-looking indicators accidentally included)
+    suspect_prefixes = ("future_", "fwd_", "forward_", "t+1_", "t+2_", "next_")
+    for name in features:
+        if any(name.lower().startswith(prefix) for prefix in suspect_prefixes):
+            flagged.append(name)
+            _feat_log.warning("LOOKAHEAD: feature '%s' has forward-looking name", name)
+
+    return flagged
+
+
+def validate_point_in_time(
+    feature_name: str,
+    ts: float,
+    registry: FeatureRegistry,
+) -> bool:
+    """Check if a feature is within its staleness window at a given timestamp.
+
+    Args:
+        feature_name: name of the feature to check
+        ts: unix timestamp to validate against
+        registry: FeatureRegistry instance
+
+    Returns:
+        True if feature is fresh (within staleness window), False if stale or unknown.
+    """
+    try:
+        meta = registry.get(feature_name)
+    except KeyError:
+        _feat_log.warning("PIT check: feature '%s' not in registry", feature_name)
+        return False
+
+    last_computed = registry._last_computed.get(feature_name, 0.0)
+    if last_computed == 0.0:
+        return False  # Never computed
+
+    age_mins = (ts - last_computed) / 60.0
+    if age_mins > meta.staleness_mins:
+        _feat_log.warning("PIT check: '%s' stale by %.1f min (limit=%.1f)",
+                          feature_name, age_mins, meta.staleness_mins)
+        return False
+
+    return True

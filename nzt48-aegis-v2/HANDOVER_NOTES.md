@@ -1,183 +1,180 @@
-# HANDOVER NOTES — Session 2026-03-29 (Final)
+# HANDOVER NOTES — Session 2026-03-30
 
-## WHAT WAS DONE THIS SESSION
+## SESSION SUMMARY
+
+This session implemented 10 books total across two commits:
+- **Commit 1** (8c802e1): Books 58, 207, 208, 209 — escalation, schema, quality gates, Bayesian
+- **Commit 2** (36a2a4f): Books 77, 82, 119, 124, 144 — lead-lag, regime, MI, clustering, conformal
+- **Book 1**: Fundamental law tracker (IR = IC × √BR)
+
+All deployed to EC2, container healthy, all imports verified.
+
+---
+
+## BOOKS IMPLEMENTED THIS SESSION
+
+### Book 1: Fundamental Law of Active Management — COMPLETE
+**New file:** `python_brain/metrics/fundamental_law.py`
+- IR = IC × √BR tracker (Spearman rank correlation)
+- Portfolio Sharpe √N scaling (uncorrelated + correlation-corrected)
+- Variance drag σ²/2 from daily returns
+- Persisted to `/app/data/fundamental_law.json`
 
 ### Book 58: Escalation Timeouts — COMPLETE
 **New file:** `python_brain/alerting/escalation_manager.py`
-**Modified:** `python_brain/alerting/telegram.py`, `python_brain/bridge.py`, `scripts/nightly_pipeline.sh`
+- WARNING → CRITICAL after 15min unanswered
+- CRITICAL → FLATTEN after 60min (writes `/app/data/KILL`)
+- Telegram notifications on escalation + countdown reminders
+- `/ack` command in kill_switch.py polling loop
 
-- `EscalationManager` class with state persistence to `/app/data/escalation_state.json`
-- WARNING unanswered 15min → auto-escalate to CRITICAL (Telegram notification sent with countdown)
-- CRITICAL repeats every 5min with countdown to flatten
-- CRITICAL unanswered 60min → EMERGENCY: writes `/app/data/KILL` (N10a kill switch — Rust checks every 1s, flattens all positions, shuts down)
-- Also writes `/app/data/commands/flatten.json` as audit trail
-- `telegram.py` auto-registers WARNING/CRITICAL alerts for escalation tracking on successful send
-- `bridge.py` heartbeat loop runs `escalation_tick()` every 30s
-- `nightly_pipeline.sh` Step 10: escalation status check
-- CLI: `--status`, `--ack <id>`, `--ack-all`, `--once`, continuous watchdog mode
-- Acknowledge: `/ack` in Telegram (partial match if no ID given — acks oldest unacked alert)
-- `continue` guards prevent same-tick escalation + flatten (operator gets a chance)
+### Book 77: Cross-Market Lead-Lag — COMPLETE
+**Existing file wired:** `python_brain/strategies/lead_lag.py` (was disconnected)
+**Modified:** `python_brain/bridge.py`
+- Cross-ticker leader buffer (`_leader_bar_closes`) tracks US equities
+- 12 leader→follower pairs (SPY→3USL, QQQ→QQQ3, NVDA→NVD3, etc.)
+- When follower tick arrives, checks leader 5-bar return vs follower lag
+- Generates LeadLag signals with confidence based on move magnitude + lag size
+- ISA constraint: long-only (shorts filtered out)
 
-### Book 209: Bayesian Multi-Source Signal Aggregation — COMPLETE
-**Modified:** `python_brain/aggregation/bayesian_aggregator.py`, `python_brain/bridge.py`, `scripts/nightly_pipeline.sh`
+### Book 82: Ensemble Regime Detection — COMPLETE
+**New file:** `python_brain/risk/regime_ensemble.py`
+- Layer 1 (FastNoisyDetector): VPIN>0.70, RVOL>3.0, Hurst<0.15, Spread>0.8%, DD>4%
+- Layer 2 (SlowAccurateDetector): 6-factor composite (VPIN/Hurst/RVOL/Spread/ADX/DD)
+- State machine: NORMAL → ALERT → confirmed or reverted (5min timeout)
+- Confidence penalties: -10 on alert, -15 STRESS, -25 CRISIS
+- Wired into bridge.py `_apply_adjustments`
 
-- Added `save()`/`load()` persistence to `/app/data/bayesian_calibration.json`
-- Added `get_aggregator()` singleton, `aggregate_signals()`, `record_outcome()`
-- **Fixed LR+ for fresh sources:** Returns 1.0 (no adjustment) when < 10 observations. Prevents hurting signals on day 1.
-- **LR+ clamped to [0.1, 10.0]** to prevent extreme swings from small samples
-- **Bridge.py signal combination wired:** When 2+ strategies fire on same tick:
-  - If Bayesian posterior agrees with best signal direction → boost confidence (up to +10)
-  - If posterior disagrees → dampen confidence (up to -15)
-  - Fields added to signal: `bayes_posterior`, `bayes_boost`/`bayes_conflict_penalty`, `bayes_n_agree`, `bayes_n_total`
-- **Bridge.py exit handler wired:** Every trade exit feeds `record_outcome()` → updates confusion matrix
-- **Shutdown save:** Bayesian calibration saved on clean shutdown
-- **Nightly pipeline Step 11:** Saves calibration snapshot
-- 16 sources pre-registered. Auto-save every 50 outcomes.
+### Book 119: MI Signal Selection — COMPLETE
+**New file:** `python_brain/analytics/mi_signal_selector.py`
+- Histogram-based mutual information (stdlib, no sklearn)
+- Conditional MI for incremental feature value
+- Transfer entropy for directed information flow
+- Nightly Step 12: ranks 15 signal features by predictive power
+- Output: `/app/data/feature_importance.json`
+
+### Book 124: Volatility Regime Clustering — COMPLETE
+**New file:** `python_brain/risk/vol_regime_cluster.py`
+- 5-regime classifier: LOW_VOL_GRIND, NORMAL, ELEVATED, CRISIS, RECOVERY
+- Nearest-centroid with softmax confidence (6 features)
+- Hysteresis tracker (5-tick persistence) prevents flapping
+- Position sizing multiplier: 0.15x CRISIS, 0.60x ELEVATED, 1.0x NORMAL
+- Strategy routing hints per regime
+- Wired into bridge.py `_apply_adjustments` (Kelly × sizing_mult)
+
+### Book 144: Conformal Prediction Calibrator — COMPLETE
+**New file:** `python_brain/analytics/conformal_calibrator.py`
+- Per-strategy + global calibration buckets
+- Maps raw confidence to empirical win rate (10 buckets)
+- Rolling window of 200 outcomes
+- ECE (Expected Calibration Error) tracking
+- Only activates after 20+ recorded outcomes
+- Saves/loads from `/app/data/conformal_calibration.json`
+- Wired into bridge.py: exit handler records outcomes, signal path calibrates confidence
+- Nightly Step 13: calibration summary report
 
 ### Book 207: NormalizedSignal Schema Validation — COMPLETE
 **New file:** `python_brain/validation/signal_schema.py`
-**Modified:** `python_brain/bridge.py`
+- Validates direction, confidence, Kelly, shares, price
+- NaN/Inf sweep in to_dict() prevents JSON errors
+- shares >= 0 (allows Apex's 0-share signals)
 
-- `NormalizedSignal` dataclass with `from_dict()` / `validate()` / `to_dict()`
-- **Defensive NaN/Inf handling:** `_safe_float()` and `_safe_int()` helpers in `from_dict()`
-- **NaN/Inf sweep in `to_dict()`:** Replaces with `None` to prevent JSON serialization errors
-- **Shares >= 0 (not >= 1):** Allows 0 shares for Apex signals where Rust does sizing
-- Validates: direction ∈ {"Long", "Short"}, confidence [0-100], kelly [0.0-0.35], price > 0, source non-empty
-- All bridge.py extras (rsi, ibs, vpin, entry_type, structural_score, etc.) preserved as passthrough
-- Verified: all fields Rust reads (direction, confidence, kelly_fraction, shares, strategy, entry_type, ticker_id) are correctly passed through
-
-### Book 208: Quality Gates (Paper → Validated → Live) — COMPLETE
+### Book 208: Quality Gates — COMPLETE
 **New file:** `python_brain/validation/quality_gates.py`
-**Modified:** `python_brain/bridge.py`, `scripts/nightly_pipeline.sh`
+- PAPER → VALIDATED → LIVE → SUSPENDED → RETIRED
+- PAPER strategies produce shadow signals only
+- Compounding Machine auto-kill wires into suspend()
 
-- `StrategyLifecycle` class with 5 states: PAPER → VALIDATED → LIVE → SUSPENDED → RETIRED
-- State persisted to `/app/data/strategy_lifecycle.json`
-- Bridge.py Stage 5: PAPER/SUSPENDED/RETIRED strategies produce shadow signals only (logged to `/app/data/shadow_signals.ndjson`)
-- Unknown strategies default to LIVE (no disruption to existing strategies)
-- **SIM_MODE correctly bypasses** quality gate check
-- **Compounding Machine wired:** Auto-kill (Sharpe < -1.0) → `suspend()` with Telegram notification. Auto-revive (Sharpe > -0.3) → `promote_to_live()`
-- Nightly pipeline Step 9: Checks all PAPER strategies, sends Telegram alert for eligible promotions
-- Promotion thresholds: 30 days, 50 signals, 35% win rate
-- CLI: `--summary`, `--check`, `--register-paper`, `--promote-validated`, `--promote-live`, `--suspend`, `--retire`
+### Book 209: Bayesian Multi-Source Aggregation — COMPLETE
+**Modified:** `python_brain/aggregation/bayesian_aggregator.py`
+- LR+ = 1.0 for <10 observations (no adjustment on fresh start)
+- 2+ strategies fire → posterior boosts/dampens confidence
 
-### CLAUDE.md Updated
-- Added Signal Validation Pipeline (3-gate), Escalation Protocol, 11-step pipeline
+---
 
-## CRITICAL FIXES MADE IN FINAL REVIEW
+## ARCHITECTURE AFTER THIS SESSION
 
-1. **Book 58:** Changed flatten mechanism from SIGHUP (which just reloads config) to N10a KILL file (`/app/data/KILL`), which is the proven Rust mechanism that actually flattens positions and shuts down. Removed unused `signal`/`subprocess` imports.
-
-2. **Book 209:** Fixed `likelihood_ratio_positive` to return 1.0 (no adjustment) when source has < 10 observations. Previously returned 0.5 (worse than random) for fresh sources, which would penalize all signals on day 1. Also clamped LR to [0.1, 10.0].
-
-3. **Book 207:** Changed shares validation from `>= 1` to `>= 0`. Apex signals have `shares: 0` because Rust does the sizing. Previous validation would have rejected all Apex signals.
-
-## INTEGRATION ARCHITECTURE
-
-### Signal flow (bridge.py process_tick Stage 5):
+### Signal Processing Pipeline (bridge.py)
 ```
-Signal → [Book 208: Quality gate] → [Book 207: Schema validation] → Rust
-              ↓ PAPER/SUSPENDED           ↓ invalid
-         shadow_signals.ndjson       SCHEMA_REJECT log
-```
-
-### Signal adjustment (bridge.py _apply_adjustments):
-```
-All signals → [Book 209: Bayesian aggregation if 2+ signals] → best → Compounding Machine
+Tick → _compute_indicators()
+  → Update leader bar closes (Book 77)
+  → _check_quality_gates()
+  → _generate_signals()
+    → 18 generators including LeadLag (Book 77)
+  → _apply_adjustments()
+    → Book 82: Ensemble regime penalty (-10 to -25)
+    → Book 124: Vol regime sizing (0.15x to 1.0x)
+    → Drawdown filter
+    → Simulated cost deduction
+    → Book 144: Conformal calibration (raw → empirical WR)
+    → Book 209: Bayesian aggregation (multi-signal boost/dampen)
+  → Book 207: NormalizedSignal validation
+  → Book 208: Quality gate (PAPER → shadow)
+  → Output to Rust
 ```
 
-### Exit flow (bridge.py main loop):
+### Nightly Pipeline (13 steps)
 ```
-exit msg → _track_strategy_exit → [Book 209: record_outcome] → [Book 208: suspend if killed]
+Step  0: Gemini scanner
+Step  1: nightly_v6 Ouroboros analysis
+Step  2: config_writer → dynamic_weights.toml
+Step  3: win_loss_delta metrics
+Step  4: Claude forensic review
+Step  5: ouroboros_challenger
+Step  6: approval_gate
+Step  7: Claude dispatcher (daily journal)
+Step  8: Claude dispatcher (weekly — Fridays)
+Step  9: Quality gates promotion check (Book 208)
+Step 10: Escalation manager status (Book 58)
+Step 11: Bayesian calibration snapshot (Book 209)
+Step 12: MI signal selection analysis (Book 119)
+Step 13: Conformal calibration report (Book 144)
 ```
 
-### Escalation flow:
+---
+
+## REMAINING WORK (for next session)
+
+### High-Priority Unimplemented Books
+1. **Book 6**: Walk-forward validation engine (backtesting — large infrastructure project)
+2. **Book 23**: Entry timing ML models (LightGBM/LSTM — needs training data)
+3. **Book 64**: Feature store (DuckDB offline + Redis online — infrastructure)
+4. **Book 125/126**: Cointegration pairs trading (17 long/inverse pairs)
+5. **Book 191**: Realistic ETP backtesting (volatility decay simulation)
+6. **Book 34**: Synthetic data augmentation (GBM + GARCH simulators)
+7. **Book 83**: Multi-scale regime detection (micro/meso/macro hierarchy)
+8. **Book 84**: Macro nowcasting (GDP/CPI proxies)
+9. **Book 127**: TDA crash detection (persistent homology)
+10. **Book 181**: Capacity analysis (market impact modeling)
+
+### Operational
+- Market opens Monday — first live test of all new modules
+- IB Gateway retrying connection (expected on weekend)
+- Monitor Telegram for escalation alerts
+- Check nightly pipeline Steps 12-13 after first run
+- Conformal calibrator needs 20+ trades before it activates
+
+### Files Created This Session
 ```
-TelegramAlerter.send() → [Book 58: register_alert if WARNING/CRITICAL]
-                                    ↓ 15 min
-                              WARNING → CRITICAL (Telegram countdown)
-                                    ↓ 60 min total
-                              CRITICAL → EMERGENCY (write /app/data/KILL → Rust flattens + shuts down)
+python_brain/metrics/fundamental_law.py        (Book 1)
+python_brain/alerting/escalation_manager.py    (Book 58)
+python_brain/risk/regime_ensemble.py           (Book 82)
+python_brain/analytics/mi_signal_selector.py   (Book 119)
+python_brain/risk/vol_regime_cluster.py        (Book 124)
+python_brain/analytics/conformal_calibrator.py (Book 144)
+python_brain/validation/signal_schema.py       (Book 207)
+python_brain/validation/quality_gates.py       (Book 208)
 ```
 
-## ALL FILES MODIFIED THIS SESSION
-1. `python_brain/alerting/escalation_manager.py` — NEW (Book 58)
-2. `python_brain/alerting/telegram.py` — MODIFIED (Book 58 registration)
-3. `python_brain/aggregation/bayesian_aggregator.py` — MODIFIED (Book 209 persistence + LR fix)
-4. `python_brain/validation/signal_schema.py` — NEW (Book 207)
-5. `python_brain/validation/quality_gates.py` — NEW (Book 208)
-6. `python_brain/bridge.py` — MODIFIED (all 4 books wired)
-7. `scripts/nightly_pipeline.sh` — MODIFIED (Steps 9-11)
-8. `CLAUDE.md` — MODIFIED (new module docs)
+### Files Modified This Session
+```
+python_brain/bridge.py                          (all books wired)
+python_brain/alerting/telegram.py               (Book 58 auto-register)
+python_brain/aggregation/bayesian_aggregator.py (Book 209 persistence)
+python_brain/ouroboros/nightly_v6.py            (Book 1 fundamental law)
+python_brain/risk/kill_switch.py               (Book 58 /ack handler)
+scripts/nightly_pipeline.sh                    (Steps 9-13)
+CLAUDE.md                                      (updated docs)
+NZT48_AEGIS_V2_COMPLETE_SUMMARY.md             (updated docs)
+```
 
-## ALL SYNTAX VERIFIED
-6 Python files pass `ast.parse()`. Bash script passes `bash -n`.
-
-### Telegram /ack Command Handler — COMPLETE
-**Modified:** `python_brain/ouroboros/kill_switch.py`
-
-- Added `/ack`, `/ack <id>`, `/ack-all`, `/alerts` commands to existing `TelegramCommandListener._handle_command()`
-- All commands audit-logged to kill_switch_audit.ndjson
-- Updated `/help` to include new commands
-- Uses existing polling loop (getUpdates every 2s) — no new infrastructure
-
-### Summary Document Updated — COMPLETE
-**Modified:** `NZT48_AEGIS_V2_COMPLETE_SUMMARY.md`
-
-- Added "Signal Validation Pipeline (Books 207, 208, 209)" section with ASCII diagram
-- Added "Escalation Protocol (Book 58)" section with flow diagram
-- Updated pipeline from "10-Step" to "11-Step" with Step 11 diagram
-- Updated CAN/CANNOT table with 4 new capabilities
-
-## ALL FILES MODIFIED THIS SESSION (FINAL COUNT)
-1. `python_brain/alerting/escalation_manager.py` — NEW (Book 58)
-2. `python_brain/alerting/telegram.py` — MODIFIED (Book 58 registration)
-3. `python_brain/aggregation/bayesian_aggregator.py` — MODIFIED (Book 209 persistence + LR fix)
-4. `python_brain/validation/signal_schema.py` — NEW (Book 207)
-5. `python_brain/validation/quality_gates.py` — NEW (Book 208)
-6. `python_brain/bridge.py` — MODIFIED (all 4 books wired)
-7. `python_brain/ouroboros/kill_switch.py` — MODIFIED (/ack, /alerts commands)
-8. `scripts/nightly_pipeline.sh` — MODIFIED (Steps 9-11)
-9. `CLAUDE.md` — MODIFIED (new module docs)
-10. `NZT48_AEGIS_V2_COMPLETE_SUMMARY.md` — MODIFIED (Books 58/207/208/209 sections)
-11. `HANDOVER_NOTES.md` — MODIFIED (this file)
-
-## ALL SYNTAX VERIFIED
-7 Python files + 1 bash script pass syntax checks.
-
-### Book 1: Fundamental Law of Active Management — COMPLETE
-**New file:** `python_brain/metrics/fundamental_law.py`, `python_brain/metrics/__init__.py`
-**Modified:** `python_brain/bridge.py`, `python_brain/ouroboros/nightly_v6.py`
-**Commit:** `40ce9a0`
-
-- `FundamentalLawTracker` class with per-strategy IC (Spearman rank correlation), breadth counter, portfolio Sharpe (√N + ρ correction), variance drag (σ²/2), Kelly-optimal growth (g* = ½Σ SR_i²)
-- Bridge.py: entry confidence tracked in `_entry_confidences` dict, paired with P&L on exit for IC
-- Bridge.py: daily portfolio return fed from equity snapshots for variance drag
-- nightly_v6.py: Step 5.20b computes full report → nightly_output.json
-- State persisted to `/app/data/fundamental_law.json`, saved on shutdown + nightly
-- Deployed to EC2, verified import OK
-
-### Book Status After This Session
-
-| Book | Status | Notes |
-|------|--------|-------|
-| 1 | DONE | Fundamental Law tracker, deployed |
-| 2 | 95% DONE | All Claude/Gemini wired (prev session). Only gap: Gemini pick accuracy tracking |
-| 3 | DONE | Reference doc — code already implements ISA gate, cost model, instrument universe |
-| 58 | DONE | Escalation timeouts + N10a KILL flatten |
-| 72 | DONE | 14 Claude decision types + dispatcher |
-| 207 | DONE | NormalizedSignal schema validation |
-| 208 | DONE | Quality gates (PAPER→LIVE lifecycle) |
-| 209 | DONE | Bayesian multi-source aggregation |
-
-**73+ books implemented in code.** Next: Book 4 onwards (continue sequential scan).
-
-## WHAT REMAINS (Next Session)
-- **IBKR connection:** Monday — engine is deployed, will connect when market opens
-- **Continue book-by-book scan:** Resume from Book 4 (Implementation Roadmap)
-- **High-value unimplemented books to prioritize:**
-  - Book 8/38: Telegram bot enhancements (partial)
-  - Book 10: Compounding engine capital allocation
-  - Book 14: Signal research lab
-  - Book 113: HMM regime detection (advanced)
-  - Book 131: Dynamic capital reallocation (meta-allocator)
-- **Gemini pick accuracy tracking** (Book 2 gap)
+### Total Books Implemented: ~91 (was 81 at session start)

@@ -186,6 +186,114 @@ def estimate_trade_cost(
 costs = CostModel.from_toml()
 
 
+# ---------------------------------------------------------------------------
+# Turnover Budget Enforcement (Book 51 extension)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TurnoverBudget:
+    """Turnover limits to prevent overtrading destroying alpha via friction."""
+    daily_limit_trades: int = 20
+    weekly_turnover_pct: float = 50.0    # % of portfolio turned over per week
+    annual_turnover_pct: float = 2000.0  # % of portfolio turned over per year
+
+
+DEFAULT_BUDGET = TurnoverBudget(
+    daily_limit_trades=20,
+    weekly_turnover_pct=50.0,
+    annual_turnover_pct=2000.0,
+)
+
+
+def check_turnover_budget(
+    trades_today: int,
+    turnover_ytd_pct: float,
+    budget: TurnoverBudget = DEFAULT_BUDGET,
+) -> tuple:
+    """Check if we're within turnover budget.
+
+    Returns: (allowed: bool, reason: str)
+    """
+    if trades_today >= budget.daily_limit_trades:
+        return False, f"Daily limit reached: {trades_today}/{budget.daily_limit_trades} trades"
+
+    # Annualize current pace and check against annual budget
+    # Rough check: if YTD turnover is already > proportional annual budget
+    import datetime
+    day_of_year = datetime.date.today().timetuple().tm_yday
+    trading_days_elapsed = max(1, int(day_of_year * 252 / 365))
+    proportional_budget = budget.annual_turnover_pct * (trading_days_elapsed / 252)
+
+    if turnover_ytd_pct > proportional_budget:
+        return False, (
+            f"YTD turnover {turnover_ytd_pct:.1f}% exceeds proportional "
+            f"annual budget {proportional_budget:.1f}% "
+            f"(day {trading_days_elapsed}/252)"
+        )
+
+    return True, "within_budget"
+
+
+def break_even_alpha(round_trip_cost_pct: float, holding_period_days: float) -> float:
+    """Minimum annualized alpha (%) required to overcome friction.
+
+    If a trade costs `round_trip_cost_pct` and is held for `holding_period_days`,
+    the annualized break-even alpha = cost * (252 / holding_period).
+
+    Example: 0.3% cost, 2-day hold → 0.3 * 126 = 37.8% annualized alpha needed.
+    """
+    if holding_period_days <= 0:
+        return float("inf")
+    trades_per_year = 252.0 / holding_period_days
+    return round_trip_cost_pct * trades_per_year
+
+
+def optimal_trade_frequency(edge_annual_pct: float, cost_per_trade_pct: float) -> float:
+    """Kelly-optimal number of trades per year given edge and cost.
+
+    Derivation: Net edge per trade = (edge / N) - cost
+    Maximize N * net_edge → N* = edge / (2 * cost)
+
+    Args:
+        edge_annual_pct: Total annual alpha available (%)
+        cost_per_trade_pct: Round-trip cost per trade (%)
+
+    Returns: Optimal trades per year. 0 if cost exceeds edge.
+    """
+    if cost_per_trade_pct <= 0:
+        return float("inf")
+    if edge_annual_pct <= 0:
+        return 0.0
+    return edge_annual_pct / (2.0 * cost_per_trade_pct)
+
+
+def regime_adjusted_budget(
+    regime: str,
+    base_budget: TurnoverBudget = DEFAULT_BUDGET,
+) -> TurnoverBudget:
+    """Adjust turnover budget based on market regime.
+
+    Crisis = 50% of normal (preserve capital, fewer trades).
+    Elevated = 70% of normal.
+    Recovery = 90% of normal.
+    Low vol grind / Normal = 100%.
+    """
+    multipliers = {
+        "CRISIS": 0.50,
+        "ELEVATED": 0.70,
+        "RECOVERY": 0.90,
+        "LOW_VOL_GRIND": 1.00,
+        "NORMAL": 1.00,
+    }
+    mult = multipliers.get(regime, 0.80)  # Unknown regime = conservative
+
+    return TurnoverBudget(
+        daily_limit_trades=max(1, int(base_budget.daily_limit_trades * mult)),
+        weekly_turnover_pct=base_budget.weekly_turnover_pct * mult,
+        annual_turnover_pct=base_budget.annual_turnover_pct * mult,
+    )
+
+
 if __name__ == "__main__":
     import json
     from dataclasses import asdict

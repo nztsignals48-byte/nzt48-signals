@@ -174,6 +174,12 @@ pub enum VetoReason {
     RiskPerTradeExceeded { risk_pct: u32 },
     /// Book 43: Structural tradability score too low (poor spread/vol/liquidity).
     StructuralScoreTooLow { score: u32 },
+    /// Book 7: Session exposure limit breached (Asia/Europe/US/Overlap).
+    SessionExposureExceeded { session: String, exposure_pct: u32, limit_pct: u32 },
+    /// Book 85: Regime-scaled daily loss limit breached (CHECK 37).
+    RegimeDailyLossLimitBreached { drawdown_pct: u32, limit_pct: i32 },
+    /// Book 85: Regime-scaled weekly loss limit breached (CHECK 38).
+    RegimeWeeklyLossLimitBreached { drawdown_pct: u32, limit_pct: i32 },
 }
 
 /// Python-visible wrapper for VetoReason (simplified for FFI).
@@ -375,6 +381,18 @@ impl From<&VetoReason> for PyVetoReason {
             VetoReason::StructuralScoreTooLow { score } => Self {
                 name: "StructuralScoreTooLow".into(),
                 detail: format!("{score}/100"),
+            },
+            VetoReason::SessionExposureExceeded { session, exposure_pct, limit_pct } => Self {
+                name: "SessionExposureExceeded".into(),
+                detail: format!("{session}: {exposure_pct}% (limit {limit_pct}%)"),
+            },
+            VetoReason::RegimeDailyLossLimitBreached { drawdown_pct, limit_pct } => Self {
+                name: "RegimeDailyLossLimitBreached".into(),
+                detail: format!("drawdown={:.2}% (limit={}%)", *drawdown_pct as f64 / 100.0, limit_pct),
+            },
+            VetoReason::RegimeWeeklyLossLimitBreached { drawdown_pct, limit_pct } => Self {
+                name: "RegimeWeeklyLossLimitBreached".into(),
+                detail: format!("drawdown={:.2}% (limit={}%)", *drawdown_pct as f64 / 100.0, limit_pct),
             },
         }
     }
