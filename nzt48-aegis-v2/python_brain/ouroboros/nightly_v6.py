@@ -2934,15 +2934,28 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Health check failed (non-fatal): %s", e)
 
-    # Step 5.42: RL Portfolio Agent — Shadow mode tracking (Book 33)
+    # Step 5.42: Constrained PPO Shadow Mode (Books 33, 213)
+    # Evolutionary parameter optimizer that proposes adjustments and tracks
+    # proposed-vs-actual performance. SHADOW ONLY — never writes live config.
     try:
-        from python_brain.rl_agent.portfolio_env import check_promotion_readiness, ShadowTracker
-        # Shadow tracker is persistent; this step just reports current status
-        log.info("RL agent: shadow mode (authority=0, observe only)")
+        from python_brain.ml.constrained_ppo import run_nightly_ppo
+        _ppo_result = run_nightly_ppo(metrics, recommendations)
+        if _ppo_result:
+            recommendations["ppo_shadow"] = _ppo_result
+            _proposal = _ppo_result.get("proposal", {})
+            _comparison = _ppo_result.get("shadow_comparison", {})
+            log.info("PPO shadow: proposed %d param adjustments, shadow_active=%s, gen=%d",
+                     len(_proposal.get("deltas", {})),
+                     _comparison.get("shadow_active", False),
+                     _ppo_result.get("generation", 0))
+            # Log individual proposals for visibility
+            for _pk, _pv in _proposal.get("deltas", {}).items():
+                if abs(_pv) > 0.001:
+                    log.info("  PPO proposes: %s %+.4f", _pk, _pv)
     except ImportError:
-        log.info("RL agent not installed — skipping")
+        log.info("Constrained PPO not installed — skipping")
     except Exception as e:
-        log.warning("RL agent check failed (non-fatal): %s", e)
+        log.warning("PPO shadow mode failed (non-fatal): %s", e)
 
     # Step 5.43: Synthetic Data — Generator calibration + validation (Book 34)
     try:

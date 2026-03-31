@@ -20,6 +20,7 @@ except ImportError:
 try:
     from python_brain.ml.constrained_ppo import (
         ConstrainedPPOAgent, PPOConfig, PolicyNetwork, ValueNetwork,
+        PPOParamOptimizer, run_nightly_ppo, PARAM_BOUNDS, PARAM_NAMES,
     )
 except ImportError:
     pass
