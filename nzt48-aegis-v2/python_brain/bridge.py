@@ -7046,6 +7046,12 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 best["bayes_posterior"] = agg_result.posterior_prob
                 best["bayes_n_agree"] = agg_result.n_sources_agree
                 best["bayes_n_total"] = agg_result.n_sources_total
+                # Book 209: Use Bayesian Kelly when it's more conservative than naive
+                if hasattr(agg_result, 'kelly_fraction') and agg_result.kelly_fraction > 0:
+                    _naive_kelly = best.get("kelly_fraction", 0.20)
+                    # Take the MINIMUM of Bayesian and naive Kelly (conservative)
+                    best["kelly_fraction"] = min(_naive_kelly, agg_result.kelly_fraction)
+                    best["bayes_kelly"] = agg_result.kelly_fraction
         except ImportError:
             pass  # Module not deployed yet
         except Exception as bayes_err:
@@ -7818,6 +7824,26 @@ def main():
                     "ticker_id": msg.get("ticker_id", -1),
                     "error": f"{type(e).__name__}: {e}",
                 }
+
+            # ── BOOK 207: SCHEMA VALIDATION AT OUTPUT BOUNDARY ──
+            # Validate every signal before it reaches Rust. Catch NaN, missing fields,
+            # wrong types. On validation failure → demote to no_signal (fail-safe).
+            if response.get("type") == "signal":
+                try:
+                    from python_brain.validation.signal_schema import NormalizedSignal
+                    _validated = NormalizedSignal.from_dict(response)
+                    _validated.validate()
+                    response = _validated.to_dict()
+                except ValueError as _schema_err:
+                    sys.stderr.write(f"SCHEMA_REJECT: tid={response.get('ticker_id')} {_schema_err}\n")
+                    sys.stderr.flush()
+                    response = {"type": "no_signal", "ticker_id": response.get("ticker_id", -1),
+                                "reason": f"schema_validation: {_schema_err}"}
+                except ImportError:
+                    pass  # Fail-open if module not deployed
+                except Exception:
+                    pass  # Fail-open on unexpected errors
+
             print(json.dumps(response), flush=True)
 
         elif msg_type == "apex_snapshot":
@@ -7834,6 +7860,19 @@ def main():
                     "ticker_id": msg.get("ticker_id", -1),
                     "error": f"{type(e).__name__}: {e}",
                 }
+            # Book 207: Schema validation for apex signals too
+            if response.get("type") == "signal":
+                try:
+                    from python_brain.validation.signal_schema import NormalizedSignal
+                    _v = NormalizedSignal.from_dict(response)
+                    _v.validate()
+                    response = _v.to_dict()
+                except ValueError as _se:
+                    sys.stderr.write(f"SCHEMA_REJECT[apex]: tid={response.get('ticker_id')} {_se}\n")
+                    sys.stderr.flush()
+                    response = {"type": "no_signal", "ticker_id": response.get("ticker_id", -1)}
+                except Exception:
+                    pass
             print(json.dumps(response), flush=True)
 
         elif msg_type == "exit":

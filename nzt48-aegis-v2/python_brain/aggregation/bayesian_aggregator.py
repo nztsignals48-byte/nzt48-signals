@@ -138,8 +138,9 @@ class AggregatedSignal:
     direction: str  # "long", "short", "no_trade"
     posterior_prob: float  # P(profitable | all signals)
     confidence: int  # 0-100 mapped from posterior
-    n_sources_agree: int
-    n_sources_total: int
+    kelly_fraction: float = 0.0  # Book 209: optimal Kelly fraction from posterior
+    n_sources_agree: int = 0
+    n_sources_total: int = 0
     source_contributions: Dict[str, float] = field(default_factory=dict)
 
 
@@ -237,10 +238,26 @@ class BayesianAggregator:
         # 0.55 → 55, 0.70 → 70, 0.85 → 85
         confidence = int(posterior_prob * 100)
 
+        # ── BOOK 209: POSTERIOR → KELLY MAPPING ──
+        # Kelly criterion: f* = (p * b - q) / b where p=win_prob, q=1-p, b=avg_win/avg_loss
+        # Simplified for symmetric payoffs (b=1): f* = 2p - 1
+        # Then quarter-Kelly for safety: f* / 4
+        # Only size when posterior > 55% (meaningful edge)
+        if direction in ("long", "short") and posterior_prob > 0.55:
+            # Full Kelly: f* = 2p - 1 (for even-money bets)
+            full_kelly = 2.0 * posterior_prob - 1.0
+            # Quarter-Kelly for compounding safety (Book 180)
+            quarter_kelly = full_kelly * 0.25
+            # Clamp to [0.01, 0.25] — never risk more than 25% or less than 1%
+            kelly = max(0.01, min(0.25, quarter_kelly))
+        else:
+            kelly = 0.0
+
         return AggregatedSignal(
             direction=direction,
             posterior_prob=round(posterior_prob, 4),
             confidence=confidence,
+            kelly_fraction=round(kelly, 4),
             n_sources_agree=long_count if direction == "long" else total - long_count,
             n_sources_total=total,
             source_contributions=contributions,

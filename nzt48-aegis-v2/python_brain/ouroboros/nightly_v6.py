@@ -3891,6 +3891,50 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Cost analysis failed (non-fatal): %s", e)
 
+    # Step N-LGB: LightGBM Entry Classifier Training (Book 23)
+    # Train on cumulative trade history once we have 200+ trades.
+    # Exports ONNX model to /app/data/models/entry_classifier.onnx for bridge.py.
+    try:
+        _lgb_min_trades = 200  # Minimum sample size for meaningful training
+        _all_trades_count = mem.total_trades if mem else 0
+        if _all_trades_count >= _lgb_min_trades:
+            from python_brain.strategies.entry_classifier import EntryClassifier
+            # Build training DataFrame from WAL events (historical features + outcomes)
+            _lgb_rows = []
+            for _t in trades:
+                _feat = {}
+                # Extract features from trade metadata (bridge.py stores these in WAL)
+                if hasattr(_t, 'features') and _t.features:
+                    _feat = _t.features
+                elif hasattr(_t, 'metadata') and isinstance(_t.metadata, dict):
+                    _feat = _t.metadata.get('features', {})
+                if _feat and len(_feat) >= 10:  # At least 10 features available
+                    _feat["outcome"] = 1 if (hasattr(_t, 'pnl') and _t.pnl > 0) else 0
+                    _lgb_rows.append(_feat)
+
+            if len(_lgb_rows) >= _lgb_min_trades:
+                try:
+                    import pandas as pd
+                    _lgb_df = pd.DataFrame(_lgb_rows)
+                    _lgb_metrics = EntryClassifier.train(_lgb_df)
+                    recommendations["lgbm_training"] = _lgb_metrics
+                    log.info("LightGBM trained: AUC=%.3f prec=%.3f recall=%.3f (n=%d)",
+                             _lgb_metrics.get("auc", 0), _lgb_metrics.get("precision", 0),
+                             _lgb_metrics.get("recall", 0), len(_lgb_rows))
+                except ImportError as _lgb_imp:
+                    log.info("LightGBM deps missing: %s — skipping training", _lgb_imp)
+                except ValueError as _lgb_val:
+                    log.info("LightGBM training skipped: %s", _lgb_val)
+            else:
+                log.info("LightGBM: %d feature-rich trades < %d minimum — skipping",
+                         len(_lgb_rows), _lgb_min_trades)
+        else:
+            log.info("LightGBM: %d total trades < %d minimum — skipping", _all_trades_count, _lgb_min_trades)
+    except ImportError:
+        log.info("LightGBM module not available — skipping")
+    except Exception as e:
+        log.warning("LightGBM training failed (non-fatal): %s", e)
+
     # Step N-EARN: Fetch next earnings dates for single-stock 3x ETPs (Book 40)
     # Writes /app/data/earnings_dates.json consumed by bridge.py earnings gate.
     try:
