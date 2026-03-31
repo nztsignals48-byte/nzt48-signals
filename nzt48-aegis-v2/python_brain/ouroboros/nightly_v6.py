@@ -766,6 +766,15 @@ def _avg_metric(records: List[Dict[str, Any]], key: str) -> float:
     return sum(vals) / len(vals) if vals else 0.0
 
 
+def _group_trades_by_strategy(trades) -> Dict[str, list]:
+    """Group a list of TradeRecord objects by their strategy field."""
+    groups: Dict[str, list] = {}
+    for t in trades:
+        strat = getattr(t, "strategy", None) or "unknown"
+        groups.setdefault(strat, []).append(t)
+    return groups
+
+
 # ---------------------------------------------------------------------------
 # 4b. Ticker Scoreboard — Promotion / Demotion / Kill
 # ---------------------------------------------------------------------------
@@ -3676,6 +3685,140 @@ def run_nightly() -> int:
             system_memory["gemini_consecutive_negative"] = 0
     except Exception as e:
         log.warning("Gemini feedback failed (non-fatal): %s", e)
+
+    # Step N8: Deflated Sharpe Ratio validation (Book 192)
+    try:
+        import numpy as _np_dsr
+        from scipy import stats as _scipy_stats
+        _dsr_results = {}
+        _n_strategies_tested = len(set(t.strategy for t in trades if t.strategy))
+        _n_strategies_tested = max(_n_strategies_tested, 1)
+
+        for strat_name, strat_trades in _group_trades_by_strategy(trades).items():
+            if len(strat_trades) < 30:
+                continue
+            returns = [t.pnl / max(abs(t.entry_price * t.qty), 1) for t in strat_trades]
+            if not returns:
+                continue
+            returns = _np_dsr.array(returns)
+            sr = returns.mean() / max(returns.std(), 1e-8) * _np_dsr.sqrt(252)
+            T = len(returns)
+            skew = float(_scipy_stats.skew(returns))
+            kurt = float(_scipy_stats.kurtosis(returns))
+            # DSR formula: SR* = SR - sqrt(V[SR]) * Phi^-1(1 - 1/N)
+            # V[SR] = (1 + 0.5*SR^2 - skew*SR + (kurt-3)/4 * SR^2) / T
+            var_sr = (1 + 0.5 * sr**2 - skew * sr + (kurt - 3) / 4 * sr**2) / T
+            # Haircut for multiple testing
+            expected_max_sr = _scipy_stats.norm.ppf(1 - 1 / _n_strategies_tested) * _np_dsr.sqrt(var_sr)
+            dsr = (sr - expected_max_sr) / max(_np_dsr.sqrt(var_sr), 1e-8)
+            p_value = 1 - float(_scipy_stats.norm.cdf(dsr))
+            _dsr_results[strat_name] = {
+                "sharpe": round(sr, 3),
+                "deflated_sharpe": round(dsr, 3),
+                "p_value": round(p_value, 4),
+                "n_trials": _n_strategies_tested,
+                "n_trades": len(strat_trades),
+                "significant": p_value < 0.05,
+            }
+            if p_value >= 0.05:
+                log.warning("DSR: %s Sharpe %.2f NOT significant (p=%.3f, %d trials)",
+                           strat_name, sr, p_value, _n_strategies_tested)
+
+        if _dsr_results:
+            _dsr_path = "/app/data/deflated_sharpe.json"
+            with open(_dsr_path, "w") as f:
+                json.dump(_dsr_results, f, indent=2)
+            recommendations["deflated_sharpe"] = _dsr_results
+            log.info("DSR validation: %d strategies, %d significant",
+                    len(_dsr_results), sum(1 for v in _dsr_results.values() if v["significant"]))
+    except ImportError:
+        log.info("scipy not available — DSR validation skipped")
+    except Exception as e:
+        log.warning("DSR validation failed (non-fatal): %s", e)
+
+    # Step N9: Cost calculator with per-trade decomposition (Book 217)
+    # Mega Audit: true P&L was -297 GBP vs reported -6.79 GBP.
+    # TRUE P&L = gross_pnl - commission - half_spread_entry - half_spread_exit - slippage - borrowing_cost - vol_drag
+    try:
+        _cost_results = {"per_trade": [], "per_strategy": {}, "viability_matrix": {}}
+        _total_gross = 0.0
+        _total_costs = 0.0
+
+        for t in trades:
+            gross_pnl = t.gross_pnl if t.gross_pnl != 0 else t.pnl
+            entry_value = abs(t.entry_price * t.qty)
+            exit_value = abs(t.exit_price * t.qty)
+            commission = t.total_commission if t.total_commission > 0 else 1.70  # IBKR GBP default per side
+            spread_entry = (t.spread_at_entry_pct if t.spread_at_entry_pct > 0 else 0.15) / 100 * entry_value / 2
+            spread_exit = (t.spread_at_exit_pct if t.spread_at_exit_pct > 0 else 0.15) / 100 * exit_value / 2
+            slippage = 0.05 / 100 * entry_value
+            leverage = getattr(t, "leverage", 3)
+            holding_hours = t.hold_time_mins / 60.0
+            # Vol drag for 3x ETPs: ~0.1% per day per unit leverage
+            vol_drag = 0.001 * leverage * (holding_hours / 24) * entry_value if leverage >= 3 else 0.0
+
+            total_cost = commission * 2 + spread_entry + spread_exit + slippage + vol_drag
+            net_pnl = gross_pnl - total_cost
+
+            _cost_results["per_trade"].append({
+                "ticker": t.ticker,
+                "strategy": t.strategy,
+                "gross_pnl": round(gross_pnl, 2),
+                "commission": round(commission * 2, 2),
+                "spread_cost": round(spread_entry + spread_exit, 2),
+                "slippage": round(slippage, 2),
+                "vol_drag": round(vol_drag, 2),
+                "total_cost": round(total_cost, 2),
+                "net_pnl": round(net_pnl, 2),
+            })
+            _total_gross += gross_pnl
+            _total_costs += total_cost
+
+        # Per-strategy aggregation
+        _strat_costs: Dict[str, Dict[str, Any]] = {}
+        for td in _cost_results["per_trade"]:
+            s = td["strategy"]
+            if s not in _strat_costs:
+                _strat_costs[s] = {"gross": 0.0, "costs": 0.0, "n": 0, "net": 0.0}
+            _strat_costs[s]["gross"] += td["gross_pnl"]
+            _strat_costs[s]["costs"] += td["total_cost"]
+            _strat_costs[s]["net"] += td["net_pnl"]
+            _strat_costs[s]["n"] += 1
+
+        for s, v in _strat_costs.items():
+            avg_cost = v["costs"] / max(v["n"], 1)
+            avg_gross = v["gross"] / max(v["n"], 1)
+            # Minimum trade size for positive expectancy: size where avg_gross > avg_cost
+            min_size = avg_cost / max(abs(avg_gross / 100.0), 0.001) if avg_gross > 0 else float('inf')
+            _cost_results["per_strategy"][s] = {
+                "total_gross": round(v["gross"], 2),
+                "total_costs": round(v["costs"], 2),
+                "total_net": round(v["net"], 2),
+                "avg_cost_per_trade": round(avg_cost, 2),
+                "cost_drag_pct": round(v["costs"] / max(abs(v["gross"]), 1) * 100, 1),
+                "n_trades": v["n"],
+                "min_trade_size_for_positive": round(min_size, 0) if min_size != float('inf') else None,
+                "viable_at_10k": v["net"] > 0,
+            }
+
+        # Viability summary
+        _cost_results["summary"] = {
+            "total_gross_pnl": round(_total_gross, 2),
+            "total_costs": round(_total_costs, 2),
+            "total_net_pnl": round(_total_gross - _total_costs, 2),
+            "cost_as_pct_of_gross": round(_total_costs / max(abs(_total_gross), 1) * 100, 1),
+            "hidden_cost_gap": round(_total_costs - sum(t.total_commission * 2 for t in trades), 2),
+        }
+
+        _cost_path = "/app/data/cost_analysis.json"
+        with open(_cost_path, "w") as f:
+            json.dump(_cost_results, f, indent=2)
+        recommendations["cost_analysis"] = _cost_results["summary"]
+        log.info("Cost analysis: gross=%.2f costs=%.2f net=%.2f (%.1f%% drag)",
+                 _total_gross, _total_costs, _total_gross - _total_costs,
+                 _cost_results["summary"]["cost_as_pct_of_gross"])
+    except Exception as e:
+        log.warning("Cost analysis failed (non-fatal): %s", e)
 
     # ════════════════════════════════════════════════════════════════════════
 

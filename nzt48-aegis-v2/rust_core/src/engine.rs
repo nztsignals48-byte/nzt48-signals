@@ -323,8 +323,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub pending_exit_notifications: Vec<(u32, f64, f64, String)>, // (ticker_id, exit_price, pnl, strategy)
     /// Book 39: Cache exit hints from BrainSignal between order submission and fill.
     /// Consumed when creating PositionState on live fill.
-    pub pending_exit_hints: HashMap<TickerId, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>)>,
-    // Fields: (max_hold_hours, exit_urgency_ramp_hours, suggested_initial_stop_atr_mult, suggested_rung3_atr, min_profit_target_pct)
+    pub pending_exit_hints: HashMap<TickerId, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<String>)>,
+    // Fields: (max_hold_hours, exit_urgency_ramp_hours, suggested_initial_stop_atr_mult, suggested_rung3_atr, min_profit_target_pct, exit_trail_bias)
     /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
     halted_tickers: std::collections::HashSet<TickerId>,
     /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.
@@ -1860,7 +1860,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     hurst: sig.hurst,
                     adx: sig.adx,
                     rvol: sig.rvol,
-                    vol_slope: 0.0,
+                    vol_slope: sig.vol_slope,
                     spread_pct,
                     price_at_reject: tick.last,
                 });
@@ -1895,12 +1895,25 @@ impl<B: BrokerAdapter> Engine<B> {
         } else {
             kelly_fraction
         };
+        // Book 180: Quarter-Kelly for leveraged ETPs. The optimal fraction for a Lx leveraged
+        // product is f* = base_kelly / L, because L amplifies both returns AND variance.
+        // 3x ETPs: a 2% underlying move = 6% on the ETP; Kelly must account for this.
+        let leverage = self.config.contracts.get(tid.0 as usize)
+            .map(|c| c.leverage as u32).unwrap_or(1);
+        let leverage_adj_kelly = if leverage >= 3 {
+            sizing_kelly / leverage as f64  // e.g., Kelly/3 for 3x ETPs
+        } else if leverage >= 2 {
+            sizing_kelly / (leverage as f64 * 0.75) // Slightly less aggressive for 2x
+        } else {
+            sizing_kelly
+        };
         let trade_value_gbp = if self.simulation_mode {
             // AUDIT-FIX (2026-03-18): Kelly × equity — institutional sizing.
             // Half-Kelly applied above for <250 trades (bootstrap phase).
             // FIXED (Sprint 5, SK-01): Use equity_for_sizing (entry-based) not marked equity.
             // Prevents undersizing after unrealised losses.
-            let notional = sizing_kelly * self.portfolio.equity_for_sizing;
+            // Book 180: Use leverage-adjusted Kelly for 3x ETPs.
+            let notional = leverage_adj_kelly * self.portfolio.equity_for_sizing;
             notional.clamp(100.0, self.portfolio.equity_for_sizing * 0.25) // Floor £100, cap 25%
         } else {
             tick.ask * shares_hint.max(1) as f64
@@ -2124,6 +2137,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 suggested_initial_stop_atr_mult: sig.suggested_initial_stop_atr_mult,
                 suggested_rung3_atr: sig.suggested_rung3_atr,
                 min_profit_target_pct: sig.min_profit_target_pct,
+                exit_trail_bias: sig.exit_trail_bias.clone(),
                 partial_exits_done: 0,
             });
 
@@ -2173,6 +2187,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 suggested_initial_stop_atr_mult: sig.suggested_initial_stop_atr_mult,
                 suggested_rung3_atr: sig.suggested_rung3_atr,
                 min_profit_target_pct: sig.min_profit_target_pct,
+                exit_trail_bias: sig.exit_trail_bias.clone(),
                 partial_exits_done: 0,
             };
             self.portfolio.add_position(pos_copy);
@@ -2188,6 +2203,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 sig.suggested_initial_stop_atr_mult,
                 sig.suggested_rung3_atr,
                 sig.min_profit_target_pct,
+                sig.exit_trail_bias.clone(),
             ));
             if let Err(e) = self
                 .broker
@@ -3183,7 +3199,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     self.wal_compressor.record_event();
                     // Book 39: Retrieve cached exit hints from pending_exit_hints
                     let hints = self.pending_exit_hints.remove(ticker_id)
-                        .unwrap_or((None, None, None, None, None));
+                        .unwrap_or((None, None, None, None, None, None));
                     // AUDIT-FIX: Use per-signal ATR mult for initial stop (Book 39)
                     let atr_val = self.bar_history.get(ticker_id).map(|h| h.atr(14)).unwrap_or(0.0);
                     let effective_atr_mult = hints.2 // suggested_initial_stop_atr_mult
@@ -3220,6 +3236,7 @@ impl<B: BrokerAdapter> Engine<B> {
                         suggested_initial_stop_atr_mult: hints.2,
                         suggested_rung3_atr: hints.3,
                         min_profit_target_pct: hints.4,
+                        exit_trail_bias: hints.5,
                         partial_exits_done: 0,
                     };
                     self.portfolio.add_position(pos.clone());

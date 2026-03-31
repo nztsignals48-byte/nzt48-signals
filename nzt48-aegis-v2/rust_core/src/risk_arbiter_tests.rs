@@ -38,6 +38,7 @@ mod tests {
                 suggested_initial_stop_atr_mult: None,
                 suggested_rung3_atr: None,
                 min_profit_target_pct: None,
+                exit_trail_bias: None,
                 partial_exits_done: 0,
         }
     }

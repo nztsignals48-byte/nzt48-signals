@@ -174,6 +174,18 @@ impl ExitStrategy for ChandelierStrategy {
         // ATR floor: minimum atr_floor_pct of entry price to prevent zombie positions when ATR=0 on cold start
         let atr = atr.max(pos.avg_entry * self.atr_floor_pct);
         let rung = self.compute_rung(pos, high, atr);
+        // Book 39: Apply exit_trail_bias from BrainSignal — "wide" widens stops 1.3x,
+        // "tight" tightens 0.7x. Trending regimes should let winners run (wide),
+        // mean-reverting regimes should capture quickly (tight).
+        let bias_mult = match pos.exit_trail_bias.as_deref() {
+            Some("wide") => 1.3,
+            Some("tight") => 0.7,
+            _ => 1.0,
+        };
+        // Also apply per-signal rung3 override if present
+        let r3 = pos.suggested_rung3_atr.unwrap_or(self.rung3_trail_atr) * bias_mult;
+        let r4 = self.rung4_trail_atr * bias_mult;
+        let r5 = self.rung5_trail_atr * bias_mult;
         match rung {
             // Rung 0: not yet at entry rung — keep initial stop
             0 => pos.stop_price,
@@ -194,13 +206,12 @@ impl ExitStrategy for ChandelierStrategy {
                 }
                 pos.avg_entry + fee_amount
             }
-            // Rung 3: +4% gain. Trail 1.0x ATR below peak. NO partial sell.
-            3 => high - self.rung3_trail_atr * atr,
-            // Rung 4: +6% gain. Trail 0.75x ATR below peak. NO partial sell.
-            4 => high - self.rung4_trail_atr * atr,
-            // Rung 5+: +8%+ gain. Trail 0.5x ATR below peak. NO partial sell.
-            // For every additional +2%, stop stays at 0.5x ATR below peak.
-            _ => high - self.rung5_trail_atr * atr,
+            // Rung 3: Trail r3 ATR below peak (bias-adjusted). NO partial sell.
+            3 => high - r3 * atr,
+            // Rung 4: Trail r4 ATR below peak (bias-adjusted). NO partial sell.
+            4 => high - r4 * atr,
+            // Rung 5+: Trail r5 ATR below peak (bias-adjusted). NO partial sell.
+            _ => high - r5 * atr,
         }
     }
 
@@ -413,7 +424,6 @@ impl ExitEngine {
 
         // Priority 2.7: MAX HOLD HOURS TIME-STOP (Book 39/94)
         // Force exit if position held past strategy-specific max holding period.
-        // Also applies urgency ramp: tighten stops progressively after ramp_hours.
         if let Some(max_hours) = position.max_hold_hours {
             let hold_hours = position.active_trading_ticks as f64 / 720.0; // 720 ticks/hour at 5s
             if hold_hours > max_hours {
@@ -424,6 +434,32 @@ impl ExitEngine {
                     limit_price: None,
                     tif: TimeInForce::Day,
                 });
+            }
+        }
+
+        // Priority 2.6: URGENCY RAMP — progressively tighten stops after ramp_hours (Book 39/94).
+        // Between ramp_hours and max_hold_hours, linearly reduce the trailing ATR multiplier
+        // from 1.0x to 0.3x. This accelerates exits on positions approaching their time limit
+        // without the cliff-edge of a hard time-stop.
+        if !is_carried {
+            if let (Some(ramp_hours), Some(max_hours)) = (position.exit_urgency_ramp_hours, position.max_hold_hours) {
+                let hold_hours = position.active_trading_ticks as f64 / 720.0;
+                if hold_hours > ramp_hours && hold_hours <= max_hours {
+                    // Linear ramp from 1.0 at ramp_hours to 0.3 at max_hours
+                    let ramp_span = (max_hours - ramp_hours).max(0.1);
+                    let urgency_frac = ((hold_hours - ramp_hours) / ramp_span).clamp(0.0, 1.0);
+                    let urgency_mult = 1.0 - urgency_frac * 0.7; // 1.0 → 0.3
+                    let urgency_stop = position.highest_high - urgency_mult * atr;
+                    if current_price <= urgency_stop && urgency_stop > position.stop_price {
+                        checks.push(ExitCheck {
+                            reason: ExitReason::TimeStop,
+                            priority: ExitPriority::TimeStop,
+                            order_type: ExitOrderType::LimitAtStop,
+                            limit_price: Some(urgency_stop),
+                            tif: TimeInForce::Day,
+                        });
+                    }
+                }
             }
         }
 

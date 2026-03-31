@@ -147,6 +147,9 @@ pub struct PositionState {
     pub suggested_rung3_atr: Option<f64>,
     /// Minimum profit target % (don't advance to breakeven below this).
     pub min_profit_target_pct: Option<f64>,
+    /// Exit trail bias: "wide" (trending, let run), "tight" (MR, capture), "neutral".
+    /// Consumed by Chandelier to adjust rung3/4/5 multipliers.
+    pub exit_trail_bias: Option<String>,
     /// Number of partial exits completed (0, 1, 2 max).
     pub partial_exits_done: u8,
 }
@@ -188,6 +191,7 @@ impl PositionState {
             suggested_initial_stop_atr_mult: None,
             suggested_rung3_atr: None,
             min_profit_target_pct: None,
+            exit_trail_bias: None,
             partial_exits_done: 0,
         }
     }

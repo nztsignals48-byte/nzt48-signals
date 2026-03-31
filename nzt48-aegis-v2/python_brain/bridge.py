@@ -2028,7 +2028,9 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
             _eq_cap = msg.get("equity", 10000)
             _existing_pos_value = 0
             _sym_cap = ticker_symbols.get(ticker_id, "")
-            for _p in msg.get("open_positions", []):
+            _open_pos = msg.get("open_positions", [])
+            _open_pos = _open_pos if isinstance(_open_pos, list) else []
+            for _p in _open_pos:
                 if _p.get("symbol", "") == _sym_cap:
                     _existing_pos_value += _p.get("market_value_gbp", 0)
             if _eq_cap > 0 and _existing_pos_value / _eq_cap > 0.20:
@@ -5231,6 +5233,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     try:
         from python_brain.execution.true_leverage import TrueLeverageCalculator
         _positions = msg.get("open_positions", [])
+        _positions = _positions if isinstance(_positions, list) else []
         if _positions:
             _tlc = TrueLeverageCalculator(_positions)
             _true_lev = _tlc.total_effective_leverage()
@@ -5480,8 +5483,10 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         if not hasattr(_apply_adjustments, "_grm"):
             _apply_adjustments._grm = GapRiskMonitor()
         _grm = _apply_adjustments._grm
+        _gap_pos = msg.get("open_positions", [])
+        _gap_pos = _gap_pos if isinstance(_gap_pos, list) else []
         _gap_exp = _grm.assess_overnight_risk(
-            positions=msg.get("open_positions", []),
+            positions=_gap_pos,
             vix=msg.get("vix", 20),
         )
         if _gap_exp and _gap_exp.get("reduce_sizing"):
@@ -5552,7 +5557,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # ── PORTFOLIO HEAT / CONCENTRATION CHECK ──
     # If total open positions exceed 4 (for £10K account), reduce new entries.
     # Capital is finite — each additional position fragments edge.
-    _open_pos_count = len(msg.get("open_positions", []))
+    _open_pos_raw = msg.get("open_positions", [])
+    _open_pos_list = _open_pos_raw if isinstance(_open_pos_raw, list) else []
+    _open_pos_count = len(_open_pos_list) if isinstance(_open_pos_raw, list) else int(_open_pos_raw) if isinstance(_open_pos_raw, (int, float)) else 0
     _equity = msg.get("equity", 10000)
     _max_positions = max(3, int(_equity / 3000))  # Scale: £10K=3, £25K=8, £50K=16
     if _open_pos_count >= _max_positions:
@@ -5574,7 +5581,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # ── CROSS-ASSET CORRELATION HEAT ──
     # If adding a new position that's highly correlated with existing positions,
     # reduce sizing to avoid concentration risk.
-    _open_symbols = [p.get("symbol", "") for p in msg.get("open_positions", []) if p.get("symbol")]
+    _open_symbols = [p.get("symbol", "") for p in _open_pos_list if isinstance(p, dict) and p.get("symbol")]
     _new_sym = ticker_symbols.get(ticker_id, "")
     if _new_sym and _open_symbols:
         # Simple sector correlation check: same prefix = same sector
@@ -5927,6 +5934,52 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         except Exception:
             pass  # Timeout/error = proceed without debate (fail-open)
 
+    # ── BOOKS 193, 198: BULLISH BIAS CORRECTION (Adjustment Layer 87) ──
+    # LLMs recommend BUY 2-3x more than SELL. Over-weight bearish evidence,
+    # under-weight bullish signals to correct for this systematic bias.
+    try:
+        n_long = sum(1 for s in all_signals if s.get("direction") == "Long")
+        n_short = sum(1 for s in all_signals if s.get("direction") == "Short")
+        n_total = n_long + n_short
+        ls_ratio = n_long / max(n_short, 1)
+
+        best["long_short_ratio"] = round(ls_ratio, 2)
+        best["bullish_bias_corrected"] = False
+
+        if best.get("direction") == "Long" and n_total > 0:
+            penalty = 0
+            if ls_ratio >= 3.0:
+                penalty = 10
+            elif ls_ratio >= 2.0:
+                penalty = 5
+
+            if penalty > 0:
+                old_conf = best["confidence"]
+                best["confidence"] = max(0, best["confidence"] - penalty)
+                best["bullish_bias_corrected"] = True
+                sys.stderr.write(
+                    f"BULLISH_BIAS_CORRECTION: tid={ticker_id} "
+                    f"L/S={n_long}/{n_short} ratio={ls_ratio:.1f} "
+                    f"penalty=-{penalty} conf={old_conf}->{best['confidence']}\n"
+                )
+                sys.stderr.flush()
+
+        # Boost rare Short signals — if < 25% of total are Short
+        if best.get("direction") == "Short" and n_total > 0:
+            short_pct = n_short / n_total
+            if short_pct < 0.25:
+                old_conf = best["confidence"]
+                best["confidence"] = min(100, best["confidence"] + 3)
+                best["bullish_bias_corrected"] = True
+                sys.stderr.write(
+                    f"BULLISH_BIAS_SHORT_BOOST: tid={ticker_id} "
+                    f"short_pct={short_pct:.2f} conf={old_conf}->{best['confidence']}\n"
+                )
+                sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"BULLISH_BIAS_ERROR: tid={ticker_id} {str(e)[:120]}\n")
+        sys.stderr.flush()
+
     # P5: Per-strategy signal tracking for validation metrics
     strat = best.get("strategy", "unknown")
     _strategy_signal_counts[strat] += 1
@@ -6153,6 +6206,24 @@ def process_tick(msg):
         else:
             best["suggested_max_hold_hours"] = 12
             best["exit_urgency_ramp_hours"] = 8
+
+        # ── BOOK 180/186: REGIME-CONDITIONAL OVERNIGHT HOLDING ──
+        # HIGH vol (VIX > 30): flatten 3x positions before close — no overnight holds.
+        # MEDIUM vol (VIX 20-30): hold only if confidence > 70.
+        # LOW vol (VIX < 20): hold if confidence > 50 (normal).
+        # This prevents catastrophic overnight gap losses in volatile regimes.
+        _vix_exit = msg.get("vix", 20)
+        if _leverage_exit >= 3 and _vix_exit > 30:
+            # HIGH VOL: Force intraday-only for 3x ETPs
+            best["suggested_max_hold_hours"] = min(best.get("suggested_max_hold_hours", 8), 6)
+            best["exit_urgency_ramp_hours"] = min(best.get("exit_urgency_ramp_hours", 4), 4)
+            best["etp_hold_rule"] = "intraday_only_high_vol"
+        elif _leverage_exit >= 3 and _vix_exit > 20:
+            # MEDIUM VOL: Shorter holds for 3x ETPs
+            if best.get("confidence", 0) < 70:
+                best["suggested_max_hold_hours"] = min(best.get("suggested_max_hold_hours", 8), 8)
+                best["exit_urgency_ramp_hours"] = min(best.get("exit_urgency_ramp_hours", 6), 5)
+                best["etp_hold_rule"] = "shortened_medium_vol"
 
         # Leverage-adjusted initial stop width: higher leverage = tighter stops
         # 3x ETPs move 3x — a 2% underlying move = 6% on the ETP
