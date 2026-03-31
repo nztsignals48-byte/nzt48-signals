@@ -2694,6 +2694,77 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Claude authority failed (non-fatal): %s", e)
 
+    # Step 5.31b: Self-Reflection Parameter Adjustment (Book 201)
+    # Uses today's metrics to auto-adjust tomorrow's parameters. This closes the
+    # feedback loop: trade → measure → adjust → trade. Bounded changes only.
+    try:
+        _refl = {}
+        _wr = metrics.win_rate if metrics else 0
+        _pf = metrics.profit_factor if metrics else 0
+        _n_trades = metrics.total_trades if metrics else 0
+
+        if _n_trades >= 3:  # Need minimum sample for meaningful adjustments
+            # 1. Win-rate-based confidence floor adjustment
+            # If WR < 40%, tighten confidence floor (require higher quality signals)
+            # If WR > 60%, loosen slightly (allow more signals through)
+            _curr_conf_floor = recommendations.get("confidence_floor", 0.65)
+            if _wr < 0.40:
+                _new_floor = min(_curr_conf_floor + 0.02, 0.80)  # Cap at 80%
+                _refl["confidence_floor_adj"] = f"{_curr_conf_floor:.2f} → {_new_floor:.2f} (WR={_wr:.1%} < 40%)"
+                recommendations["confidence_floor"] = _new_floor
+            elif _wr > 0.60 and _n_trades >= 10:
+                _new_floor = max(_curr_conf_floor - 0.01, 0.55)  # Floor at 55%
+                _refl["confidence_floor_adj"] = f"{_curr_conf_floor:.2f} → {_new_floor:.2f} (WR={_wr:.1%} > 60%)"
+                recommendations["confidence_floor"] = _new_floor
+
+            # 2. Profit-factor-based Chandelier tightness
+            # If PF < 1.0 (losing money), tighten stops (reduce trail multiplier)
+            # If PF > 2.0, can afford wider stops (more room to ride winners)
+            # Key name matches config_writer.py: chandelier_atr_mult
+            _curr_mult = recommendations.get("chandelier_atr_mult", 2.0)
+            if _pf < 1.0 and _pf > 0:
+                _new_mult = max(_curr_mult - 0.1, 1.5)  # Don't go below 1.5
+                _refl["chandelier_adj"] = f"{_curr_mult:.2f} → {_new_mult:.2f} (PF={_pf:.2f} < 1.0)"
+                recommendations["chandelier_atr_mult"] = _new_mult
+            elif _pf > 2.0 and _n_trades >= 10:
+                _new_mult = min(_curr_mult + 0.05, 3.0)  # Cap at 3.0
+                _refl["chandelier_adj"] = f"{_curr_mult:.2f} → {_new_mult:.2f} (PF={_pf:.2f} > 2.0)"
+                recommendations["chandelier_atr_mult"] = _new_mult
+
+            # 3. Drawdown-based heat reduction
+            # If max drawdown today > 3%, reduce heat limit for tomorrow
+            _max_dd = abs(metrics.max_drawdown) if metrics and hasattr(metrics, 'max_drawdown') else 0
+            if _max_dd > 3.0:
+                _curr_heat = recommendations.get("heat_limit_pct", 10.0)
+                _new_heat = max(_curr_heat - 1.0, 5.0)  # Floor at 5%
+                _refl["heat_adj"] = f"{_curr_heat:.1f}% → {_new_heat:.1f}% (DD={_max_dd:.1f}% > 3%)"
+                recommendations["heat_limit_pct"] = _new_heat
+
+            # 4. Strategy-level win rate tracking → promote/demote
+            _strat_stats = recommendations.get("strategy_performance", {})
+            _promoted = []
+            _demoted = []
+            for _sname, _sstats in _strat_stats.items():
+                _s_wr = _sstats.get("win_rate", 0.5)
+                _s_n = _sstats.get("trades", 0)
+                if _s_n >= 5 and _s_wr < 0.30:
+                    _demoted.append(f"{_sname} (WR={_s_wr:.0%}, n={_s_n})")
+                elif _s_n >= 10 and _s_wr > 0.65:
+                    _promoted.append(f"{_sname} (WR={_s_wr:.0%}, n={_s_n})")
+            if _demoted:
+                _refl["demoted_strategies"] = _demoted
+            if _promoted:
+                _refl["promoted_strategies"] = _promoted
+
+        if _refl:
+            recommendations["self_reflection"] = _refl
+            log.info("Self-reflection: %d adjustments → %s",
+                     len(_refl), ", ".join(_refl.keys()))
+        else:
+            log.info("Self-reflection: no adjustments (n=%d trades)", _n_trades)
+    except Exception as e:
+        log.warning("Self-reflection failed (non-fatal): %s", e)
+
     # Step 5.32: WAL Deterministic Replay Check (Book 92)
     try:
         from python_brain.risk.deterministic_replay import WALReplayer
@@ -3819,6 +3890,43 @@ def run_nightly() -> int:
                  _cost_results["summary"]["cost_as_pct_of_gross"])
     except Exception as e:
         log.warning("Cost analysis failed (non-fatal): %s", e)
+
+    # Step N-EARN: Fetch next earnings dates for single-stock 3x ETPs (Book 40)
+    # Writes /app/data/earnings_dates.json consumed by bridge.py earnings gate.
+    try:
+        _etp_underlyings = list(set([
+            "TSLA", "NVDA", "AMD", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSM", "MU",
+        ]))
+        _earnings_out = {}
+        try:
+            import yfinance as yf
+            for _ul in _etp_underlyings:
+                try:
+                    _tk = yf.Ticker(_ul)
+                    _cal = _tk.calendar
+                    if _cal is not None and hasattr(_cal, 'get'):
+                        _ed = _cal.get("Earnings Date")
+                        if _ed is not None and len(_ed) > 0:
+                            _earnings_out[_ul] = str(_ed[0].date()) if hasattr(_ed[0], 'date') else str(_ed[0])[:10]
+                    elif isinstance(_cal, dict) and "Earnings Date" in _cal:
+                        _ed = _cal["Earnings Date"]
+                        if _ed:
+                            _first = _ed[0] if isinstance(_ed, list) else _ed
+                            _earnings_out[_ul] = str(_first)[:10]
+                except Exception:
+                    pass  # Skip individual ticker failures
+            if _earnings_out:
+                _earn_path = os.path.join(os.environ.get("AEGIS_DATA_DIR", "/app/data"), "earnings_dates.json")
+                with open(_earn_path, "w") as f:
+                    json.dump(_earnings_out, f, indent=2)
+                log.info("Earnings dates: %d underlyings updated → %s", len(_earnings_out), _earn_path)
+                recommendations["earnings_dates"] = _earnings_out
+            else:
+                log.info("Earnings dates: yfinance returned no dates (market holiday?)")
+        except ImportError:
+            log.info("yfinance not installed — earnings date fetch skipped")
+    except Exception as e:
+        log.warning("Earnings date fetch failed (non-fatal): %s", e)
 
     # ════════════════════════════════════════════════════════════════════════
 

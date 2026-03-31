@@ -836,6 +836,42 @@ _bar_cache: dict = {}
 _blacklist_warned: set = set()
 _blacklist_warned_date: str = ""
 
+# ── BOOK 40: SINGLE-STOCK 3x ETP → UNDERLYING MAPPING (earnings protection) ──
+# Key: LSE ETP symbol → value: US underlying ticker (for earnings lookup)
+# 3x single-stock ETPs amplify earnings gaps 3.5-5x. Must exit before close on earnings day.
+_ETP_UNDERLYING_MAP = {
+    "TSL3.L": "TSLA", "3LTS.L": "TSLA", "3STS.L": "TSLA",
+    "NVD3.L": "NVDA", "3LNV.L": "NVDA", "3SNV.L": "NVDA",
+    "AMD3.L": "AMD",  "3LAM.L": "AMD",  "3SAM.L": "AMD",
+    "APL3.L": "AAPL", "3LAP.L": "AAPL", "3SAP.L": "AAPL",
+    "MSF3.L": "MSFT", "3LMS.L": "MSFT", "3SMS.L": "MSFT",
+    "GOO3.L": "GOOGL", "3LGO.L": "GOOGL",
+    "AMZ3.L": "AMZN", "3LAZ.L": "AMZN",
+    "MET3.L": "META", "3LME.L": "META",
+    "TSM3.L": "TSM",
+    "GPT3.L": "NVDA",  # GPT-themed but tracks NVDA
+    "MU2.L": "MU",     # 2x Micron
+}
+# Earnings dates cache: underlying → "YYYY-MM-DD" next earnings date
+# Updated by nightly pipeline (yfinance query). Loaded from /app/data/earnings_dates.json
+_earnings_dates: dict = {}
+_earnings_dates_loaded: bool = False
+
+def _load_earnings_dates():
+    """Load earnings dates from nightly-generated JSON."""
+    global _earnings_dates, _earnings_dates_loaded
+    if _earnings_dates_loaded:
+        return _earnings_dates
+    try:
+        _path = os.path.join(os.environ.get("AEGIS_DATA_DIR", "/app/data"), "earnings_dates.json")
+        if os.path.exists(_path):
+            with open(_path, 'r') as f:
+                _earnings_dates = json.load(f)
+        _earnings_dates_loaded = True
+    except Exception:
+        _earnings_dates_loaded = True  # Don't retry on error
+    return _earnings_dates
+
 # ============================================================================
 # Gate veto logging — tracks WHY signals were suppressed and what WOULD have happened
 # Logged to stderr as GATE_VETO lines, also written to /app/data/gate_vetoes.ndjson
@@ -2600,6 +2636,33 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
             pass
         except Exception:
             pass
+
+    # ── BOOK 40: EARNINGS PROXIMITY GATE (single-stock 3x ETPs) ──
+    # 3x single-stock ETPs amplify earnings gaps 3.5-5x.
+    # Block new entries on earnings day. Existing positions get forced max_hold_hours=0
+    # (handled downstream in the adjustment layer, not here).
+    if not _SIM_MODE:
+        try:
+            _sym = ticker_symbols.get(ticker_id, "")
+            _underlying = _ETP_UNDERLYING_MAP.get(_sym)
+            if _underlying:
+                _ed = _load_earnings_dates()
+                _next_earn = _ed.get(_underlying, "")
+                if _next_earn:
+                    from datetime import datetime as _dt_earn, timezone as _tz_earn
+                    _ts_earn = msg.get("timestamp_ns", 0)
+                    if _ts_earn > 0:
+                        _now_dt = _dt_earn.fromtimestamp(_ts_earn / 1_000_000_000, tz=_tz_earn.utc)
+                        _earn_dt = _dt_earn.strptime(_next_earn, "%Y-%m-%d").replace(tzinfo=_tz_earn.utc)
+                        _days_to = (_earn_dt.date() - _now_dt.date()).days
+                        if _days_to == 0:
+                            return False, "earnings_day_block", f"{_sym} underlying {_underlying} earnings TODAY"
+                        elif _days_to == 1:
+                            # T-1: allow entry but cap hold time to force exit before close
+                            msg["_earnings_tomorrow"] = True
+                            msg["_earnings_underlying"] = _underlying
+        except Exception:
+            pass  # Fail-open: trade if earnings lookup fails
 
     # ── REGIME-SCALED DAILY LOSS LIMIT (Book 85 + Book 15: 6-signal composite) ──
     # Uses 6-signal regime composite (VIX, credit, breadth, DXY, yield curve, SPX momentum)
@@ -5691,6 +5754,17 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 for sig in all_signals:
                     sig["max_hold_hours"] = 480  # 20 days
                     sig["etp_hold_rule"] = "3x_index_vix_low"
+
+    # ── BOOK 40: EARNINGS-TOMORROW HOLD CAP ──
+    # If underlying has earnings tomorrow, cap hold to force exit before close today.
+    # This prevents holding 3x single-stock ETPs through amplified earnings gaps.
+    if msg.get("_earnings_tomorrow"):
+        _earn_ul = msg.get("_earnings_underlying", "?")
+        for sig in all_signals:
+            _prev_hold = sig.get("max_hold_hours", 999)
+            sig["max_hold_hours"] = min(_prev_hold, 4)  # Exit within 4 hours (well before close)
+            sig["etp_hold_rule"] = f"earnings_T-1_{_earn_ul}"
+            sig["suggested_max_hold_hours"] = min(sig.get("suggested_max_hold_hours", 999), 4)
 
     # ── TURN-OF-MONTH (TOM) SIZING OVERLAY (Book 171) ──
     # Unlike the confidence boost in _generate_signals, this applies to Kelly sizing.
