@@ -54,7 +54,7 @@ MONITOR_STATUS_FILE = DATA_DIR / "monitor_status.json"
 MONITOR_HISTORY_FILE = DATA_DIR / "monitor_checks.ndjson"
 ALERT_COOLDOWN_FILE = DATA_DIR / "monitor_alert_cooldown.txt"
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://aegis-redis:6379/0")
 
 # Thresholds
 DISK_WARN_PCT = 80       # Warn when disk > 80% full

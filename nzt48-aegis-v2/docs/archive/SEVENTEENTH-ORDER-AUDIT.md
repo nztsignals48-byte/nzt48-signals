@@ -84,7 +84,7 @@
 2. **Authenticate IB Gateway with 2FA**
    ```
    1. Open http://localhost:5900 in VNC client
-   2. Log in with IB credentials (afghitman / Lema2016!!)
+   2. Log in with IB credentials ([REDACTED] / [REDACTED])
    3. Approve 2FA challenge
    4. IBC will auto-accept the connection
    5. Gateway should now be listening on port 4001

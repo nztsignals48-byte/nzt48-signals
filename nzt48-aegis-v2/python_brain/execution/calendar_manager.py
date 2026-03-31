@@ -188,3 +188,52 @@ class TradingCalendar:
         """Check if current UTC time is during US/LSE overlap session."""
         # Overlap: 14:30-16:30 UTC (standard), 13:30-15:30 during DST gap
         return time(14, 30) <= utc_time <= time(16, 30)
+
+
+def get_event_proximity(timestamp_ns: int) -> Optional[Dict]:
+    """Check proximity to known market events (open, close, auction, overlap).
+
+    Called by bridge.py to scale position size near high-impact events.
+    Near events: reduce size to avoid slippage and volatility spikes.
+
+    Args:
+        timestamp_ns: Current timestamp in nanoseconds since epoch.
+
+    Returns:
+        dict with minutes_to_event (int), impact (float 0-1),
+        event_type (str), or None if no event within 4 hours.
+    """
+    if timestamp_ns <= 0:
+        return None
+
+    try:
+        utc_dt = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc)
+    except (OSError, ValueError, OverflowError):
+        return None
+
+    utc_t = utc_dt.time()
+    current_mins = utc_t.hour * 60 + utc_t.minute
+
+    # Known high-impact events with (time_utc_minutes, impact, label)
+    events = [
+        (8 * 60, 0.7, "LSE_open"),            # 08:00 UTC
+        (14 * 60 + 30, 0.8, "US_open"),        # 14:30 UTC
+        (16 * 60 + 25, 0.6, "LSE_close"),      # 16:25 UTC (5 min before 16:30)
+        (16 * 60 + 30, 0.9, "LSE_auction"),     # 16:30 UTC closing auction
+        (20 * 60 + 55, 0.7, "US_close"),        # 20:55 UTC (5 min before 21:00)
+        (21 * 60, 0.9, "US_close_exact"),       # 21:00 UTC
+        (14 * 60 + 30, 0.5, "US_LSE_overlap"),  # 14:30 UTC overlap start
+    ]
+
+    closest = None
+    min_dist = 4 * 60  # 4 hours in minutes
+
+    for event_mins, impact, label in events:
+        dist = abs(event_mins - current_mins)
+        # Handle day wrap (e.g. current=23:50, event=00:10)
+        dist = min(dist, 24 * 60 - dist)
+        if dist < min_dist:
+            min_dist = dist
+            closest = {"minutes_to_event": dist, "impact": impact, "event_type": label}
+
+    return closest

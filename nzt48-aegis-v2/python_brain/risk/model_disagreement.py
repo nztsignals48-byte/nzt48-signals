@@ -164,3 +164,32 @@ class DisagreementEnsemble:
             "sizing_multiplier": self.sizing_multiplier(),
             "confidence_adj": self.confidence_adjustment(),
         }
+
+
+def compute_disagreement(confidences: List[float]) -> float:
+    """Compute disagreement among a list of confidence values.
+
+    Called by bridge.py when 3+ signals fire on the same tick.
+    Uses coefficient of variation (CV = std/mean) as disagreement metric.
+
+    Args:
+        confidences: List of confidence values from multiple signal generators.
+
+    Returns:
+        Float 0-1 representing disagreement level.
+        0 = perfect agreement, 1 = maximum disagreement.
+    """
+    if len(confidences) < 2:
+        return 0.0
+
+    arr = np.array(confidences, dtype=float)
+    mean_val = float(np.mean(arr))
+
+    if mean_val <= 0:
+        return 1.0
+
+    std_val = float(np.std(arr, ddof=1))
+    cv = std_val / mean_val
+
+    # Clamp to [0, 1]
+    return min(1.0, max(0.0, cv))

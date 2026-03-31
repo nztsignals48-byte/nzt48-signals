@@ -55,7 +55,7 @@ terraform apply plan.tfplan
 # Create AWS Secret manually
 aws secretsmanager create-secret \
     --name nzt48/ib-credentials \
-    --secret-string '{"username":"afghitman","password":"Lema2016!!"}' \
+    --secret-string '{"username":"[REDACTED]","password":"[REDACTED]"}' \
     --region us-east-1
 ```
 

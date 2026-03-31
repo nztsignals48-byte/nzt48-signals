@@ -402,3 +402,68 @@ def run_nightly_inefficiency_scan() -> Dict:
         log.warning("Failed to save inefficiency scores: %s", e)
 
     return summary
+
+
+def score_inefficiency(prices: "np.ndarray", volumes: "np.ndarray") -> Dict:
+    """Score market inefficiency from price and volume arrays.
+
+    Called by bridge.py to assess whether a ticker exhibits enough
+    inefficiency for profitable trading.
+
+    Scoring components (each 0-33):
+      1. Autocorrelation: negative lag-1 autocorrelation = mean-reversion potential
+      2. Volume/price divergence: volume rising while price flat = hidden activity
+      3. Price clustering: prices cluster at certain levels = structural friction
+
+    Args:
+        prices: numpy array of recent close prices
+        volumes: numpy array of recent volumes (same length as prices)
+
+    Returns:
+        dict with total_score (0-100).
+    """
+    try:
+        import numpy as _np
+    except ImportError:
+        return {"total_score": 50}
+
+    prices = _np.asarray(prices, dtype=float)
+    volumes = _np.asarray(volumes, dtype=float)
+
+    n = len(prices)
+    if n < 5:
+        return {"total_score": 50}
+
+    # 1. Autocorrelation score (0-33): negative autocorrelation = mean-reversion
+    returns = _np.diff(prices) / _np.where(prices[:-1] != 0, prices[:-1], 1e-10)
+    if len(returns) >= 5:
+        mean_r = float(_np.mean(returns))
+        lag1_cov = float(_np.mean((returns[1:] - mean_r) * (returns[:-1] - mean_r)))
+        var_r = float(_np.var(returns))
+        autocorr = lag1_cov / var_r if var_r > 1e-10 else 0.0
+        # Negative autocorr = mean-reverting = more inefficient
+        auto_score = min(33, max(0, int(33 * (1.0 - autocorr) / 2.0)))
+    else:
+        auto_score = 16
+
+    # 2. Volume/price divergence score (0-33)
+    if len(volumes) >= 5 and float(_np.std(volumes)) > 0:
+        vol_change = float(_np.std(volumes[-5:])) / float(_np.mean(volumes[-5:]) + 1e-10)
+        price_change = float(_np.std(prices[-5:])) / float(_np.mean(prices[-5:]) + 1e-10)
+        # High volume variation with low price variation = hidden activity
+        divergence = vol_change / max(price_change, 1e-10)
+        div_score = min(33, int(divergence * 8))
+    else:
+        div_score = 10
+
+    # 3. Price clustering score (0-34): prices clustering = structural friction
+    if n >= 10:
+        rounded = _np.round(prices, 1)
+        unique_ratio = len(_np.unique(rounded)) / len(rounded)
+        # Low unique ratio = high clustering = more friction = more inefficient
+        cluster_score = min(34, int(34 * (1.0 - unique_ratio)))
+    else:
+        cluster_score = 10
+
+    total = auto_score + div_score + cluster_score
+    return {"total_score": min(100, max(0, total))}

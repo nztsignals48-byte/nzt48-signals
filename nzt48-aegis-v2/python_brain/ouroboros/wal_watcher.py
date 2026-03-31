@@ -254,7 +254,7 @@ def tail_wal(wal_dir: Path, config_dir: Path) -> None:
     log.info("Loaded ticker map: %d entries", len(TICKER_MAP))
 
     # Initialise Google Sheets sync (silent no-op if no service account)
-    redis_url = os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0")
+    redis_url = os.environ.get("REDIS_URL", "redis://aegis-redis:6379/0")
     _init_sheets_sync(redis_url)
 
     current_file = get_current_wal_file(wal_dir)

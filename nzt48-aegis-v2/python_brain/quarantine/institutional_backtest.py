@@ -44,7 +44,14 @@ from python_brain.ouroboros.backfill_simulator import (
     COSTS_PER_EXCHANGE, FX_TO_GBP, STARTING_EQUITY,
     load_blacklist_from_config, load_universe_file,
 )
-from python_brain.ouroboros.monte_carlo import run_constrained_simulation, ConstrainedMCResult
+try:
+    from python_brain.ouroboros.monte_carlo import run_constrained_simulation, ConstrainedMCResult
+except ImportError:
+    try:
+        from python_brain.monte_carlo.engine import run_constrained_simulation, ConstrainedMCResult
+    except ImportError:
+        run_constrained_simulation = None
+        ConstrainedMCResult = None
 
 logging.basicConfig(
     level=logging.INFO,

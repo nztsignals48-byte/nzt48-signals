@@ -125,3 +125,130 @@ class PortfolioRebalancer:
             for s in all_strategies
         )
         return total_drift > threshold
+
+
+# ---------------------------------------------------------------------------
+# Almgren-Chriss No-Trade Zone + Regime Bands — Book 56 extensions
+# ---------------------------------------------------------------------------
+
+import math
+
+
+def almgren_chriss_ntz(
+    position_gbp: float,
+    target_gbp: float,
+    vol: float,
+    trading_cost: float,
+    risk_aversion: float = 1e-6,
+) -> float:
+    """Almgren-Chriss no-trade zone width.
+
+    The optimal NTZ half-width where the cost of trading exceeds
+    the benefit of being closer to target:
+        width = sqrt(4 * trading_cost * vol / lambda)
+
+    Args:
+        position_gbp: current position value in GBP
+        target_gbp: target position value in GBP
+        vol: annualized volatility of the position (decimal, e.g. 0.20)
+        trading_cost: round-trip cost as fraction (e.g. 0.003 for 30 bps)
+        risk_aversion: lambda parameter (default 1e-6)
+
+    Returns:
+        NTZ half-width in GBP. If |position - target| < width, don't trade.
+    """
+    if risk_aversion <= 0 or vol <= 0:
+        return 0.0
+    width = math.sqrt(4.0 * trading_cost * vol / risk_aversion)
+    return width
+
+
+@dataclass
+class AsymmetricBand:
+    """Asymmetric no-trade band (wider upper for leveraged ETPs due to decay)."""
+    lower: float  # Lower NTZ bound (GBP below target)
+    upper: float  # Upper NTZ bound (GBP above target) — wider for leveraged ETPs
+    reason: str = ""  # e.g. "3x leveraged ETP — decay widens upper band"
+
+
+def regime_ntz_multiplier(regime: str) -> float:
+    """Regime-dependent NTZ multiplier.
+
+    Wider no-trade zones in volatile regimes to reduce churn.
+
+    Args:
+        regime: one of STEADY, WOI (watch-of-interest), CRISIS, EXTREME
+
+    Returns:
+        Multiplier for NTZ width (1.0 = normal)
+    """
+    multipliers = {
+        "STEADY": 1.0,
+        "WOI": 1.5,
+        "CRISIS": 2.0,
+        "EXTREME": 3.0,
+    }
+    return multipliers.get(regime.upper(), 1.0)
+
+
+def coordinated_rebalance(
+    positions: Dict[str, float],
+    targets: Dict[str, float],
+    costs: Dict[str, float],
+    inter_cluster_delay_secs: float = 2.0,
+) -> List[Dict]:
+    """Greedy coordinated rebalance: sell first, buy second, inter-cluster delay.
+
+    Ensures sells generate cash before buys consume it.
+
+    Args:
+        positions: current position values {strategy: gbp_value}
+        targets: target position values {strategy: gbp_value}
+        costs: trading cost per strategy {strategy: cost_fraction}
+        inter_cluster_delay_secs: delay between sell and buy clusters
+
+    Returns:
+        Ordered list of rebalance instructions:
+        [{"strategy": str, "action": "sell"|"buy", "delta_gbp": float, "cost_gbp": float, "cluster": int}]
+    """
+    sells = []
+    buys = []
+
+    all_strategies = set(positions.keys()) | set(targets.keys())
+
+    for strategy in all_strategies:
+        current = positions.get(strategy, 0.0)
+        target = targets.get(strategy, 0.0)
+        delta = target - current
+        cost_rate = costs.get(strategy, 0.003)
+        cost_gbp = abs(delta) * cost_rate
+
+        if delta < -1.0:  # Sell (reduce position)
+            sells.append({
+                "strategy": strategy,
+                "action": "sell",
+                "delta_gbp": round(delta, 2),
+                "cost_gbp": round(cost_gbp, 2),
+                "cluster": 0,
+            })
+        elif delta > 1.0:  # Buy (increase position)
+            buys.append({
+                "strategy": strategy,
+                "action": "buy",
+                "delta_gbp": round(delta, 2),
+                "cost_gbp": round(cost_gbp, 2),
+                "cluster": 1,
+            })
+
+    # Sort sells by magnitude (largest sell first to free cash)
+    sells.sort(key=lambda x: x["delta_gbp"])
+    # Sort buys by magnitude (largest buy first for best fill)
+    buys.sort(key=lambda x: x["delta_gbp"], reverse=True)
+
+    orders = sells + buys
+
+    if sells and buys:
+        log.info("COORDINATED_REBALANCE: %d sells then %.0fs delay then %d buys",
+                 len(sells), inter_cluster_delay_secs, len(buys))
+
+    return orders

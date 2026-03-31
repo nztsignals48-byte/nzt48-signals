@@ -261,3 +261,63 @@ class PairsTracker:
             "adf_p": s.adf_pvalue,
             "hedge_ratio": s.hedge_ratio,
         } for name, s in self._states.items()}
+
+
+def detect_pair_signal(
+    symbol: str,
+    prices: List[float],
+    hurst: float,
+) -> Optional[Dict]:
+    """Detect pairs trading signal for a symbol.
+
+    Called by bridge.py as a signal generator. Checks if the symbol
+    belongs to a known ETP pair, computes the z-score of recent prices
+    vs the pair's mean, and signals if mean-reverting conditions hold.
+
+    Args:
+        symbol: Ticker symbol (e.g. "3USL.L")
+        prices: Recent close prices (list)
+        hurst: Current Hurst exponent for the symbol
+
+    Returns:
+        dict with confidence (int) and z_score (float), or None.
+    """
+    # Find which pair this symbol belongs to
+    pair_name = None
+    for name, (long_t, inv_t) in ETP_PAIRS.items():
+        if symbol in (long_t, inv_t):
+            pair_name = name
+            break
+
+    if pair_name is None:
+        return None
+
+    if len(prices) < 10:
+        return None
+
+    arr = np.array(prices, dtype=float)
+    mean_val = float(np.mean(arr))
+    std_val = float(np.std(arr, ddof=1))
+
+    if std_val < 1e-10:
+        return None
+
+    z_score = float((arr[-1] - mean_val) / std_val)
+
+    # Signal if |z| > 2.0 and hurst < 0.4 (mean-reverting regime)
+    if abs(z_score) > 2.0 and hurst < 0.4:
+        # Confidence scales with z-score magnitude and mean-reversion strength
+        base_conf = 55
+        z_bonus = min(20, int((abs(z_score) - 2.0) * 10))
+        hurst_bonus = int((0.4 - hurst) * 30)  # Lower hurst = stronger MR
+        confidence = min(90, base_conf + z_bonus + hurst_bonus)
+
+        return {
+            "confidence": confidence,
+            "z_score": round(z_score, 3),
+            "pair_name": pair_name,
+            "direction": "long" if z_score < -2.0 else "short",
+            "strategy": "Pairs",
+        }
+
+    return None

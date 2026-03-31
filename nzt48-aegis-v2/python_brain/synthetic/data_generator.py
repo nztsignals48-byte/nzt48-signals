@@ -458,7 +458,10 @@ class SyntheticDataPipeline:
     def __init__(self, output_dir: str = "/app/data/synthetic",
                  seed: int = 42):
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         self.seed = seed
 
     def generate(self, real_prices: np.ndarray,

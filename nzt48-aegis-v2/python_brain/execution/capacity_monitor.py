@@ -138,3 +138,131 @@ class CapacityMonitor:
             "median_adv": sorted(self._adv.values())[len(self._adv) // 2] if self._adv else 0,
             "capacity_wall_gbp": self.portfolio_capacity_wall(10000),
         }
+
+
+# ─── Market Impact Models ────────────────────────────────────────────────────
+
+import math
+
+
+def square_root_impact(order_gbp: float, adv_gbp: float, daily_vol_pct: float) -> float:
+    """Square-root market impact model.
+
+    impact_bps = sigma * sqrt(Q / ADV)
+
+    Where:
+    - sigma = daily volatility (in bps, e.g. 2.0% = 200 bps)
+    - Q = order size (GBP)
+    - ADV = average daily volume (GBP)
+
+    Returns estimated impact in basis points.
+    """
+    if adv_gbp <= 0 or order_gbp <= 0:
+        return 0.0
+    sigma_bps = daily_vol_pct * 100.0  # Convert pct to bps
+    return sigma_bps * math.sqrt(order_gbp / adv_gbp)
+
+
+def permanent_impact(order_gbp: float, adv_gbp: float, kyle_lambda: Optional[float] = None) -> float:
+    """Kyle's lambda permanent impact estimate.
+
+    permanent_impact_bps = lambda * (Q / ADV)
+
+    If kyle_lambda not provided, uses empirical default of 0.5 * sqrt(daily_spread_bps).
+    Simplified: default lambda = 10 bps (typical for liquid small-cap ETPs).
+
+    Returns estimated permanent impact in basis points.
+    """
+    if adv_gbp <= 0 or order_gbp <= 0:
+        return 0.0
+    lam = kyle_lambda if kyle_lambda is not None else 10.0  # Default 10 bps
+    return lam * (order_gbp / adv_gbp)
+
+
+# ─── TWAP / VWAP Algo Scheduling ─────────────────────────────────────────────
+
+
+@dataclass
+class TWAPSlice:
+    """A single time slice in a TWAP schedule."""
+    time: float          # Minutes from start
+    size_gbp: float      # GBP to execute in this slice
+    cumulative_pct: float  # Cumulative % executed after this slice
+
+
+def generate_twap(total_gbp: float, n_slices: int, duration_mins: float) -> list:
+    """Generate equal-sized TWAP (Time-Weighted Average Price) slices.
+
+    Splits total_gbp evenly across n_slices over duration_mins.
+    """
+    if n_slices <= 0 or total_gbp <= 0:
+        return []
+
+    slice_gbp = total_gbp / n_slices
+    interval = duration_mins / n_slices
+
+    slices = []
+    for i in range(n_slices):
+        slices.append(TWAPSlice(
+            time=round(i * interval, 2),
+            size_gbp=round(slice_gbp, 2),
+            cumulative_pct=round((i + 1) / n_slices * 100, 1),
+        ))
+    return slices
+
+
+@dataclass
+class VWAPSlice:
+    """A single slice in a VWAP schedule."""
+    time: float              # Minutes from start (or bucket label)
+    size_gbp: float          # GBP to execute in this slice
+    target_volume_pct: float  # Target % of volume in this bucket
+
+
+def generate_vwap(total_gbp: float, volume_profile: dict) -> list:
+    """Generate volume-weighted VWAP slices.
+
+    volume_profile: dict mapping time_bucket (str/float) -> relative volume weight.
+    e.g. {"09:00": 0.15, "10:00": 0.10, "11:00": 0.08, ...}
+
+    Slices are sized proportionally to the volume profile.
+    """
+    if not volume_profile or total_gbp <= 0:
+        return []
+
+    total_weight = sum(volume_profile.values())
+    if total_weight <= 0:
+        return []
+
+    slices = []
+    for bucket, weight in volume_profile.items():
+        pct = weight / total_weight
+        slices.append(VWAPSlice(
+            time=float(bucket) if isinstance(bucket, (int, float)) else hash(bucket) % 1440,
+            size_gbp=round(total_gbp * pct, 2),
+            target_volume_pct=round(pct * 100, 1),
+        ))
+    return slices
+
+
+def should_use_algo(order_gbp: float, adv_gbp: float, urgency: float = 0.5) -> str:
+    """Decide execution method based on order size vs ADV and urgency.
+
+    urgency: 0.0 (patient) to 1.0 (immediate)
+
+    Returns: "MARKET", "TWAP", or "VWAP"
+    """
+    if adv_gbp <= 0:
+        return "MARKET"
+
+    participation = order_gbp / adv_gbp
+
+    if participation < 0.005 or urgency > 0.8:
+        # Small order or urgent -> market order
+        return "MARKET"
+    elif participation < 0.02:
+        # Moderate size -> TWAP (simple, predictable)
+        return "TWAP"
+    else:
+        # Large order -> VWAP (minimize impact by matching volume)
+        return "VWAP"

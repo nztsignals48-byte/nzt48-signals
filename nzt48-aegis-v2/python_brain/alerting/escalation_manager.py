@@ -456,3 +456,208 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# AEGIS Error Catalog — Book 58 extensions
+# ---------------------------------------------------------------------------
+
+import re
+
+
+class ErrorCategory(Enum):
+    """Error categories for AEGIS error classification."""
+    A_DATA = "A_DATA"
+    B_CONNECTION = "B_CONNECTION"
+    C_ORDER = "C_ORDER"
+    D_RISK = "D_RISK"
+    E_SYSTEM = "E_SYSTEM"
+    F_LOGIC = "F_LOGIC"
+    G_EXTERNAL = "G_EXTERNAL"
+
+
+class SeverityLevel(Enum):
+    """6-level severity scale for AEGIS alerts."""
+    S1_TRACE = 1
+    S2_DEBUG = 2
+    S3_INFO = 3
+    S4_WARNING = 4
+    S5_CRITICAL = 5
+    S6_EMERGENCY = 6
+
+
+# ~50 key error codes → (category, severity, description, remediation)
+AEGIS_ERROR_CATALOG: Dict[str, tuple] = {
+    # A: Data errors (A001–A010)
+    "A001": (ErrorCategory.A_DATA, SeverityLevel.S4_WARNING, "Stale tick data (>60s old)", "Check IBKR data feed connection"),
+    "A002": (ErrorCategory.A_DATA, SeverityLevel.S5_CRITICAL, "WAL write failure", "Check disk space and WAL directory permissions"),
+    "A003": (ErrorCategory.A_DATA, SeverityLevel.S4_WARNING, "Data gap >5 minutes detected", "Verify market hours; check IBKR subscription"),
+    "A004": (ErrorCategory.A_DATA, SeverityLevel.S3_INFO, "Missing indicator value (NaN)", "Indicator will use fallback; check input data"),
+    "A005": (ErrorCategory.A_DATA, SeverityLevel.S5_CRITICAL, "WAL corruption detected", "Stop engine, repair WAL from backup, restart"),
+    "A006": (ErrorCategory.A_DATA, SeverityLevel.S4_WARNING, "Tick timestamp out of order", "Check clock sync; data feed may be replaying"),
+    "A007": (ErrorCategory.A_DATA, SeverityLevel.S3_INFO, "Contract definition missing", "Add to contracts.toml and reload"),
+    "A008": (ErrorCategory.A_DATA, SeverityLevel.S4_WARNING, "Price spike >10 ATR detected", "Likely bad tick; will be filtered by Rust"),
+    "A009": (ErrorCategory.A_DATA, SeverityLevel.S5_CRITICAL, "No ticks received for any symbol >5min", "IBKR connection likely dead; restart gateway"),
+    "A010": (ErrorCategory.A_DATA, SeverityLevel.S4_WARNING, "RVOL data unavailable", "Volume analytics degraded; using fallback RVOL=1.0"),
+
+    # B: Connection errors (B001–B010)
+    "B001": (ErrorCategory.B_CONNECTION, SeverityLevel.S5_CRITICAL, "IBKR gateway disconnected", "Check IB Gateway process; restart if needed"),
+    "B002": (ErrorCategory.B_CONNECTION, SeverityLevel.S4_WARNING, "IBKR reconnect attempt", "Auto-reconnecting; monitor for B001 escalation"),
+    "B003": (ErrorCategory.B_CONNECTION, SeverityLevel.S4_WARNING, "Telegram API unreachable", "Alerts will queue; check network connectivity"),
+    "B004": (ErrorCategory.B_CONNECTION, SeverityLevel.S3_INFO, "Claude CLI timeout (>30s)", "Curation fallback active (10% haircut)"),
+    "B005": (ErrorCategory.B_CONNECTION, SeverityLevel.S5_CRITICAL, "Bridge→Rust IPC failure", "Signals cannot reach engine; restart bridge.py"),
+    "B006": (ErrorCategory.B_CONNECTION, SeverityLevel.S4_WARNING, "DuckDB connection lost", "Warehouse queries degraded; will auto-reconnect"),
+    "B007": (ErrorCategory.B_CONNECTION, SeverityLevel.S3_INFO, "Gemini API rate limited", "Morning brief may be delayed; using cached data"),
+    "B008": (ErrorCategory.B_CONNECTION, SeverityLevel.S5_CRITICAL, "SSH tunnel to EC2 dropped", "Re-establish tunnel; check EC2 instance health"),
+    "B009": (ErrorCategory.B_CONNECTION, SeverityLevel.S4_WARNING, "WebSocket heartbeat missed", "Reconnecting data stream; may miss 1-2 ticks"),
+    "B010": (ErrorCategory.B_CONNECTION, SeverityLevel.S3_INFO, "RevenueCat webhook timeout", "Non-critical for trading; retry queued"),
+
+    # C: Order errors (C001–C010)
+    "C001": (ErrorCategory.C_ORDER, SeverityLevel.S5_CRITICAL, "Order rejected by broker", "Check order params, buying power, and position limits"),
+    "C002": (ErrorCategory.C_ORDER, SeverityLevel.S4_WARNING, "Partial fill on entry", "Position sized incorrectly; monitor for completion"),
+    "C003": (ErrorCategory.C_ORDER, SeverityLevel.S5_CRITICAL, "Order stuck in SUBMITTED >5min", "Cancel and resubmit; check IBKR TWS for errors"),
+    "C004": (ErrorCategory.C_ORDER, SeverityLevel.S4_WARNING, "Slippage exceeds 2x expected", "Liquidity may be thin; consider reducing size"),
+    "C005": (ErrorCategory.C_ORDER, SeverityLevel.S5_CRITICAL, "Duplicate order detected", "Kill switch check; may need manual cancellation"),
+    "C006": (ErrorCategory.C_ORDER, SeverityLevel.S4_WARNING, "Exit order rejected — position still open", "Retry exit; if persistent, manual close needed"),
+    "C007": (ErrorCategory.C_ORDER, SeverityLevel.S3_INFO, "Order filled at better price than limit", "Positive slippage — no action needed"),
+    "C008": (ErrorCategory.C_ORDER, SeverityLevel.S4_WARNING, "Chandelier stop triggered during halt", "Price may gap on resume; monitor closely"),
+    "C009": (ErrorCategory.C_ORDER, SeverityLevel.S5_CRITICAL, "Position size exceeds ISA limit", "Risk gate should have caught this; investigate"),
+    "C010": (ErrorCategory.C_ORDER, SeverityLevel.S4_WARNING, "Market order used instead of limit", "Check order type logic; limit preferred for cost control"),
+
+    # D: Risk errors (D001–D010)
+    "D001": (ErrorCategory.D_RISK, SeverityLevel.S5_CRITICAL, "Drawdown exceeds sacred limit", "Auto-halt triggered; review before restart"),
+    "D002": (ErrorCategory.D_RISK, SeverityLevel.S4_WARNING, "Portfolio heat approaching limit", "Reduce new entries; let existing trades resolve"),
+    "D003": (ErrorCategory.D_RISK, SeverityLevel.S5_CRITICAL, "Correlation breach — positions too correlated", "Close most correlated position; diversify"),
+    "D004": (ErrorCategory.D_RISK, SeverityLevel.S4_WARNING, "Overnight exposure exceeds threshold", "Review overnight hold rules; may need to flatten"),
+    "D005": (ErrorCategory.D_RISK, SeverityLevel.S6_EMERGENCY, "Multiple risk gates failing simultaneously", "Likely systemic event; flatten all and halt"),
+    "D006": (ErrorCategory.D_RISK, SeverityLevel.S4_WARNING, "Kelly fraction at upper bound", "Sizing capped; review if sustained"),
+    "D007": (ErrorCategory.D_RISK, SeverityLevel.S5_CRITICAL, "Monte Carlo ruin probability >10%", "Strategy may need retirement; run full analysis"),
+    "D008": (ErrorCategory.D_RISK, SeverityLevel.S4_WARNING, "Regime shift detected — strategy mismatch", "Monitor; lifecycle may auto-suspend"),
+    "D009": (ErrorCategory.D_RISK, SeverityLevel.S3_INFO, "VaR limit 80% utilized", "Approaching risk capacity; reduce new signals"),
+    "D010": (ErrorCategory.D_RISK, SeverityLevel.S4_WARNING, "Spread drag exceeding 50% of edge", "Cost erosion high; consider ticker blacklist"),
+
+    # E: System errors (E001–E005)
+    "E001": (ErrorCategory.E_SYSTEM, SeverityLevel.S6_EMERGENCY, "Rust engine panic/crash", "Check crash log; restart engine; investigate core dump"),
+    "E002": (ErrorCategory.E_SYSTEM, SeverityLevel.S5_CRITICAL, "Disk space <5% free", "Purge old WAL archives; expand volume if on EC2"),
+    "E003": (ErrorCategory.E_SYSTEM, SeverityLevel.S5_CRITICAL, "Memory usage >90%", "Check for leaks; restart bridge.py; increase swap"),
+    "E004": (ErrorCategory.E_SYSTEM, SeverityLevel.S4_WARNING, "Docker container restart detected", "Check logs for OOM or crash; may lose state"),
+    "E005": (ErrorCategory.E_SYSTEM, SeverityLevel.S3_INFO, "Config reload (SIGHUP) processed", "Normal operation after gate_tuning auto-apply"),
+
+    # F: Logic errors (F001–F005)
+    "F001": (ErrorCategory.F_LOGIC, SeverityLevel.S5_CRITICAL, "Signal confidence outside [0,100]", "Clamp and log; investigate signal generator"),
+    "F002": (ErrorCategory.F_LOGIC, SeverityLevel.S4_WARNING, "Bayesian prior update divergence", "Prior may be stale; reset calibration"),
+    "F003": (ErrorCategory.F_LOGIC, SeverityLevel.S5_CRITICAL, "Strategy generated NaN/Inf signal", "Schema validation should catch; check upstream"),
+    "F004": (ErrorCategory.F_LOGIC, SeverityLevel.S4_WARNING, "Thompson sampling exploration spike", "Expected occasionally; monitor for persistence"),
+    "F005": (ErrorCategory.F_LOGIC, SeverityLevel.S3_INFO, "Gate tuning recommendation clipped to bounds", "Normal operation — hard bounds enforced"),
+
+    # G: External errors (G001–G005)
+    "G001": (ErrorCategory.G_EXTERNAL, SeverityLevel.S4_WARNING, "Market halt detected", "Pause signal generation; resume on unhalt"),
+    "G002": (ErrorCategory.G_EXTERNAL, SeverityLevel.S3_INFO, "Exchange early close schedule", "Adjust session timing; reduce late-day entries"),
+    "G003": (ErrorCategory.G_EXTERNAL, SeverityLevel.S5_CRITICAL, "Broker margin call received", "Flatten to meet margin; investigate sizing"),
+    "G004": (ErrorCategory.G_EXTERNAL, SeverityLevel.S4_WARNING, "FOMC/CPI event within 30 minutes", "Reduce new entries; widen stops on existing"),
+    "G005": (ErrorCategory.G_EXTERNAL, SeverityLevel.S3_INFO, "Market session open/close", "Normal event; session timing adjusted"),
+}
+
+# Regex patterns for auto-classifying error messages to AEGIS codes
+_ERROR_PATTERNS: List[tuple] = [
+    # A: Data
+    (r"stale.*tick|tick.*stale|data.*stale", "A001"),
+    (r"wal.*write.*fail|write.*wal.*fail|failed.*write.*wal", "A002"),
+    (r"data.*gap|gap.*data|no.*tick.*\d+\s*min", "A003"),
+    (r"nan|NaN|indicator.*missing|missing.*indicator", "A004"),
+    (r"wal.*corrupt|corrupt.*wal", "A005"),
+    (r"timestamp.*order|out.*of.*order.*tick", "A006"),
+    (r"contract.*missing|missing.*contract", "A007"),
+    (r"price.*spike|spike.*price|outlier.*tick", "A008"),
+    (r"no.*ticks.*received|zero.*ticks", "A009"),
+    (r"rvol.*unavail|volume.*unavail", "A010"),
+    # B: Connection
+    (r"ibkr.*disconnect|gateway.*disconnect|ib.*disconnect", "B001"),
+    (r"ibkr.*reconnect|reconnect.*ibkr", "B002"),
+    (r"telegram.*unreachable|telegram.*fail|telegram.*timeout", "B003"),
+    (r"claude.*timeout|cli.*timeout|curator.*timeout", "B004"),
+    (r"bridge.*ipc.*fail|ipc.*fail|rust.*ipc", "B005"),
+    (r"duckdb.*connection|duckdb.*lost", "B006"),
+    (r"gemini.*rate.*limit|gemini.*429", "B007"),
+    (r"ssh.*tunnel.*drop|ec2.*unreachable", "B008"),
+    (r"websocket.*heartbeat|heartbeat.*miss", "B009"),
+    # C: Order
+    (r"order.*reject|rejected.*order|broker.*reject", "C001"),
+    (r"partial.*fill|fill.*partial", "C002"),
+    (r"order.*stuck|stuck.*submitted", "C003"),
+    (r"slippage.*exceed|high.*slippage", "C004"),
+    (r"duplicate.*order|order.*duplicate", "C005"),
+    (r"exit.*reject|reject.*exit.*order", "C006"),
+    (r"position.*size.*exceed|exceed.*isa.*limit", "C009"),
+    # D: Risk
+    (r"drawdown.*exceed|sacred.*limit|drawdown.*halt", "D001"),
+    (r"portfolio.*heat|heat.*limit", "D002"),
+    (r"correlation.*breach|too.*correlated", "D003"),
+    (r"overnight.*exposure|overnight.*exceed", "D004"),
+    (r"multiple.*risk.*gate|risk.*gate.*fail", "D005"),
+    (r"kelly.*bound|kelly.*cap", "D006"),
+    (r"ruin.*prob|monte.*carlo.*ruin", "D007"),
+    (r"regime.*shift|regime.*mismatch", "D008"),
+    (r"spread.*drag|cost.*erosion", "D010"),
+    # E: System
+    (r"rust.*panic|engine.*crash|engine.*panic", "E001"),
+    (r"disk.*space|disk.*full|no.*space.*left", "E002"),
+    (r"memory.*usage|oom|out.*of.*memory", "E003"),
+    (r"docker.*restart|container.*restart", "E004"),
+    (r"sighup|config.*reload", "E005"),
+    # F: Logic
+    (r"confidence.*outside|confidence.*invalid|confidence.*range", "F001"),
+    (r"bayesian.*diverge|prior.*diverge", "F002"),
+    (r"nan.*signal|inf.*signal|signal.*nan|signal.*inf", "F003"),
+    (r"thompson.*spike|exploration.*spike", "F004"),
+    (r"clipped.*bounds|recommendation.*clipped", "F005"),
+    # G: External
+    (r"market.*halt|trading.*halt|halt.*detected", "G001"),
+    (r"early.*close|exchange.*close.*early", "G002"),
+    (r"margin.*call|margin.*requirement", "G003"),
+    (r"fomc|cpi.*event|fed.*meeting", "G004"),
+]
+
+
+def classify_error(error_msg: str) -> tuple:
+    """Classify an error message to an AEGIS error code via regex pattern matching.
+
+    Args:
+        error_msg: raw error message string
+
+    Returns:
+        (code, category, severity, description, remediation) or
+        ("UNKNOWN", ErrorCategory.E_SYSTEM, SeverityLevel.S4_WARNING, error_msg, "Investigate manually")
+    """
+    msg_lower = error_msg.lower()
+    for pattern, code in _ERROR_PATTERNS:
+        if re.search(pattern, msg_lower):
+            if code in AEGIS_ERROR_CATALOG:
+                cat, sev, desc, remed = AEGIS_ERROR_CATALOG[code]
+                return (code, cat, sev, desc, remed)
+    return ("UNKNOWN", ErrorCategory.E_SYSTEM, SeverityLevel.S4_WARNING, error_msg, "Investigate manually")
+
+
+# Known cascade sequences: initial error → downstream errors
+_CASCADE_MAP: Dict[str, List[str]] = {
+    "B001": ["A009", "A003", "C003"],          # IBKR disconnect → no ticks → data gap → stuck orders
+    "E002": ["A002", "A005"],                   # Disk full → WAL write fail → WAL corruption
+    "E001": ["B005", "C003", "D005"],           # Rust panic → IPC fail → stuck orders → multi-gate fail
+    "A009": ["A003", "D008"],                   # No ticks → data gap → regime mismatch (stale data)
+    "B005": ["C003", "C006"],                   # IPC fail → stuck orders → exit rejection
+    "D001": ["D005"],                           # Drawdown breach → multi-gate fail (sacred halt)
+    "G003": ["D001", "D005"],                   # Margin call → drawdown → multi-gate fail
+    "E003": ["E001", "B005"],                   # OOM → engine crash → IPC fail
+}
+
+
+def cascade_chain(initial_code: str) -> List[str]:
+    """Return known cascade sequence for an initial error code.
+
+    Args:
+        initial_code: AEGIS error code (e.g. "B001")
+
+    Returns:
+        List of downstream error codes that commonly follow, or empty list.
+    """
+    return _CASCADE_MAP.get(initial_code, [])

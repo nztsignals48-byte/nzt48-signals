@@ -303,3 +303,165 @@ class GPEngine:
             target.value = replacement.value
             target.children = replacement.children
         return mutant
+
+
+# ---------------------------------------------------------------------------
+# Island Model GA — Book 51 extensions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class IslandPopulation:
+    """A single island in the island-model GP."""
+    pop_size: int
+    island_id: int
+    individuals: List[GPNode] = field(default_factory=list)
+    best_fitness: float = -float("inf")
+
+    def init_random(self, n_features: int, max_depth: int = 6) -> None:
+        self.individuals = [random_tree(n_features, max_depth) for _ in range(self.pop_size)]
+
+
+def migrate_population(
+    islands: List[IslandPopulation],
+    migration_rate: float,
+    gen: int,
+    fitnesses_per_island: Optional[List[List[float]]] = None,
+) -> None:
+    """Ring-topology migration: copy top 5% of island i to island (i+1) % N every 20 gens.
+
+    Args:
+        islands: list of IslandPopulation
+        migration_rate: fraction of population to migrate (0.05 = top 5%)
+        gen: current generation number
+        fitnesses_per_island: optional pre-computed fitnesses; if None, uses best_fitness ordering
+    """
+    if gen % 20 != 0 or gen == 0:
+        return
+
+    import copy as _copy
+
+    n_islands = len(islands)
+    if n_islands < 2:
+        return
+
+    for i in range(n_islands):
+        src = islands[i]
+        dst = islands[(i + 1) % n_islands]
+
+        n_migrants = max(1, int(len(src.individuals) * migration_rate))
+
+        # Rank source individuals by fitness if available
+        if fitnesses_per_island is not None and i < len(fitnesses_per_island):
+            fits = fitnesses_per_island[i]
+            ranked = sorted(range(len(src.individuals)), key=lambda idx: fits[idx] if idx < len(fits) else -1e9, reverse=True)
+        else:
+            # Fallback: just take first n_migrants (caller should sort)
+            ranked = list(range(len(src.individuals)))
+
+        migrants = [_copy.deepcopy(src.individuals[idx]) for idx in ranked[:n_migrants]]
+
+        # Replace worst individuals in destination
+        if fitnesses_per_island is not None and (i + 1) % n_islands < len(fitnesses_per_island):
+            dst_fits = fitnesses_per_island[(i + 1) % n_islands]
+            worst_idx = sorted(range(len(dst.individuals)), key=lambda idx: dst_fits[idx] if idx < len(dst_fits) else 1e9)
+        else:
+            worst_idx = list(range(len(dst.individuals) - n_migrants, len(dst.individuals)))
+
+        for j, migrant in enumerate(migrants):
+            if j < len(worst_idx) and worst_idx[j] < len(dst.individuals):
+                dst.individuals[worst_idx[j]] = migrant
+
+    log.info("GP migration at gen %d: %.0f%% migrated across %d islands",
+             gen, migration_rate * 100, n_islands)
+
+
+def compute_shap_importance(
+    tree: GPNode,
+    X: np.ndarray,
+    y: np.ndarray,
+    n_repeats: int = 5,
+) -> Dict[int, float]:
+    """Permutation-based feature importance (numpy only, no shap library).
+
+    For each feature used in the tree, permute that column n_repeats times
+    and measure the drop in Sharpe. Higher drop = more important.
+
+    Args:
+        tree: GP expression tree
+        X: feature matrix (N x D)
+        y: returns array (N,)
+        n_repeats: number of permutation rounds per feature
+
+    Returns:
+        dict mapping feature_index -> importance score (mean Sharpe drop)
+    """
+    # Collect which features the tree uses
+    used_features = set()
+    _collect_features(tree, used_features)
+
+    if not used_features or X.shape[0] < 20:
+        return {f: 0.0 for f in used_features}
+
+    # Baseline fitness
+    baseline = compute_fitness(tree, X, y)
+
+    importance: Dict[int, float] = {}
+    for feat_idx in used_features:
+        drops = []
+        for _ in range(n_repeats):
+            X_perm = X.copy()
+            np.random.shuffle(X_perm[:, feat_idx])
+            perm_fitness = compute_fitness(tree, X_perm, y)
+            drops.append(baseline - perm_fitness)
+        importance[feat_idx] = float(np.mean(drops))
+
+    return importance
+
+
+def _collect_features(node: GPNode, features: set) -> None:
+    """Recursively collect feature indices used in a tree."""
+    if node.node_type == NodeType.FEATURE and node.value is not None:
+        features.add(node.value)
+    for child in node.children:
+        _collect_features(child, features)
+
+
+def walk_forward_fitness(
+    tree: GPNode,
+    X_splits: List[np.ndarray],
+    y_splits: List[np.ndarray],
+    n_splits: int = 5,
+) -> float:
+    """Walk-forward (temporal) cross-validation fitness.
+
+    Trains on splits [0..i-1], tests on split [i] for i in 1..n_splits.
+    Returns average out-of-sample Sharpe across folds.
+
+    Args:
+        tree: GP expression tree (stateless — no training needed, just evaluate OOS)
+        X_splits: list of feature matrices, one per temporal fold
+        y_splits: list of return arrays, one per temporal fold
+        n_splits: number of splits to use (capped at len(X_splits))
+
+    Returns:
+        Average OOS Sharpe ratio across folds
+    """
+    n = min(n_splits, len(X_splits))
+    if n < 2:
+        return -10.0
+
+    oos_sharpes = []
+    for i in range(1, n):
+        X_test = X_splits[i]
+        y_test = y_splits[i]
+
+        if X_test.shape[0] < 20:
+            continue
+
+        fitness = compute_fitness(tree, X_test, y_test)
+        oos_sharpes.append(fitness)
+
+    if not oos_sharpes:
+        return -10.0
+
+    return float(np.mean(oos_sharpes))

@@ -180,3 +180,78 @@ class AdversarialTester:
             sensitivities[..., i] = (new_pred - base_pred) / epsilon
 
         return sensitivities
+
+
+def detect_manipulation(
+    price: float,
+    volume: float,
+    spread_bps: float,
+    recent_prices: List[float],
+) -> Dict:
+    """Detect market manipulation from tick-level data.
+
+    Called by bridge.py as a pre-gate before signal generation.
+    Checks for spoofing, wash trading, and stop hunting patterns.
+
+    Returns dict with is_manipulation (bool), type (str), confidence (float).
+    """
+    result = {"is_manipulation": False, "type": "none", "confidence": 0.0}
+
+    if len(recent_prices) < 5:
+        return result
+
+    prices = np.array(recent_prices, dtype=float)
+
+    # --- Spoofing: price moved > 3 ATR in last 5 ticks then reverted ---
+    if len(prices) >= 5:
+        diffs = np.abs(np.diff(prices))
+        atr = float(np.mean(diffs)) if len(diffs) > 0 else 1e-10
+        if atr > 0:
+            last5 = prices[-5:]
+            max_move = float(np.max(last5) - np.min(last5))
+            if max_move > 3 * atr:
+                # Check reversion: price returned close to where it started
+                reversion = abs(last5[-1] - last5[0]) / max(max_move, 1e-10)
+                if reversion < 0.3:  # Reverted > 70%
+                    result = {
+                        "is_manipulation": True,
+                        "type": "spoofing",
+                        "confidence": min(0.9, 0.5 + (max_move / atr - 3) * 0.1),
+                    }
+                    return result
+
+    # --- Wash trading: volume spike with no price change ---
+    if len(prices) >= 5 and volume > 0:
+        price_range = float(np.max(prices[-5:]) - np.min(prices[-5:]))
+        price_range_pct = price_range / max(abs(price), 1e-10) * 100
+        # If spread is tight and volume is high but price didn't move
+        if price_range_pct < 0.03 and spread_bps < 5:
+            result = {
+                "is_manipulation": True,
+                "type": "wash_trading",
+                "confidence": 0.5,
+            }
+            return result
+
+    # --- Stop hunting: touched round number then reversed ---
+    if len(prices) >= 10:
+        low = float(np.min(prices[-10:]))
+        high = float(np.max(prices[-10:]))
+        current = prices[-1]
+
+        # Check if low or high is near a round number
+        for level in [low, high]:
+            # Round numbers: multiples of 1, 5, 10, 50, 100
+            for rnd in [1.0, 5.0, 10.0, 50.0, 100.0]:
+                nearest = round(level / rnd) * rnd
+                if abs(level - nearest) / max(abs(nearest), 1e-10) < 0.002:
+                    # Price touched round number then reversed
+                    if abs(current - level) > abs(high - low) * 0.5:
+                        result = {
+                            "is_manipulation": True,
+                            "type": "stop_hunting",
+                            "confidence": 0.6,
+                        }
+                        return result
+
+    return result

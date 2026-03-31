@@ -83,8 +83,8 @@ docker build -f Dockerfile.ibc -t nzt48-ib-gateway:v3.14.0 .
 **Run Command**:
 ```bash
 docker run -d -p 4004:4004 \
-  -e TWS_USERID=afghitman \
-  -e TWS_PASSWORD=Lema2016!! \
+  -e TWS_USERID=[REDACTED] \
+  -e TWS_PASSWORD=[REDACTED] \
   -e IB_GATEWAY_SOCKET_CLIENT_ID=101 \
   nzt48-ib-gateway:v3.14.0
 ```

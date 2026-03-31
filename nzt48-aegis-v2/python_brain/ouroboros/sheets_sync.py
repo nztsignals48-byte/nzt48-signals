@@ -35,7 +35,7 @@ Usage:
 
     # Programmatic (background thread started by WAL watcher)
     from python_brain.ouroboros.sheets_sync import SheetsSyncClient
-    client = SheetsSyncClient(redis_url="redis://:nzt48redis@aegis-redis:6379/0")
+    client = SheetsSyncClient(redis_url="redis://aegis-redis:6379/0")
     client.start()  # background thread
     ...
     client.stop()
@@ -859,13 +859,13 @@ class SheetsSyncClient:
     """Background thread that pops events from Redis and writes to Google Sheets.
 
     Usage:
-        client = SheetsSyncClient(redis_url="redis://:nzt48redis@aegis-redis:6379/0")
+        client = SheetsSyncClient(redis_url="redis://aegis-redis:6379/0")
         client.start()
         ...
         client.stop()
     """
 
-    _REDIS_URL_DEFAULT = "redis://:nzt48redis@aegis-redis:6379/0"
+    _REDIS_URL_DEFAULT = "redis://aegis-redis:6379/0"
 
     def __init__(
         self,
@@ -2472,7 +2472,7 @@ def main():
     )
     parser.add_argument(
         "--redis-url",
-        default=os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0"),
+        default=os.environ.get("REDIS_URL", "redis://aegis-redis:6379/0"),
         help="Redis connection URL",
     )
     parser.add_argument(

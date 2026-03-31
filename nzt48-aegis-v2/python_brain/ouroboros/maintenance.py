@@ -728,7 +728,7 @@ def cleanup_old_step_logs(max_age_days: int = 14, dry_run: bool = False) -> dict
 #   ORANGE — daily_loss 1.0%-2.0% OR RiskStateChange to "Halt"
 #   RED    — daily_loss > 2.0% OR RiskStateChange to "Flatten"/"Emergency"
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://:nzt48redis@aegis-redis:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://aegis-redis:6379/0")
 CB_REDIS_KEY = "aegis:circuit_breaker:state"
 CB_CHECKPOINT_FILE = DATA_DIR / "circuit_breaker_checkpoint.json"
 EVENTS_DIR_CB = Path(os.environ.get("AEGIS_EVENTS_DIR", os.environ.get("AEGIS_WAL_DIR", "/app/events")))

@@ -605,7 +605,10 @@ class RobustnessValidator:
 
     def __init__(self, output_dir: str = "/app/data/validation"):
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     def validate(self, strategy_name: str,
                  returns: np.ndarray,

@@ -128,7 +128,10 @@ class HealthMonitor:
                  autonomy_level: int = 0):
         self.data_dir = Path(data_dir)
         self.health_dir = self.data_dir / "health"
-        self.health_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.health_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         self.autonomy_level = autonomy_level
         self._consecutive_warnings: Dict[str, int] = {}
         self._check_history: List[HealthReport] = []

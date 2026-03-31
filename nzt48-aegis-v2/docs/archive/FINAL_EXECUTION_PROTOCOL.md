@@ -83,8 +83,8 @@ nc -vz 127.0.0.1 4001
 ```
 1. Open VNC to localhost:5900 (or your EC2 IP:5900)
 2. Log in with IB credentials:
-   - User: afghitman
-   - Password: Lema2016!!
+   - User: [REDACTED]
+   - Password: [REDACTED]
 3. IBC will show 2FA challenge
 4. Approve the challenge
 5. Gateway should now listen on port 4001

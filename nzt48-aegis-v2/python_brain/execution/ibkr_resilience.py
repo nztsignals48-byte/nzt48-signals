@@ -228,3 +228,19 @@ class IBKRConnectionManager:
             "total_attempts": len(self._attempts),
             "is_connected": self.is_connected,
         }
+
+
+def is_connection_healthy(connection_state: str) -> bool:
+    """Check if IBKR connection state is healthy enough for trading.
+
+    Called by bridge.py as a pre-gate: if unhealthy, no new entries.
+
+    Args:
+        connection_state: One of "active", "reconnecting_short",
+                          "disconnected", "stale", "error".
+
+    Returns:
+        True if connection is healthy enough to generate signals.
+    """
+    healthy_states = {"active", "reconnecting_short"}
+    return connection_state.lower().strip() in healthy_states

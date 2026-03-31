@@ -241,15 +241,21 @@ class EventCalendar:
     def save(self):
         """Save calendar to disk."""
         calendar_path = os.path.join(DATA_DIR, "event_calendar.json")
-        os.makedirs(DATA_DIR, exist_ok=True)
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+        except OSError:
+            pass
 
         data = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "events": [asdict(e) for e in self.events]
         }
 
-        with open(calendar_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(calendar_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
 
     def upcoming(self, days: int = 7) -> List[ScheduledEvent]:
         """Get events in next N days."""

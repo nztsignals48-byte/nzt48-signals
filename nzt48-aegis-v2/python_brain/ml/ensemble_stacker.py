@@ -117,7 +117,10 @@ class EnsembleTrainer:
                  model_dir: str = "/app/models"):
         self.config = config or EnsembleConfig()
         self.model_dir = Path(model_dir)
-        self.model_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.model_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     def determine_phase(self, n_samples: int) -> int:
         if n_samples < PHASE_1_MAX:
@@ -452,7 +455,10 @@ def run_nightly_ensemble(features_path: str = "/app/data/ml/features.npy",
 
     # Save result
     out_dir = Path("/app/data/ml")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     try:
         with open(str(out_dir / "ensemble_result.json"), "w") as f:
             json.dump(result.to_dict(), f, indent=2, default=str)

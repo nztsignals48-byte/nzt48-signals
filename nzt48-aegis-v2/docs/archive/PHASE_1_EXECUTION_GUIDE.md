@@ -158,8 +158,8 @@ enable_nat_gateway = true
 enable_vpc_endpoints = true  # For cost optimization
 
 # Secrets (will be created empty, you'll populate via AWS Console)
-ib_username = "afghitman"
-ib_password = "Lema2016!!"  # Or use AWS Secrets Manager
+ib_username = "[REDACTED]"
+ib_password = "[REDACTED]"  # Or use AWS Secrets Manager
 
 # Monitoring
 enable_cloudwatch_dashboards = true
@@ -279,7 +279,7 @@ Create the IB credentials secret in AWS Secrets Manager:
 ```bash
 aws secretsmanager create-secret \
     --name nzt48/ib-credentials \
-    --secret-string '{"username":"afghitman","password":"Lema2016!!"}' \
+    --secret-string '{"username":"[REDACTED]","password":"[REDACTED]"}' \
     --region us-east-1
 
 # Output should show:
@@ -297,8 +297,8 @@ aws secretsmanager create-secret \
 4. Secret value: JSON
    ```json
    {
-     "username": "afghitman",
-     "password": "Lema2016!!"
+     "username": "[REDACTED]",
+     "password": "[REDACTED]"
    }
    ```
 5. Click "Create secret"

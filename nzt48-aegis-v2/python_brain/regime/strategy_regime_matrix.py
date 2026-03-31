@@ -161,10 +161,187 @@ STRATEGY_REGIME_MATRIX: Dict[Tuple[str, Regime], StrategyRegimeParams] = {
     ("VanguardSniper", Regime.WOI): StrategyRegimeParams(size_mult=0.6, confidence_adj=-10),
     ("VanguardSniper", Regime.CRISIS): StrategyRegimeParams.disabled(),
     ("VanguardSniper", Regime.INFLATION): StrategyRegimeParams(size_mult=0.5),
+
+    # ===== Book 15 Enhancement: Full 18-strategy coverage =====
+
+    # ===== ApexScout — 60s snapshot momentum =====
+    ("ApexScout", Regime.STEADY): StrategyRegimeParams(size_mult=1.1),
+    ("ApexScout", Regime.WOI): StrategyRegimeParams(size_mult=0.7, confidence_adj=-5),
+    ("ApexScout", Regime.CRISIS): StrategyRegimeParams.disabled(),
+    ("ApexScout", Regime.INFLATION): StrategyRegimeParams(size_mult=0.6),
+
+    # ===== IBS_MeanReversion — Connors RSI-2 contrarian =====
+    ("IBS_MeanReversion", Regime.STEADY): StrategyRegimeParams(size_mult=0.8),
+    ("IBS_MeanReversion", Regime.WOI): StrategyRegimeParams(size_mult=1.2, confidence_adj=5),
+    ("IBS_MeanReversion", Regime.CRISIS): StrategyRegimeParams(size_mult=0.4, exit_tightness=0.6),
+    ("IBS_MeanReversion", Regime.INFLATION): StrategyRegimeParams(size_mult=1.0),
+
+    # ===== VolExpansion — RVOL spike breakout =====
+    ("VolExpansion", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("VolExpansion", Regime.WOI): StrategyRegimeParams(size_mult=0.6),
+    ("VolExpansion", Regime.CRISIS): StrategyRegimeParams.disabled(),
+    ("VolExpansion", Regime.INFLATION): StrategyRegimeParams(size_mult=0.5),
+
+    # ===== ORB_Breakout — Opening Range Breakout =====
+    ("ORB_Breakout", Regime.STEADY): StrategyRegimeParams(size_mult=1.1),
+    ("ORB_Breakout", Regime.WOI): StrategyRegimeParams(size_mult=0.7, confidence_adj=-5),
+    ("ORB_Breakout", Regime.CRISIS): StrategyRegimeParams.disabled(),
+    ("ORB_Breakout", Regime.INFLATION): StrategyRegimeParams(size_mult=0.6),
+
+    # ===== GapFade — buy the gap down =====
+    ("GapFade", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("GapFade", Regime.WOI): StrategyRegimeParams(size_mult=1.1, confidence_adj=3),
+    ("GapFade", Regime.CRISIS): StrategyRegimeParams(size_mult=0.3, exit_tightness=0.5),
+    ("GapFade", Regime.INFLATION): StrategyRegimeParams(size_mult=0.8),
+
+    # ===== S1_Microstructure — bid-ask spread patterns =====
+    ("S1_Microstructure", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("S1_Microstructure", Regime.WOI): StrategyRegimeParams(size_mult=0.8),
+    ("S1_Microstructure", Regime.CRISIS): StrategyRegimeParams(size_mult=0.3, exit_tightness=0.5),
+    ("S1_Microstructure", Regime.INFLATION): StrategyRegimeParams(size_mult=0.7),
+
+    # ===== S6_Catalyst — event-driven =====
+    ("S6_Catalyst", Regime.STEADY): StrategyRegimeParams(size_mult=0.8),
+    ("S6_Catalyst", Regime.WOI): StrategyRegimeParams(size_mult=1.0),
+    ("S6_Catalyst", Regime.CRISIS): StrategyRegimeParams(size_mult=0.5, confidence_adj=-10),
+    ("S6_Catalyst", Regime.INFLATION): StrategyRegimeParams(size_mult=1.0, confidence_adj=5),
+
+    # ===== VolCompression — Bollinger squeeze =====
+    ("VolCompression", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("VolCompression", Regime.WOI): StrategyRegimeParams(size_mult=0.7),
+    ("VolCompression", Regime.CRISIS): StrategyRegimeParams.disabled(),
+    ("VolCompression", Regime.INFLATION): StrategyRegimeParams(size_mult=0.6),
+
+    # ===== RebalancingFlow — ETP rebalancing window =====
+    ("RebalancingFlow", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("RebalancingFlow", Regime.WOI): StrategyRegimeParams(size_mult=0.8),
+    ("RebalancingFlow", Regime.CRISIS): StrategyRegimeParams(size_mult=1.3, confidence_adj=10),  # Rebalancing stronger in crisis
+    ("RebalancingFlow", Regime.INFLATION): StrategyRegimeParams(size_mult=0.9),
+
+    # ===== NAVArbitrage — ETP NAV premium/discount =====
+    ("NAVArbitrage", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("NAVArbitrage", Regime.WOI): StrategyRegimeParams(size_mult=0.9),
+    ("NAVArbitrage", Regime.CRISIS): StrategyRegimeParams(size_mult=1.2, confidence_adj=5),  # Dislocations in crisis
+    ("NAVArbitrage", Regime.INFLATION): StrategyRegimeParams(size_mult=0.8),
+
+    # ===== AlphaFactory — formulaic ensemble =====
+    ("AlphaFactory", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("AlphaFactory", Regime.WOI): StrategyRegimeParams(size_mult=0.7),
+    ("AlphaFactory", Regime.CRISIS): StrategyRegimeParams(size_mult=0.4),
+    ("AlphaFactory", Regime.INFLATION): StrategyRegimeParams(size_mult=0.6),
+
+    # ===== LeadLag — cross-market US→LSE =====
+    ("LeadLag", Regime.STEADY): StrategyRegimeParams(size_mult=1.1),
+    ("LeadLag", Regime.WOI): StrategyRegimeParams(size_mult=0.8),
+    ("LeadLag", Regime.CRISIS): StrategyRegimeParams(size_mult=0.5, exit_tightness=0.6),
+    ("LeadLag", Regime.INFLATION): StrategyRegimeParams(size_mult=0.7),
+
+    # ===== CalendarAnomalies — day/hour patterns =====
+    ("CalendarAnomalies", Regime.STEADY): StrategyRegimeParams(size_mult=1.0),
+    ("CalendarAnomalies", Regime.WOI): StrategyRegimeParams(size_mult=0.7),
+    ("CalendarAnomalies", Regime.CRISIS): StrategyRegimeParams.disabled(),
+    ("CalendarAnomalies", Regime.INFLATION): StrategyRegimeParams(size_mult=0.8),
+
+    # ===== PairsTrading — cointegration pairs =====
+    ("PairsTrading", Regime.STEADY): StrategyRegimeParams(size_mult=0.9),
+    ("PairsTrading", Regime.WOI): StrategyRegimeParams(size_mult=1.1, confidence_adj=5),
+    ("PairsTrading", Regime.CRISIS): StrategyRegimeParams(size_mult=0.4, exit_tightness=0.5),
+    ("PairsTrading", Regime.INFLATION): StrategyRegimeParams(size_mult=1.0),
 }
 
 # Default for strategies not in matrix
 _DEFAULT_PARAMS = StrategyRegimeParams(size_mult=0.7)
+
+
+# ---------------------------------------------------------------------------
+# Book 15 Enhancement: Regime Transition Manager
+# ---------------------------------------------------------------------------
+class RegimeTransitionManager:
+    """Smooth blending between regime configs during transitions.
+
+    When a regime change is detected, instead of snapping to new parameters
+    instantly, blend linearly over a configurable window (default 2 days).
+    This prevents whipsaw losses from rapid regime oscillation.
+    """
+
+    def __init__(self, blend_days: int = 2):
+        self._blend_days = blend_days
+        self._prev_regime: Optional[Regime] = None
+        self._current_regime: Optional[Regime] = None
+        self._transition_day: int = 0
+        self._day_counter: int = 0
+
+    def on_regime_change(self, new_regime: Regime):
+        """Call when regime detection produces a new regime."""
+        if self._current_regime is None:
+            self._current_regime = new_regime
+            self._prev_regime = new_regime
+            return
+
+        if new_regime != self._current_regime:
+            self._prev_regime = self._current_regime
+            self._current_regime = new_regime
+            self._transition_day = self._day_counter
+
+    def tick_day(self):
+        """Call once per trading day to advance the blend counter."""
+        self._day_counter += 1
+
+    def blend(
+        self,
+        strategy: str,
+        confidence: int,
+        kelly_fraction: float,
+    ) -> Tuple[int, float]:
+        """Apply blended regime adjustments during transition.
+
+        During the blend window, linearly interpolates between old and new
+        regime parameters. After the window, uses new regime exclusively.
+        """
+        if self._current_regime is None:
+            return confidence, kelly_fraction
+
+        days_since_transition = self._day_counter - self._transition_day
+
+        if days_since_transition >= self._blend_days or self._prev_regime == self._current_regime:
+            # Fully transitioned — use current regime
+            params = STRATEGY_REGIME_MATRIX.get(
+                (strategy, self._current_regime), _DEFAULT_PARAMS
+            )
+            if not params.enabled:
+                return 0, 0.0
+            return (
+                max(0, min(100, confidence + params.confidence_adj)),
+                kelly_fraction * params.size_mult,
+            )
+
+        # Blending: interpolate between prev and current
+        alpha = days_since_transition / self._blend_days  # 0=old, 1=new
+
+        old_params = STRATEGY_REGIME_MATRIX.get(
+            (strategy, self._prev_regime), _DEFAULT_PARAMS
+        )
+        new_params = STRATEGY_REGIME_MATRIX.get(
+            (strategy, self._current_regime), _DEFAULT_PARAMS
+        )
+
+        # If either regime disables the strategy, blend toward disable
+        if not new_params.enabled:
+            blended_mult = old_params.size_mult * (1 - alpha)
+            blended_adj = int(old_params.confidence_adj * (1 - alpha))
+        elif not old_params.enabled:
+            blended_mult = new_params.size_mult * alpha
+            blended_adj = int(new_params.confidence_adj * alpha)
+        else:
+            blended_mult = old_params.size_mult * (1 - alpha) + new_params.size_mult * alpha
+            blended_adj = int(
+                old_params.confidence_adj * (1 - alpha) + new_params.confidence_adj * alpha
+            )
+
+        return (
+            max(0, min(100, confidence + blended_adj)),
+            kelly_fraction * blended_mult,
+        )
 
 
 # ---------------------------------------------------------------------------

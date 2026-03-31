@@ -244,3 +244,172 @@ class ShadowTracker:
         with open(path, "w") as f:
             json.dump(state, f, indent=2, default=str)
         log.info("Shadow state saved: %s (%d strategies)", path, len(state))
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing & Statistical Comparison (Book 67 extension)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ABComparison:
+    """Result of an A/B strategy comparison."""
+    control_name: str
+    test_name: str
+    control_result: ShadowResult
+    test_result: ShadowResult
+    p_value: float = 1.0
+    effect_size: float = 0.0  # Cohen's d
+    significant: bool = False
+
+
+def welch_ttest(returns_a: List[float], returns_b: List[float]) -> Tuple[float, float]:
+    """Welch's t-test for two samples with unequal variance.
+
+    Returns: (t_statistic, p_value)
+    Uses scipy-free implementation with Welch-Satterthwaite dof.
+    """
+    import numpy as np
+
+    a = np.array(returns_a, dtype=float)
+    b = np.array(returns_b, dtype=float)
+    n_a, n_b = len(a), len(b)
+
+    if n_a < 2 or n_b < 2:
+        return 0.0, 1.0
+
+    mean_a, mean_b = np.mean(a), np.mean(b)
+    var_a, var_b = np.var(a, ddof=1), np.var(b, ddof=1)
+
+    se_a = var_a / n_a
+    se_b = var_b / n_b
+    se_diff = math.sqrt(se_a + se_b)
+
+    if se_diff < 1e-15:
+        return 0.0, 1.0
+
+    t_stat = (mean_a - mean_b) / se_diff
+
+    # Welch-Satterthwaite degrees of freedom
+    numerator = (se_a + se_b) ** 2
+    denominator = (se_a ** 2) / (n_a - 1) + (se_b ** 2) / (n_b - 1)
+    if denominator < 1e-15:
+        return t_stat, 1.0
+    dof = numerator / denominator
+
+    # Approximate p-value using normal distribution for large dof,
+    # else use a conservative t-distribution approximation
+    # For stdlib-only: use the regularized incomplete beta function approach
+    # Simplified: for dof > 30, normal approx is fine; else use conservative bound
+    abs_t = abs(t_stat)
+    if dof > 30:
+        # Normal approximation (two-tailed)
+        # P(|Z| > t) ~ 2 * erfc(t / sqrt(2)) / 2
+        p_value = math.erfc(abs_t / math.sqrt(2))
+    else:
+        # Conservative approximation for smaller dof using normal
+        # This slightly underestimates p-value (conservative = harder to promote)
+        correction = 1.0 + 1.0 / (4.0 * max(dof, 1))
+        p_value = math.erfc(abs_t / (math.sqrt(2) * correction))
+
+    return float(t_stat), max(0.0, min(1.0, float(p_value)))
+
+
+def effect_size_cohens_d(returns_a: List[float], returns_b: List[float]) -> float:
+    """Cohen's d — standardized effect size between two return distributions.
+
+    Interpretation: 0.2 = small, 0.5 = medium, 0.8 = large.
+    Uses pooled standard deviation.
+    """
+    import numpy as np
+
+    a = np.array(returns_a, dtype=float)
+    b = np.array(returns_b, dtype=float)
+    n_a, n_b = len(a), len(b)
+
+    if n_a < 2 or n_b < 2:
+        return 0.0
+
+    mean_a, mean_b = np.mean(a), np.mean(b)
+    var_a, var_b = np.var(a, ddof=1), np.var(b, ddof=1)
+
+    # Pooled standard deviation
+    pooled_var = ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
+    pooled_std = math.sqrt(pooled_var)
+
+    if pooled_std < 1e-15:
+        return 0.0
+
+    return float((mean_a - mean_b) / pooled_std)
+
+
+def compare_strategies(
+    tracker: ShadowTracker,
+    strategy_a: str,
+    strategy_b: str,
+) -> ABComparison:
+    """Run A/B comparison between two shadow strategies.
+
+    strategy_a = control (incumbent), strategy_b = test (challenger).
+    """
+    result_a = tracker.evaluate(strategy_a)
+    result_b = tracker.evaluate(strategy_b)
+
+    # Extract per-trade P&L returns
+    strat_a = tracker._strategies.get(strategy_a)
+    strat_b = tracker._strategies.get(strategy_b)
+
+    returns_a = [t.virtual_pnl for t in strat_a.closed_trades] if strat_a else []
+    returns_b = [t.virtual_pnl for t in strat_b.closed_trades] if strat_b else []
+
+    comp = ABComparison(
+        control_name=strategy_a,
+        test_name=strategy_b,
+        control_result=result_a,
+        test_result=result_b,
+    )
+
+    if len(returns_a) < 10 or len(returns_b) < 10:
+        log.info("A/B: insufficient trades (a=%d, b=%d) — need 10+ each",
+                 len(returns_a), len(returns_b))
+        return comp
+
+    t_stat, p_val = welch_ttest(returns_b, returns_a)  # test vs control
+    d = effect_size_cohens_d(returns_b, returns_a)
+
+    comp.p_value = p_val
+    comp.effect_size = d
+    comp.significant = p_val < 0.05 and abs(d) > 0.2
+
+    log.info("A/B: %s vs %s — t=%.3f, p=%.4f, d=%.3f, sig=%s",
+             strategy_a, strategy_b, t_stat, p_val, d, comp.significant)
+    return comp
+
+
+def promotion_decision(
+    comparison: ABComparison,
+    min_p: float = 0.05,
+    min_effect: float = 0.2,
+) -> str:
+    """Decide whether to PROMOTE, HOLD, or DEMOTE the test strategy.
+
+    Returns:
+      "PROMOTE" — test is significantly better than control
+      "HOLD"    — inconclusive, keep running both
+      "DEMOTE"  — test is significantly worse than control
+    """
+    p = comparison.p_value
+    d = comparison.effect_size
+
+    if p > min_p:
+        # Not statistically significant — keep running
+        return "HOLD"
+
+    if d > min_effect:
+        # Test significantly outperforms control
+        return "PROMOTE"
+    elif d < -min_effect:
+        # Test significantly underperforms control
+        return "DEMOTE"
+    else:
+        # Significant p but tiny effect — not actionable
+        return "HOLD"

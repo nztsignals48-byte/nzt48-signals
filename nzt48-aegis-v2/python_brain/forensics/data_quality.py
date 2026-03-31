@@ -206,3 +206,61 @@ class DataQualityAnalyzer:
             json.dump(report.to_dict(), f, indent=2)
         log.info("Data quality report: %s (score=%.0f%%)", path, report.overall_score)
         return path
+
+
+def check_tick_quality(
+    price: float,
+    bid: float,
+    ask: float,
+    volume: float,
+    timestamp_ns: int,
+) -> Dict[str, Any]:
+    """Check real-time tick data quality for a single tick.
+
+    Called by bridge.py as a pre-gate before signal generation.
+    Returns dict with quality_score (0-100). Score < 50 should reject the tick.
+    """
+    import time as _time
+
+    score = 100
+    issues = []
+
+    # Price must be positive
+    if price <= 0:
+        score -= 40
+        issues.append("price_non_positive")
+
+    # Bid < Ask (when both present)
+    if bid > 0 and ask > 0:
+        if bid >= ask:
+            score -= 25
+            issues.append("bid_gte_ask")
+        else:
+            # Spread < 5% of mid
+            mid = (bid + ask) / 2
+            spread_pct = (ask - bid) / mid if mid > 0 else 0
+            if spread_pct > 0.05:
+                score -= 20
+                issues.append("spread_too_wide")
+
+    # Volume must be non-negative
+    if volume < 0:
+        score -= 15
+        issues.append("negative_volume")
+
+    # Timestamp not stale (> 60s old)
+    if timestamp_ns > 0:
+        now_ns = int(_time.time() * 1_000_000_000)
+        age_s = (now_ns - timestamp_ns) / 1_000_000_000
+        if age_s > 60:
+            score -= 20
+            issues.append("stale_timestamp")
+        elif age_s < -5:
+            # Future timestamp (> 5s into future — clock skew tolerance)
+            score -= 15
+            issues.append("future_timestamp")
+
+    return {
+        "quality_score": max(0, score),
+        "issues": issues,
+    }

@@ -100,7 +100,10 @@ class NewsAggregator:
 
     def __init__(self, data_dir: str = "/app/data/news"):
         self._data_dir = Path(data_dir)
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._data_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         self._running = False
         self._threads: List[threading.Thread] = []
         # Per-ticker sentiment cache: symbol -> deque of recent NewsItems
@@ -696,3 +699,33 @@ def _extract_symbols_from_title(title: str) -> List[str]:
             if match not in {"A", "I", "CEO", "FDA", "SEC", "IPO", "ETF", "NYSE", "GDP", "CPI", "THE", "FOR", "AND", "NOT"}:
                 symbols.add(match)
     return list(symbols)
+
+
+def get_cached_sentiment(symbol: str) -> Optional[float]:
+    """Get cached sentiment score for a symbol.
+
+    Called by bridge.py as a news sentiment overlay on signals.
+    Reads from /app/data/sentiment_cache.json if it exists.
+
+    Args:
+        symbol: Ticker symbol (e.g. "AAPL", "3USL.L")
+
+    Returns:
+        Float from -1.0 (bearish) to +1.0 (bullish), or None if no data.
+    """
+    cache_path = Path("/app/data/sentiment_cache.json")
+    try:
+        if not cache_path.exists():
+            return None
+        with open(cache_path) as f:
+            cache = json.load(f)
+        val = cache.get(symbol.upper())
+        if val is None:
+            # Try without exchange suffix (e.g. "3USL" for "3USL.L")
+            base = symbol.split(".")[0].upper()
+            val = cache.get(base)
+        if val is not None:
+            return max(-1.0, min(1.0, float(val)))
+        return None
+    except Exception:
+        return None

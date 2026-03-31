@@ -236,3 +236,135 @@ class MigrationChecker:
         ok = 0 < sacred <= 8
         return CheckResult("safety_boundaries", "RISK", ok,
                           f"Sacred limit {sacred}% (need <=8%)" if not ok else "OK")
+
+
+# ---------------------------------------------------------------------------
+# Migration Step Sequence + Scaling Phases + Rollback — Book 60 extensions
+# ---------------------------------------------------------------------------
+
+from typing import Optional
+
+
+@dataclass
+class MigrationStep:
+    """A single step in the paper→live migration sequence."""
+    sequence: int
+    name: str
+    description: str
+    is_reversible: bool
+    prerequisite_steps: List[int] = field(default_factory=list)
+
+
+MIGRATION_STEPS: List[MigrationStep] = [
+    MigrationStep(
+        sequence=1, name="final_recon",
+        description="Final reconciliation: compare paper P&L vs WAL events, zero discrepancy tolerance",
+        is_reversible=True, prerequisite_steps=[],
+    ),
+    MigrationStep(
+        sequence=2, name="code_freeze",
+        description="Code freeze: no deployments for 48h before and 72h after go-live",
+        is_reversible=True, prerequisite_steps=[1],
+    ),
+    MigrationStep(
+        sequence=3, name="backup",
+        description="Full backup: config, WAL, DuckDB warehouse, persistent memory, dynamic weights",
+        is_reversible=True, prerequisite_steps=[1],
+    ),
+    MigrationStep(
+        sequence=4, name="config_change",
+        description="Config switch: set mode=LIVE in config.toml, enable real order routing",
+        is_reversible=True, prerequisite_steps=[2, 3],
+    ),
+    MigrationStep(
+        sequence=5, name="capital_alloc",
+        description="Capital allocation: fund ISA account, verify available buying power matches plan",
+        is_reversible=True, prerequisite_steps=[4],
+    ),
+    MigrationStep(
+        sequence=6, name="strategy_select",
+        description="Strategy selection: only VALIDATED/LIVE lifecycle strategies active; PAPER strategies shadow-only",
+        is_reversible=True, prerequisite_steps=[4],
+    ),
+    MigrationStep(
+        sequence=7, name="risk_tighten",
+        description="Risk tightening: halve position sizes (50% Kelly), double NTZ widths, lower confidence floor +5",
+        is_reversible=True, prerequisite_steps=[5, 6],
+    ),
+    MigrationStep(
+        sequence=8, name="deploy",
+        description="Deploy: restart engine with LIVE config, verify IBKR gateway connected, confirm first heartbeat",
+        is_reversible=False, prerequisite_steps=[7],
+    ),
+    MigrationStep(
+        sequence=9, name="first_trade_monitor",
+        description="First trade monitoring: watch first 3 trades in real-time, verify fills match expected slippage",
+        is_reversible=False, prerequisite_steps=[8],
+    ),
+    MigrationStep(
+        sequence=10, name="24h_intensive",
+        description="24-hour intensive monitoring: Telegram alerts at S4+, manual review every 2 hours, abort if loss >1%",
+        is_reversible=False, prerequisite_steps=[9],
+    ),
+]
+
+
+@dataclass
+class ScalingPhase:
+    """A capital scaling phase during the paper→live transition."""
+    phase: str
+    weeks: int
+    capital_pct: float       # % of total ISA capital deployed
+    max_positions: int
+    strategies: List[str]    # Which strategies are active in this phase
+
+
+SCALING_PHASES: List[ScalingPhase] = [
+    ScalingPhase(
+        phase="proof_of_life", weeks=2, capital_pct=10.0, max_positions=1,
+        strategies=["TypeF"],
+    ),
+    ScalingPhase(
+        phase="confidence", weeks=4, capital_pct=25.0, max_positions=2,
+        strategies=["TypeF", "S2"],
+    ),
+    ScalingPhase(
+        phase="scale_up", weeks=6, capital_pct=50.0, max_positions=3,
+        strategies=["TypeF", "S2", "TypeB"],
+    ),
+    ScalingPhase(
+        phase="full_deployment", weeks=0, capital_pct=100.0, max_positions=5,
+        strategies=["TypeF", "S2", "TypeB", "MeanRev", "Momentum"],
+    ),
+]
+
+
+def check_rollback_triggers(metrics: dict) -> Optional[str]:
+    """Check if any rollback trigger is active.
+
+    Triggers:
+      - Daily loss > 4% of deployed capital
+      - System health check failure (uptime/connectivity)
+      - Operational error (order stuck, WAL corruption, etc.)
+
+    Args:
+        metrics: dict with keys like daily_loss_pct, health_ok, operational_errors
+
+    Returns:
+        Reason string if rollback needed, None if all clear.
+    """
+    daily_loss = metrics.get("daily_loss_pct", 0.0)
+    if daily_loss > 4.0:
+        return f"ROLLBACK: daily loss {daily_loss:.1f}% exceeds 4% threshold"
+
+    health_ok = metrics.get("health_ok", True)
+    if not health_ok:
+        failed = metrics.get("health_failures", [])
+        return f"ROLLBACK: system health check failed — {', '.join(failed) if failed else 'unknown'}"
+
+    op_errors = metrics.get("operational_errors", 0)
+    if op_errors > 0:
+        last_error = metrics.get("last_op_error", "unknown")
+        return f"ROLLBACK: {op_errors} operational error(s) — last: {last_error}"
+
+    return None
