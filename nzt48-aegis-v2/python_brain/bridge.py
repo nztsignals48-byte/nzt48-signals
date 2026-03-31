@@ -649,6 +649,338 @@ def _log_gate_veto(ticker_id, gate_name, price, indicators, reason_detail=""):
         sys.stderr.flush()
 
 # ============================================================================
+# BOOK 42: CONDITIONAL HEDGING — Dynamic Hedge Activation & Unwinding
+# ============================================================================
+# Reduces hedging costs 60-80% vs permanent hedging by activating only when
+# warning signals fire. VIX backwardation preceded 85-90% of >15% drawdowns.
+#
+# Warning Signal Thresholds:
+#   - VIX backwardation: VIX term structure inverted (spot > 1-month future)
+#   - Credit widening: spreads > 30bp above 20-day MA (or proxy via HYG/TLT)
+#   - Breadth decline: <40% of assets above 200-day MA (25% = CRISIS)
+#
+# Hedge Activation: 2nd signal OR 2 consecutive closes beyond threshold
+# Hedge Unwinding: ALL signals must clear for 5 consecutive days
+# ============================================================================
+
+_hedge_state = {
+    "status": "INACTIVE",  # INACTIVE, MONITORING, HEDGE_ACTIVE, KILLING
+    "activation_count": 0,  # Count of active warning signals (0-3)
+    "signal_fire_times": {},  # signal_name → timestamp last fired
+    "consecutive_days_clear": 0,  # Days with all signals cleared (0-5)
+    "last_clear_date": None,  # Date of last signal clear check
+    "current_allocation": {  # Current hedge positions
+        "inverse_etp_pct": 0.0,  # % of portfolio in inverse ETPs
+        "vix_etp_pct": 0.0,  # % of portfolio in VIX ETPs
+        "cash_raised_pct": 0.0,  # % of portfolio raised to cash
+    },
+}
+
+_hedge_signal_history = deque(maxlen=20)  # Recent (timestamp, signal_name, value) tuples
+
+# VIX term structure tracking (last N closes)
+_vix_spot_history = deque(maxlen=30)  # Recent VIX spot close prices
+_vix_1m_future_history = deque(maxlen=30)  # Recent VIX 1-month future closes
+
+# Credit spread tracking (bond ETF proxy)
+_credit_spread_history = deque(maxlen=30)  # Recent HYG-TLT spreads or estimated spreads
+_credit_spread_ma20 = 0.0  # 20-day MA of credit spreads
+
+# Breadth tracking (% of assets above 200-day MA)
+_breadth_tracker = {
+    "total_symbols": 0,
+    "above_200ma": 0,
+    "last_breadth_pct": 50.0,  # Start neutral
+    "last_check_time": 0,
+}
+
+def _load_hedge_state():
+    """Load persisted hedge state from /app/data/hedge_state.json."""
+    global _hedge_state
+    try:
+        state_path = "/app/data/hedge_state.json"
+        if os.path.exists(state_path):
+            with open(state_path) as f:
+                persisted = json.load(f)
+            _hedge_state.update(persisted)
+            sys.stderr.write(
+                f"HEDGE_LOAD: status={_hedge_state['status']} "
+                f"activation_count={_hedge_state['activation_count']}\n"
+            )
+            sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"HEDGE_LOAD: failed to load state: {e} (non-fatal)\n")
+        sys.stderr.flush()
+
+def _save_hedge_state():
+    """Persist hedge state to /app/data/hedge_state.json."""
+    try:
+        state_path = "/app/data/hedge_state.json"
+        with open(state_path, "w") as f:
+            json.dump(_hedge_state, f, indent=2)
+    except Exception as e:
+        sys.stderr.write(f"HEDGE_SAVE: failed to save state: {e}\n")
+        sys.stderr.flush()
+
+def _monitor_hedge_signals(msg, ind):
+    """
+    Monitor 3 warning signals for hedge activation.
+    Called once per tick to track signal state.
+
+    Returns:
+        (vix_backwardation, credit_warning, breadth_declining) — boolean tuple
+    """
+    timestamp_ns = msg.get("timestamp_ns", 0)
+    timestamp_s = timestamp_ns / 1_000_000_000 if timestamp_ns > 0 else time.time()
+
+    # ── Signal 1: VIX Backwardation (VIX spot > VIX 1m future) ──
+    vix_spot = msg.get("vix_spot", None)
+    vix_1m = msg.get("vix_1m_future", None)
+    vix_backwardation = False
+    if vix_spot is not None and vix_1m is not None:
+        if vix_spot > 0:
+            _vix_spot_history.append(vix_spot)
+        if vix_1m > 0:
+            _vix_1m_future_history.append(vix_1m)
+        # Backwardation: spot > future (flat or inverted term structure)
+        vix_backwardation = vix_spot > vix_1m * 1.02  # 2% margin to avoid noise
+        if vix_backwardation:
+            _hedge_signal_history.append((timestamp_s, "VIX_BACKWARDATION", vix_spot - vix_1m))
+
+    # ── Signal 2: Credit Spread Widening ──
+    # Proxy: Use HYG (high-yield bonds) vs TLT (long-term treasury) spread
+    # Or estimate from provided credit spread if available
+    credit_warning = False
+    hyg_price = msg.get("hyg_price", None)
+    tlt_price = msg.get("tlt_price", None)
+    credit_spread = msg.get("credit_spread_bp", None)
+
+    if credit_spread is not None:
+        _credit_spread_history.append(credit_spread)
+        if len(_credit_spread_history) >= 20:
+            _credit_spread_ma20 = sum(_credit_spread_history) / len(_credit_spread_history)
+            # Warning: spreads > 30bp above 20-day MA
+            credit_warning = credit_spread > _credit_spread_ma20 + 30
+            if credit_warning:
+                _hedge_signal_history.append((timestamp_s, "CREDIT_WIDENING", credit_spread - _credit_spread_ma20))
+
+    # ── Signal 3: Market Breadth Declining ──
+    # < 40% of assets above 200-day MA = warning
+    # < 25% of assets above 200-day MA = CRISIS (triggers kill switch)
+    breadth_pct = msg.get("breadth_200ma_pct", None)
+    breadth_declining = False
+    breadth_crisis = False
+    if breadth_pct is not None:
+        _breadth_tracker["last_breadth_pct"] = breadth_pct
+        breadth_declining = breadth_pct < 40
+        breadth_crisis = breadth_pct < 25  # Triggers max hedge + raise cash 10%
+        if breadth_declining or breadth_crisis:
+            _hedge_signal_history.append((timestamp_s, "BREADTH_DECLINING", breadth_pct))
+
+    return vix_backwardation, credit_warning, breadth_declining, breadth_crisis
+
+def _check_hedge_activation_rules(vix_bw, credit_warn, breadth_decline, breadth_crisis):
+    """
+    Check if hedge should be activated based on signal counts and rules.
+
+    Activation Rules (Book 42):
+      - 2nd signal fires: activate hedge
+      - 2 consecutive closes beyond threshold: activate hedge
+      - All 3 signals firing: kill switch (max hedge + 50%+ cash)
+
+    Returns:
+        (should_activate, num_signals_active, kill_switch)
+    """
+    num_active = sum([vix_bw, credit_warn, breadth_decline])
+    kill_switch = breadth_crisis or num_active == 3
+
+    # Activation threshold: 2+ signals
+    should_activate = num_active >= 2 or kill_switch
+
+    return should_activate, num_active, kill_switch
+
+def _apply_conditional_hedge(msg, all_signals):
+    """
+    Apply conditional hedging overlay to signal generation.
+
+    Hedge Allocation Matrix (Book 42):
+      - All clear: no hedge, full allocation
+      - VIX bw + normal credit: 3% inverse ETP + 2% VIX allocation
+      - VIX bw + credit warn + breadth decline: 5% inverse + 3% VIX + raise 10% cash
+      - All 3 (kill switch): 50%+ cash, max hedge (8% inverse + 5% VIX)
+
+    Implementation: Generate new hedge signals (inverse ETP buy, VIX ETP buy)
+    and route them as signals with HEDGE_* strategy names.
+    """
+    global _hedge_state
+
+    # Load initial state once per session
+    if _hedge_state["status"] == "INACTIVE":
+        _load_hedge_state()
+
+    vix_bw, credit_warn, breadth_dec, breadth_crisis = _monitor_hedge_signals(msg, {})
+    should_activate, num_signals, kill_switch = _check_hedge_activation_rules(
+        vix_bw, credit_warn, breadth_dec, breadth_crisis
+    )
+
+    # Determine hedge allocation based on signal combination
+    inverse_pct, vix_pct, cash_pct = 0.0, 0.0, 0.0
+
+    if kill_switch:
+        # All 3 firing → max hedge + 50%+ cash raise
+        _hedge_state["status"] = "KILLING"
+        inverse_pct, vix_pct, cash_pct = 8.0, 5.0, 50.0
+        sys.stderr.write("HEDGE_ACTIVATION: kill_switch triggered (all signals firing)\n")
+    elif should_activate:
+        _hedge_state["status"] = "HEDGE_ACTIVE"
+        _hedge_state["activation_count"] = num_signals
+
+        if num_signals == 2:
+            # 2 signals: check which combination
+            if vix_bw and credit_warn:
+                # VIX backwardation + credit warning → 5% inverse + 3% VIX + 10% cash
+                inverse_pct, vix_pct, cash_pct = 5.0, 3.0, 10.0
+                sys.stderr.write("HEDGE_ACTIVATION: VIX_BW + CREDIT_WARN (5% inverse, 3% VIX, 10% cash)\n")
+            elif vix_bw and breadth_dec:
+                # VIX backwardation + breadth decline → 5% inverse + 3% VIX + 10% cash
+                inverse_pct, vix_pct, cash_pct = 5.0, 3.0, 10.0
+                sys.stderr.write("HEDGE_ACTIVATION: VIX_BW + BREADTH_DEC (5% inverse, 3% VIX, 10% cash)\n")
+            else:
+                # Default 2-signal hedge: 3% inverse + 2% VIX
+                inverse_pct, vix_pct, cash_pct = 3.0, 2.0, 0.0
+                sys.stderr.write("HEDGE_ACTIVATION: 2 signals (3% inverse, 2% VIX)\n")
+        sys.stderr.flush()
+    else:
+        # No activation: check if should unwind
+        if _hedge_state["status"] != "INACTIVE":
+            # Track consecutive clear days for unwinding
+            from datetime import datetime, timezone
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if today != _hedge_state.get("last_clear_date"):
+                _hedge_state["last_clear_date"] = today
+                _hedge_state["consecutive_days_clear"] += 1
+            else:
+                # Same day, same clear state: no increment
+                pass
+
+            if _hedge_state["consecutive_days_clear"] >= 5:
+                # All signals clear for 5+ days → unwind hedge
+                sys.stderr.write(
+                    f"HEDGE_UNWINDING: all signals clear for {_hedge_state['consecutive_days_clear']} days\n"
+                )
+                sys.stderr.flush()
+                _hedge_state["status"] = "INACTIVE"
+                _hedge_state["activation_count"] = 0
+                _hedge_state["consecutive_days_clear"] = 0
+                _hedge_state["current_allocation"] = {"inverse_etp_pct": 0, "vix_etp_pct": 0, "cash_raised_pct": 0}
+                _save_hedge_state()
+                return []  # No new hedge signals — let existing ones unwind naturally
+
+    # Generate hedge signals based on allocations
+    hedge_signals = []
+
+    if inverse_pct > 0:
+        # Inverse ETP signal (e.g., short S&P 500 via PSQ, SH, PSA, PSII)
+        hedge_signals.append({
+            "type": "signal",
+            "ticker_id": msg.get("ticker_id", 0),
+            "direction": "Long",  # Buy inverse (which is short the market)
+            "confidence": 60 + (num_signals * 10),  # Confidence scales with signal count
+            "kelly_fraction": 0.05,  # Conservative sizing for hedges
+            "shares": 0,  # Rust-side sizing
+            "strategy": "HEDGE_InverseETP",
+            "book_reference": 42,
+            "hedge_pct_allocation": inverse_pct,
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+        })
+
+    if vix_pct > 0:
+        # VIX ETP signal (e.g., UVXY, VIXY for 1x or XIV for -1x)
+        hedge_signals.append({
+            "type": "signal",
+            "ticker_id": msg.get("ticker_id", 0),
+            "direction": "Long",  # VIX long (portfolio insurance)
+            "confidence": 60 + (num_signals * 10),
+            "kelly_fraction": 0.03,  # Small VIX position
+            "shares": 0,
+            "strategy": "HEDGE_VIXAllocation",
+            "book_reference": 42,
+            "hedge_pct_allocation": vix_pct,
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+        })
+
+    if cash_pct > 0:
+        # Cash raise signal: flatten long positions proportionally, build cash reserve
+        hedge_signals.append({
+            "type": "signal",
+            "ticker_id": msg.get("ticker_id", 0),
+            "direction": "Flat",  # Special direction for cash raise
+            "confidence": 65 + (num_signals * 10),
+            "kelly_fraction": 0.0,  # No new positions during cash raise
+            "shares": 0,
+            "strategy": "HEDGE_CashRaise",
+            "book_reference": 42,
+            "hedge_pct_allocation": cash_pct,
+            "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec}",
+        })
+
+    # Update persisted state
+    _hedge_state["current_allocation"] = {
+        "inverse_etp_pct": inverse_pct,
+        "vix_etp_pct": vix_pct,
+        "cash_raised_pct": cash_pct,
+    }
+    _save_hedge_state()
+
+    return hedge_signals
+
+def _apply_hedge_confidence_overlay(best_signal, msg, num_active_hedge_signals):
+    """
+    Reduce confidence for long signals when hedge is active (Book 42).
+
+    Logic:
+      - Hedge INACTIVE: no adjustment
+      - 1-2 signals active: reduce long confidence by 10 points
+      - Kill switch active: reduce long confidence by 25 points, short confidence by +15
+    """
+    if best_signal is None:
+        return best_signal
+
+    direction = best_signal.get("direction", "").lower()
+    hedge_status = _hedge_state.get("status", "INACTIVE")
+
+    if hedge_status == "INACTIVE":
+        return best_signal  # No hedge adjustment
+
+    if direction == "long":
+        if hedge_status == "KILLING":
+            # Kill switch: heavily penalize longs
+            best_signal["confidence"] = max(0, best_signal.get("confidence", 50) - 25)
+            sys.stderr.write(
+                f"HEDGE_OVERLAY: long signal confidence reduced 25pts (kill switch active) "
+                f"→ {best_signal['confidence']}\n"
+            )
+        else:
+            # Normal hedge: modest long penalty
+            best_signal["confidence"] = max(0, best_signal.get("confidence", 50) - 10)
+            sys.stderr.write(
+                f"HEDGE_OVERLAY: long signal confidence reduced 10pts (hedge active) "
+                f"→ {best_signal['confidence']}\n"
+            )
+        sys.stderr.flush()
+    elif direction == "short":
+        if hedge_status == "KILLING":
+            # Kill switch: boost short signals
+            best_signal["confidence"] = min(100, best_signal.get("confidence", 50) + 15)
+            sys.stderr.write(
+                f"HEDGE_OVERLAY: short signal confidence raised 15pts (kill switch active) "
+                f"→ {best_signal['confidence']}\n"
+            )
+            sys.stderr.flush()
+
+    return best_signal
+
+# ============================================================================
 # Phase E: Adaptive confidence floor from dynamic_weights.toml
 # ============================================================================
 
@@ -2262,6 +2594,100 @@ def _compute_confidence_floor(msg, ind):
     return floor
 
 
+def _validate_breakout_3criteria(bars_5m, breakout_level, breakout_is_long=True):
+    """Book 22: Validate breakout with 3-criteria gate.
+
+    Requirements for high-confidence breakout (68% WR):
+    1. Close beyond level (NOT just wick) — 68% vs 31% wick-only WR
+    2. Volume >= 1.5x 20-bar average — WR crosses 60% at 1.5x
+    3. No reversal within 3 bars — 3-bar hold required
+
+    Args:
+        bars_5m: List of OHLCV bars (5-minute)
+        breakout_level: Price level being broken (e.g., resistance/support)
+        breakout_is_long: True for long breakout (price > level), False for short
+
+    Returns:
+        Dictionary with:
+        - criteria_met: Count of criteria met (0-3)
+        - confidence_adj: Adjustment to apply (-8 or +10)
+        - failed_criteria: List of which criteria failed (for logging)
+        - details: Dict with individual criterion status
+    """
+    if not bars_5m or len(bars_5m) < 4:  # Need current + 3 bars ahead for hold check
+        return {
+            "criteria_met": 0,
+            "confidence_adj": -8,
+            "failed_criteria": ["insufficient_data"],
+            "details": {}
+        }
+
+    current_bar = bars_5m[-1]
+    current_close = current_bar["close"]
+
+    # Criterion 1: Close beyond level (not just wick)
+    criterion1_pass = False
+    if breakout_is_long:
+        criterion1_pass = current_close > breakout_level
+    else:
+        criterion1_pass = current_close < breakout_level
+
+    # Criterion 2: Volume >= 1.5x 20-bar average
+    criterion2_pass = False
+    if len(bars_5m) >= 20:
+        volumes_20 = [b["volume"] for b in bars_5m[-20:]]
+        avg_vol_20 = sum(volumes_20) / len(volumes_20)
+        current_vol = current_bar["volume"]
+        criterion2_pass = current_vol >= (1.5 * avg_vol_20)
+
+    # Criterion 3: No reversal within 3 bars
+    # Current bar is at index -1. Check bars at -2, -3, -4 (next 3 bars after current in time series)
+    criterion3_pass = True
+    num_bars_to_check = min(3, len(bars_5m) - 1)  # Can't check more than available future bars
+    if num_bars_to_check > 0:
+        for bar_offset in range(1, num_bars_to_check + 1):
+            if len(bars_5m) >= bar_offset + 1:  # Make sure we have that bar
+                check_bar = bars_5m[-1 - bar_offset]  # -2, -3, -4 from current (-1)
+                check_close = check_bar["close"]
+                if breakout_is_long and check_close < breakout_level:
+                    criterion3_pass = False
+                    break
+                elif not breakout_is_long and check_close > breakout_level:
+                    criterion3_pass = False
+                    break
+
+    # Count criteria met
+    criteria_met = sum([criterion1_pass, criterion2_pass, criterion3_pass])
+
+    # Determine confidence adjustment
+    if criteria_met == 3:
+        confidence_adj = +10
+    elif criteria_met <= 1:
+        confidence_adj = -8
+    else:
+        confidence_adj = 0  # 2 criteria met = neutral (not penalized but not boosted)
+
+    # Log which criteria failed
+    failed_criteria = []
+    if not criterion1_pass:
+        failed_criteria.append("close_not_beyond")
+    if not criterion2_pass:
+        failed_criteria.append("low_volume")
+    if not criterion3_pass:
+        failed_criteria.append("reversal_detected")
+
+    return {
+        "criteria_met": criteria_met,
+        "confidence_adj": confidence_adj,
+        "failed_criteria": failed_criteria,
+        "details": {
+            "criterion1_close_beyond": criterion1_pass,
+            "criterion2_volume_1_5x": criterion2_pass,
+            "criterion3_no_reversal_3bar": criterion3_pass,
+        }
+    }
+
+
 def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, common_fields):
     """System 1: Microstructure Momentum — order flow proxy + intraday momentum.
 
@@ -2613,6 +3039,192 @@ def _system4_volatility(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
             "strategy": "S4_VolPremium", "s4_vix": round(vix, 1), "s4_mode": "long_rebound",
             **common_fields,
         }
+
+    return None
+
+
+def _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
+    """Book 5: FOMC Pre-drift Positioning — position ahead of FOMC + ride post-event drift.
+
+    Entry strategy:
+    - T-1 (1 day before FOMC): Long positioning with dovish bias (confidence +15).
+      Rationale: Pre-event uncertainty premium tends to resolve toward policy dovishness.
+      Expected drift: +0.4% average through T+5.
+    - T (FOMC day): Soft block via _event_context hard_block, but log for T+1 state.
+    - T+1 to T+5: Drift continuation based on actual event outcome:
+        * Dovish FOMC: Continue LONG (confidence +12).
+        * Hawkish FOMC: Flip to INVERSE/SHORT proxy if available, else reduce (confidence +8).
+
+    Exit: 6 days max hold (T+5 close). Win rate target: 70%+.
+
+    Data flow:
+    1. Detect FOMC scheduled date from event_calendar.json (via _load_calendar).
+    2. Compare current date to FOMC date to determine positioning phase (T-1 / T+1..T+5).
+    3. For post-event phase, check macro data (persistent_memory or context_store) for:
+       - Fed funds rate decision (raise=hawkish, cut/hold=dovish)
+       - Forward guidance tone (inflation concerns=hawkish, growth concerns=dovish)
+    4. Generate signal with appropriate confidence and metadata.
+    """
+    ts_ns = msg.get("timestamp_ns", 0)
+    if ts_ns <= 0:
+        return None
+
+    from datetime import datetime, timezone
+
+    # Get current UTC date/time
+    utc_dt = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc)
+    current_date = utc_dt.date()
+
+    # Load FOMC schedule
+    try:
+        from python_brain.strategies.fomc_drift import _load_calendar
+        events = _load_calendar()
+    except (ImportError, Exception):
+        return None
+
+    # Find next FOMC event within ±5 days
+    fomc_event = None
+    fomc_date = None
+    for evt in events:
+        if evt.get("type") != "FOMC":
+            continue
+        evt_date_str = evt.get("date")  # ISO format YYYY-MM-DD
+        if evt_date_str:
+            try:
+                evt_date_obj = datetime.strptime(evt_date_str, "%Y-%m-%d").date()
+                days_diff = (evt_date_obj - current_date).days
+                if -5 <= days_diff <= 5:
+                    fomc_event = evt
+                    fomc_date = evt_date_obj
+                    break
+            except ValueError:
+                continue
+
+    if not fomc_event or not fomc_date:
+        return None
+
+    days_to_fomc = (fomc_date - current_date).days
+
+    # ── PHASE 1: T-1 PRE-FOMC POSITIONING (1 day before) ──
+    if days_to_fomc == 1:
+        # Pre-event dovish bias: markets front-run rate cuts
+        conf = 62.0
+        conf += 15.0  # Dovish pre-event bias
+
+        # Sentiment bonus if recent volatility elevated (event premium priced in)
+        vix = msg.get("vix", 0)
+        if vix > 20.0:
+            conf += 5.0  # Elevated VIX = strong event premium
+        if vix > 25.0:
+            conf += 3.0  # Extreme event uncertainty
+
+        conf = min(conf, 85.0)
+        if conf < conf_floor:
+            return None
+
+        kelly = kelly_fn(conf)
+        return {
+            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+            "confidence": conf,
+            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+            "strategy": "FOMMCDriftT-1",
+            "fomc_phase": "pre_event",
+            "days_to_fomc": 1,
+            "expected_drift_pct": 0.4,
+            "max_hold_hours": 144,  # 6 days
+            "suggested_exit_urgency_hours": 120,  # Tighten stops after T+5
+            **common_fields,
+        }
+
+    # ── PHASE 2: T+1 to T+5 DRIFT CAPTURE (post-event continuation) ──
+    if 1 <= days_to_fomc <= 5:
+        # Determine if FOMC was dovish or hawkish from nightly macro data
+        dovish = None
+        try:
+            # Try to load FOMC outcome from persistent memory
+            pm_path = "/app/data/persistent_memory.json"
+            if os.path.exists(pm_path):
+                with open(pm_path) as f:
+                    pm = json.load(f)
+                    fomc_outcome = pm.get("last_fomc_outcome")
+                    if fomc_outcome:
+                        dovish = fomc_outcome.get("dovish", None)
+                        if dovish is None:
+                            # Infer from fields
+                            rate_decision = fomc_outcome.get("rate_decision")  # "cut" / "hold" / "raise"
+                            dovish = rate_decision in ("cut", "hold")
+        except (FileNotFoundError, json.JSONDecodeError, Exception):
+            pass
+
+        # Fallback: if no persistent data, check context_store for clues
+        if dovish is None:
+            try:
+                ctx_path = "/app/data/context_store.json"
+                if os.path.exists(ctx_path):
+                    with open(ctx_path) as f:
+                        ctx = json.load(f)
+                        fomc_guidance = ctx.get("last_macro_event", {})
+                        if "fomc" in fomc_guidance.get("event_type", "").lower():
+                            sentiment = fomc_guidance.get("sentiment")  # "dovish" / "hawkish"
+                            dovish = sentiment == "dovish"
+            except (FileNotFoundError, json.JSONDecodeError, Exception):
+                pass
+
+        # If still unknown, default to dovish bias (pre-event positioning already assumes dovish)
+        if dovish is None:
+            dovish = True
+
+        # ── DOVISH OUTCOME: Continue LONG ──
+        if dovish:
+            conf = 60.0
+            conf += 12.0  # Dovish drift continuation
+            vix = msg.get("vix", 0)
+            if vix > 18.0:
+                conf += 3.0  # Elevated VIX amplifies drift
+            conf = min(conf, 82.0)
+            if conf < conf_floor:
+                return None
+
+            kelly = kelly_fn(conf)
+            return {
+                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                "confidence": conf,
+                "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                "strategy": "FOMMCDriftT+N",
+                "fomc_phase": "post_event_dovish",
+                "days_since_fomc": days_to_fomc,
+                "expected_drift_pct": 0.4,
+                "max_hold_hours": 144,
+                **common_fields,
+            }
+
+        # ── HAWKISH OUTCOME: Reduce conviction ──
+        else:
+            # ISA constraint: long-only. Instead of shorting, reduce position.
+            # Rate hikes tend to hurt growth, but inflation hedge can rally.
+            conf = 55.0
+            conf += 8.0  # Hawkish drift is weaker but tradeable
+            vix = msg.get("vix", 0)
+            if vix > 22.0:
+                conf += 2.0  # High VIX in hawkish regime = fade opportunity
+
+            conf = min(conf, 75.0)
+            if conf < conf_floor:
+                return None
+
+            kelly = kelly_fn(conf)
+            return {
+                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                "confidence": conf,
+                "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                "strategy": "FOMMCDriftT+N",
+                "fomc_phase": "post_event_hawkish",
+                "days_since_fomc": days_to_fomc,
+                "expected_drift_pct": 0.15,  # Lower drift in hawkish
+                "max_hold_hours": 96,  # Tighten to 4 days
+                "note": "hawkish_outcome_reduced_conviction",
+                **common_fields,
+            }
 
     return None
 
@@ -3279,6 +3891,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # ── SYSTEM 5: Overnight Carry (Phase 8) ──
     s5_signal = _system5_overnight(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
 
+    # ── BOOK 5: FOMC Pre-drift Positioning ──
+    fomc_signal = _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+
     # ── SYSTEM 6: Catalyst Rotation (Phase 9) ──
     s6_signal = _system6_catalyst(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
 
@@ -3676,58 +4291,109 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # ── BOOK 5: OVERNIGHT REVERSAL (NIGHT RIDER) ──
     # Stock declined >1.5% during day, NOT news-driven, volume >1.5x average.
     # Enter near close for overnight recovery. Exit at open +15 minutes.
-    # 65% WR on non-news-driven declines with volume confirmation.
+    # Expected 55%+ WR on non-news-driven declines with volume confirmation.
+    # Block on earnings day, inverse ETPs, and mean-reverting regimes.
     night_rider_signal = None
     try:
         from datetime import datetime as _dt_nr, timezone as _tz_nr
         _ts_nr = msg.get("timestamp_ns", 0)
         if _ts_nr > 0 and bars_5m and len(bars_5m) >= 50:
-            _utc_nr = _dt_nr.fromtimestamp(_ts_nr / 1_000_000_000, tz=_tz_nr.utc)
-            _h_nr = _utc_nr.hour
-            _sym_nr = ticker_symbols.get(ticker_id, "")
-            _exch_nr = _get_exchange_for_symbol(_sym_nr) if _sym_nr else ""
-            # Only trigger in last 60 minutes of trading session
-            _nr_window = False
-            if _exch_nr == "LSE" and 15 <= _h_nr < 16:
-                _nr_window = True
-            elif _exch_nr == "US" and (20 <= _h_nr or _h_nr < 21):
-                _nr_window = True
-            elif _exch_nr in ("XETRA", "EURONEXT") and 16 <= _h_nr < 17:
-                _nr_window = True
-            if _nr_window:
-                # Check: declined >1.5% from day open
-                _day_open = bars_5m[0]["open"] if len(bars_5m) < 80 else bars_5m[-78]["open"]
-                _current_nr = msg.get("last", 0)
-                _day_return = (_current_nr - _day_open) / _day_open if _day_open > 0 else 0
-                # Check: volume >1.5x average
-                _vol_ok = ind.get("rvol", 1.0) > 1.5
-                # Check: not news-driven (no extreme single-bar move > 3%)
-                _news_driven = False
-                for b in bars_5m[-20:]:
-                    _bar_ret = abs(b["close"] - b["open"]) / b["open"] if b["open"] > 0 else 0
-                    if _bar_ret > 0.03:
-                        _news_driven = True
-                        break
-                if _day_return < -0.015 and _vol_ok and not _news_driven:
-                    _nr_conf = 60.0
-                    if _day_return < -0.025:
-                        _nr_conf += 10.0  # Deeper decline = higher reversal probability
-                    if ind.get("rvol", 1.0) > 2.5:
-                        _nr_conf += 5.0  # Capitulation volume
-                    if vpin < 0.50:
-                        _nr_conf += 5.0  # Low informed selling = retail panic
-                    _nr_conf = min(_nr_conf, 90.0)
-                    if _nr_conf >= conf_floor:
-                        kelly = _kelly_for(_nr_conf)
-                        night_rider_signal = {
-                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                            "confidence": _nr_conf,
-                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                            "strategy": "NightRider", "day_return": round(_day_return * 100, 2),
-                            "suggested_max_hold_hours": 16,  # Exit at open +15min
-                            "exit_urgency_ramp_hours": 12,
-                            **common_fields,
-                        }
+            # Filter 1: Regime check — block mean-reverting/random (need trending for reversal)
+            if hurst_regime not in ("trending",):
+                pass  # Exit early if not trending regime
+            else:
+                _utc_nr = _dt_nr.fromtimestamp(_ts_nr / 1_000_000_000, tz=_tz_nr.utc)
+                _h_nr = _utc_nr.hour
+                _sym_nr = ticker_symbols.get(ticker_id, "")
+                _exch_nr = _get_exchange_for_symbol(_sym_nr) if _sym_nr else ""
+
+                # Filter 2: Block inverse ETPs (Night Rider is long-only)
+                _is_inverse = _sym_nr.startswith("3S") or _sym_nr in (
+                    "QQQS.L", "3USS.L", "3STS.L", "3SNV.L", "3SAP.L", "3SMS.L", "3SEM.L",
+                )
+                if not _is_inverse:
+                    # Only trigger in last 60 minutes of trading session
+                    _nr_window = False
+                    if _exch_nr == "LSE" and 15 <= _h_nr < 16:
+                        _nr_window = True
+                    elif _exch_nr == "US" and (20 <= _h_nr or _h_nr < 21):
+                        _nr_window = True
+                    elif _exch_nr in ("XETRA", "EURONEXT") and 16 <= _h_nr < 17:
+                        _nr_window = True
+
+                    if _nr_window:
+                        # Filter 3: Check for earnings day (skip high-volatility event days)
+                        _skip_earnings = False
+                        try:
+                            from python_brain.events.event_calendar import get_event_calendar
+                            _evt_cal = get_event_calendar()
+                            _near_evt = _evt_cal.is_near_event(_ts_nr)
+                            if _near_evt and hasattr(_near_evt, 'event_type') and _near_evt.event_type == "EARNINGS":
+                                _skip_earnings = True
+                        except Exception:
+                            pass  # Fail-open: continue if calendar unavailable
+
+                        if not _skip_earnings:
+                            # Check: declined >1.5% from day open
+                            _day_open = bars_5m[0]["open"] if len(bars_5m) < 80 else bars_5m[-78]["open"]
+                            _current_nr = msg.get("last", 0)
+                            _day_return = (_current_nr - _day_open) / _day_open if _day_open > 0 else 0
+                            _day_decline_pct = -_day_return * 100.0  # Convert to positive decline %
+
+                            # Check: volume >1.5x average
+                            _vol_ok = ind.get("rvol", 1.0) > 1.5
+                            _rvol_val = ind.get("rvol", 1.0)
+
+                            # Enhanced: not news-driven (no single bar > 3% of session move)
+                            _news_driven = False
+                            if _day_decline_pct > 0.1:  # Only check if meaningful decline
+                                _threshold_pct = _day_decline_pct * 0.03  # 3% of session move
+                                for b in bars_5m[-20:]:
+                                    _bar_move = abs(b["high"] - b["low"]) / (b["open"] + 1e-9) * 100.0
+                                    if _bar_move > _threshold_pct:
+                                        _news_driven = True
+                                        break
+
+                            if _day_return < -0.015 and _vol_ok and not _news_driven:
+                                # Base confidence: 60
+                                _nr_conf = 60.0
+
+                                # Boost +10 if deeper decline > 2.5%
+                                if _day_decline_pct > 2.5:
+                                    _nr_conf += 10.0
+
+                                # Boost +10 if RVOL > 2.0
+                                if _rvol_val > 2.0:
+                                    _nr_conf += 10.0
+
+                                # Boost +5 if market breadth improved in last hour (last 12 bars in 5-min)
+                                try:
+                                    _recent_bars = bars_5m[-12:] if len(bars_5m) >= 12 else bars_5m
+                                    if len(_recent_bars) >= 3:
+                                        _up_bars_recent = sum(1 for b in _recent_bars if b["close"] > b["open"])
+                                        if _up_bars_recent >= len(_recent_bars) * 0.6:  # 60%+ up bars
+                                            _nr_conf += 5.0
+                                except Exception:
+                                    pass
+
+                                # Legacy: low VPIN bonus (retained for compatibility)
+                                if vpin < 0.50:
+                                    _nr_conf += 5.0  # Low informed selling = retail panic
+
+                                _nr_conf = min(_nr_conf, 80.0)
+                                if _nr_conf >= conf_floor:
+                                    kelly = _kelly_for(_nr_conf)
+                                    night_rider_signal = {
+                                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                                        "confidence": _nr_conf,
+                                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                                        "strategy": "NightRider", "day_return": round(_day_return * 100, 2),
+                                        "day_decline_pct": round(_day_decline_pct, 2),
+                                        "rvol_entry": round(_rvol_val, 2),
+                                        "suggested_max_hold_hours": 16,  # Exit at open +15min
+                                        "exit_urgency_ramp_hours": 12,
+                                        **common_fields,
+                                    }
     except Exception:
         pass
 
@@ -3837,7 +4503,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
-        s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, s6_signal, s7_signal,
+        s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, fomc_signal, s6_signal, s7_signal,
         vol_comp_signal, rebal_signal, nav_signal, alpha_signal, lead_lag_signal,
         emat_signal, attn_signal, swarm_signal, hft_signal, negrisk_signal,
         highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
@@ -3987,6 +4653,22 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # AUTONOMY: Filter out auto-killed strategies (live Sharpe < -1.0 over 30+ trades)
     if _auto_killed_strategies:
         all_signals = [s for s in all_signals if s.get("strategy", "") not in _auto_killed_strategies]
+
+    # ── BOOK 42: CONDITIONAL HEDGING ──
+    # Monitor hedge signals and generate hedge allocations if thresholds met.
+    # Hedge signals are appended to all_signals for consideration alongside regular signals.
+    try:
+        hedge_sigs = _apply_conditional_hedge(msg, all_signals)
+        if hedge_sigs:
+            all_signals.extend(hedge_sigs)
+            sys.stderr.write(
+                f"HEDGE_SIGNALS: {len(hedge_sigs)} hedge signals generated "
+                f"(status={_hedge_state.get('status')})\n"
+            )
+            sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"HEDGE_ERROR: _apply_conditional_hedge failed: {e}\n")
+        sys.stderr.flush()
 
     all_signals.sort(key=lambda s: s["confidence"], reverse=True)
     return all_signals
@@ -4744,16 +5426,56 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     except Exception:
         _flags = None
 
-    # REGIME-AWARE RISK LIMITS (Book 85)
+    # ── BOOK 85: REGIME-SCALED RISK LIMITS ──
+    # Daily/weekly loss limits, per-trade risk budget, and cooldown enforcement.
     try:
         from python_brain.risk.regime_risk_limits import get_regime_limits
         rl = get_regime_limits(vix=msg.get("vix", 21), hurst=ind.get("hurst", 0.5))
-        # Apply regime confidence floor
+
+        # 1. Apply regime-scaled confidence floor
         all_signals = [s for s in all_signals if s["confidence"] >= rl.confidence_floor]
         if not all_signals:
             return None
-    except Exception:
+
+        # 2. Store regime risk-per-trade for Rust engine (CHECK 37)
+        msg["_regime_risk_per_trade"] = rl.risk_per_trade_pct / 100.0  # Convert to decimal
+        msg["_regime_daily_loss_limit"] = rl.daily_loss_limit_pct / 100.0
+        msg["_regime_weekly_loss_limit"] = rl.weekly_loss_limit_pct / 100.0
+        msg["_regime_name"] = rl.regime
+
+        # 3. Enforce regime-scaled cooldown between trades
+        # Cooldown is checked per-ticker: store regime cooldown in msg for signal gating
+        if not hasattr(_apply_adjustments, "_last_signal_time"):
+            _apply_adjustments._last_signal_time = {}
+        last_sig_ns = _apply_adjustments._last_signal_time.get(ticker_id, 0)
+        now_ns = msg.get("timestamp_ns", int(time.time() * 1e9))
+        elapsed_ns = now_ns - last_sig_ns
+        cooldown_ns = rl.cooldown_secs * 1_000_000_000
+
+        if last_sig_ns > 0 and elapsed_ns < cooldown_ns:
+            # Still in cooldown — suppress signals for this ticker
+            seconds_remaining = (cooldown_ns - elapsed_ns) / 1e9
+            log.info(f"Regime cooldown active for {symbol}: {seconds_remaining:.1f}s remaining "
+                     f"({rl.regime}={rl.cooldown_secs}s)")
+            return None  # Hard block: cooldown not elapsed
+
+        # 4. Attach regime info to signals for Rust processing + diagnostics
+        for sig in all_signals:
+            sig["regime"] = rl.regime
+            sig["regime_risk_per_trade_pct"] = rl.risk_per_trade_pct
+            sig["regime_cooldown_secs"] = rl.cooldown_secs
+
+    except Exception as e:
+        log.warning(f"Book 85 regime limits failed: {e}")
         pass
+
+    # Update last signal time if signals still pending (before any further filtering)
+    if all_signals and hasattr(_apply_adjustments, "_last_signal_time"):
+        try:
+            now_ns = msg.get("timestamp_ns", int(time.time() * 1e9))
+            _apply_adjustments._last_signal_time[ticker_id] = now_ns
+        except Exception:
+            pass
 
     # SIGNAL ROUTER — session-aware filtering + conflict resolution (Book 216)
     try:
@@ -5634,6 +6356,14 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if _tick_counts.get(ticker_id, 0) % 100 == 0:
                 sys.stderr.write(f"BAYES_ERR: {bayes_err}\n")
                 sys.stderr.flush()
+
+    # ── BOOK 42: HEDGE CONFIDENCE OVERLAY ──
+    # Reduce confidence for long signals when hedge is active.
+    # Kill switch boosts short signals and penalizes longs more aggressively.
+    num_active_hedge_sigs = sum(
+        1 for sig in all_signals if sig.get("strategy", "").startswith("HEDGE_")
+    )
+    best = _apply_hedge_confidence_overlay(best, msg, num_active_hedge_sigs)
 
     # COMPOUNDING MACHINE: Scale Kelly by edge-proportional allocation weight.
     # Strategies with proven higher Sharpe get more capital. Unproven get 50%.

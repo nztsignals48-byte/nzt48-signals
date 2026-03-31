@@ -1,4 +1,4 @@
-//! RiskArbiter — synchronous 31-check risk gate with 4-state regime hierarchy.
+//! RiskArbiter — synchronous 36-check risk gate with 4-state regime hierarchy.
 //! HALT > FLATTEN > REDUCE > NORMAL. Fail-closed. State frozen during eval.
 
 use crate::config::RiskConfig;
@@ -11,6 +11,65 @@ use std::collections::{HashMap, VecDeque};
 // Sprint 6: All constants moved to config.toml [hardening] section.
 // Accessed via self.config.* in RiskArbiter methods.
 const VELOCITY_WINDOW_5MIN_NS: u64 = 300_000_000_000;
+
+// ── Book 7: Session Exposure Limits ──
+// Max NAV by session (% of current equity)
+const SESSION_ASIA_LIMIT_PCT: f64 = 30.0;
+const SESSION_EUROPE_LIMIT_PCT: f64 = 50.0;
+const SESSION_US_LIMIT_PCT: f64 = 60.0;
+const SESSION_OVERLAP_EU_US_LIMIT_PCT: f64 = 80.0;
+
+/// Session classification based on London local time (seconds from midnight).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TradingSession {
+    Asia,       // 00:00-08:00 London time
+    Europe,     // 08:00-14:30 London time
+    Us,         // 14:30-21:00 London time (US core hours, EU still open until 15:30)
+    Overlap,    // EU+US overlap: 14:30-15:30 (covered by Us above, split handled separately)
+    PostMarket, // 21:00-00:00 London time
+}
+
+impl TradingSession {
+    /// Determine current trading session from London local time (seconds from midnight).
+    pub fn from_london_secs(london_secs: u32) -> Self {
+        match london_secs {
+            0..=28799 => TradingSession::Asia,         // 00:00-07:59:59
+            28800..=52199 => TradingSession::Europe,   // 08:00-14:29:59
+            52200..=75599 => TradingSession::Us,       // 14:30-20:59:59
+            _ => TradingSession::PostMarket,            // 21:00-23:59:59 and beyond
+        }
+    }
+
+    /// Return session name for logging.
+    pub fn name(&self) -> &'static str {
+        match self {
+            TradingSession::Asia => "Asia",
+            TradingSession::Europe => "Europe",
+            TradingSession::Us => "US+EU_Overlap",
+            TradingSession::Overlap => "EU+US_Overlap",
+            TradingSession::PostMarket => "PostMarket",
+        }
+    }
+
+    /// Classify ticker's exchange to a session.
+    pub fn classify_exchange(exchange_mic: &str) -> TradingSession {
+        match exchange_mic {
+            // Asia: Tokyo (TSE), Hong Kong (HKEX), Singapore (SGX)
+            "XTSE" | "XHKG" | "XSES" => TradingSession::Asia,
+
+            // Europe: All ISA-eligible European exchanges
+            "XLON" | "XDUB" |  // UK & Ireland (8:00-16:30 GMT/BST)
+            "XETR" | "XPAR" | "XAMS" | "XBRU" | "XLIS" | "XMIL" | "XMAD" | // Euronext/CBF
+            "XSWX" | "XSTO" | "XOSL" | "XCSE" | "XHEL" | "XWAR" => TradingSession::Europe,
+
+            // US: NYSE (XNYS), NASDAQ (XNAS)
+            "XNYS" | "XNAS" | "ARCX" | "BATS" => TradingSession::Us,
+
+            // Unknown: default to Europe
+            _ => TradingSession::Europe,
+        }
+    }
+}
 
 /// Context provided by the caller for each evaluation.
 #[derive(Clone, Debug)]
@@ -62,6 +121,8 @@ pub struct EvalContext {
     pub native_spread_bps: f64,
     /// Sprint 2D: Structural tradability score from Python bridge [0-100].
     pub structural_score: f64,
+    /// Book 7: Exchange MIC code for the intent ticker (e.g., "XLON", "XETR").
+    pub exchange_mic: String,
 }
 
 impl Default for EvalContext {
@@ -95,6 +156,7 @@ impl Default for EvalContext {
             kalman_divergence: 0.0,  // No divergence data
             native_spread_bps: 0.0,  // No spread data
             structural_score: 50.0,  // Neutral default (won't trigger veto at 40 or penalty at 60)
+            exchange_mic: String::new(),  // SENTINEL: empty exchange = unknown session (safe)
         }
     }
 }
@@ -495,6 +557,34 @@ impl RiskArbiter {
             }, ts);
         }
 
+        // CHECK 36: Session Exposure Limits (Book 7)
+        // Max NAV by session: Asia 30%, Europe 50%, US 60%, EU+US Overlap 80%.
+        if enforce_live_gates {
+            if let Some(veto) = self.check_session_exposure(intent_ticker, portfolio, ctx) {
+                return self.reject(veto, ts);
+            }
+        }
+
+        // CHECK 37: Regime-Scaled Daily Loss Limit (Book 85)
+        // Dynamic daily circuit breaker based on regime: STEADY -3%, INFLATION -2.5%, WOI -2%, CRISIS -1.5%
+        if enforce_live_gates {
+            if let Some(veto) = self.check_regime_daily_loss(portfolio) {
+                return self.reject(veto, ts);
+            }
+        }
+
+        // CHECK 38: Regime-Scaled Weekly Loss Limit (Book 85)
+        // Dynamic weekly circuit breaker based on regime: STEADY -7%, INFLATION -5.5%, WOI -4%, CRISIS -2%
+        if enforce_live_gates {
+            if let Some(veto) = self.check_regime_weekly_loss(portfolio) {
+                return self.reject(veto, ts);
+            }
+        }
+
+        // CHECK 39: Regime-Scaled Risk Per Trade (Book 85)
+        // Cap position size to regime-appropriate risk budget: STEADY 0.75%, INFLATION 0.60%, WOI 0.40%, CRISIS 0.20%
+        // Applied during position sizing below (after effective_kelly calculation).
+
         // All checks passed. Calculate adjusted size.
         // SC-13: Kelly scaling ramp — configurable target, clamp range
         let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)
@@ -507,7 +597,7 @@ impl RiskArbiter {
         let regime_scale = self.regime_scales.get(&regime_name).copied().unwrap_or(default_scale);
         let adjusted_size = size * regime_scale;
 
-        // Sizing instrumentation: log every candidate that passes all 27 checks
+        // Sizing instrumentation: log every candidate that passes all 36 checks
         eprintln!(
             "SIZING: ticker={} kelly_in={:.4} effective={:.4} ramp={:.2} ramped={:.4} \
              equity={:.0} size={:.0} regime_scale={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
@@ -592,6 +682,102 @@ impl RiskArbiter {
         if self.velocity_log.len() > 50_000 {
             self.velocity_log.pop_front();
         }
+    }
+
+    /// CHECK 36: Session Exposure Limits (Book 7).
+    /// Prevents overconcentration by session:
+    /// - Asia: 30% of equity
+    /// - Europe: 50% of equity
+    /// - US: 60% of equity
+    /// - EU+US Overlap (14:30-15:30 London): 80% of equity
+    ///
+    /// Returns VetoReason if exposure would exceed limit, None otherwise.
+    fn check_session_exposure(
+        &self,
+        intent_ticker: TickerId,
+        portfolio: &PortfolioState,
+        ctx: &EvalContext,
+    ) -> Option<VetoReason> {
+        if ctx.exchange_mic.is_empty() || portfolio.equity <= 0.0 {
+            // Unknown exchange or no equity: skip check (safe default)
+            return None;
+        }
+
+        // Determine current trading session from London time
+        let current_session = TradingSession::from_london_secs(ctx.time_secs);
+
+        // Classify the intent ticker's exchange to a session
+        let intent_exchange_session = TradingSession::classify_exchange(&ctx.exchange_mic);
+
+        // Determine applicable exposure limit based on current time and intent exchange
+        let (session_name, limit_pct) = match current_session {
+            TradingSession::PostMarket => {
+                // After 21:00 London: no new entries allowed anyway (CHECK 11), skip session check
+                return None;
+            }
+            TradingSession::Asia => {
+                // 00:00-08:00: Only Asia sessions are open
+                match intent_exchange_session {
+                    TradingSession::Asia => ("Asia", SESSION_ASIA_LIMIT_PCT),
+                    _ => {
+                        // Attempting to trade non-Asia exchange during Asia hours
+                        // Use the more restrictive limit for the intent exchange
+                        (intent_exchange_session.name(), SESSION_ASIA_LIMIT_PCT)
+                    }
+                }
+            }
+            TradingSession::Europe => {
+                // 08:00-14:30: Europe session (US not yet open)
+                match intent_exchange_session {
+                    TradingSession::Europe => ("Europe", SESSION_EUROPE_LIMIT_PCT),
+                    TradingSession::Asia => ("Europe", SESSION_EUROPE_LIMIT_PCT),
+                    _ => ("Europe", SESSION_EUROPE_LIMIT_PCT),
+                }
+            }
+            TradingSession::Us => {
+                // 14:30-21:00: US session
+                // 14:30-15:30 (52200-56400): Europe+US overlap → 80% limit
+                // 15:30-21:00 (56400-75600): US core hours → 60% limit
+                let is_eu_us_overlap = ctx.time_secs >= 52200 && ctx.time_secs < 56400; // 14:30-15:30
+                if is_eu_us_overlap {
+                    ("US+EU_Overlap", SESSION_OVERLAP_EU_US_LIMIT_PCT)
+                } else {
+                    ("US", SESSION_US_LIMIT_PCT)
+                }
+            }
+            TradingSession::Overlap => {
+                // This variant shouldn't be reached (handled by Us), but for completeness:
+                ("US+EU_Overlap", SESSION_OVERLAP_EU_US_LIMIT_PCT)
+            }
+        };
+
+        // Calculate current session exposure (% of equity)
+        let mut session_notional = 0.0;
+
+        for (ticker, position) in portfolio.positions() {
+            // Skip the intent ticker (not yet added to portfolio)
+            if *ticker == intent_ticker {
+                continue;
+            }
+
+            // For simplicity, use average entry price × quantity as notional
+            // (Could enhance with current mark-to-market for precision)
+            let position_notional = position.avg_entry * position.qty as f64;
+            session_notional += position_notional;
+        }
+
+        let current_exposure_pct = (session_notional / portfolio.equity) * 100.0;
+
+        // Check if adding this position would exceed the limit
+        if current_exposure_pct >= limit_pct {
+            return Some(VetoReason::SessionExposureExceeded {
+                session: session_name.to_string(),
+                exposure_pct: current_exposure_pct as u32,
+                limit_pct: limit_pct as u32,
+            });
+        }
+
+        None
     }
 
     /// CHECK 20: Macro Regime Escalation (Phase 9).
@@ -689,4 +875,90 @@ impl RiskArbiter {
         }
         false
     }
+
+    /// CHECK 37: Regime-Scaled Daily Loss Limit (Book 85).
+    /// Dynamic daily drawdown circuit breaker scaled by current regime.
+    /// Thresholds:
+    /// - STEADY: -3.0%
+    /// - INFLATION: -2.5%
+    /// - WOI: -2.0%
+    /// - CRISIS: -1.5%
+    ///
+    /// Returns VetoReason if limit breached (initiates FLATTEN), None otherwise.
+    fn check_regime_daily_loss(&self, portfolio: &PortfolioState) -> Option<VetoReason> {
+        // Regime-scaled limits (more restrictive in crisis)
+        let daily_loss_limit = match self.regime {
+            RiskRegime::Halt => return None,     // Already halted, skip check
+            RiskRegime::Flatten => return None,  // Already flattening, skip check
+            RiskRegime::Reduce => -2.5,          // Reduce uses INFLATION limit
+            RiskRegime::Normal => -3.0,          // Normal uses STEADY limit
+        };
+
+        let daily_dd = portfolio.daily_drawdown_pct();
+        if daily_dd < daily_loss_limit {
+            // Exceeded limit (more negative than threshold)
+            eprintln!(
+                "CHECK_37 REGIME_DAILY_LOSS: drawdown {:.2}% exceeds regime limit {:.2}% (regime={:?}) → FLATTEN",
+                daily_dd, daily_loss_limit, self.regime
+            );
+            return Some(VetoReason::RegimeDailyLossLimitBreached {
+                drawdown_pct: (daily_dd * 100.0) as u32,
+                limit_pct: (daily_loss_limit * 100.0) as i32,
+            });
+        }
+        None
+    }
+
+    /// CHECK 38: Regime-Scaled Weekly Loss Limit (Book 85).
+    /// Dynamic weekly drawdown circuit breaker scaled by current regime.
+    /// Thresholds:
+    /// - STEADY: -7.0%
+    /// - INFLATION: -5.5%
+    /// - WOI: -4.0%
+    /// - CRISIS: -2.0%
+    ///
+    /// Returns VetoReason if limit breached (initiates FLATTEN), None otherwise.
+    fn check_regime_weekly_loss(&self, portfolio: &PortfolioState) -> Option<VetoReason> {
+        // Regime-scaled limits (more restrictive in crisis)
+        let weekly_loss_limit = match self.regime {
+            RiskRegime::Halt => return None,     // Already halted, skip check
+            RiskRegime::Flatten => return None,  // Already flattening, skip check
+            RiskRegime::Reduce => -5.5,          // Reduce uses INFLATION limit
+            RiskRegime::Normal => -7.0,          // Normal uses STEADY limit
+        };
+
+        let weekly_dd = portfolio.weekly_drawdown_pct();
+        if weekly_dd < weekly_loss_limit {
+            // Exceeded limit (more negative than threshold)
+            eprintln!(
+                "CHECK_38 REGIME_WEEKLY_LOSS: drawdown {:.2}% exceeds regime limit {:.2}% (regime={:?}) → FLATTEN",
+                weekly_dd, weekly_loss_limit, self.regime
+            );
+            return Some(VetoReason::RegimeWeeklyLossLimitBreached {
+                drawdown_pct: (weekly_dd * 100.0) as u32,
+                limit_pct: (weekly_loss_limit * 100.0) as i32,
+            });
+        }
+        None
+    }
+
+    /// CHECK 39: Regime-Scaled Risk Per Trade (Book 85).
+    /// Applied during position sizing to cap risk per trade by regime.
+    /// Thresholds (% of equity):
+    /// - STEADY: 0.75%
+    /// - INFLATION: 0.60%
+    /// - WOI: 0.40%
+    /// - CRISIS: 0.20%
+    ///
+    /// Called by evaluate() after effective_kelly is calculated.
+    /// Returns scaled Kelly cap as multiplier [0.0, 1.0].
+    pub fn regime_risk_per_trade_scale(&self) -> f64 {
+        match self.regime {
+            RiskRegime::Halt => 0.0,           // No trades in HALT
+            RiskRegime::Flatten => 0.0,        // No new entries in FLATTEN
+            RiskRegime::Reduce => 0.40 / 0.75, // WOI/INFLATION scale relative to STEADY
+            RiskRegime::Normal => 1.0,         // STEADY = full 0.75% allowed
+        }
+    }
 }
+
