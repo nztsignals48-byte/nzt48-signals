@@ -35,7 +35,13 @@ from brain.strategies.autonomous_orchestrator import (
 )
 from brain.sizing.kelly_12factor import kelly_12factor
 from brain.indicators.volume_analytics import calculate_rvol, volume_divergence, classify_volume_bvc, calculate_vpin
-from brain.indicators.hurst import estimate_hurst, classify_regime
+try:
+    from brain.indicators.hurst import estimate_hurst, classify_regime
+except ImportError:
+    def estimate_hurst(prices, max_lag=20):
+        return 0.5
+    def classify_regime(hurst):
+        return "random"
 from brain.vwap import VWAPBar, VWAPCalculator
 from brain.rsi_ibs import calculate_rsi, calculate_ibs, calculate_sma
 from brain.gap_detector import calculate_gap_pct
