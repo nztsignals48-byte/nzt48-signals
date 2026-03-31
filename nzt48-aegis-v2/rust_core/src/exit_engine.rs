@@ -295,6 +295,10 @@ impl Default for ExitConfig {
 pub struct ExitEngine {
     pub config: ExitConfig,
     strategy: Box<dyn ExitStrategy>,
+    /// Book 39: Concrete default ChandelierStrategy for applying per-position signal hints.
+    /// When the strategy is InfiniteChandelier, this holds a fallback ChandelierStrategy
+    /// so with_signal_hints() can still work for positions with exit hints.
+    default_chandelier: ChandelierStrategy,
     /// Book 39: Per-strategy Chandelier overrides. Key = entry_type (e.g., "TypeF", "S2").
     /// When a position's entry_type matches, that strategy's params are used instead of global.
     per_strategy_overrides: std::collections::HashMap<String, ChandelierStrategy>,
@@ -302,7 +306,12 @@ pub struct ExitEngine {
 
 impl ExitEngine {
     pub fn new(config: ExitConfig, strategy: Box<dyn ExitStrategy>) -> Self {
-        Self { config, strategy, per_strategy_overrides: std::collections::HashMap::new() }
+        Self { config, strategy, default_chandelier: ChandelierStrategy::default(), per_strategy_overrides: std::collections::HashMap::new() }
+    }
+
+    /// Set the default ChandelierStrategy (used for per-position hint application).
+    pub fn set_default_chandelier(&mut self, strat: ChandelierStrategy) {
+        self.default_chandelier = strat;
     }
 
     /// Book 39: Register per-strategy Chandelier override.
@@ -422,6 +431,46 @@ impl ExitEngine {
             }
         }
 
+        // Book 39: PARTIAL PROFIT LADDERING — 25% at Rung 3, 25% at Rung 4.
+        // Remaining 50% trails with the Chandelier stop.
+        // partial_exits_done: 0 = none, 1 = rung3 done, 2 = rung3+rung4 done
+        if position.qty > 1 && !is_halt_flatten {
+            let profit_pct = if position.avg_entry > 0.0 {
+                (current_price - position.avg_entry) / position.avg_entry
+            } else {
+                0.0
+            };
+            // Rung 3 partial (25%): profit >= 1.5% and not yet done
+            if position.trailing_rung >= 3 && position.partial_exits_done == 0 && profit_pct >= 0.015 {
+                let partial = (position.qty as f64 * 0.25).max(1.0) as u32;
+                if partial > 0 && partial < position.qty {
+                    checks.push(ExitCheck {
+                        reason: ExitReason::PartialProfitTake,
+                        priority: ExitPriority::TimeStop, // Low priority — doesn't override protective stops
+                        order_type: ExitOrderType::LimitAtStop,
+                        limit_price: Some(current_price),
+                        tif: TimeInForce::Day,
+                    });
+                    // Store the partial qty hint — engine.rs reads this
+                    // Note: we can't mutate position here, engine.rs handles qty reduction
+                }
+            }
+            // Rung 4 partial (25%): profit >= 2.5% and only rung3 done
+            else if position.trailing_rung >= 4 && position.partial_exits_done == 1 && profit_pct >= 0.025 {
+                let remaining = position.qty;
+                let partial = (remaining as f64 * 0.33).max(1.0) as u32; // 33% of remaining ≈ 25% of original
+                if partial > 0 && partial < remaining {
+                    checks.push(ExitCheck {
+                        reason: ExitReason::PartialProfitTake,
+                        priority: ExitPriority::TimeStop,
+                        order_type: ExitOrderType::LimitAtStop,
+                        limit_price: Some(current_price),
+                        tif: TimeInForce::Day,
+                    });
+                }
+            }
+        }
+
         // Priority 2.7: MAX HOLD HOURS TIME-STOP (Book 39/94)
         // Force exit if position held past strategy-specific max holding period.
         if let Some(max_hours) = position.max_hold_hours {
@@ -521,6 +570,21 @@ impl ExitEngine {
             (winner.order_type, winner.tif, winner.limit_price)
         };
 
+        // Book 39: Compute partial_qty for profit laddering exits
+        let partial_qty = if winner.reason == ExitReason::PartialProfitTake {
+            if position.partial_exits_done == 0 {
+                // Rung 3: sell 25% of position
+                Some((position.qty as f64 * 0.25).max(1.0) as u32)
+            } else if position.partial_exits_done == 1 {
+                // Rung 4: sell 33% of remaining (≈25% of original)
+                Some((position.qty as f64 * 0.33).max(1.0) as u32)
+            } else {
+                None // Already did both partials
+            }
+        } else {
+            None
+        };
+
         Some(ExitResult {
             signal: ExitSignal {
                 ticker_id: position.ticker_id,
@@ -529,7 +593,7 @@ impl ExitEngine {
                 order_type,
                 position_order_id: position.origin_order_id.clone(),
                 limit_price,
-                partial_qty: None,
+                partial_qty,
             },
             tif,
             suppressed_count: checks.len() - 1,
@@ -548,9 +612,33 @@ impl ExitEngine {
             position.highest_high = current_price;
         }
         // Book 39: Use per-strategy override if available, else global strategy.
+        // When per-position signal hints exist (rung3_atr, trail_bias), apply them
+        // via with_signal_hints() to create a position-specific Chandelier config.
+        let has_hints = position.suggested_rung3_atr.is_some()
+            || position.exit_trail_bias.is_some()
+            || position.suggested_initial_stop_atr_mult.is_some();
+        let hinted;
         let strat: &dyn ExitStrategy = if let Some(ovr) = self.per_strategy_overrides.get(&position.entry_type) {
-            ovr as &dyn ExitStrategy
+            if has_hints {
+                hinted = ovr.with_signal_hints(
+                    position.suggested_initial_stop_atr_mult,
+                    position.suggested_rung3_atr,
+                    position.exit_trail_bias.as_deref(),
+                );
+                &hinted as &dyn ExitStrategy
+            } else {
+                ovr as &dyn ExitStrategy
+            }
+        } else if has_hints {
+            // Default strategy path but position has signal hints — apply to default_chandelier
+            hinted = self.default_chandelier.with_signal_hints(
+                position.suggested_initial_stop_atr_mult,
+                position.suggested_rung3_atr,
+                position.exit_trail_bias.as_deref(),
+            );
+            &hinted as &dyn ExitStrategy
         } else {
+            // Default strategy, no hints — use as-is (may be InfiniteChandelier)
             self.strategy.as_ref()
         };
         // Compute new rung (can only increase)

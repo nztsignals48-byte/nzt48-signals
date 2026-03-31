@@ -535,6 +535,60 @@ _LEAD_LAG_R2_STRONG_THRESH = 0.85  # R² above this → "strong" confidence boos
 _lead_lag_optimal_lags = {}  # loaded from /app/data/lead_lag_calibration.json
 _lead_lag_nightly_last_load = 0.0
 
+# ── BOOK 15: 6-SIGNAL REGIME COMPOSITE ──
+# Enhanced regime detection using 6 macro factors instead of VIX-only.
+# Scores: 0 = all clear (STEADY), 6 = all firing (CRISIS)
+# Each signal contributes 0 or 1 to the composite score.
+def _regime_composite_score(msg, ind=None):
+    """Compute 6-factor regime stress score (0-6).
+    Returns (score, regime_name, details_dict)."""
+    score = 0
+    details = {}
+    # 1. VIX level (primary)
+    vix = msg.get("vix", 18)
+    if vix > 25:
+        score += 1
+        details["vix_elevated"] = True
+    if vix > 35:
+        score += 1  # Double-count extreme VIX
+        details["vix_extreme"] = True
+    # 2. Credit spreads (HY OAS)
+    credit_spread = msg.get("credit_spread_bps", 120)
+    if credit_spread > 200:
+        score += 1
+        details["credit_widening"] = True
+    # 3. Market breadth
+    breadth = msg.get("pct_above_200dma", 55)
+    if breadth < 40:
+        score += 1
+        details["breadth_declining"] = True
+    # 4. DXY strength (dollar stress)
+    dxy = msg.get("dxy", 100)
+    if dxy > 108:
+        score += 1
+        details["dollar_stress"] = True
+    # 5. Yield curve (2s10s spread) — inversion signals recession
+    yield_spread = msg.get("yield_2s10s", 0.5)
+    if yield_spread < 0:
+        score += 1
+        details["curve_inverted"] = True
+    # 6. Equity momentum — SPX below 50-day SMA
+    spx_vs_sma50 = msg.get("spx_vs_sma50_pct", 1.0)
+    if spx_vs_sma50 < -3.0:
+        score += 1
+        details["equity_momentum_weak"] = True
+
+    # Map score to regime
+    if score >= 5:
+        regime = "CRISIS"
+    elif score >= 3:
+        regime = "WOI"
+    elif score >= 2:
+        regime = "INFLATION"
+    else:
+        regime = "STEADY"
+    return score, regime, details
+
 # Tick counters for diagnostic logging (per-ticker)
 _tick_counts = {}
 
@@ -605,17 +659,44 @@ _symbol_exchange_map_loaded = False
 _symbol_exchange_map = {}  # symbol → exchange key (e.g. "LSE", "US")
 _symbol_raw_exchange_map = {}  # S6: symbol → raw exchange from contracts.toml (e.g. "LSEETF")
 
-# Approximate UTC offsets per exchange (Rust does authoritative DST-aware check).
-# This is a compute-saving early return, not a safety gate — fail-open is safe.
-_EXCHANGE_UTC_OFFSET = {
-    "LSE": 0,        # GMT (simplified; BST is +1 Mar-Oct)
-    "US": -5,         # EST (simplified; EDT is -4 Mar-Nov)
-    "HKEX": 8,        # HKT (no DST)
-    "TSE": 9,         # JST (no DST)
-    "XETRA": 1,       # CET (simplified; CEST is +2 Mar-Oct)
-    "EURONEXT": 1,     # CET (simplified; CEST is +2 Mar-Oct)
-    "SGX": 8,          # SGT (no DST)
+# DST-aware UTC offsets per exchange. Uses zoneinfo for correct BST/CET/EDT.
+# Fallback to static offsets if zoneinfo unavailable.
+_EXCHANGE_TIMEZONE = {
+    "LSE": "Europe/London",       # GMT/BST (+0/+1)
+    "LSEETF": "Europe/London",
+    "US": "America/New_York",     # EST/EDT (-5/-4)
+    "HKEX": "Asia/Hong_Kong",     # HKT (+8, no DST)
+    "TSE": "Asia/Tokyo",          # JST (+9, no DST)
+    "XETRA": "Europe/Berlin",     # CET/CEST (+1/+2)
+    "EURONEXT": "Europe/Paris",   # CET/CEST (+1/+2)
+    "SGX": "Asia/Singapore",      # SGT (+8, no DST)
 }
+_EXCHANGE_UTC_OFFSET_STATIC = {
+    "LSE": 0, "LSEETF": 0, "US": -5, "HKEX": 8,
+    "TSE": 9, "XETRA": 1, "EURONEXT": 1, "SGX": 8,
+}
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _HAS_ZONEINFO = True
+except ImportError:
+    _HAS_ZONEINFO = False
+
+
+def _exchange_utc_offset(exchange, utc_dt=None):
+    """Return current UTC offset in hours for an exchange, DST-aware.
+    Falls back to static offset if zoneinfo unavailable."""
+    if _HAS_ZONEINFO and exchange in _EXCHANGE_TIMEZONE:
+        from datetime import datetime, timezone
+        if utc_dt is None:
+            utc_dt = datetime.now(timezone.utc)
+        tz = _ZoneInfo(_EXCHANGE_TIMEZONE[exchange])
+        local_dt = utc_dt.astimezone(tz)
+        return local_dt.utcoffset().total_seconds() / 3600.0
+    return _EXCHANGE_UTC_OFFSET_STATIC.get(exchange, 0)
+
+
+# Legacy alias for backward compatibility
+_EXCHANGE_UTC_OFFSET = _EXCHANGE_UTC_OFFSET_STATIC
 
 
 def _load_exchange_cutoffs():
@@ -726,7 +807,7 @@ def _is_in_blackout(ticker_id, timestamp_ns):
     from datetime import datetime, timezone, timedelta
     utc_dt = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc)
 
-    offset_hours = _EXCHANGE_UTC_OFFSET.get(exchange, 0)
+    offset_hours = _exchange_utc_offset(exchange, utc_dt)
     local_dt = utc_dt + timedelta(hours=offset_hours)
 
     # Past cutoff = blackout
@@ -2514,19 +2595,16 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
         except Exception:
             pass
 
-    # ── REGIME-SCALED DAILY LOSS LIMIT (Book 85) ──
-    # Tighter limits in hostile regimes: STEADY -3%, INFLATION -2.5%, WOI -2%, CRISIS -1.5%
+    # ── REGIME-SCALED DAILY LOSS LIMIT (Book 85 + Book 15: 6-signal composite) ──
+    # Uses 6-signal regime composite (VIX, credit, breadth, DXY, yield curve, SPX momentum)
+    # instead of VIX-only for more robust regime detection.
     if not _SIM_MODE:
         _daily_pnl_pct = msg.get("daily_pnl_pct", 0)
-        _vix_dl = msg.get("vix", 20)
-        if _vix_dl > 30:
-            _daily_limit = -1.5  # CRISIS
-        elif _vix_dl > 22:
-            _daily_limit = -2.0  # WOI
-        elif _vix_dl > 15:
-            _daily_limit = -2.5  # INFLATION/normal elevated
-        else:
-            _daily_limit = -3.0  # STEADY
+        _reg_score, _reg_name, _reg_details = _regime_composite_score(msg)
+        msg["_regime_composite_score"] = _reg_score
+        msg["_regime_name"] = _reg_name
+        _REGIME_DAILY_LIMITS = {"CRISIS": -1.5, "WOI": -2.0, "INFLATION": -2.5, "STEADY": -3.0}
+        _daily_limit = _REGIME_DAILY_LIMITS.get(_reg_name, -3.0)
         if _daily_pnl_pct < _daily_limit:
             return False, "daily_loss_limit", \
                 f"daily PnL {_daily_pnl_pct:.1f}% < regime-adjusted limit {_daily_limit:.1f}% (VIX={_vix_dl:.0f})"
@@ -2537,31 +2615,18 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
     if not _SIM_MODE:
         _weekly_pnl_pct = msg.get("weekly_pnl_pct", 0)
         if _weekly_pnl_pct != 0:
-            _vix_wl = msg.get("vix", 20)
-            if _vix_wl > 30:
-                _weekly_limit = -2.0  # CRISIS
-            elif _vix_wl > 22:
-                _weekly_limit = -4.0  # WOI
-            elif _vix_wl > 15:
-                _weekly_limit = -5.5  # INFLATION
-            else:
-                _weekly_limit = -7.0  # STEADY
+            # Use 6-signal composite regime (already computed above for daily limit)
+            _REGIME_WEEKLY_LIMITS = {"CRISIS": -2.0, "WOI": -4.0, "INFLATION": -5.5, "STEADY": -7.0}
+            _weekly_limit = _REGIME_WEEKLY_LIMITS.get(msg.get("_regime_name", "STEADY"), -7.0)
             if _weekly_pnl_pct < _weekly_limit:
                 return False, "weekly_loss_limit", \
                     f"weekly PnL {_weekly_pnl_pct:.1f}% < regime-adjusted limit {_weekly_limit:.1f}%"
 
-    # ── REGIME-SCALED RISK PER TRADE (Book 85) ──
-    # Dynamic risk-per-trade based on regime. Store for sizing layer.
+    # ── REGIME-SCALED RISK PER TRADE (Book 85 + Book 15 composite) ──
+    # Dynamic risk-per-trade based on 6-signal composite regime.
     if not _SIM_MODE:
-        _vix_rpt = msg.get("vix", 20)
-        if _vix_rpt > 30:
-            msg["_regime_risk_per_trade"] = 0.002  # CRISIS: 0.20%
-        elif _vix_rpt > 22:
-            msg["_regime_risk_per_trade"] = 0.004  # WOI: 0.40%
-        elif _vix_rpt > 15:
-            msg["_regime_risk_per_trade"] = 0.006  # INFLATION: 0.60%
-        else:
-            msg["_regime_risk_per_trade"] = 0.0075  # STEADY: 0.75%
+        _REGIME_RPT = {"CRISIS": 0.002, "WOI": 0.004, "INFLATION": 0.006, "STEADY": 0.0075}
+        msg["_regime_risk_per_trade"] = _REGIME_RPT.get(msg.get("_regime_name", "STEADY"), 0.0075)
 
     # ── REGIME-ADAPTIVE COOLDOWN (Book 85) ──
     # Longer cooldowns between trades in hostile regimes.
@@ -2759,7 +2824,7 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
                 _utc_cut = _dt_cut.fromtimestamp(_ts_cutoff / 1e9, tz=_tz_cut.utc)
                 _sym_cut = ticker_symbols.get(ticker_id, "")
                 _exch_cut = _get_exchange_for_symbol(_sym_cut) if _sym_cut else ""
-                _off_cut = _EXCHANGE_UTC_OFFSET.get(_exch_cut, 0)
+                _off_cut = _exchange_utc_offset(_exch_cut, _utc_cut)
                 _local_cut = _utc_cut + _td_cut(hours=_off_cut)
                 _lm_cut = _local_cut.hour * 60 + _local_cut.minute
                 _CLOSE_MAP = {"LSE": 990, "XETRA": 1050, "EURONEXT": 1050, "US": 960,
@@ -5330,7 +5395,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         _utc_mins = _utc_dt_ew.hour * 60 + _utc_dt_ew.minute
         _sym_ew = ticker_symbols.get(ticker_id, "")
         _exch_ew = _get_exchange_for_symbol(_sym_ew) if _sym_ew else ""
-        _offset_hrs = _EXCHANGE_UTC_OFFSET.get(_exch_ew, 0)
+        _offset_hrs = _exchange_utc_offset(_exch_ew, _utc_dt_ew)
         _local_dt = _utc_dt_ew + _td_ew(hours=_offset_hrs)
         _local_mins = _local_dt.hour * 60 + _local_dt.minute
 
@@ -5671,7 +5736,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         _utc_oh = _dt_oh.fromtimestamp(_ts_oh / 1_000_000_000, tz=_tz_oh.utc)
         _sym_oh = ticker_symbols.get(ticker_id, "")
         _exch_oh = _get_exchange_for_symbol(_sym_oh) if _sym_oh else ""
-        _off_oh = _EXCHANGE_UTC_OFFSET.get(_exch_oh, 0)
+        _off_oh = _exchange_utc_offset(_exch_oh, _utc_oh)
         _local_oh = _utc_oh + _td_oh(hours=_off_oh)
         _lm_oh = _local_oh.hour * 60 + _local_oh.minute
         _OPEN_OH = {"LSE": 480, "XETRA": 540, "EURONEXT": 540, "US": 570,

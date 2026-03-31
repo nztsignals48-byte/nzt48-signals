@@ -22,6 +22,7 @@ class EventType(Enum):
     CPI = "CPI"
     NFP = "NFP"
     PCE = "PCE"
+    BOE = "BOE"
     EARNINGS = "EARNINGS"
     GEOPOLITICAL = "GEOPOLITICAL"
 
@@ -102,8 +103,8 @@ class EventCalendar:
         self.events = []
         now = datetime.now(timezone.utc)
 
-        # Generate 30-day forward calendar
-        for days_ahead in range(30):
+        # Generate 90-day forward calendar (needed for T-1 FOMC drift positioning)
+        for days_ahead in range(90):
             target_date = now + timedelta(days=days_ahead)
 
             # FOMC meetings (hardcoded 2025-2026)
@@ -117,6 +118,9 @@ class EventCalendar:
 
             # PCE (last Friday of month, 8:30 AM ET = 13:30 UTC)
             self._add_pce_events(target_date)
+
+            # BOE rate decisions
+            self._add_boe_events(target_date)
 
             # Earnings seasons
             self._add_earnings_events(target_date)
@@ -215,6 +219,30 @@ class EventCalendar:
                     pre_event_hours=2.0,
                     post_event_hours=2.0
                 ))
+
+    def _add_boe_events(self, target_date: datetime):
+        """Add Bank of England rate decisions (hardcoded 2025-2026)."""
+        boe_dates_2025 = [
+            "2025-02-06", "2025-03-20", "2025-05-08", "2025-06-19",
+            "2025-08-07", "2025-09-18", "2025-11-06", "2025-12-18"
+        ]
+        boe_dates_2026 = [
+            "2026-02-05", "2026-03-19", "2026-05-07", "2026-06-18",
+            "2026-08-06", "2026-09-17", "2026-11-05", "2026-12-17"
+        ]
+        all_boe = boe_dates_2025 + boe_dates_2026
+        date_str = target_date.strftime("%Y-%m-%d")
+        if date_str in all_boe:
+            self.events.append(ScheduledEvent(
+                name="BOE Rate Decision",
+                event_type=EventType.BOE.value,
+                date=date_str,
+                time_utc="12:00",  # 12:00 UTC (noon GMT)
+                impact=Impact.HIGH.value,
+                expected_vol_mult=1.4,
+                pre_event_hours=3.0,
+                post_event_hours=3.0
+            ))
 
     def _add_earnings_events(self, target_date: datetime):
         """Add earnings season markers."""

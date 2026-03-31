@@ -571,7 +571,10 @@ impl<B: BrokerAdapter> Engine<B> {
                     time_stop_aggressive_trail_atr: config.exit_time_stop.aggressive_trail_atr,
                     ..ExitConfig::default()
                 };
+                let default_chandelier = strategy.clone();
                 let mut exit_engine = ExitEngine::new(exit_config, Box::new(strategy));
+                // Book 39: Store default Chandelier for per-position signal hint application
+                exit_engine.set_default_chandelier(default_chandelier);
                 // Book 39: Wire per-strategy Chandelier overrides from config.toml
                 for (name, _ovr) in &ch.per_strategy {
                     let (rung_pct, init_atr, r3, r4, r5, floor) = ch.params_for_strategy(name);
@@ -1297,7 +1300,13 @@ impl<B: BrokerAdapter> Engine<B> {
                     let priority_str = format!("{:?}", result.signal.priority);
                     let final_pnl = pos.unrealized_pnl - pos.total_commission;
                     let entry_time = pos.entry_timestamp_ns;
-                    let exit_qty = pos.qty;
+                    // Book 39: Partial exit laddering — use partial_qty if set, else full position
+                    let is_partial = result.signal.partial_qty.is_some();
+                    let exit_qty = if let Some(pq) = result.signal.partial_qty {
+                        pq.min(pos.qty) // Never sell more than we hold
+                    } else {
+                        pos.qty
+                    };
                     let highest_rung = pos.trailing_rung;
                     let entry_price_gbp = pos.avg_entry;
                     let exit_price_gbp = tick.last;
@@ -1458,24 +1467,41 @@ impl<B: BrokerAdapter> Engine<B> {
                         trade_class: String::new(),   // Assigned by nightly trade taxonomy
                         entry_type: pos_entry_type.clone(),
                     });
-                    self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
-                    self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
-                    // COMPOUNDING: Queue exit for Python bridge live Sharpe tracking
-                    self.pending_exit_notifications.push((
-                        tid.0, exit_price_gbp, final_pnl, pos_entry_type,
-                    ));
-                    if final_pnl < 0.0 {
-                        self.liquidation_defense.record_stop_loss();
+                    // Book 39: Handle partial vs full exit
+                    if is_partial {
+                        // Partial exit: reduce qty, keep position open, increment partial counter
+                        if let Some(pos) = self.positions.get_mut(&tid) {
+                            let partial_pnl = (tick.last - pos.avg_entry) * exit_qty as f64 - (pos.total_commission * exit_qty as f64 / (exit_qty + pos.qty - exit_qty).max(1) as f64);
+                            pos.qty = pos.qty.saturating_sub(exit_qty);
+                            pos.partial_exits_done = pos.partial_exits_done.saturating_add(1);
+                            eprintln!(
+                                "PARTIAL_EXIT: ticker={} sold={} remaining={} partial_done={} pnl=£{:.2}",
+                                tid.0, exit_qty, pos.qty, pos.partial_exits_done, partial_pnl
+                            );
+                        }
+                        // Partial notional reduction for sector tracking
+                        self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
                     } else {
-                        self.liquidation_defense.record_win();
+                        // Full exit: close position entirely
+                        self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
+                        self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
+                        // COMPOUNDING: Queue exit for Python bridge live Sharpe tracking
+                        self.pending_exit_notifications.push((
+                            tid.0, exit_price_gbp, final_pnl, pos_entry_type,
+                        ));
+                        if final_pnl < 0.0 {
+                            self.liquidation_defense.record_stop_loss();
+                        } else {
+                            self.liquidation_defense.record_win();
+                        }
+                        let close_notional = tick.last * exit_qty as f64;
+                        if close_notional > 0.0 {
+                            let return_pct = final_pnl / close_notional * 100.0;
+                            self.thompson_sampler.observe(tid, return_pct);
+                        }
+                        self.portfolio.remove_position(tid);
+                        self.positions.remove(&tid);
                     }
-                    let close_notional = tick.last * exit_qty as f64;
-                    if close_notional > 0.0 {
-                        let return_pct = final_pnl / close_notional * 100.0;
-                        self.thompson_sampler.observe(tid, return_pct);
-                    }
-                    self.portfolio.remove_position(tid);
-                    self.positions.remove(&tid);
                     // AUDIT-FIX: Post-exit cooldown — prevent immediate re-entry spam.
                     // After a stop-out, wait EXIT_COOLDOWN_NS before re-entering same ticker.
                     // Reuses gap_cooldowns HashMap (already per-ticker + checked before signal).

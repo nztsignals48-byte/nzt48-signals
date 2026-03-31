@@ -433,6 +433,8 @@ pub enum ExitReason {
     DustGuard,
     /// S3: Position held too long without reaching rung 2 → aggressive trail exit.
     TimeStop,
+    /// Book 39: Partial profit take at Rung 3 (25%) and Rung 4 (25%), remaining 50% trails.
+    PartialProfitTake,
 }
 
 /// Exit priority. Higher number = higher priority. Enum ordering matches.
