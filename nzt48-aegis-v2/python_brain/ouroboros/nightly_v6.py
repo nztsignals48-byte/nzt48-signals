@@ -2670,11 +2670,26 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Bayesian aggregator update failed (non-fatal): %s", e)
 
-    # Step 5.31: Claude Cold-Path Nightly Review (Books 72, 142)
+    # Step 5.31: Claude Cold-Path Nightly Review (Books 72, 142, 205)
+    # Now with Book 205 multi-LLM cost routing — picks cheapest adequate model.
     try:
         from python_brain.claude.decision_authority import DecisionAuthority, DecisionType
         claude_auth = DecisionAuthority(trade_count=mem.total_trades if mem else 0)
         if claude_auth.can_make_decision(DecisionType.NIGHTLY_REVIEW):
+            # Book 205: Route to cheapest adequate model
+            _routed_model = None
+            try:
+                from python_brain.claude.model_router import get_router
+                _router = get_router()
+                _n_trades = metrics.total_trades if metrics else 0
+                _complexity = "complex" if _n_trades >= 10 else "moderate" if _n_trades >= 3 else "simple"
+                _routed_model = _router.route("nightly_review", _complexity)
+                log.info("Model router: nightly_review/%s → %s", _complexity, _routed_model)
+            except ImportError:
+                pass
+            except Exception as _mr_err:
+                log.warning("Model router failed (using default): %s", _mr_err)
+
             review_request = claude_auth.get_prompt(DecisionType.NIGHTLY_REVIEW, {
                 "metrics": {"trades": metrics.total_trades, "wr": metrics.win_rate,
                             "pf": metrics.profit_factor, "pnl": metrics.total_pnl},
@@ -2682,6 +2697,9 @@ def run_nightly() -> int:
                 "regime": recommendations.get("hmm_regime", {}).get("name", "unknown"),
                 "trade_count": mem.total_trades if mem else 0,
             })
+            # Override model if router provided one
+            if _routed_model and hasattr(review_request, 'model'):
+                review_request.model = _routed_model
             recommendations["claude_review_prompt"] = review_request.to_dict()
             log.info("Claude review: prompt generated (model=%s, authority=%s)",
                      review_request.model, claude_auth.current_level.name)
@@ -2690,7 +2708,25 @@ def run_nightly() -> int:
             recommendations["claude_review_response"] = review_response.to_dict()
             log.info("Claude review: executed (model=%s, confidence=%.2f, cost=$%.4f)",
                      review_response.model_used, review_response.confidence, review_response.cost_usd)
+            # Record cost for budget tracking
+            if _routed_model:
+                try:
+                    _router.record_cost(
+                        model=review_response.model_used,
+                        task_type="nightly_review",
+                        complexity=_complexity,
+                        tokens_used=getattr(review_response, 'tokens_used', 0),
+                        cost_usd=review_response.cost_usd,
+                    )
+                except Exception:
+                    pass
         recommendations["claude_authority"] = claude_auth.to_dict()
+        # Add cost summary to recommendations
+        try:
+            from python_brain.claude.model_router import get_router
+            recommendations["llm_cost_summary"] = get_router().get_cost_summary()
+        except Exception:
+            pass
     except Exception as e:
         log.warning("Claude authority failed (non-fatal): %s", e)
 

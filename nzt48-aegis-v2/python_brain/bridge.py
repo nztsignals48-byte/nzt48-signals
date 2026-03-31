@@ -7060,6 +7060,30 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 sys.stderr.write(f"BAYES_ERR: {bayes_err}\n")
                 sys.stderr.flush()
 
+    # ── BOOKS 151/152: AGENT SWARM CONSENSUS ──
+    # 10 micro-agents each vote on signal quality. Low consensus → dampen/block.
+    if best.get("type") == "signal" and not _SIM_MODE:
+        try:
+            from python_brain.swarm.signal_consensus import get_swarm
+            _swarm = get_swarm()
+            _swarm_result = _swarm.evaluate(
+                signal_dict=best, indicators_dict=ind, msg_dict=msg
+            )
+            if _swarm_result.should_block:
+                return {"type": "no_signal", "ticker_id": ticker_id,
+                        "reason": f"swarm_blocked (score={_swarm_result.score})"}
+            if _swarm_result.confidence_delta != 0:
+                best["confidence"] = max(0, min(100,
+                    best.get("confidence", 50) + _swarm_result.confidence_delta))
+            best["swarm_score"] = _swarm_result.score
+            best["swarm_votes"] = f"{_swarm_result.n_agree}/{_swarm_result.n_total}"
+        except ImportError:
+            pass  # Module not deployed
+        except Exception as _sw_err:
+            if _tick_counts.get(ticker_id, 0) % 200 == 0:
+                sys.stderr.write(f"SWARM_ERR: {_sw_err}\n")
+                sys.stderr.flush()
+
     # ── BOOK 42: HEDGE CONFIDENCE OVERLAY ──
     # Reduce confidence for long signals when hedge is active.
     # Kill switch boosts short signals and penalizes longs more aggressively.
