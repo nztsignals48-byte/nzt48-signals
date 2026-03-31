@@ -36,6 +36,8 @@ from python_brain.ouroboros.claude_helper import (
     send_telegram,
     build_context_string,
     load_claude_md,
+    MODEL_OPUS,
+    get_last_backend,
 )
 
 log = logging.getLogger("ouroboros_challenger")
@@ -422,7 +424,7 @@ def run_challenger(
         system_ctx = claude_md + "\n\n" + CHALLENGER_SYSTEM_PROMPT
 
     start_time = time.time()
-    result = claude_query(prompt, system_context=system_ctx)
+    result = claude_query(prompt, system_context=system_ctx, model=MODEL_OPUS)
     elapsed = time.time() - start_time
 
     if result is None:

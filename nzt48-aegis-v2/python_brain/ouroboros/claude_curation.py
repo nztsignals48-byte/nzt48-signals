@@ -33,6 +33,8 @@ from python_brain.ouroboros.claude_helper import (
     build_context_string,
     load_context_files,
     send_telegram,
+    MODEL_HAIKU,
+    get_last_backend,
 )
 
 # ---------------------------------------------------------------------------
@@ -281,7 +283,7 @@ def run_curation(send_tg: bool = False) -> int:
     ])
     system_ctx = build_context_string(context)
 
-    result = claude_query(prompt, system_context=system_ctx)
+    result = claude_query(prompt, system_context=system_ctx, model=MODEL_HAIKU)
     if result is None:
         log.error("Claude query failed — no curation result")
         return 1

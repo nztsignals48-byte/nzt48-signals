@@ -31,6 +31,8 @@ from python_brain.ouroboros.claude_helper import (
     send_telegram,
     build_context_string,
     load_claude_md,
+    MODEL_OPUS,
+    get_last_backend,
 )
 
 log = logging.getLogger("claude_review")
@@ -368,7 +370,7 @@ def call_claude(prompt: str) -> Optional[Dict[str, Any]]:
         system_context = claude_md + "\n\n" + SYSTEM_PROMPT
 
     start_time = time.time()
-    review = claude_query(prompt, system_context=system_context)
+    review = claude_query(prompt, system_context=system_context, model=MODEL_OPUS)
     elapsed = time.time() - start_time
 
     if review is None:
@@ -383,8 +385,9 @@ def call_claude(prompt: str) -> Optional[Dict[str, Any]]:
 
     # Add metadata
     review["_latency_s"] = round(elapsed, 2)
-    review["_cost_usd"] = 0.0  # Free via Max subscription
-    log.info("Claude CLI review completed in %.1fs", elapsed)
+    review["_backend"] = get_last_backend()
+    review["_cost_usd"] = 0.0 if get_last_backend() == "cli" else -1  # -1 = unknown API cost
+    log.info("Claude review completed in %.1fs via %s", elapsed, get_last_backend())
     return review
 
 
@@ -489,7 +492,9 @@ def _send_telegram_summary(review: Dict[str, Any]):
         for alert in risk_alerts[:3]:
             lines.append(f"  - {alert}")
 
-    lines.append(f"\n<i>Cost: $0.00 (Max sub) | Latency: {review.get('_latency_s', 0):.0f}s</i>")
+    backend = review.get("_backend", "cli")
+    cost = review.get("_cost_usd", 0.0)
+    lines.append(f"\n<i>Backend: {backend} | Cost: ${cost:.4f} | Latency: {review.get('_latency_s', 0):.0f}s</i>")
 
     send_telegram("\n".join(lines))
     log.info("Telegram summary sent")

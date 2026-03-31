@@ -36,6 +36,8 @@ from python_brain.ouroboros.claude_helper import (
     send_telegram,
     build_context_string,
     load_claude_md,
+    MODEL_SONNET,
+    get_last_backend,
 )
 
 log = logging.getLogger("claude_briefing")
@@ -496,7 +498,7 @@ def call_claude(prompt: str, is_evening: bool = False) -> Optional[str]:
         "Example: {\"briefing_text\": \"<b>AEGIS MORNING BRIEFING...</b>\"}"
     )
 
-    result = claude_query(enhanced_prompt, system_context=system_context)
+    result = claude_query(enhanced_prompt, system_context=system_context, model=MODEL_SONNET)
     elapsed = time.time() - start_time
 
     if result is None:

@@ -472,12 +472,14 @@ class DecisionAuthority:
                 requires_human_approval=True,
             )
 
-        # Try Claude CLI first, then Gemini fallback
+        # Try Claude CLI first, then Anthropic API, then Gemini fallback
         response = self._call_claude_cli(request)
+        if response is None:
+            response = self._call_anthropic_api(request)
         if response is None:
             response = self._call_gemini(request)
         if response is None:
-            log.error("Both Claude CLI and Gemini API failed")
+            log.error("All backends failed (CLI + Anthropic API + Gemini)")
             return DecisionResponse(
                 decision_type=request.decision_type,
                 recommendation="ERROR: all API calls failed",
@@ -512,6 +514,54 @@ class DecisionAuthority:
             return None
         except Exception as e:
             log.error("Claude CLI error: %s", e)
+            return None
+
+    def _call_anthropic_api(self, request: DecisionRequest) -> Optional[DecisionResponse]:
+        """Call Anthropic API as second fallback (paid, model-tiered)."""
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            log.info("ANTHROPIC_API_KEY not set, skipping API fallback")
+            return None
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+
+            # Map request model to API model names
+            model_map = {
+                "opus": "claude-opus-4-6",
+                "sonnet": "claude-sonnet-4-5-20250929",
+                "haiku": "claude-haiku-4-5-20251001",
+            }
+            api_model = model_map.get(request.model, "claude-sonnet-4-5-20250929")
+
+            log.info("Anthropic API call (model=%s, prompt=%d chars)", api_model, len(request.prompt))
+            response = client.messages.create(
+                model=api_model,
+                max_tokens=request.max_tokens,
+                messages=[{"role": "user", "content": request.prompt}],
+            )
+
+            raw = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    raw += block.text
+
+            if not raw.strip():
+                log.warning("Anthropic API returned empty response")
+                return None
+
+            log.info(
+                "Anthropic API success: model=%s, input=%d, output=%d tokens",
+                api_model, response.usage.input_tokens, response.usage.output_tokens,
+            )
+            return self._parse_response(request, raw.strip(), model_used=api_model, source="anthropic_api")
+
+        except ImportError:
+            log.info("anthropic SDK not installed, skipping API fallback")
+            return None
+        except Exception as e:
+            log.error("Anthropic API error: %s", e)
             return None
 
     def _call_gemini(self, request: DecisionRequest) -> Optional[DecisionResponse]:

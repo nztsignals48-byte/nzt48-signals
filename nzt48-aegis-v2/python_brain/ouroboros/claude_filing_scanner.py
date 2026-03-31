@@ -34,6 +34,7 @@ from python_brain.ouroboros.claude_helper import (
     build_context_string,
     load_context_files,
     send_telegram,
+    MODEL_SONNET,
 )
 
 # ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ def run_filing_scanner() -> int:
 
         # Query Claude
         prompt = build_filing_prompt(symbol, filings, previous_text)
-        result = claude_query(prompt)
+        result = claude_query(prompt, model=MODEL_SONNET)
 
         if result is None:
             log.warning("Claude query failed for %s — skipping", symbol)
