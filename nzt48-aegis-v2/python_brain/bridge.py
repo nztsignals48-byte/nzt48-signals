@@ -8076,12 +8076,17 @@ def process_apex_snapshot(msg):
 def _heartbeat_daemon():
     """Background thread: write heartbeat every 30s regardless of main loop."""
     tick_count = 0
+    sys.stderr.write("[HEARTBEAT_DAEMON] started (will write every 30s)\n")
+    sys.stderr.flush()
     while True:
         time.sleep(30)
         try:
             _write_heartbeat({"ticks_processed": tick_count})
-        except Exception:
-            pass  # Silently fail if heartbeat dir doesn't exist yet
+            sys.stderr.write("[HEARTBEAT_DAEMON] wrote heartbeat\n")
+            sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"[HEARTBEAT_DAEMON] error: {e}\n")
+            sys.stderr.flush()
 
 
 def main():
