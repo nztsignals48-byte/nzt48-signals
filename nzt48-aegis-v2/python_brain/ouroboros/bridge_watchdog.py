@@ -119,20 +119,29 @@ def _is_heartbeat_fresh() -> tuple:
 
 
 def get_bridge_status() -> dict:
-    """Get comprehensive bridge status."""
-    alive, pid = _is_bridge_running()
+    """Get comprehensive bridge status.
+
+    NOTE: Bridge is managed by Rust engine subprocess. We only check heartbeat freshness.
+    The PID in the heartbeat file may not exist as a process (subprocess managed by Rust).
+    Status is determined by heartbeat recency alone, not OS process state.
+    """
+    hb = read_heartbeat()
     fresh, age = _is_heartbeat_fresh()
 
     status = "healthy"
-    if not alive:
+    if not hb:
+        # No heartbeat file at all
         status = "dead"
     elif not fresh:
+        # Heartbeat stale (not updated in 90s)
         status = "stale"
+    # else: heartbeat file exists and is recent = healthy
 
+    pid = hb.get("pid") if hb else None
     return {
         "status": status,
         "pid": pid,
-        "alive": alive,
+        "alive": fresh,  # "alive" means heartbeat is fresh
         "heartbeat_fresh": fresh,
         "heartbeat_age_sec": round(age, 1) if age != float("inf") else None,
         "checked_at": datetime.now(timezone.utc).isoformat(),
