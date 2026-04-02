@@ -4,7 +4,7 @@
 //!
 //! Usage: aegis [--config-dir PATH] [--wal-dir PATH]
 //!
-//! IS_LIVE = true (H20). Live trading enabled.
+//! IS_LIVE = false (SIMULATION MODE). Only simulated trades, no real IBKR orders.
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -28,10 +28,11 @@ use rust_core::types::{MarketTick, RiskRegime, TickerId, WalPayload};
 use rust_core::universe::{RouteResult, UniverseClass};
 use rust_core::wal_writer::WalWriter;
 
-/// IS_LIVE = true (H20). Live trading enabled.
-/// Safety: paper_mode in config.toml provides the operational gate.
-/// This constant enables infinite broker retry + live data paths.
-const IS_LIVE: bool = true;
+/// IS_LIVE = false. SIMULATION MODE ONLY.
+/// All trades are simulated and logged internally.
+/// No real orders are submitted to IBKR - only live market data is consumed.
+/// Safety: Paper mode uses paper_mode in config.toml gate + this constant prevents broker orders.
+const IS_LIVE: bool = false;
 
 /// Reconciliation interval in nanoseconds (5 minutes).
 const RECONCILE_INTERVAL_NS: u64 = 300_000_000_000;
@@ -48,9 +49,10 @@ const KILL_SWITCH_CHECK_NS: u64 = 1_000_000_000;
 
 fn main() {
     eprintln!("╔══════════════════════════════════════════╗");
-    eprintln!("║  AEGIS V2 — Live Engine                  ║");
-    eprintln!("║  IS_LIVE = true (H20)                    ║");
-    eprintln!("║  Mode: LIVE — Real orders enabled        ║");
+    eprintln!("║  AEGIS V2 — Simulation Engine            ║");
+    eprintln!("║  IS_LIVE = false                         ║");
+    eprintln!("║  Mode: SIMULATION — No real orders       ║");
+    eprintln!("║  Live data: YES | Real trades: NO        ║");
     eprintln!("╚══════════════════════════════════════════╝");
 
     // RT1: Validate config.live.toml exists (pre-flight check for future live deployment).
