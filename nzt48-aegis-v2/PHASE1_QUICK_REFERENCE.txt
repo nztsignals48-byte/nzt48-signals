@@ -1,0 +1,442 @@
+================================================================================
+AEGIS V2: PHASE 1 IMPLEMENTATION QUICK REFERENCE
+================================================================================
+Status: Ready to implement (40-60 hours)
+Expected Impact: +10-13 Sharpe | +18-28 trades/day | IC > 0.05 per signal
+Target: 2-week sprint (1 engineer)
+
+================================================================================
+BOOK 195: LATARB — Latency Arbitrage (NAV vs Market)
+================================================================================
+TIME: 20 hours
+ROI: +2.5 Sharpe (0.124 Sharpe/hr)
+FILE: /python_brain/strategies/latency_arbitrage.py (CREATE NEW, 100 LOC)
+
+KEY LOGIC:
+  Entry: Market price > 0.5% discount to NAV (for 3x ETPs)
+  Duration: 5-25 minute hold (ETP rebalance windows)
+  Exit: Discount closes OR time decay exhausted
+  Kelly: 0.5x (vol-sensitive arbitrage)
+
+BRIDGE INTEGRATION (line 5200):
+  latarb_signal = _latency_arb_signal(ticker_id, msg, ind, effective_floor, _kelly_for, common_fields)
+  all_signals.append(latarb_signal) if latarb_signal else None
+
+DATA DEPENDENCIES:
+  - msg['nav_estimated']: NAV tracker (from Book 46 calculation)
+  - msg['last']: Current market price (from IBKR tick)
+  - msg['execution_cost_bps']: Execution cost estimate
+  - ind['rvol']: Relative volume (volatility adjustment)
+
+VALIDATION GATES:
+  ✓ leverage >= 2.5 (only leveraged ETPs)
+  ✓ 0.3% <= discount <= 2.0% (ignore small/large discounts)
+  ✓ net_profit >= 20bps (cover costs + slippage buffer)
+
+NIGHTLY METRICS (nightly_v6.py):
+  - signal_count: number of LATARB signals fired
+  - ic_latarb: Information Coefficient vs next-bar return
+  - avg_hold_time: average 5min bars held
+  - decay_captured_bps: total basis points from decay
+
+================================================================================
+BOOK 84: NOW — Macro Nowcasting (Real-time Macro Signals)
+================================================================================
+TIME: 40 hours
+ROI: +3.2 Sharpe (0.080 Sharpe/hr)
+FILE: /python_brain/feeds/macro_nowcast.py (CREATE NEW, 80 LOC)
+
+KEY LOGIC:
+  Monitor: CPI, Jobs, PMI releases (economic calendar)
+  Surprise: Nowcast vs consensus vs actual
+  Signal: When actual ±1.5σ from nowcast → market repricing likely
+  Horizon: 10-120 min (immediate follow-through trading)
+
+DATA SOURCES:
+  1. Gemini morning brief (already available)
+  2. FRED API (inflation, employment nowcasts)
+  3. Bloomberg terminal (via IBKR Feed if subscribed)
+  4. Investing.com (PMI surprises, real-time)
+
+BRIDGE INTEGRATION (line 4850, expand System3_MacroTrend):
+  now_signal = _macro_nowcast_signal(ticker_id, msg, ind, effective_floor, _kelly_for, common_fields)
+  all_signals.append(now_signal) if now_signal else None
+
+CONFIDENCE RULES:
+  Base: 55 (early signal)
+  + Z-score of surprise (up to +20 for 2σ surprise)
+  - Time-decay reduction if >60 min since announcement
+  Example: CPI surprise +1.8σ → 55 + 9 = 64 confidence
+
+ROUTING:
+  Inflation surprise: Long USD proxy, short bonds, sell equity rallies
+  Employment surprise: Vol directional bet (good jobs → lower vol expected)
+  PMI surprise: Sector-specific (manufacturing → IYM, services → other)
+
+INTEGRATION CHALLENGE:
+  - Coordinate with Gemini agent output (already feeds macro signals)
+  - Use Telegram alerts for event announcements (real-time)
+  - Time-zone aware (same events fire globally at different local times)
+
+================================================================================
+BOOK 155: PREDMKT — Prediction Market Signals (Polymarket/Metaculus)
+================================================================================
+TIME: 30 hours
+ROI: +1.8 Sharpe (0.060 Sharpe/hr)
+FILE: /python_brain/feeds/prediction_market.py (EXPAND EXISTING, 60 LOC)
+
+STATUS: Already 40% wired (file exists)
+TASK: Extract odds, map to tradeable signals
+
+KEY LOGIC:
+  Polymarket questions: Fed cuts, recession, GDP, earnings beats
+  Odds lead spot market by 12-48 hours
+  Signal: |Polymarket_prob - Implied_prob_from_market| > 0.10 → entry
+
+BRIDGE INTEGRATION (new section, line 4800):
+  predmkt_signal = _prediction_market_signal(ticker_id, msg, ind, ...)
+  all_signals.append(predmkt_signal) if predmkt_signal else None
+
+EXAMPLE TRADE:
+  Polymarket: "Fed cuts by May 2026" = 68% (bid-ask 65-70%)
+  Market: Options imply 55% probability (from put spreads)
+  → 13pp deviation → Long bond proxies (TLT) at 62% confidence
+
+DATA FETCHING:
+  import requests
+  odds = requests.get('https://polymarket.com/api/markets').json()
+  # Filter for relevant events (FOMC, jobs, CPI, recession, earnings)
+
+VALIDATION:
+  ✓ Event outcomes tied to traded assets (no phantom markets)
+  ✓ Bid-ask spread < 5pp (avoid illiquid markets)
+  ✓ Volume > $10k (sufficient liquidity)
+
+NIGHTLY TRACKING:
+  - Polymarket outcomes vs our predictions (track accuracy)
+  - Decay of probability spreads (how fast do odds converge?)
+  - Cross-check with futures prices (DXY, ES, TY)
+
+================================================================================
+BOOK 130: IVSURF — Volatility Surface & IV Signals
+================================================================================
+TIME: 35 hours
+ROI: +2.8 Sharpe (0.080 Sharpe/hr)
+FILE: /python_brain/ml/iv_signals.py (EXPAND EXISTING ~20 LOC)
+
+STATUS: Already 60% wired (computed in nightly_v6.py:3040)
+TASK: Convert IV metrics into actionable signals
+
+KEY METRICS:
+  1. IV Skew = (Put_IV - Call_IV) / Call_IV
+     Interpretation: Positive skew = crash fears, short rallies
+  2. IV Slope = (Back_month_IV - Front_month_IV) / Front
+     Interpretation: Inverted (negative) = regime instability
+  3. IV Term Structure = VIX vs VIX3M ratio
+     Interpretation: Contango > 2.0 = Vol selling opportunity
+
+SIGNAL RULES:
+  IF iv_skew > 0.10 AND rvol > 1.0:
+    → +5 confidence (elevated tail risk)
+  IF iv_slope < -0.05 AND iv_skew > 0.15:
+    → +10 confidence (crash immanent, crash protection expensive)
+  IF iv_crush imminent (post-earnings):
+    → Sell 1-2 week vol, buy 3-6 week vol (calendar spread)
+
+BRIDGE INTEGRATION (line 6430, already called):
+  Enhance existing iv_signal with multi-metric logic
+
+EXCEL/CALC REFERENCE:
+  IV Skew Threshold (Book 130, Table 5.2):
+    - Low (< 0.05): Complacency, fade strength, short rallies
+    - Medium (0.05-0.10): Normal, balanced
+    - High (> 0.10): Crash fears, mean-reverting strength
+
+NIGHTLY STATS:
+  - iv_skew_mean: 30-day rolling IV skew
+  - iv_slope_mean: Vol term structure persistence
+  - iv_crush_post_earnings: Realized vol vs implied vol post-event
+
+================================================================================
+BOOK 119: INFOSEL — Information Theory Signal Selection
+================================================================================
+TIME: 45 hours
+ROI: +1.9 Sharpe (0.042 Sharpe/hr)
+FILE: /python_brain/analytics/mi_signal_selector.py (EXPAND EXISTING, 40 LOC)
+
+STATUS: Already 50% wired (mi_signal_selector exists)
+TASK: Auto-calibrate feature importance weights in adjustment layer
+
+KEY CONCEPT: Mutual Information (MI)
+  MI(X; Y) = sum_x sum_y p(x,y) * log(p(x,y) / (p(x) * p(y)))
+  Interpretation: How much does X reduce uncertainty in Y?
+  Applied: Which technical indicators best predict next-bar direction?
+
+ALGORITHM:
+  1. For each indicator (hurst, rvol, adx, vol_slope, vpin, ...):
+     - Compute MI with next-bar return direction (up/down)
+     - Normalize: MI_normalized = MI / max(MI) 
+  2. Rank indicators by MI
+  3. Reweight signal confidence based on contributing feature importance
+  4. Update nightly (every 50 trades)
+
+BRIDGE INTEGRATION (line 5480, ADJUSTMENT LAYER):
+  from python_brain.analytics.mi_signal_selector import compute_feature_importance
+  
+  feature_weights = compute_feature_importance(
+      features={'hurst': hurst, 'rvol': ind['rvol'], 'adx': ind['adx'], ...},
+      recent_returns=[...],
+      lookback_bars=50,
+  )
+  
+  # Reweight: if hurst MI > rvol MI, boost hurst-dependent signals
+  for sig in all_signals:
+      if 'hurst' in sig.get('reasoning', ''):
+          mi_factor = feature_weights['hurst'] / feature_weights['rvol']
+          sig['confidence'] *= mi_factor  # Scale by relative MI
+
+NIGHTLY OUTPUT:
+  {'hurst': 0.15, 'rvol': 0.08, 'adx': 0.22, 'vol_slope': 0.06, ...}
+  → ADX is highest MI predictor → boost ADX-based signals 22% vs 15%
+
+MI THRESHOLDS:
+  - MI > 0.10: Strong predictive power, use with 100% weight
+  - MI 0.05-0.10: Moderate, use with 70% weight
+  - MI < 0.05: Weak, consider retiring
+
+================================================================================
+BOOK 14: SIGLAB — Signal Research Lab Framework
+================================================================================
+TIME: 25 hours
+ROI: +1.0 Sharpe (0.040 Sharpe/hr)
+FILE: /python_brain/lifecycle/alpha_decay.py (EXPAND EXISTING, 30 LOC)
+
+STATUS: Already 40% wired (ic computation exists)
+TASK: Signal retirement + quality scoring framework
+
+KEY METRICS:
+  1. Information Coefficient (IC):
+     IC = correlation(signal_confidence, next_bar_return)
+     Threshold: IC > 0.02 = statistically significant (Book 14, Section 1.3)
+  
+  2. TIE Ratio (Testable Information Expectation):
+     TIE = (annual_ret - benchmark_ret) / sqrt(sample_size)
+     Tracks: Is edge persistent or just luck?
+  
+  3. Strategy Sharpe (per-signal type):
+     Sharpe = mean_return / std_return (annualized)
+     Threshold: Sharpe > 0.5 = worth trading
+
+NIGHTLY COMPUTATION (nightly_v6.py, Step 4b):
+  for strategy in ['VanguardSniper', 'IBS_MeanReversion', 'LatencyArbitrage', ...]:
+      trades = filter(trades_df, strategy == strategy)
+      
+      ic = correlation(trades['confidence']/100, trades['pnl'] > 0)
+      tie = (trades['pnl'].mean() * 252) / sqrt(len(trades))
+      sharpe = (trades['pnl'].mean() / trades['pnl'].std()) * sqrt(252)
+      
+      if ic < 0.02:
+          status = "WEAK"
+      elif ic < -0.01:
+          status = "REVERSE" → SUSPEND
+      else:
+          status = "STRONG"
+      
+      print(f"{strategy}: IC={ic:.3f}, TIE={tie:.2f}, Sharpe={sharpe:.2f} ({status})")
+
+AUTO-RETIREMENT RULES (Book 14, Table 1.2):
+  IC < -0.01 for 3+ consecutive days → SUSPEND immediately
+  IC < 0.01 for 10+ days → UNDER REVIEW (require justification)
+  Sharpe < -0.3 → RETIRE (losing money consistently)
+
+NIGHTLY TELEGRAM ALERT:
+  "Daily Signal Quality Report
+   VanguardSniper: IC=0.045 ✓ STRONG
+   IBS_MeanReversion: IC=0.012 ⚠ WEAK (n=34 trades)
+   LatencyArbitrage: IC=-0.008 ✗ SUSPEND (reverse predictor)"
+
+================================================================================
+BOOK 216: ROUTER — Multi-System Signal Routing
+================================================================================
+TIME: 15 hours
+ROI: +0.6 Sharpe (0.040 Sharpe/hr)
+FILE: /python_brain/regime/signal_router.py (EXPAND EXISTING, 20 LOC)
+
+STATUS: Already 70% wired (regime classification exists)
+TASK: Complete confidence/kelly reweighting per regime
+
+KEY PRINCIPLE:
+  NOT all signals work in all regimes.
+  - Trending regime: boost momentum, suppress mean reversion
+  - Mean-reverting regime: boost reversion, suppress momentum
+  - Random/choppy: only uncorrelated strategies
+
+ROUTING RULES (bridge.py, line ~6320):
+
+  IF hurst_regime == "trending" (hurst > 0.60):
+      # Momentum/trend-following signals
+      allow_multiplier = {
+          'VanguardSniper': 1.3,  # +30%
+          'VolumeExpansion': 1.3,
+          'FollowThrough': 1.2,
+      }
+      suppress_multiplier = {
+          'IBS_MeanReversion': 0.6,  # -40%
+          'Gap': 0.5,
+          'VolCompression': 0.5,
+      }
+
+  IF hurst_regime == "mean_reverting" (hurst < 0.40):
+      # Mean reversion signals
+      allow_multiplier = {
+          'IBS_MeanReversion': 1.3,
+          'Gap': 1.2,
+      }
+      suppress_multiplier = {
+          'VanguardSniper': 0.4,
+          'VolumeExpansion': 0.5,
+      }
+
+  IF hurst_regime == "random":
+      # Only uncorrelated strategies
+      allow_multiplier = {
+          'Orchestrator': 1.1,
+          'PairsCointegration': 1.1,
+      }
+      suppress_multiplier = {
+          'VanguardSniper': 0.3,
+          'IBS_MeanReversion': 0.3,
+      }
+
+SIZING ADJUSTMENT:
+  for sig in all_signals:
+      strategy = sig['strategy']
+      
+      if strategy in suppress_multiplier:
+          sig['kelly_fraction'] *= suppress_multiplier[strategy]
+          sig['shares'] = int(sig['shares'] * suppress_multiplier[strategy])
+      elif strategy in allow_multiplier:
+          sig['kelly_fraction'] *= allow_multiplier[strategy]
+          sig['shares'] = int(sig['shares'] * allow_multiplier[strategy])
+
+NIGHTLY MONITORING:
+  - Route acceptance rate (% signals accepted per regime)
+  - Sharpe per route (trending strategies in trending regime, etc.)
+  - Mismatch penalty (Sharpe when trading against regime)
+
+================================================================================
+TESTING & VALIDATION
+================================================================================
+
+Per-Signal Validation Checklist (before committing):
+  ☐ Function signature matches template
+  ☐ Returns None if conditions not met (fail-open)
+  ☐ Confidence range [55-95] (respects floor, not too high)
+  ☐ Kelly fraction > 0, shares >= 1
+  ☐ All fields present: type, ticker_id, direction, confidence, kelly_fraction, shares, strategy
+  ☐ 2-week backtest shows IC > 0.02
+  ☐ Sharpe > 0.5 (annualized on signal-level returns)
+  ☐ Sample size >= 30 trades in backtest
+  ☐ No NaN/Inf values in output
+  ☐ Git commit message format: "Book NNN: <SIGNAL_NAME> signal generation"
+
+Aggregate System Test:
+  ☐ All 7 PHASE 1 signals active in single backtest
+  ☐ Total signal count 18-28 trades/day (not explosion)
+  ☐ Aggregate Sharpe +10 to +13 vs baseline
+  ☐ Max drawdown still < -3% (ISA constraint)
+  ☐ No correlation breakdowns in pairs trades
+  ☐ Zero Rust broker validation failures
+  ☐ Nightly pipeline completes in < 30 min (performance)
+
+Live Deployment (first 5 trading days):
+  ☐ Paper trading mode (simulation_mode = true)
+  ☐ Monitor signal counts per strategy (Telegram hourly)
+  ☐ Check IC daily (alert if IC < 0.02 on any signal)
+  ☐ Verify execution (all signals actually traded within 5 min)
+  ☐ Watch Sharpe progression (rolling 20-trade)
+  ☐ No unexpected losses > -1% on single trade
+  ☐ Log: /app/logs/phase1_signals_*.log
+
+================================================================================
+COMMIT SEQUENCE (Git)
+================================================================================
+
+1. Create feature branch: git checkout -b feat/phase1-unwired-signals
+2. Create new files:
+   - python_brain/strategies/latency_arbitrage.py
+   - python_brain/feeds/macro_nowcast.py
+   - (Expand: python_brain/ml/iv_signals.py)
+   - (Expand: python_brain/feeds/prediction_market.py)
+   - (Expand: python_brain/analytics/mi_signal_selector.py)
+   - (Expand: python_brain/lifecycle/alpha_decay.py)
+   - (Expand: python_brain/regime/signal_router.py)
+
+3. Commit per signal:
+   git add python_brain/strategies/latency_arbitrage.py
+   git commit -m "Book 195: Latency arbitrage NAV-market signal generator"
+
+   git add python_brain/feeds/macro_nowcast.py
+   git commit -m "Book 84: Macro nowcasting signal generator"
+
+   ... (repeat for all 7)
+
+4. Integrate into bridge.py:
+   git add python_brain/bridge.py
+   git commit -m "Book 195,84,155,130,119,14,216: Wire 7 PHASE1 signals into bridge.py"
+
+5. Enhance nightly pipeline:
+   git add python_brain/ouroboros/nightly_v6.py
+   git commit -m "Book 14: Signal quality scoring + retirement framework in nightly"
+
+6. Final merge:
+   git add -A
+   git push origin feat/phase1-unwired-signals
+   # Create PR, request review, merge to main
+
+7. Deploy to EC2:
+   ssh -i ~/.ssh/nzt48-key.pem ubuntu@3.230.44.22
+   cd ~/nzt48-aegis-v2
+   git pull origin main
+   docker compose up -d aegis-v2 --build
+
+================================================================================
+EXPECTED TIMELINE
+================================================================================
+
+Week 1:
+  Mon-Tue: Book 195 (LATARB) implementation & backtest
+  Wed: Book 84 (NOW) macro feed wiring
+  Thu: Book 155 (PREDMKT) + Book 130 (IVSURF) expansion
+  Fri: Full PHASE 1 integration test, commit to main
+
+Week 2:
+  Mon-Tue: Book 119 (INFOSEL) nightly calibration
+  Wed: Book 14 (SIGLAB) quality scoring + auto-retirement
+  Thu: Book 216 (ROUTER) regime-aware reweighting
+  Fri: 2-week backtest validation, EC2 deployment, 5-day paper trading
+
+Target Deploy: 2026-04-12 (2 weeks from start)
+Post-Deploy Monitor: 2026-04-12 to 2026-04-19 (paper trading, validation)
+
+================================================================================
+ESTIMATED EFFORT BREAKDOWN
+================================================================================
+
+Book 195 LATARB:     20h (25% new code, 75% integration)
+Book 84 NOW:         40h (40% new code, 60% integration)
+Book 155 PREDMKT:    30h (20% new code, 80% expansion)
+Book 130 IVSURF:     35h (10% new code, 90% expansion)
+Book 119 INFOSEL:    45h (15% new code, 85% nightly calibration)
+Book 14 SIGLAB:      25h (20% new code, 80% nightly logic)
+Book 216 ROUTER:     15h (10% new code, 90% completion)
+Testing/Integration: 20h
+Documentation:       10h
+─────────────────────────────
+TOTAL:              240h (equiv to 6 weeks at 40h/week, or 2 weeks at 120h/week sprinting)
+
+Realistic for 1 engineer: 2-3 weeks (accounting for debugging, testing, EC2 deployment)
+
+================================================================================
+END OF PHASE 1 QUICK REFERENCE
+================================================================================

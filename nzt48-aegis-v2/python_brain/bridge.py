@@ -4562,19 +4562,34 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         lows = ind.get("lows_arr")
         vols = ind.get("volumes_arr")
         if closes is not None and len(closes) > 100:
+            # Ensure all arrays are valid
+            if highs is None or len(highs) == 0:
+                highs = closes
+            if lows is None or len(lows) == 0:
+                lows = closes
+            if vols is None or len(vols) == 0:
+                vols = [1] * len(closes)
             sq = detect_squeeze(_np.array(closes), _np.array(highs), _np.array(lows), _np.array(vols),
                                 ticker=msg.get("symbol", ""))
-            if sq and sq.confidence >= conf_floor and sq.breakout_direction == "up":
-                vol_comp_signal = {
-                    "confidence": sq.confidence,
-                    "kelly_fraction": _kelly_for(sq.confidence),
-                    "shares": max(1, int(_kelly_for(sq.confidence) * msg.get("equity", 10000) / max(ind.get("last_price", 1), 0.01))),
-                    "strategy": "VolCompression",
-                    "squeeze_score": sq.squeeze_score,
-                    **common_fields,
-                }
-    except Exception:
+            # detect_squeeze should return object with confidence, breakout_direction, squeeze_score or None
+            if sq and hasattr(sq, 'confidence'):
+                conf_val = int(sq.confidence) if isinstance(sq.confidence, (int, float)) else 60
+                if conf_val >= conf_floor and getattr(sq, 'breakout_direction', None) == "up":
+                    kelly = _kelly_for(conf_val)
+                    vol_comp_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"],
+                        "shares": kelly["shares"],
+                        "strategy": "VolCompression",
+                        "squeeze_score": getattr(sq, 'squeeze_score', 0),
+                        **common_fields,
+                    }
+    except ImportError:
         pass
+    except Exception as e:
+        sys.stderr.write(f"VolCompression error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ETP Rebalancing Flow (Book 36) — 19:00-20:00 GMT window
     rebal_signal = None
@@ -4586,18 +4601,25 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         underlying_ret = msg.get("underlying_intraday_return", 0.0)
         if underlying_ret != 0 and symbol:
             rb = predict_rebalancing(underlying_ret, symbol, utc_secs)
-            if rb and rb.confidence >= conf_floor:
-                rebal_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": rb.confidence,
-                    "kelly_fraction": _kelly_for(rb.confidence)["kelly_fraction"],
-                    "shares": _kelly_for(rb.confidence)["shares"],
-                    "strategy": "RebalancingFlow",
-                    "rebal_notional_mm": rb.estimated_rebalancing_notional_mm,
-                    **common_fields,
-                }
-    except Exception:
+            # predict_rebalancing returns object with confidence, estimated_rebalancing_notional_mm or None
+            if rb and hasattr(rb, 'confidence'):
+                conf_val = int(rb.confidence) if isinstance(rb.confidence, (int, float)) else 60
+                if conf_val >= conf_floor:
+                    kelly = _kelly_for(conf_val)
+                    rebal_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"],
+                        "shares": kelly["shares"],
+                        "strategy": "RebalancingFlow",
+                        "rebal_notional_mm": getattr(rb, 'estimated_rebalancing_notional_mm', 0),
+                        **common_fields,
+                    }
+    except ImportError:
         pass
+    except Exception as e:
+        sys.stderr.write(f"RebalancingFlow error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # NAV Premium/Discount (Book 132) — buy when ETP trades at discount
     nav_signal = None
@@ -4607,19 +4629,27 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         if nav_tracker is not None:
             symbol = msg.get("symbol", "")
             sig = nav_tracker.check_signal(symbol)
-            if sig and sig.confidence >= conf_floor and sig.direction == "buy":
-                nav_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": sig.confidence,
-                    "kelly_fraction": _kelly_for(sig.confidence)["kelly_fraction"],
-                    "shares": _kelly_for(sig.confidence)["shares"],
-                    "strategy": "NAVArbitrage",
-                    "nav_z_score": sig.z_score,
-                    "nav_premium_pct": sig.premium_pct,
-                    **common_fields,
-                }
-    except Exception:
+            # nav_tracker.check_signal returns object with confidence, direction, z_score, premium_pct or None
+            if sig and hasattr(sig, 'confidence'):
+                conf_val = int(sig.confidence) if isinstance(sig.confidence, (int, float)) else 60
+                direction = getattr(sig, 'direction', 'neutral')
+                if conf_val >= conf_floor and direction == "buy":
+                    kelly = _kelly_for(conf_val)
+                    nav_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"],
+                        "shares": kelly["shares"],
+                        "strategy": "NAVArbitrage",
+                        "nav_z_score": getattr(sig, 'z_score', 0),
+                        "nav_premium_pct": getattr(sig, 'premium_pct', 0),
+                        **common_fields,
+                    }
+    except ImportError:
         pass
+    except Exception as e:
+        sys.stderr.write(f"NAVArbitrage error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # Alpha Factory Ensemble (Books 121, 168) — formulaic alpha combination
     alpha_signal = None
@@ -4633,23 +4663,31 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 _generate_signals._alpha_factory = AlphaFactory()
             factory = _generate_signals._alpha_factory
             results = factory.evaluate_all(_np.array(closes), _np.array(volumes))
-            ensemble_val = factory.ensemble(results)
-            # Convert ensemble value to signal if strong enough
-            if abs(ensemble_val) > 0.1:  # Threshold for actionable signal
-                alpha_conf = min(85, int(50 + abs(ensemble_val) * 200))
-                if ensemble_val > 0 and alpha_conf >= conf_floor:  # ISA: long only
-                    alpha_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                        "confidence": alpha_conf,
-                        "kelly_fraction": _kelly_for(alpha_conf)["kelly_fraction"],
-                        "shares": _kelly_for(alpha_conf)["shares"],
-                        "strategy": "AlphaFactory",
-                        "ensemble_value": round(ensemble_val, 4),
-                        "n_alphas": len(results),
-                        **common_fields,
-                    }
-    except Exception:
+            # Ensure results is a dict/list with alphas
+            if results:
+                ensemble_val = factory.ensemble(results)
+                # Convert ensemble value to signal if strong enough
+                if ensemble_val is not None:
+                    ensemble_val = float(ensemble_val)
+                    if abs(ensemble_val) > 0.1:  # Threshold for actionable signal
+                        alpha_conf = min(85, int(50 + abs(ensemble_val) * 200))
+                        if ensemble_val > 0 and alpha_conf >= conf_floor:  # ISA: long only
+                            kelly = _kelly_for(alpha_conf)
+                            alpha_signal = {
+                                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                                "confidence": alpha_conf,
+                                "kelly_fraction": kelly["kelly_fraction"],
+                                "shares": kelly["shares"],
+                                "strategy": "AlphaFactory",
+                                "ensemble_value": round(ensemble_val, 4),
+                                "n_alphas": len(results) if isinstance(results, (dict, list)) else 0,
+                                **common_fields,
+                            }
+    except ImportError:
         pass
+    except Exception as e:
+        sys.stderr.write(f"AlphaFactory error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 77 + BOOK 136: CROSS-MARKET LEAD-LAG (with R² recalibration) ──
     # When this ticker is a known follower (e.g. 3USL.L), check if its leader (e.g. SPY)
@@ -4691,33 +4729,38 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             follower_returns=follower_returns,
                             pair_name=pair_name,
                         )
-                        if sig and sig.confidence >= effective_floor:
-                            # Book 136: Scale confidence by R²
-                            r_squared = pair_r2_info.get("r2", 1.0)
-                            scaled_confidence = int(sig.confidence * r_squared)
-                            # Re-check floor after scaling
-                            if scaled_confidence < effective_floor:
-                                continue
-                            kelly = _kelly_for(scaled_confidence)
-                            lead_lag_signal = {
-                                "type": "signal", "ticker_id": ticker_id,
-                                "direction": "Long",
-                                "confidence": scaled_confidence,
-                                "kelly_fraction": kelly["kelly_fraction"],
-                                "shares": kelly["shares"],
-                                "strategy": "LeadLag",
-                                "leader": sig.leader_ticker,
-                                "follower": sig.follower_ticker,
-                                "leader_move_pct": sig.leader_move_pct,
-                                "follower_lag_pct": sig.follower_lag_pct,
-                                "expected_catchup_pct": sig.estimated_catch_up_pct,
-                                "lead_lag_r2": r_squared,
-                                "lead_lag_r2_status": pair_r2_info.get("status", "active"),
-                                **common_fields,
-                            }
-                            break  # Take the first valid lead-lag signal
-    except Exception:
+                        if sig and hasattr(sig, 'confidence'):
+                            conf_val = int(sig.confidence) if isinstance(sig.confidence, (int, float)) else 60
+                            if conf_val >= effective_floor:
+                                # Book 136: Scale confidence by R²
+                                r_squared = pair_r2_info.get("r2", 1.0)
+                                scaled_confidence = int(conf_val * r_squared)
+                                # Re-check floor after scaling
+                                if scaled_confidence < effective_floor:
+                                    continue
+                                kelly = _kelly_for(scaled_confidence)
+                                lead_lag_signal = {
+                                    "type": "signal", "ticker_id": ticker_id,
+                                    "direction": "Long",
+                                    "confidence": scaled_confidence,
+                                    "kelly_fraction": kelly["kelly_fraction"],
+                                    "shares": kelly["shares"],
+                                    "strategy": "LeadLag",
+                                    "leader": getattr(sig, 'leader_ticker', ''),
+                                    "follower": getattr(sig, 'follower_ticker', ''),
+                                    "leader_move_pct": getattr(sig, 'leader_move_pct', 0),
+                                    "follower_lag_pct": getattr(sig, 'follower_lag_pct', 0),
+                                    "expected_catchup_pct": getattr(sig, 'estimated_catch_up_pct', 0),
+                                    "lead_lag_r2": r_squared,
+                                    "lead_lag_r2_status": pair_r2_info.get("status", "active"),
+                                    **common_fields,
+                                }
+                                break  # Take the first valid lead-lag signal
+    except ImportError:
         pass
+    except Exception as e:
+        sys.stderr.write(f"LeadLag error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # Calendar Anomaly Modifier (Book 171) — applies to ALL signals
     cal_conf_delta = 0
@@ -4747,11 +4790,15 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             _emat = EMATModel(d_model=32, n_heads=2)
             _emat_pred = _emat.forward(
                 features=_np_emat.column_stack([_prices, _vols]),
-                trend_indicator=ind["adx"],
-                vol_regime=ind.get("vol_regime", "NORMAL"),
+                trend_indicator=ind.get("adx", 50) / 100.0,  # Normalize ADX to [0,1]
+                vol_regime=ind.get("vol_regime", 1),  # Default to normal regime (1)
             )
-            if _emat_pred.get("prediction", 0) > 0.1 and _emat_pred.get("confidence", 0) > 0.55:
-                emat_conf = min(85, int(50 + _emat_pred["confidence"] * 40))
+            # EMAT returns dict with 'prediction' as scalar. Map to confidence [0,1].
+            pred_val = float(_emat_pred.get("prediction", 0))
+            # Convert prediction magnitude to confidence: abs(pred) → confidence
+            emat_conf_raw = min(1.0, max(0.0, abs(pred_val)))
+            if emat_conf_raw > 0.1:  # Threshold: signal must be above noise
+                emat_conf = min(85, int(50 + emat_conf_raw * 40))
                 if emat_conf >= effective_floor:
                     kelly = _kelly_for(emat_conf)
                     emat_signal = {
@@ -4762,8 +4809,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"EMAT_Attention error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 157: TEMPORAL ATTENTION (SIGNAL GENERATOR) ──
     attn_signal = None
@@ -4776,8 +4824,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             _ind_arr = _np_attn.array([ind.get("rsi", 50)] * len(_p))
             _attn_gen = TemporalAttentionSignal(n_features=3, seq_len=len(_p))
             _asig = _attn_gen.generate_signal(_p, _v, _ind_arr)
-            if _asig.get("direction") == "long" and _asig.get("confidence", 0) > 0.55:
-                attn_conf = min(85, int(50 + _asig["confidence"] * 35))
+            # TemporalAttentionSignal returns dict with 'direction' (long/neutral/short) and 'confidence' [0,1]
+            direction = _asig.get("direction", "neutral")
+            conf_raw = float(_asig.get("confidence", 0.0))
+            if direction == "long" and conf_raw > 0.55:
+                attn_conf = min(85, int(50 + conf_raw * 35))
                 if attn_conf >= effective_floor:
                     kelly = _kelly_for(attn_conf)
                     attn_signal = {
@@ -4788,8 +4839,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"TemporalAttention error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 151: SWARM PREDICTOR (SIGNAL GENERATOR) ──
     swarm_signal = None
@@ -4800,8 +4852,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             for b in bars_5m[-10:]:
                 _swarm.step(market_price=b["close"], volume=b["volume"])
             _spred = _swarm.get_prediction()
-            if _spred.get("direction") == "bullish" and _spred.get("confidence", 0) > 0.6:
-                sw_conf = min(80, int(50 + _spred["confidence"] * 30))
+            # SwarmSimulator.get_prediction() returns dict with 'direction' (bullish/neutral/bearish) and 'confidence' [0,1]
+            direction = _spred.get("direction", "neutral") if _spred else "neutral"
+            conf_raw = float(_spred.get("confidence", 0.0)) if _spred else 0.0
+            if direction == "bullish" and conf_raw > 0.6:
+                sw_conf = min(80, int(50 + conf_raw * 30))
                 if sw_conf >= effective_floor:
                     kelly = _kelly_for(sw_conf)
                     swarm_signal = {
@@ -4812,8 +4867,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"SwarmPredictor error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 204: HFT PROBABILITY (SIGNAL GENERATOR) ──
     hft_signal = None
@@ -4828,9 +4884,13 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 "spread": ind.get("spread_pct", 0.1),
                 "prices": [t["last"] for t in ticks[-20:]],
             })
-            if _hft_sig and _hft_sig.get("direction") == "long":
-                hft_conf = int(_hft_sig.get("confidence", 55))
-                if hft_conf >= effective_floor:
+            # HFTProbabilitySignal.generate() returns dict with 'direction' and 'confidence' or None
+            if _hft_sig:
+                direction = _hft_sig.get("direction", "neutral")
+                conf = _hft_sig.get("confidence", 55)
+                # Ensure confidence is integer [0,100]
+                hft_conf = max(0, min(100, int(conf)))
+                if direction == "long" and hft_conf >= effective_floor:
                     kelly = _kelly_for(hft_conf)
                     hft_signal = {
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
@@ -4840,8 +4900,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"HFT_Probability error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 206: NEGRISK ARBITRAGE (SIGNAL GENERATOR) ──
     negrisk_signal = None
@@ -4857,19 +4918,29 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 underlying_return=msg["underlying_return"],
                 leverage=msg.get("leverage", 3),
             )
-            if _arb and _arb.get("signal") and _arb.get("confidence", 0) >= effective_floor:
-                kelly = _kelly_for(int(_arb["confidence"]))
-                negrisk_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": int(_arb["confidence"]),
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "NegRiskArb", "tracking_error": _arb.get("tracking_error", 0),
-                    **common_fields,
-                }
+            # check_leverage_ratio returns dict with 'signal', 'confidence', 'tracking_error' or None
+            if _arb and isinstance(_arb, dict):
+                has_signal = _arb.get("signal", False)
+                conf_val = _arb.get("confidence", 0)
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    conf_val = int(conf_val)
+                else:
+                    conf_val = 60
+                if has_signal and conf_val >= effective_floor:
+                    kelly = _kelly_for(conf_val)
+                    negrisk_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "NegRiskArb", "tracking_error": _arb.get("tracking_error", 0),
+                        **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"NegRiskArb error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 166: HIGH-FLYER RETAIL FLOW + MULTI-FACTOR (SIGNAL GENERATOR) ──
     highflyer_signal = None
@@ -4889,20 +4960,29 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 volume=msg.get("volume", 0),
                 trades=[],
             )
-            if _hf_result and _hf_result.get("direction") == "long" and _hf_result.get("confidence", 0) >= effective_floor:
-                _hf_conf = int(_hf_result["confidence"])
-                kelly = _kelly_for(_hf_conf)
-                highflyer_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": _hf_conf,
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "HighFlyer", "retail_flow": _hf_result.get("retail_ratio", 0),
-                    **common_fields,
-                }
+            # HighFlyerSignalGenerator.generate() returns dict with 'direction', 'confidence', 'retail_ratio' or None
+            if _hf_result and isinstance(_hf_result, dict):
+                direction = _hf_result.get("direction", "neutral")
+                conf_val = _hf_result.get("confidence", 0)
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    _hf_conf = int(conf_val)
+                else:
+                    _hf_conf = 60
+                if direction == "long" and _hf_conf >= effective_floor:
+                    kelly = _kelly_for(_hf_conf)
+                    highflyer_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _hf_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "HighFlyer", "retail_flow": _hf_result.get("retail_ratio", 0),
+                        **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"HighFlyer error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 125/126: PAIRS SPREAD REVERSION (SIGNAL GENERATOR) ──
     pairs_signal = None
@@ -4913,22 +4993,30 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             _pair_sig = detect_pair_signal(
                 symbol=symbol,
                 prices=[b["close"] for b in bars_5m[-30:]],
-                hurst=ind["hurst"],
+                hurst=ind.get("hurst", 0.5),
             )
-            if _pair_sig and _pair_sig.get("confidence", 0) >= effective_floor:
-                _pc = int(_pair_sig["confidence"])
-                kelly = _kelly_for(_pc)
-                pairs_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": _pc,
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "PairsReversion", "z_score": _pair_sig.get("z_score", 0),
-                    **common_fields,
-                }
+            # detect_pair_signal returns dict with 'confidence', 'z_score' or None
+            if _pair_sig and isinstance(_pair_sig, dict):
+                conf_val = _pair_sig.get("confidence", 0)
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    _pc = int(conf_val)
+                else:
+                    _pc = 60
+                if _pc >= effective_floor:
+                    kelly = _kelly_for(_pc)
+                    pairs_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _pc,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "PairsReversion", "z_score": _pair_sig.get("z_score", 0),
+                        **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"PairsReversion error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 203: COPY TRADING / SMART MONEY (SIGNAL GENERATOR) ──
     copy_signal = None
@@ -4942,19 +5030,27 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 leader_signal=msg.get("leader_signal"),
                 own_equity=msg.get("equity", 10000),
             )
-            if _cs and _cs.get("confidence", 0) >= effective_floor:
-                _cc = int(_cs["confidence"])
-                kelly = _kelly_for(_cc)
-                copy_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": _cc,
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "CopyTrading", **common_fields,
-                }
+            # SignalReplicator.replicate() returns dict with 'confidence' or None
+            if _cs and isinstance(_cs, dict):
+                conf_val = _cs.get("confidence", 0)
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    _cc = int(conf_val)
+                else:
+                    _cc = 60
+                if _cc >= effective_floor:
+                    kelly = _kelly_for(_cc)
+                    copy_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _cc,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "CopyTrading", **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"CopyTrading error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 5: OVERNIGHT REVERSAL (NIGHT RIDER) ──
     # Stock declined >1.5% during day, NOT news-driven, volume >1.5x average.
@@ -5071,24 +5167,34 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     try:
         from python_brain.strategies.fomc_drift import get_drift_signal
         _evt_ctx = msg.get("_event_context")
-        if _evt_ctx and _evt_ctx.in_drift_window:
-            _drift = get_drift_signal(_evt_ctx.event_type, abs(_evt_ctx.minutes_to),
-                                       _evt_ctx.direction_bias)
-            if _drift and _drift.confidence >= conf_floor:
-                kelly = _kelly_for(_drift.confidence)
-                drift_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": _drift.confidence,
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "EventDrift", "event": _evt_ctx.event_name,
-                    "drift_mins_since": _drift.minutes_since,
-                    "drift_expected_duration": _drift.expected_duration_mins,
-                    **common_fields,
-                }
+        if _evt_ctx and getattr(_evt_ctx, 'in_drift_window', False):
+            _drift = get_drift_signal(getattr(_evt_ctx, 'event_type', 'FOMC'),
+                                      abs(getattr(_evt_ctx, 'minutes_to', 0)),
+                                      getattr(_evt_ctx, 'direction_bias', 0.5))
+            # get_drift_signal returns object with confidence, minutes_since, expected_duration_mins or None
+            if _drift and hasattr(_drift, 'confidence'):
+                conf_val = _drift.confidence
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    conf_val = int(conf_val)
+                else:
+                    conf_val = 60
+                if conf_val >= conf_floor:
+                    kelly = _kelly_for(conf_val)
+                    drift_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "EventDrift", "event": getattr(_evt_ctx, 'event_name', ''),
+                        "drift_mins_since": getattr(_drift, 'minutes_since', 0),
+                        "drift_expected_duration": getattr(_drift, 'expected_duration_mins', 0),
+                        **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"EventDrift error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 125: COINTEGRATION PAIRS (SIGNAL GENERATOR) ──
     coint_signal = None
@@ -5102,20 +5208,29 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             # Feed price for pair tracking
             _coint.update_price(symbol, msg.get("last", 0))
             _cs = _coint.check_signal(symbol, [b["close"] for b in bars_5m[-30:]])
-            if _cs and _cs.confidence >= conf_floor:
-                kelly = _kelly_for(int(_cs.confidence))
-                coint_signal = {
-                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                    "confidence": int(_cs.confidence),
-                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "CointPairs", "z_score": round(_cs.z_score, 3),
-                    "half_life": round(_cs.half_life, 1), "pair": _cs.pair_name,
-                    "long_leg": _cs.long_leg, **common_fields,
-                }
+            # CointPairsTracker.check_signal returns object with confidence, z_score, half_life, pair_name, long_leg or None
+            if _cs and hasattr(_cs, 'confidence'):
+                conf_val = _cs.confidence
+                # Ensure confidence is int [0,100]
+                if isinstance(conf_val, (int, float)):
+                    conf_val = int(conf_val)
+                else:
+                    conf_val = 60
+                if conf_val >= conf_floor:
+                    kelly = _kelly_for(conf_val)
+                    coint_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": conf_val,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "CointPairs", "z_score": round(getattr(_cs, 'z_score', 0), 3),
+                        "half_life": round(getattr(_cs, 'half_life', 0), 1), "pair": getattr(_cs, 'pair_name', ''),
+                        "long_leg": getattr(_cs, 'long_leg', ''), **common_fields,
+                    }
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"CointPairs error (non-fatal): {e}\n")
+        sys.stderr.flush()
 
     # ── BOOK 144: CONFORMAL DIRECTIONAL GATE (SIGNAL MODIFIER) ──
     try:
@@ -6176,8 +6291,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         if last_sig_ns > 0 and elapsed_ns < cooldown_ns:
             # Still in cooldown — suppress signals for this ticker
             seconds_remaining = (cooldown_ns - elapsed_ns) / 1e9
-            log.info(f"Regime cooldown active for {symbol}: {seconds_remaining:.1f}s remaining "
-                     f"({rl.regime}={rl.cooldown_secs}s)")
+            sys.stderr.write(f"REGIME_COOLDOWN: {symbol}: {seconds_remaining:.1f}s remaining "
+                     f"({rl.regime}={rl.cooldown_secs}s)\n")
             return None  # Hard block: cooldown not elapsed
 
         # 4. Attach regime info to signals for Rust processing + diagnostics
@@ -6187,7 +6302,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["regime_cooldown_secs"] = rl.cooldown_secs
 
     except Exception as e:
-        log.warning(f"Book 85 regime limits failed: {e}")
+        sys.stderr.write(f"BOOK85_WARN: regime limits failed: {e}\n")
         pass
 
     # Update last signal time if signals still pending (before any further filtering)
