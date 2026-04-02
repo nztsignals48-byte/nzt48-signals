@@ -280,13 +280,22 @@ impl PythonBridge {
     /// Start the Python bridge subprocess.
     /// P0-1.2: Spawns a dedicated reader thread for timeout-safe reads.
     pub fn start() -> Result<Self, String> {
+        eprintln!("[DEBUG] PythonBridge::start() called");
+
         // Pipe stderr to a log file instead of inheriting (avoids lost diagnostics).
+        eprintln!("[DEBUG] Opening /app/data/bridge_stderr.log");
         let stderr_file = OpenOptions::new()
             .create(true)
             .append(true)
             .open("/app/data/bridge_stderr.log")
-            .map_err(|e| format!("Failed to open bridge stderr log: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("Failed to open bridge stderr log: {e}");
+                eprintln!("[ERROR] {}", msg);
+                msg
+            })?;
+        eprintln!("[DEBUG] Stderr file opened successfully");
 
+        eprintln!("[DEBUG] Spawning python3 /app/python_brain/bridge.py");
         let mut child = Command::new("python3")
             .args(["/app/python_brain/bridge.py"])
             .stdin(Stdio::piped())
@@ -294,14 +303,22 @@ impl PythonBridge {
             .stderr(Stdio::from(stderr_file))
             .current_dir("/app")
             .spawn()
-            .map_err(|e| format!("Failed to start Python bridge: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("Failed to start Python bridge: {e}");
+                eprintln!("[ERROR] {}", msg);
+                msg
+            })?;
+        eprintln!("[DEBUG] Child process spawned successfully");
 
+        eprintln!("[DEBUG] Taking stdin and stdout from child process");
         let stdin = child.stdin.take().ok_or("No stdin on child process")?;
         let stdout = child.stdout.take().ok_or("No stdout on child process")?;
+        eprintln!("[DEBUG] Stdin and stdout acquired");
 
         // P0-1.2: Spawn reader thread — reads lines from stdout and sends via channel.
         // This allows the main thread to use recv_timeout() instead of blocking forever.
         let (line_tx, line_rx) = mpsc::channel::<String>();
+        eprintln!("[DEBUG] Spawning bridge reader thread");
         std::thread::Builder::new()
             .name("aegis-bridge-reader".to_string())
             .spawn(move || {
@@ -320,7 +337,12 @@ impl PythonBridge {
                     }
                 }
             })
-            .map_err(|e| format!("Failed to spawn bridge reader thread: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("Failed to spawn bridge reader thread: {e}");
+                eprintln!("[ERROR] {}", msg);
+                msg
+            })?;
+        eprintln!("[DEBUG] Bridge reader thread spawned successfully");
 
         eprintln!("Python Bridge: subprocess started (pid={})", child.id());
 
