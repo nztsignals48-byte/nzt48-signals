@@ -443,3 +443,77 @@ class MacroProbabilityOverlay:
             return default
         weighted_sum = sum(p * w for p, w in items)
         return float(np.clip(weighted_sum / total_weight, 0.0, 1.0))
+
+    def crowd_vs_model_signal(self, events: List[PredictionEvent],
+                              model_signal: str = "neutral",
+                              model_confidence: float = 0.5) -> Dict[str, Any]:
+        """Generate signal from disagreement between crowd and model (Book 155).
+
+        Prediction market consensus vs historical model: when they diverge,
+        the crowd's conviction (high volume) suggests real information.
+
+        Args:
+            events: List of prediction events.
+            model_signal: Model's directional assessment (bullish/bearish/neutral).
+            model_confidence: Model's confidence [0, 1].
+
+        Returns:
+            Dict with crowd-vs-model signal and confidence boost.
+        """
+        if not events:
+            return {
+                "signal": "PREDMKT_CROWD_MODEL",
+                "agreement": "INSUFFICIENT_DATA",
+                "confidence_adjustment": 0,
+            }
+
+        # Compute crowd's aggregate direction
+        crowd_bullish = 0.0
+        crowd_bearish = 0.0
+        total_volume = 0.0
+
+        for event in events:
+            vol_weight = math.log1p(event.volume + 1)
+            total_volume += vol_weight
+
+            if "bull" in event.question.lower() or "ath" in event.question.lower():
+                crowd_bullish += event.probability * vol_weight
+            elif any(kw in event.question.lower() for kw in RECESSION_KEYWORDS):
+                crowd_bearish += event.probability * vol_weight
+
+        if total_volume < 1e-6:
+            return {
+                "signal": "PREDMKT_CROWD_MODEL",
+                "agreement": "NO_VOLUME",
+                "confidence_adjustment": 0,
+            }
+
+        crowd_bullish /= total_volume
+        crowd_bearish /= total_volume
+
+        # Determine crowd consensus
+        if crowd_bullish > 0.6:
+            crowd_signal = "bullish"
+        elif crowd_bearish > 0.6:
+            crowd_signal = "bearish"
+        else:
+            crowd_signal = "neutral"
+
+        # Compare to model
+        if crowd_signal == model_signal:
+            agreement = "AGREEMENT"
+            adjustment = min(10, int(20 * max(crowd_bullish, crowd_bearish)))
+        else:
+            agreement = "DISAGREEMENT"
+            adjustment = -max(5, int(10 * max(crowd_bullish, crowd_bearish)))
+
+        return {
+            "signal": "PREDMKT_CROWD_MODEL",
+            "crowd_consensus": crowd_signal,
+            "model_assessment": model_signal,
+            "agreement": agreement,
+            "crowd_bullish_prob": round(crowd_bullish, 3),
+            "crowd_bearish_prob": round(crowd_bearish, 3),
+            "confidence_adjustment": int(adjustment),
+            "total_volume_weight": round(total_volume, 2),
+        }

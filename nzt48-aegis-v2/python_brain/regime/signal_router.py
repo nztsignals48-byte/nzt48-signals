@@ -208,3 +208,67 @@ class SignalRouter:
             return None
         winners.sort(key=lambda s: s.get("confidence", 0), reverse=True)
         return winners[0]
+
+    def apply_regime_filters(
+        self,
+        signals: List[Dict],
+        regime: str,
+    ) -> List[Dict]:
+        """Filter signals based on regime-specific IC thresholds (Book 216).
+
+        Crisis regime: only accept signals with IC > 0.03 + momentum > 0.5.
+        Mean-reverting regime: only accept reversion signals with z-score > 1.5.
+
+        Args:
+            signals: List of signal dicts.
+            regime: Current regime (crisis, mean_reverting, trending, etc.).
+
+        Returns:
+            Filtered list of regime-approved signals.
+        """
+        if regime == "crisis":
+            # Crisis mode: strict filters
+            filtered = []
+            for sig in signals:
+                ic = sig.get("ic", sig.get("information_coefficient", 0.0))
+                momentum = sig.get("momentum_score", 0.0)
+                if ic > 0.03 and momentum > 0.5:
+                    filtered.append(sig)
+                    log.info(
+                        "CRISIS_FILTER PASS: %s (ic=%.3f, momentum=%.2f)",
+                        sig.get("strategy"), ic, momentum,
+                    )
+                else:
+                    log.info(
+                        "CRISIS_FILTER REJECT: %s (ic=%.3f, momentum=%.2f)",
+                        sig.get("strategy"), ic, momentum,
+                    )
+            return filtered
+
+        elif regime == "mean_reverting":
+            # Mean-reversion mode: prefer reversion signals with high z-score
+            filtered = []
+            for sig in signals:
+                strat = sig.get("strategy", "")
+                if "revers" in strat.lower():
+                    z_score = sig.get("z_score", 0.0)
+                    if z_score > 1.5:
+                        filtered.append(sig)
+                        log.info(
+                            "MEAN_REV_FILTER PASS: %s (z=%.2f)",
+                            strat, z_score,
+                        )
+                    else:
+                        log.info(
+                            "MEAN_REV_FILTER REJECT: %s (z=%.2f < 1.5)",
+                            strat, z_score,
+                        )
+                else:
+                    # Non-reversion strategies pass with reduced confidence
+                    sig["confidence"] = max(0, sig.get("confidence", 50) - 5)
+                    filtered.append(sig)
+            return filtered
+
+        else:
+            # Default/trending: all signals pass
+            return signals

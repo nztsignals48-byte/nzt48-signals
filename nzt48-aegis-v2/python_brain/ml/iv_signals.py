@@ -494,6 +494,55 @@ class IVSignalGenerator:
         adjusted = base_confidence + adjustment
         return float(np.clip(adjusted, 0.0, 100.0))
 
+    def iv_skew_directional_signal(self, surface: VolatilitySurface,
+                                   regime: str = "unknown") -> Dict[str, Any]:
+        """Generate directional signal from IV skew widening (Book 130).
+
+        High skew = elevated tail risk = tactical short vol setup.
+        Signal: when skew_percentile > 80 and steepening, tactical short.
+
+        Args:
+            surface: VolatilitySurface snapshot.
+            regime: Current market regime.
+
+        Returns:
+            Dict with signal confidence based on IV rank and skew steepness.
+        """
+        skew_analysis = self._skew_signal(surface)
+        skew_pct = skew_analysis.get("skew_percentile", 50.0)
+        shift = skew_analysis.get("shift", "STABLE")
+
+        # IV rank: normalise percentile to [0, 100] for confidence
+        iv_rank = skew_pct
+
+        # Skew steepness confidence boost
+        steepness_boost = 0.0
+        if shift == "STEEPENING":
+            steepness_boost = 10.0
+        elif shift == "FLATTENING":
+            steepness_boost = -5.0
+
+        # Base confidence: IV rank percentile
+        if iv_rank > 80 and shift == "STEEPENING":
+            confidence = min(90, 60 + int((iv_rank - 80) * 3) + int(steepness_boost))
+            direction = "short_vol"  # Tactical short when skew widens
+        elif iv_rank < 20 and shift == "FLATTENING":
+            confidence = min(85, 50 + int((20 - iv_rank) * 2))
+            direction = "long_vol"
+        else:
+            confidence = 50 + int((iv_rank - 50) * 0.6)
+            direction = "neutral"
+
+        return {
+            "signal": "IV_SKEW_DIRECTIONAL",
+            "direction": direction,
+            "confidence": max(0, int(confidence)),
+            "iv_rank": round(iv_rank, 1),
+            "skew_steepness": shift,
+            "regime": regime,
+            "skew_ratio": skew_analysis.get("skew_ratio", 0.0),
+        }
+
     # ── Private Methods ────────────────────────────────────────────────
 
     def _term_structure_signal(self, surface: VolatilitySurface) -> Dict[str, Any]:

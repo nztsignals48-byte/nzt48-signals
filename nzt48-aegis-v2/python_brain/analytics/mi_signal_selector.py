@@ -265,6 +265,88 @@ def load_feature_weights(path: str = "/app/data/feature_importance.json") -> Dic
         return {}
 
 
+def dynamic_indicator_reweighting(
+    trade_log_path: str = "/app/data/trade_log.ndjson",
+    lookback_bars: int = 20,
+) -> Dict[str, float]:
+    """Dynamically reweight indicators THIS WEEK based on MI (Book 119).
+
+    Compute mutual information between each indicator and next 20-bar
+    returns. Indicators with high MI get boosted; low-MI indicators
+    get downweighted in confidence.
+
+    Args:
+        trade_log_path: Path to ndjson trade log.
+        lookback_bars: Forward-looking bar window (20 = 1 hour intraday).
+
+    Returns:
+        Dict mapping indicator names to MI-based weight multipliers [0.5, 1.5].
+    """
+    # Load recent trades
+    trades = []
+    try:
+        with open(trade_log_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        trades.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except FileNotFoundError:
+        log.warning(f"Trade log not found: {trade_log_path}")
+        return {}
+
+    if len(trades) < 20:
+        log.info(f"Insufficient trades ({len(trades)}) for dynamic reweighting")
+        return {}
+
+    # Extract indicators and forward returns
+    indicators = defaultdict(list)
+    forward_returns = []
+
+    for i, trade in enumerate(trades[:-lookback_bars]):
+        # Forward return: next 20 bars' log return
+        if i + lookback_bars < len(trades):
+            entry_price = trade.get("entry_price", 1.0)
+            future_price = trades[i + lookback_bars].get("exit_price", entry_price)
+            fwd_return = math.log(future_price / entry_price) if entry_price > 0 else 0.0
+            forward_returns.append(fwd_return)
+
+            # Extract indicators
+            for feat in SIGNAL_FEATURES:
+                val = trade.get(feat, 0.0)
+                if isinstance(val, (int, float)) and math.isfinite(val):
+                    indicators[feat].append(float(val))
+                else:
+                    indicators[feat].append(0.0)
+
+    if len(forward_returns) < 20:
+        return {}
+
+    # Compute MI for each indicator vs forward returns
+    weights = {}
+    max_mi = 0.0
+    mi_scores = {}
+
+    for feat in SIGNAL_FEATURES:
+        if feat in indicators and len(indicators[feat]) == len(forward_returns):
+            mi = mutual_information(indicators[feat], forward_returns)
+            mi_scores[feat] = mi
+            max_mi = max(max_mi, mi)
+
+    # Normalize MI to weight multipliers [0.5, 1.5]
+    if max_mi > 0:
+        for feat, mi in mi_scores.items():
+            normalized_mi = mi / max_mi  # [0, 1]
+            weight_mult = 0.5 + normalized_mi  # [0.5, 1.5]
+            weights[feat] = round(weight_mult, 3)
+
+    log.info(f"Dynamic reweighting: {len(weights)} indicators, "
+             f"max_mi={max_mi:.4f}")
+    return weights
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

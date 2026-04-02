@@ -2053,6 +2053,27 @@ def run_nightly() -> int:
     except Exception as e:
         log.warning("Ticker scoreboard generation failed (non-fatal): %s", e)
 
+    # Step 4b: BOOK 14 — Signal Quality Framework (SIGLAB)
+    # Score signal quality using IC, Sharpe, max DD, hit rate. Runs after trades written.
+    try:
+        from python_brain.lifecycle.alpha_decay import compute_signal_quality_scores
+        trades_live_path = str(DATA_DIR / "trades_live.json")
+        quality_scores = compute_signal_quality_scores(trades_file=trades_live_path)
+        if quality_scores.get("status") == "ok":
+            log.info(
+                "Signal quality scores: %d strategies analyzed, "
+                "recommended confidence_floor=%.2f",
+                len(quality_scores.get("strategies", {})),
+                quality_scores.get("recommended_confidence_floor", 0.55),
+            )
+            recommendations["signal_quality_scores"] = quality_scores
+        else:
+            log.info("Signal quality: %s", quality_scores.get("status", "unknown"))
+    except ImportError:
+        pass
+    except Exception as e:
+        log.warning("Signal quality scoring failed (non-fatal): %s", e)
+
     # Step 5: Alpha decay detection
     decay_signals = detect_alpha_decay(REPORTS_DIR, metrics)
 

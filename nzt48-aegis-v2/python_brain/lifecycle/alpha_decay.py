@@ -225,6 +225,131 @@ def run_decay_analysis() -> Dict:
     return report
 
 
+def compute_signal_quality_scores(
+    trades_file: str = "/app/data/trades_live.json",
+    output_file: str = "/app/data/signal_quality_scores.json",
+) -> Dict[str, Any]:
+    """Score signal quality using IC, Sharpe, max DD, hit rate (Book 14).
+
+    Runs nightly after trades_live.json written. Computes per-strategy
+    quality metrics and adjusts confidence_floor for next day.
+
+    Args:
+        trades_file: Path to trades_live.json from Step 4b.
+        output_file: Path to write signal_quality_scores.json.
+
+    Returns:
+        Dict with per-strategy quality scores.
+    """
+    if not os.path.exists(trades_file):
+        return {"status": "no_trades", "strategies": {}}
+
+    try:
+        with open(trades_file) as f:
+            trades = json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {"status": "invalid_trades_file", "strategies": {}}
+
+    # Group trades by strategy
+    strategy_trades = defaultdict(list)
+    for trade in trades:
+        strat = trade.get("strategy", "unknown")
+        strategy_trades[strat].append(trade)
+
+    scores = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "strategies": {},
+        "recommended_confidence_floor": 0.55,
+    }
+
+    for strategy, strat_trades in strategy_trades.items():
+        if len(strat_trades) < 5:
+            scores["strategies"][strategy] = {
+                "status": "insufficient_trades",
+                "n_trades": len(strat_trades),
+            }
+            continue
+
+        # Extract metrics
+        returns = []
+        hit_count = 0
+        max_dd = 0.0
+        cumulative = 1.0
+
+        for trade in strat_trades:
+            pnl = trade.get("pnl", trade.get("realized_pnl", 0.0))
+            if pnl is None:
+                continue
+            returns.append(pnl)
+            if pnl > 0:
+                hit_count += 1
+            cumulative *= (1 + pnl)
+            drawdown = 1.0 - cumulative / max(cumulative, 1.0)
+            max_dd = max(max_dd, drawdown)
+
+        if not returns:
+            scores["strategies"][strategy] = {"status": "no_valid_pnl"}
+            continue
+
+        # Compute Sharpe, hit rate, IC (proxy: correlation to entry confidence)
+        n = len(returns)
+        mean_r = sum(returns) / n
+        var_r = sum((r - mean_r) ** 2 for r in returns) / max(n - 1, 1)
+        sharpe = (mean_r / math.sqrt(var_r)) * math.sqrt(252) if var_r > 0 else 0.0
+        hit_rate = hit_count / n
+
+        # IC (Information Coefficient): correlation of confidence to PnL sign
+        confidences = [trade.get("confidence", 50) for trade in strat_trades]
+        pnl_signs = [1.0 if pnl > 0 else 0.0 for pnl in returns]
+        ic = _compute_correlation(confidences, pnl_signs)
+
+        scores["strategies"][strategy] = {
+            "n_trades": n,
+            "sharpe": round(sharpe, 3),
+            "hit_rate": round(hit_rate, 3),
+            "max_drawdown": round(max_dd, 3),
+            "ic": round(ic, 3),
+            "quality_score": round((hit_rate * 0.3 + max(0, sharpe / 2.0) * 0.4 + max(ic, 0) * 0.3), 3),
+        }
+
+    # Recommend confidence floor adjustment
+    quality_scores = [s.get("quality_score", 0.5) for s in scores["strategies"].values()]
+    if quality_scores:
+        avg_quality = sum(quality_scores) / len(quality_scores)
+        if avg_quality > 0.7:
+            scores["recommended_confidence_floor"] = 0.55
+        elif avg_quality > 0.5:
+            scores["recommended_confidence_floor"] = 0.60
+        else:
+            scores["recommended_confidence_floor"] = 0.70
+
+    # Save
+    try:
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, "w") as f:
+            json.dump(scores, f, indent=2)
+        log.info(f"Signal quality scores saved to {output_file}")
+    except Exception as e:
+        log.error(f"Failed to save signal quality scores: {e}")
+
+    return scores
+
+
+def _compute_correlation(x: List[float], y: List[float]) -> float:
+    """Compute Pearson correlation between x and y."""
+    if len(x) < 2 or len(y) < 2 or len(x) != len(y):
+        return 0.0
+    n = len(x)
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    cov = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n)) / (n - 1)
+    var_x = sum((xi - mean_x) ** 2 for xi in x) / (n - 1)
+    var_y = sum((yi - mean_y) ** 2 for yi in y) / (n - 1)
+    if var_x > 0 and var_y > 0:
+        return cov / math.sqrt(var_x * var_y)
+    return 0.0
+
+
 if __name__ == "__main__":
     report = run_decay_analysis()
     print(f"Alpha Decay: {report.get('summary', {})}")
