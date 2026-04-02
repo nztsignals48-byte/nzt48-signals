@@ -373,7 +373,9 @@ fn main() {
     let mut tick_channel = TickChannel::new(ChannelConfig::default());
 
     // Start Python Brain bridge subprocess with lifecycle manager (RM-5)
+    eprintln!("=== BRIDGE SPAWN STARTING ===");
     let mut subprocess_mgr = PythonSubprocessManager::new();
+    eprintln!("=== PythonBridge::start() about to be called ===");
     let mut python_bridge = match PythonBridge::start() {
         Ok(mut bridge) => {
             bridge.leverage_map = leverage_map.clone();
