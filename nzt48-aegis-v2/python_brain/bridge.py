@@ -15,6 +15,7 @@ import math
 import os
 import sys
 import time
+import threading
 from collections import defaultdict, deque
 
 # Add python_brain to path so brain.* imports work (strategies use `from brain.config import ...`)
@@ -8072,11 +8073,26 @@ def process_apex_snapshot(msg):
     }
 
 
+def _heartbeat_daemon():
+    """Background thread: write heartbeat every 30s regardless of main loop."""
+    tick_count = 0
+    while True:
+        time.sleep(30)
+        try:
+            _write_heartbeat({"ticks_processed": tick_count})
+        except Exception:
+            pass  # Silently fail if heartbeat dir doesn't exist yet
+
+
 def main():
     """Main loop: read JSON lines from stdin, write responses to stdout."""
     global _last_heartbeat_time
     sys.stderr.write("Python Brain Bridge: started\n")
     sys.stderr.flush()
+
+    # Start background heartbeat daemon (ensures watchdog sees alive signal even if main loop blocks)
+    hb_thread = threading.Thread(target=_heartbeat_daemon, daemon=True)
+    hb_thread.start()
 
     # Write initial heartbeat immediately on startup
     _last_heartbeat_time = time.time()
@@ -8085,10 +8101,22 @@ def main():
     except Exception:
         pass
 
-    # Start data feeds (news, sentiment, Polygon backup) — non-blocking
+    # Start data feeds (news, sentiment, Polygon backup) — non-blocking with timeout
     try:
         from python_brain.feeds.data_manager import get_data_manager
-        _data_mgr = get_data_manager()
+        import signal
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("DataManager initialization timeout (10s)")
+
+        # Set 10s timeout for DataManager init
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(10)
+        try:
+            _data_mgr = get_data_manager()
+        finally:
+            signal.alarm(0)  # Cancel timeout
+
         sys.stderr.write("Bridge: DataManager started (news + polygon feeds)\n")
         sys.stderr.flush()
     except Exception as e:
