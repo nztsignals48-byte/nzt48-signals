@@ -310,7 +310,15 @@ fn main() {
     // Connect to IB Gateway with retry.
     // Paper mode: max 10 attempts then proceed without broker (idle until reconnect).
     // Live mode: infinite retry — never proceed without broker.
-    let max_attempts: u64 = if config.crucible.paper_mode { 10 } else { u64::MAX };
+    // SIMULATION MODE: skip connection entirely (no real orders possible anyway)
+    let max_attempts: u64 = if IS_LIVE {
+        u64::MAX // Live mode: infinite retry
+    } else if config.crucible.paper_mode {
+        10 // Paper mode: 10 attempts then give up
+    } else {
+        1 // Simulation mode: 1 quick attempt then skip
+    };
+
     let mut broker_connected = false;
     eprintln!("Connecting to IB Gateway (max {} attempts)...", if max_attempts == u64::MAX { "∞".to_string() } else { max_attempts.to_string() });
     let mut attempt: u64 = 0;
