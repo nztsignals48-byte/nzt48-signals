@@ -1,0 +1,219 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    AEGIS V2 DEPLOYMENT CHECKLIST                          ║
+║                         Saturday 2026-04-04                               ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+PHASE 0: PRE-DEPLOYMENT (Do Friday/Saturday before deployment)
+─────────────────────────────────────────────────────────────────────────────
+
+[ ] 1. Read deployment documentation
+    → Start: README_DEPLOYMENT_SATURDAY.md (master guide)
+    → For quick deployment: QUICK_DEPLOY.md
+    → For detailed reference: DEPLOYMENT_INSTRUCTIONS.md
+
+[ ] 2. Verify EC2 connectivity
+    → Can SSH: ssh -i ~/.ssh/ec2-temp-key ubuntu@3.230.44.22
+    → Can access GitHub: ping github.com (from EC2)
+    → Can access IBKR: Verify connection works
+
+[ ] 3. Check EC2 resources
+    → Disk space: df -h / (need 50GB+ available)
+    → Memory: free -h (need 8GB+)
+    → Time sync: date -u (should be current UTC)
+
+[ ] 4. Prepare deployment command
+    → Copy command from QUICK_DEPLOY.md
+    → Have it ready to paste into SSH session
+    → Takes 5-10 minutes to complete
+
+PHASE 1: DEPLOYMENT (Saturday morning 5-10 minutes)
+─────────────────────────────────────────────────────────────────────────────
+
+[ ] 5. SSH to EC2
+    → ssh -i ~/.ssh/ec2-temp-key ubuntu@3.230.44.22
+
+[ ] 6. Run deployment command (copy-paste ready)
+    → cd ~/nzt48-aegis-v2 && \
+      git fetch && \
+      git checkout feat/tier-system-enhancements-full && \
+      git pull && \
+      docker compose down && \
+      docker compose build --no-cache && \
+      docker compose up -d aegis-v2 && \
+      docker compose logs -f aegis-v2
+
+[ ] 7. Wait for build completion
+    → Build takes 3-5 minutes
+    → Watch for: "Successfully built" message
+    → Container should show "Up" in docker compose ps
+
+[ ] 8. Watch startup logs
+    → Tail logs with: docker compose logs -f aegis-v2
+    → Expected: Startup banner, IS_LIVE=false, bridge starting, IBKR connecting
+
+PHASE 2: IMMEDIATE VERIFICATION (30-60 seconds)
+─────────────────────────────────────────────────────────────────────────────
+
+[ ] 9. Verify container is running
+    → docker compose ps aegis-v2
+    → Expected: "aegis-v2" status "Up" with uptime
+
+[ ] 10. Confirm IS_LIVE=false (CRITICAL)
+    → docker compose logs aegis-v2 | grep "IS_LIVE"
+    → Expected: "IS_LIVE = false"
+    → ❌ If shows "IS_LIVE = true" STOP and investigate
+
+[ ] 11. Verify bridge spawned
+    → docker compose logs aegis-v2 | grep "Python Brain: bridge started"
+    → Expected: "Python Brain: bridge started (pid=...)"
+    → ⏳ May take 10 seconds, be patient
+
+[ ] 12. Verify IBKR connection
+    → docker compose logs aegis-v2 | grep "Market data farm"
+    → Expected: "Market data farm connection is OK: eufarm"
+    → ⏳ May take 30 seconds, IBKR might need 2FA
+
+[ ] 13. Verify strategies loaded
+    → docker compose logs aegis-v2 | grep "Bridge: strategy"
+    → Expected: "Bridge: strategy execution active (22 strategies)"
+    → Shows all Phase 1 strategies ready
+
+PHASE 3: POST-DEPLOYMENT MONITORING (Saturday-Sunday)
+─────────────────────────────────────────────────────────────────────────────
+
+[ ] 14. Continuous log monitoring
+    → docker compose logs -f aegis-v2
+    → Watch for: startup completion, no errors, market ticks arriving
+
+[ ] 15. Heartbeat check
+    → docker exec aegis-v2 cat /app/data/bridge_heartbeat.json
+    → Should show recent timestamp (updated every 30s)
+
+[ ] 16. Wait for market open
+    → Markets close: Friday 20:00 UTC
+    → Asia opens: Sunday 06:00 UTC
+    → System will start generating signals at market open
+
+[ ] 17. Monitor first signals (Sunday 06:00 UTC+)
+    → Watch logs: docker compose logs -f aegis-v2 | grep "SIGNAL_ARRIVED"
+    → Expected: Signal entries, order submissions, fills
+    → Check Telegram chat 8649112811 for alerts
+
+[ ] 18. Verify WAL logging
+    → docker exec aegis-v2 tail -f /app/events/current.ndjson
+    → Should see events: EntrySignal, OrderAcked, OrderFilled
+    → Confirms trading pipeline is working
+
+[ ] 19. Check system health
+    → curl -s http://3.230.44.22:8000/api/status | jq .
+    → Should show: equity, daily_pnl, position count
+
+[ ] 20. Confirm P&L updates
+    → Check equity value updates
+    → Verify daily P&L changes with trades
+    → Expected: Positive/negative swings based on market
+
+TROUBLESHOOTING
+─────────────────────────────────────────────────────────────────────────────
+
+If build fails:
+[ ] Check: docker compose logs (last 50 lines for error)
+[ ] Check: Disk space (df -h /)
+[ ] Check: Memory (free -h)
+[ ] Try: docker system prune -a (clean Docker)
+[ ] Retry: docker compose build --no-cache
+
+If bridge won't start:
+[ ] Check: IBKR connection status (docker compose logs ib-gateway)
+[ ] Check: Bridge stderr (docker exec aegis-v2 cat /app/data/bridge_stderr.log)
+[ ] Try: docker compose restart aegis-v2
+[ ] Wait: 30 seconds (IBKR 2FA might be pending)
+
+If no signals tomorrow:
+[ ] Verify: Market is open (not weekends)
+[ ] Check: Mode is not Dark (should be ModeA/B/BPlus/C)
+[ ] Check: Confidence floor (may filter weak signals)
+[ ] Check: Logs for strategy errors (grep "ERROR" in logs)
+
+If time seems wrong:
+[ ] Check: System UTC time (docker exec aegis-v2 date -u)
+[ ] Check: BST status (grep "BST\|GMT" in logs)
+[ ] Expected: Trading mode matches current market hours
+[ ] Note: UTC migration is hardcoded, should never be wrong
+
+FINAL VERIFICATION CHECKLIST
+─────────────────────────────────────────────────────────────────────────────
+
+DEPLOYMENT SUCCESS (all must be ✅):
+[ ] Container running
+[ ] IS_LIVE=false confirmed
+[ ] Bridge spawned successfully
+[ ] IBKR connected (or waiting for 2FA)
+[ ] 22 strategies loaded
+[ ] WAL logging active
+[ ] Heartbeat file created
+[ ] System logs flowing normally
+
+MARKET OPEN SUCCESS (all must be ✅):
+[ ] Market ticks arriving
+[ ] Signals being generated
+[ ] Orders being submitted
+[ ] Order fills recorded
+[ ] WAL events logged
+[ ] Telegram alerts received
+[ ] Equity/P&L updating
+[ ] No errors in logs
+
+DEPLOYMENT IS COMPLETE WHEN ALL ABOVE ARE ✅
+
+═════════════════════════════════════════════════════════════════════════════
+
+QUICK REFERENCE COMMANDS
+─────────────────────────────────────────────────────────────────────────────
+
+SSH to EC2:
+  ssh -i ~/.ssh/ec2-temp-key ubuntu@3.230.44.22
+
+Deploy (copy-paste entire block):
+  cd ~/nzt48-aegis-v2 && \
+  git fetch && \
+  git checkout feat/tier-system-enhancements-full && \
+  git pull && \
+  docker compose down && \
+  docker compose build --no-cache && \
+  docker compose up -d aegis-v2 && \
+  docker compose logs -f aegis-v2
+
+Verify deployment (30 seconds):
+  docker compose logs aegis-v2 | grep -E "IS_LIVE|bridge started|Market data farm|strategy"
+
+Watch logs:
+  docker compose logs -f aegis-v2
+
+Watch signals:
+  docker compose logs -f aegis-v2 | grep "SIGNAL_ARRIVED\|ENTRY_GATE"
+
+Check WAL events:
+  docker exec aegis-v2 tail -f /app/events/current.ndjson
+
+System health:
+  curl -s http://3.230.44.22:8000/api/status | jq .
+
+═════════════════════════════════════════════════════════════════════════════
+
+IMPORTANT NOTES
+─────────────────────────────────────────────────────────────────────────────
+
+✓ Time: UTC migration is hardcoded - will NEVER be wrong
+✓ Safety: IS_LIVE=false is unbreakable - no real money at risk
+✓ Simulation: Paper broker only - no real orders sent
+✓ Monitoring: WAL logs all trades, Telegram alerts enabled
+✓ Recovery: All commands have fallback options
+
+═════════════════════════════════════════════════════════════════════════════
+
+If everything passes: ✅ DEPLOYMENT COMPLETE AND SUCCESSFUL
+
+System is ready for first trading session Sunday 06:00 UTC.
+
+═════════════════════════════════════════════════════════════════════════════
