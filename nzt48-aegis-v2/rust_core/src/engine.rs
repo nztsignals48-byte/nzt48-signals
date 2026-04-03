@@ -886,14 +886,17 @@ impl<B: BrokerAdapter> Engine<B> {
         // Step 7: Write SystemReady to WAL
         self.now_ns = system_time_ns;
         // Set initial trading mode from system clock — don't wait for first tick.
-        // Without this, engine starts in Dark mode even during market hours.
-        let startup_london_secs = self.clock.now_london_secs(system_time_ns);
-        self.current_mode = TradingMode::from_london_secs(startup_london_secs);
+        // UTC-only: convert to UTC seconds from midnight, check BST status.
+        let startup_utc_secs = self.clock.now_utc_secs(system_time_ns);
+        let startup_epoch = self.clock.now_utc_epoch(system_time_ns);
+        let startup_is_bst = Clock::is_bst_from_epoch(startup_epoch);
+        self.current_mode = TradingMode::from_utc_secs(startup_utc_secs);
         eprintln!(
-            "STARTUP: Initial trading mode = {:?} (London time {}:{:02})",
+            "STARTUP: Initial trading mode = {:?} (UTC {}:{:02}, BST={})",
             self.current_mode,
-            startup_london_secs / 3600,
-            (startup_london_secs % 3600) / 60,
+            startup_utc_secs / 3600,
+            (startup_utc_secs % 3600) / 60,
+            startup_is_bst,
         );
         self.write_wal(WalPayload::SystemReady {
             wal_events_replayed: replay_result.events_replayed,
@@ -939,8 +942,12 @@ impl<B: BrokerAdapter> Engine<B> {
     }
 
     /// Get current London time (seconds from midnight).
-    fn london_time_secs(&self) -> u32 {
-        self.clock.now_london_secs(self.now_ns)
+    fn utc_time_secs(&self) -> u32 {
+        self.clock.now_utc_secs(self.now_ns)
+    }
+
+    fn utc_epoch(&self) -> u64 {
+        self.clock.now_utc_epoch(self.now_ns)
     }
 
     /// Update bar history for a ticker from high/low data.
@@ -1194,11 +1201,12 @@ impl<B: BrokerAdapter> Engine<B> {
         // Update last_prices AFTER price_move calculation (FIX for Issue #14)
         self.last_prices.insert(tid, tick.last);
 
-        // Real London time from synced clock
-        let time_secs = self.london_time_secs();
+        // Real UTC time from synced clock
+        let utc_secs = self.utc_time_secs();
+        let is_bst = Clock::is_bst_from_epoch(self.utc_epoch());
 
-        // Phase 11: Determine current trading mode
-        self.current_mode = TradingMode::from_london_secs(time_secs);
+        // Phase 11: Determine current trading mode (UTC-based)
+        self.current_mode = TradingMode::from_utc_secs(utc_secs);
 
         // ──────────────────────────────────────────────────────────────────
         // EXIT EVALUATION — runs BEFORE Dark/Closed gates so positions can
@@ -1215,7 +1223,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     .get(&tid)
                     .map(|h| h.realized_vol(6120.0))
                     .unwrap_or(0.30);
-                let time_fraction = Clock::time_of_day_fraction(time_secs);
+                let time_fraction = Clock::time_of_day_fraction_utc(utc_secs, is_bst);
                 let momentum = if let Some(&prev) = self.last_prices.get(&tid)
                     && prev > 0.0
                 {
@@ -1290,11 +1298,11 @@ impl<B: BrokerAdapter> Engine<B> {
                 }
 
                 let is_halt = self.arbiter.regime >= RiskRegime::Flatten;
-                let is_eod = Clock::eod_phase(time_secs).is_some();
+                let is_eod = Clock::eod_phase_utc(utc_secs, is_bst).is_some();
                 let is_carried = self.carry_manager.is_carried(&tid);
                 let exit_result = self
                     .exit_engine
-                    .evaluate(pos, tick.last, atr, time_secs, is_halt, is_eod, is_carried);
+                    .evaluate(pos, tick.last, atr, utc_secs, is_halt, is_eod, is_carried);
                 if let Some(ref result) = exit_result {
                     let reason_str = format!("{:?}", result.signal.reason);
                     let priority_str = format!("{:?}", result.signal.priority);
@@ -1424,13 +1432,18 @@ impl<B: BrokerAdapter> Engine<B> {
                     } else {
                         0
                     };
-                    // Classify session phase from London time (approximate from entry time).
+                    // Classify session phase from UTC time (approximate from entry time).
                     let entry_session_phase = {
-                        let london_secs = self.clock.now_london_secs(entry_time);
-                        if london_secs < 8 * 3600 { "pre_open" }
-                        else if london_secs < 10 * 3600 { "open" }
-                        else if london_secs < 13 * 3600 { "morning" }
-                        else if london_secs < 16 * 3600 { "afternoon" }
+                        let utc_secs = self.clock.now_utc_secs(entry_time);
+                        // During GMT: 08:00-10:00 UTC = open, before 08:00 = pre_open
+                        // During BST: 07:00-09:00 UTC = open, before 07:00 = pre_open
+                        let is_bst_entry = Clock::is_bst_from_epoch(self.clock.now_utc_epoch(entry_time));
+                        let open_time = if is_bst_entry { 7 * 3600 } else { 8 * 3600 };
+                        let mid_time = open_time + 2 * 3600; // 2 hours after open
+                        if utc_secs < open_time { "pre_open" }
+                        else if utc_secs < mid_time { "open" }
+                        else if utc_secs < (open_time + 5 * 3600) { "morning" } // open + 5 hours
+                        else if utc_secs < (open_time + 8 * 3600) { "afternoon" } // open + 8 hours
                         else { "close" }
                     }.to_string();
                     self.write_wal(WalPayload::PositionClosed {
@@ -1484,7 +1497,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     } else {
                         // Full exit: close position entirely
                         self.sector_tracker.clear_position(tid, tick.last * exit_qty as f64);
-                        self.predictive_scorer.record_trade(tid, final_pnl, time_secs);
+                        self.predictive_scorer.record_trade(tid, final_pnl, utc_secs);
                         // COMPOUNDING: Queue exit for Python bridge live Sharpe tracking
                         self.pending_exit_notifications.push((
                             tid.0, exit_price_gbp, final_pnl, pos_entry_type,
@@ -1639,6 +1652,10 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
+        // Get UTC time once for all subsequent checks
+        let utc_secs = self.utc_time_secs();
+        let is_bst = Clock::is_bst_from_epoch(self.utc_epoch());
+
         // AUDIT-FIX: Exchange-open check. Don't trade tickers on closed exchanges.
         // HKEX closes 08:00 UTC, LSE 16:30 UTC, etc. Trading stale data from
         // closed exchanges produces immediate stop-outs (0-minute hold trades).
@@ -1664,7 +1681,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 }
                 "LSEETF" | "LSE" => {
                     // LSE: Use existing clock module (handles BST)
-                    Clock::is_lse_open(time_secs)
+                    Clock::is_lse_open_utc(self.now_ns, is_bst)
                 }
                 "IBIS" | "XETRA" => {
                     // XETRA: 08:00-16:30 CET = 07:00-15:30 UTC (winter), 06:00-14:30 UTC (summer)
@@ -1700,8 +1717,8 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
-        // Auction period check: no entries during auctions (ModeB refinement)
-        if Clock::is_auction(time_secs) {
+        // Auction period check: no entries during auctions (ModeB refinement, UTC-based)
+        if Clock::is_auction_utc(utc_secs, is_bst) {
             return;
         }
 
@@ -1713,7 +1730,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     let window_secs = ev.window_mins * 60;
                     let event_start = ev.time_secs.saturating_sub(window_secs);
                     let event_end = ev.time_secs + window_secs;
-                    if time_secs >= event_start && time_secs <= event_end {
+                    if utc_secs >= event_start && utc_secs <= event_end {
                         eprintln!(
                             "ECON_CALENDAR: Blocking entry — event {} at {}s (window {}min)",
                             ev.name, ev.time_secs, ev.window_mins,
@@ -1766,7 +1783,7 @@ impl<B: BrokerAdapter> Engine<B> {
         // During ModeBPlus/ModeC, US tickers trade — don't gate on XLON.
         // During ModeA, Asian tickers trade — don't gate on XLON.
         if matches!(self.current_mode, TradingMode::ModeB) {
-            if !self.european_session.entry_allowed("XLON", time_secs) {
+            if !self.european_session.entry_allowed("XLON", utc_secs) {
                 return;
             }
         }
@@ -1810,7 +1827,7 @@ impl<B: BrokerAdapter> Engine<B> {
             .unwrap_or(1);
         let exchange_mic = self.broker.exchange_for_ticker(&tid).to_string();
         let ctx = EvalContext {
-            time_secs,
+            time_secs: utc_secs,
             last_tick_age_secs: tick_age_secs,
             bid: tick.bid,
             ask: tick.ask,
@@ -2555,9 +2572,9 @@ impl<B: BrokerAdapter> Engine<B> {
             self.last_heartbeat_ns = self.now_ns;
         }
 
-        // P21: Session manager update.
-        let london_secs = self.london_time_secs();
-        if let Some(transition) = self.session_mgr.update(london_secs, !self.positions.is_empty(), self.now_ns) {
+        // P21: Session manager update (UTC-based).
+        let utc_secs = self.utc_time_secs();
+        if let Some(transition) = self.session_mgr.update(utc_secs, !self.positions.is_empty(), self.now_ns) {
             eprintln!("SESSION: {:?} → {:?}", transition.from, transition.to);
         }
 

@@ -800,9 +800,10 @@ fn main() {
                             engine.arbiter.regime = escalation;
                         }
 
-                    // Build context for Python bridge
-                    let time_secs = engine.clock.now_london_secs(loop_start);
-                    let time_fraction = Clock::time_of_day_fraction(time_secs);
+                    // Build context for Python bridge (UTC-based)
+                    let utc_secs = engine.clock.now_utc_secs(loop_start);
+                    let is_bst = Clock::is_bst_from_epoch(engine.clock.now_utc_epoch(loop_start));
+                    let time_fraction = Clock::time_of_day_fraction_utc(utc_secs, is_bst);
                     let spread_pct = if t.bid > 0.0 {
                         (t.ask - t.bid) / t.bid * 100.0
                     } else {
@@ -845,7 +846,7 @@ fn main() {
                         equity: engine.portfolio.equity,
                         // P8+: Fields for S4-S7 strategies
                         vix: engine.macro_regime.indicator().vix,
-                        london_time_secs: engine.clock.now_london_secs(engine.now_ns),
+                        london_time_secs: engine.clock.now_utc_secs(engine.now_ns), // UTC seconds from midnight
                         gap_pct: {
                             // Compute real gap % from last known price vs current
                             if let Some(&prev) = engine.last_prices.get(&t.ticker_id) {
@@ -935,8 +936,8 @@ fn main() {
                                         t.ticker_id.0, apex_signal.confidence, apex_signal.kelly_fraction, apex_signal.strategy
                                     );
 
-                                    // Build RiskArbiter evaluation context
-                                    let time_secs = engine.clock.now_london_secs(engine.now_ns);
+                                    // Build RiskArbiter evaluation context (UTC-based)
+                                    let time_secs = engine.clock.now_utc_secs(engine.now_ns);
                                     let ticker_score = engine.predictive_scorer.score(t.ticker_id);
                                     let exchange_mic = engine.broker.exchange_for_ticker(&t.ticker_id).to_string();
                                     let eval_ctx = rust_core::risk_arbiter::EvalContext {

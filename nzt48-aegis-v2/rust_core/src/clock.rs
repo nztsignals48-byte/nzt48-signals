@@ -1,59 +1,90 @@
 //! Clock synchronisation, LSE market hours, UK holiday calendar.
-//! All times are seconds-from-midnight London local time (H109).
-//! Timezone conversion (chrono-tz) happens at the binary entrypoint;
-//! this module works with pre-computed London seconds for testability.
+//! CRITICAL: All times are UTC ONLY. No local timezone conversion.
+//! Market hours are defined in UTC equivalents to avoid BST/GMT confusion.
+//! LSE opens at 08:00 London time:
+//! - GMT (Oct-Mar): 08:00 London = 08:00 UTC → LSE_OPEN_UTC_SECS = 8*3600
+//! - BST (Mar-Oct): 08:00 London = 07:00 UTC → LSE_OPEN_UTC_SECS must account for this
+//! SOLUTION: Convert all market times to UTC ranges that account for DST dynamically.
 
-/// LSE open time (seconds from midnight London).
-pub const LSE_OPEN_SECS: u32 = 8 * 3600; // 08:00
-/// LSE close time.
-pub const LSE_CLOSE_SECS: u32 = 16 * 3600 + 30 * 60; // 16:30
-/// Entry cutoff (H35).
-pub const ENTRY_CUTOFF_SECS: u32 = 15 * 3600 + 45 * 60; // 15:45
-/// Auction open start (07:50).
-pub const AUCTION_OPEN_START: u32 = 7 * 3600 + 50 * 60;
-/// Auction open end (08:00).
-pub const AUCTION_OPEN_END: u32 = 8 * 3600;
-/// Auction close start (16:30).
-pub const AUCTION_CLOSE_START: u32 = 16 * 3600 + 30 * 60;
-/// Auction close end (16:35).
-pub const AUCTION_CLOSE_END: u32 = 16 * 3600 + 35 * 60;
-/// EOD flatten phases.
-pub const EOD_PHASE1_SECS: u32 = 15 * 3600 + 55 * 60; // T-35
-pub const EOD_PHASE2_SECS: u32 = 16 * 3600 + 15 * 60; // T-15
-pub const EOD_PHASE3_SECS: u32 = 16 * 3600 + 25 * 60; // T-5
+/// LSE CONTINUOUS TRADING HOURS (UTC-aware):
+/// During GMT (winter, Oct-Mar): 08:00-16:30 London = 08:00-16:30 UTC
+/// During BST (summer, Mar-Oct): 08:00-16:30 London = 07:00-15:30 UTC
+/// This function is called with current epoch time to determine correct range.
 
-/// Unified 2-mode trading clock.
-/// Active = 23:00-21:00 London (22 hours across all 6 markets).
-/// Dark = 21:00-23:00 London (maintenance window).
+/// GST base (no DST): LSE 08:00 London
+pub const LSE_OPEN_UTC_GMT: u32 = 8 * 3600; // 08:00 UTC (when no BST)
+pub const LSE_OPEN_UTC_BST: u32 = 7 * 3600; // 07:00 UTC (when BST active)
+pub const LSE_CLOSE_UTC_GMT: u32 = 16 * 3600 + 30 * 60; // 16:30 UTC (when no BST)
+pub const LSE_CLOSE_UTC_BST: u32 = 15 * 3600 + 30 * 60; // 15:30 UTC (when BST active)
+/// Entry cutoff (15:45 London):
+/// - GMT: 15:45 UTC
+/// - BST: 14:45 UTC
+pub const ENTRY_CUTOFF_UTC_GMT: u32 = 15 * 3600 + 45 * 60;
+pub const ENTRY_CUTOFF_UTC_BST: u32 = 14 * 3600 + 45 * 60;
+
+/// Auction periods in London time, converted to UTC ranges:
+/// Open auction: 07:50-08:00 London
+pub const AUCTION_OPEN_START_UTC_GMT: u32 = 7 * 3600 + 50 * 60;
+pub const AUCTION_OPEN_START_UTC_BST: u32 = 6 * 3600 + 50 * 60;
+pub const AUCTION_OPEN_END_UTC_GMT: u32 = 8 * 3600;
+pub const AUCTION_OPEN_END_UTC_BST: u32 = 7 * 3600;
+
+/// Close auction: 16:30-16:35 London
+pub const AUCTION_CLOSE_START_UTC_GMT: u32 = 16 * 3600 + 30 * 60;
+pub const AUCTION_CLOSE_START_UTC_BST: u32 = 15 * 3600 + 30 * 60;
+pub const AUCTION_CLOSE_END_UTC_GMT: u32 = 16 * 3600 + 35 * 60;
+pub const AUCTION_CLOSE_END_UTC_BST: u32 = 15 * 3600 + 35 * 60;
+
+/// EOD flatten phases in London time:
+/// Phase 1 (T-35): 15:55 London
+/// Phase 2 (T-15): 16:15 London
+/// Phase 3 (T-5):  16:25 London
+pub const EOD_PHASE1_UTC_GMT: u32 = 15 * 3600 + 55 * 60;
+pub const EOD_PHASE1_UTC_BST: u32 = 14 * 3600 + 55 * 60;
+pub const EOD_PHASE2_UTC_GMT: u32 = 16 * 3600 + 15 * 60;
+pub const EOD_PHASE2_UTC_BST: u32 = 15 * 3600 + 15 * 60;
+pub const EOD_PHASE3_UTC_GMT: u32 = 16 * 3600 + 25 * 60;
+pub const EOD_PHASE3_UTC_BST: u32 = 15 * 3600 + 25 * 60;
+
+/// Unified 2-mode trading clock (UTC-based).
+/// Active = 22:00-20:00 UTC (22 hours across all 6 markets).
+///   This corresponds to 23:00-21:00 London in winter (GMT)
+///   and 23:00-21:00 UTC-1 in summer (during BST when London is UTC+1).
+/// Dark = 20:00-22:00 UTC (maintenance window).
+///
+/// NOTE: We work in UTC throughout. The engine receives UTC epoch time from IBKR,
+/// and converts to seconds-from-midnight-UTC for all mode checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TradingMode {
-    /// Active: 23:00-21:00 London. Full trading across all 6 markets.
+    /// Active: 22:00-20:00 UTC. Full trading across all 6 markets.
     /// Sub-modes (ModeA/B/B+/C) are kept for legacy compatibility but all allow entries/exits.
     ModeA,
     ModeB,
     ModeBPlus,
     ModeC,
-    /// Dark: 21:00-23:00 London. Maintenance window.
+    /// Dark: 20:00-22:00 UTC. Maintenance window.
     Dark,
 }
 
 impl TradingMode {
-    /// Determine the current trading mode from London seconds-from-midnight.
-    /// Unified: Active from 23:00-21:00 (22 hours), Dark from 21:00-23:00.
-    /// Returns sub-mode labels for telemetry/logging but all Active sub-modes
-    /// have identical permissions (entries, exits, subscriptions all allowed).
-    pub fn from_london_secs(time_secs: u32) -> Self {
-        const ACTIVE_START: u32 = 23 * 3600;  // 23:00 London
-        const DARK_START: u32 = 21 * 3600;    // 21:00 London
+    /// Determine the current trading mode from UTC seconds-from-midnight.
+    /// This is the ONLY method that should be called. Input must be:
+    /// `(current_utc_epoch_ns / 1_000_000_000) % 86400` = seconds from midnight UTC.
+    ///
+    /// Active: 22:00-23:59 UTC and 00:00-20:00 UTC (wraps midnight, 22 hours).
+    /// Dark: 20:00-22:00 UTC (2-hour maintenance window).
+    pub fn from_utc_secs(utc_secs_from_midnight: u32) -> Self {
+        const ACTIVE_START: u32 = 22 * 3600;  // 22:00 UTC
+        const DARK_START: u32 = 20 * 3600;    // 20:00 UTC
 
-        // Active hours: 23:00-23:59 and 00:00-21:00 (wraps midnight)
-        if time_secs >= ACTIVE_START || time_secs < DARK_START {
+        // Active hours: 22:00-23:59 and 00:00-20:00 (wraps midnight)
+        if utc_secs_from_midnight >= ACTIVE_START || utc_secs_from_midnight < DARK_START {
             // Return sub-mode for telemetry (all have identical permissions)
-            match time_secs {
-                t if t >= ACTIVE_START || t < 8 * 3600 => TradingMode::ModeA,
-                t if t < 14 * 3600 + 30 * 60 => TradingMode::ModeB,
-                t if t < 16 * 3600 + 35 * 60 => TradingMode::ModeBPlus,
-                _ => TradingMode::ModeC,
+            match utc_secs_from_midnight {
+                t if t >= ACTIVE_START || t < 6 * 3600 => TradingMode::ModeA,       // 22:00-06:00 UTC (Asia/pre-market)
+                t if t < 12 * 3600 + 30 * 60 => TradingMode::ModeB,                 // 06:00-12:30 UTC (Europe)
+                t if t < 14 * 3600 + 35 * 60 => TradingMode::ModeBPlus,             // 12:30-14:35 UTC (US overlap)
+                _ => TradingMode::ModeC,                                             // 14:35-20:00 UTC (US-only)
             }
         } else {
             TradingMode::Dark
@@ -119,29 +150,54 @@ impl Clock {
         self.offset_ns as f64 / 1_000_000_000.0
     }
 
-    /// Is the LSE currently in continuous trading? (08:00-16:30 London)
-    pub fn is_lse_open(time_secs: u32) -> bool {
-        (LSE_OPEN_SECS..LSE_CLOSE_SECS).contains(&time_secs)
+    /// Is LSE in continuous trading right now (UTC)?
+    /// Accounts for BST/GMT transitions automatically.
+    /// Input: epoch_ns = current IBKR epoch in nanoseconds.
+    pub fn is_lse_open_utc(epoch_ns: u64, is_bst: bool) -> bool {
+        let utc_secs_from_midnight = ((epoch_ns / 1_000_000_000) % 86400) as u32;
+        let (open, close) = if is_bst {
+            (LSE_OPEN_UTC_BST, LSE_CLOSE_UTC_BST)
+        } else {
+            (LSE_OPEN_UTC_GMT, LSE_CLOSE_UTC_GMT)
+        };
+        (open..close).contains(&utc_secs_from_midnight)
     }
 
-    /// Is the current time within an auction period?
-    pub fn is_auction(time_secs: u32) -> bool {
-        (AUCTION_OPEN_START..AUCTION_OPEN_END).contains(&time_secs)
-            || (AUCTION_CLOSE_START..AUCTION_CLOSE_END).contains(&time_secs)
+    /// Is the current time within an auction period (UTC)?
+    pub fn is_auction_utc(utc_secs_from_midnight: u32, is_bst: bool) -> bool {
+        let (open_start, open_end, close_start, close_end) = if is_bst {
+            (AUCTION_OPEN_START_UTC_BST, AUCTION_OPEN_END_UTC_BST,
+             AUCTION_CLOSE_START_UTC_BST, AUCTION_CLOSE_END_UTC_BST)
+        } else {
+            (AUCTION_OPEN_START_UTC_GMT, AUCTION_OPEN_END_UTC_GMT,
+             AUCTION_CLOSE_START_UTC_GMT, AUCTION_CLOSE_END_UTC_GMT)
+        };
+        (open_start..open_end).contains(&utc_secs_from_midnight)
+            || (close_start..close_end).contains(&utc_secs_from_midnight)
     }
 
-    /// Is the current time past the entry cutoff? (15:45 London, H35)
-    pub fn is_after_cutoff(time_secs: u32) -> bool {
-        time_secs >= ENTRY_CUTOFF_SECS
+    /// Is the current time past entry cutoff (15:45 London, UTC-adjusted)?
+    pub fn is_after_cutoff_utc(utc_secs_from_midnight: u32, is_bst: bool) -> bool {
+        let cutoff = if is_bst {
+            ENTRY_CUTOFF_UTC_BST
+        } else {
+            ENTRY_CUTOFF_UTC_GMT
+        };
+        utc_secs_from_midnight >= cutoff
     }
 
-    /// Which EOD flatten phase are we in? None if before T-35.
-    pub fn eod_phase(time_secs: u32) -> Option<u8> {
-        if time_secs >= EOD_PHASE3_SECS {
+    /// Which EOD flatten phase are we in (UTC)?
+    pub fn eod_phase_utc(utc_secs_from_midnight: u32, is_bst: bool) -> Option<u8> {
+        let (phase1, phase2, phase3) = if is_bst {
+            (EOD_PHASE1_UTC_BST, EOD_PHASE2_UTC_BST, EOD_PHASE3_UTC_BST)
+        } else {
+            (EOD_PHASE1_UTC_GMT, EOD_PHASE2_UTC_GMT, EOD_PHASE3_UTC_GMT)
+        };
+        if utc_secs_from_midnight >= phase3 {
             Some(3) // T-5: MTL emergency
-        } else if time_secs >= EOD_PHASE2_SECS {
+        } else if utc_secs_from_midnight >= phase2 {
             Some(2) // T-15: limit at mid
-        } else if time_secs >= EOD_PHASE1_SECS {
+        } else if utc_secs_from_midnight >= phase1 {
             Some(1) // T-35: passive limit
         } else {
             None
@@ -153,16 +209,15 @@ impl Clock {
         self.holidays.iter().any(|h| h == date)
     }
 
-    /// Should we trade today? Market is open AND not a holiday.
-    pub fn is_trading_day(&self, date: &str, time_secs: u32) -> bool {
-        !self.is_uk_holiday(date) && Self::is_lse_open(time_secs)
+    /// Should we trade today (UTC-based)? Market is open AND not a holiday.
+    pub fn is_trading_day(&self, date: &str, utc_secs: u32, is_bst: bool) -> bool {
+        !self.is_uk_holiday(date) && Self::is_lse_open_utc(utc_secs as u64 * 1_000_000_000, is_bst)
     }
 
-    /// Compute current London seconds-from-midnight from system nanoseconds.
-    /// Applies broker clock offset and BST adjustment.
-    /// P1-01 FIX: Hardcoded exact BST transition dates (last Sunday of March/October)
-    /// instead of day-of-year approximation that was off by ±3 days.
-    pub fn now_london_secs(&self, system_ns: u64) -> u32 {
+    /// Compute current UTC seconds-from-midnight.
+    /// Applies broker clock offset (no timezone conversion).
+    /// Input: system nanoseconds. Output: UTC seconds from midnight [0-86400).
+    pub fn now_utc_secs(&self, system_ns: u64) -> u32 {
         // Apply broker clock offset to get "real" time
         let adjusted_ns = if self.offset_ns >= 0 {
             system_ns.wrapping_add(self.offset_ns as u64)
@@ -170,25 +225,24 @@ impl Clock {
             system_ns.wrapping_sub((-self.offset_ns) as u64)
         };
         let epoch_secs = adjusted_ns / 1_000_000_000;
+        (epoch_secs % 86400) as u32
+    }
 
-        // UTC seconds from midnight
-        let utc_secs_from_midnight = (epoch_secs % 86400) as u32;
-
-        let is_bst = Self::is_bst_from_epoch(epoch_secs);
-
-        if is_bst {
-            // BST = UTC + 1 hour
-            (utc_secs_from_midnight + 3600) % 86400
+    /// Get current UTC epoch seconds (for checking BST status, etc).
+    pub fn now_utc_epoch(&self, system_ns: u64) -> u64 {
+        let adjusted_ns = if self.offset_ns >= 0 {
+            system_ns.wrapping_add(self.offset_ns as u64)
         } else {
-            utc_secs_from_midnight
-        }
+            system_ns.wrapping_sub((-self.offset_ns) as u64)
+        };
+        adjusted_ns / 1_000_000_000
     }
 
     /// Check if a Unix epoch timestamp falls within BST (British Summer Time).
     /// BST starts: last Sunday of March at 01:00 UTC.
     /// BST ends: last Sunday of October at 01:00 UTC.
     /// Hardcoded for 2025-2032 (extend before 2033).
-    fn is_bst_from_epoch(epoch_secs: u64) -> bool {
+    pub fn is_bst_from_epoch(epoch_secs: u64) -> bool {
         // BST transition Unix timestamps (all at 01:00 UTC on the transition day).
         const YEAR_2025_START: u64 = 1_735_689_600;
         const YEAR_2033_START: u64 = 1_988_150_400;
@@ -219,17 +273,23 @@ impl Clock {
         (84..301).contains(&day_of_year)
     }
 
-    /// Fraction of trading day elapsed [0.0, 1.0].
-    /// 08:00 = 0.0, 16:30 = 1.0. Clamps outside trading hours.
-    pub fn time_of_day_fraction(time_secs: u32) -> f64 {
-        let trading_duration = LSE_CLOSE_SECS - LSE_OPEN_SECS; // 8.5 hours
-        if time_secs <= LSE_OPEN_SECS {
+    /// Fraction of LSE trading day elapsed [0.0, 1.0] (UTC-based).
+    /// During GMT: 08:00 UTC = 0.0, 16:30 UTC = 1.0
+    /// During BST: 07:00 UTC = 0.0, 15:30 UTC = 1.0
+    pub fn time_of_day_fraction_utc(utc_secs_from_midnight: u32, is_bst: bool) -> f64 {
+        let (open, close) = if is_bst {
+            (LSE_OPEN_UTC_BST, LSE_CLOSE_UTC_BST)
+        } else {
+            (LSE_OPEN_UTC_GMT, LSE_CLOSE_UTC_GMT)
+        };
+        let trading_duration = close - open;
+        if utc_secs_from_midnight <= open {
             return 0.0;
         }
-        if time_secs >= LSE_CLOSE_SECS {
+        if utc_secs_from_midnight >= close {
             return 1.0;
         }
-        (time_secs - LSE_OPEN_SECS) as f64 / trading_duration as f64
+        (utc_secs_from_midnight - open) as f64 / trading_duration as f64
     }
 }
 
@@ -238,36 +298,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lse_open_hours() {
-        assert!(!Clock::is_lse_open(7 * 3600)); // 07:00
-        assert!(Clock::is_lse_open(8 * 3600)); // 08:00
-        assert!(Clock::is_lse_open(12 * 3600)); // 12:00
-        assert!(Clock::is_lse_open(16 * 3600 + 29 * 60)); // 16:29
-        assert!(!Clock::is_lse_open(16 * 3600 + 30 * 60)); // 16:30
+    fn test_lse_open_hours_gmt() {
+        // During GMT (winter): 08:00-16:30 London = 08:00-16:30 UTC
+        assert!(!Clock::is_lse_open_utc(0, false)); // 00:00 UTC
+        assert!(!Clock::is_lse_open_utc((7 * 3600) as u64 * 1_000_000_000, false)); // 07:00 UTC
+        assert!(Clock::is_lse_open_utc((8 * 3600) as u64 * 1_000_000_000, false)); // 08:00 UTC
+        assert!(Clock::is_lse_open_utc((12 * 3600) as u64 * 1_000_000_000, false)); // 12:00 UTC
+        assert!(Clock::is_lse_open_utc((16 * 3600 + 29 * 60) as u64 * 1_000_000_000, false)); // 16:29 UTC
+        assert!(!Clock::is_lse_open_utc((16 * 3600 + 30 * 60) as u64 * 1_000_000_000, false)); // 16:30 UTC
     }
 
     #[test]
-    fn test_auction_periods() {
-        assert!(Clock::is_auction(7 * 3600 + 50 * 60)); // 07:50
-        assert!(Clock::is_auction(7 * 3600 + 55 * 60)); // 07:55
-        assert!(!Clock::is_auction(8 * 3600)); // 08:00
-        assert!(Clock::is_auction(16 * 3600 + 30 * 60)); // 16:30
-        assert!(Clock::is_auction(16 * 3600 + 34 * 60)); // 16:34
-        assert!(!Clock::is_auction(16 * 3600 + 35 * 60)); // 16:35
+    fn test_lse_open_hours_bst() {
+        // During BST (summer): 08:00-16:30 London = 07:00-15:30 UTC
+        assert!(!Clock::is_lse_open_utc((6 * 3600) as u64 * 1_000_000_000, true)); // 06:00 UTC
+        assert!(Clock::is_lse_open_utc((7 * 3600) as u64 * 1_000_000_000, true)); // 07:00 UTC
+        assert!(Clock::is_lse_open_utc((12 * 3600) as u64 * 1_000_000_000, true)); // 12:00 UTC
+        assert!(Clock::is_lse_open_utc((15 * 3600 + 29 * 60) as u64 * 1_000_000_000, true)); // 15:29 UTC
+        assert!(!Clock::is_lse_open_utc((15 * 3600 + 30 * 60) as u64 * 1_000_000_000, true)); // 15:30 UTC
     }
 
     #[test]
-    fn test_entry_cutoff() {
-        assert!(!Clock::is_after_cutoff(15 * 3600 + 44 * 60)); // 15:44
-        assert!(Clock::is_after_cutoff(15 * 3600 + 45 * 60)); // 15:45
+    fn test_auction_periods_gmt() {
+        // Open: 07:50-08:00 London = 07:50-08:00 UTC (GMT)
+        assert!(Clock::is_auction_utc(7 * 3600 + 50 * 60, false)); // 07:50 UTC
+        assert!(Clock::is_auction_utc(7 * 3600 + 55 * 60, false)); // 07:55 UTC
+        assert!(!Clock::is_auction_utc(8 * 3600, false)); // 08:00 UTC
+        // Close: 16:30-16:35 London = 16:30-16:35 UTC (GMT)
+        assert!(Clock::is_auction_utc(16 * 3600 + 30 * 60, false)); // 16:30 UTC
+        assert!(Clock::is_auction_utc(16 * 3600 + 34 * 60, false)); // 16:34 UTC
+        assert!(!Clock::is_auction_utc(16 * 3600 + 35 * 60, false)); // 16:35 UTC
     }
 
     #[test]
-    fn test_eod_phases() {
-        assert_eq!(Clock::eod_phase(15 * 3600), None);
-        assert_eq!(Clock::eod_phase(15 * 3600 + 55 * 60), Some(1));
-        assert_eq!(Clock::eod_phase(16 * 3600 + 15 * 60), Some(2));
-        assert_eq!(Clock::eod_phase(16 * 3600 + 25 * 60), Some(3));
+    fn test_auction_periods_bst() {
+        // Open: 07:50-08:00 London = 06:50-07:00 UTC (BST)
+        assert!(Clock::is_auction_utc(6 * 3600 + 50 * 60, true)); // 06:50 UTC
+        assert!(Clock::is_auction_utc(6 * 3600 + 55 * 60, true)); // 06:55 UTC
+        assert!(!Clock::is_auction_utc(7 * 3600, true)); // 07:00 UTC
+        // Close: 16:30-16:35 London = 15:30-15:35 UTC (BST)
+        assert!(Clock::is_auction_utc(15 * 3600 + 30 * 60, true)); // 15:30 UTC
+        assert!(Clock::is_auction_utc(15 * 3600 + 34 * 60, true)); // 15:34 UTC
+        assert!(!Clock::is_auction_utc(15 * 3600 + 35 * 60, true)); // 15:35 UTC
+    }
+
+    #[test]
+    fn test_entry_cutoff_gmt() {
+        // 15:45 London = 15:45 UTC (GMT)
+        assert!(!Clock::is_after_cutoff_utc(15 * 3600 + 44 * 60, false)); // 15:44 UTC
+        assert!(Clock::is_after_cutoff_utc(15 * 3600 + 45 * 60, false)); // 15:45 UTC
+    }
+
+    #[test]
+    fn test_entry_cutoff_bst() {
+        // 15:45 London = 14:45 UTC (BST)
+        assert!(!Clock::is_after_cutoff_utc(14 * 3600 + 44 * 60, true)); // 14:44 UTC
+        assert!(Clock::is_after_cutoff_utc(14 * 3600 + 45 * 60, true)); // 14:45 UTC
+    }
+
+    #[test]
+    fn test_eod_phases_gmt() {
+        assert_eq!(Clock::eod_phase_utc(15 * 3600, false), None);
+        assert_eq!(Clock::eod_phase_utc(15 * 3600 + 55 * 60, false), Some(1));
+        assert_eq!(Clock::eod_phase_utc(16 * 3600 + 15 * 60, false), Some(2));
+        assert_eq!(Clock::eod_phase_utc(16 * 3600 + 25 * 60, false), Some(3));
+    }
+
+    #[test]
+    fn test_eod_phases_bst() {
+        assert_eq!(Clock::eod_phase_utc(14 * 3600, true), None);
+        assert_eq!(Clock::eod_phase_utc(14 * 3600 + 55 * 60, true), Some(1));
+        assert_eq!(Clock::eod_phase_utc(15 * 3600 + 15 * 60, true), Some(2));
+        assert_eq!(Clock::eod_phase_utc(15 * 3600 + 25 * 60, true), Some(3));
     }
 
     #[test]
@@ -306,7 +408,7 @@ mod tests {
         assert!(!clock.is_trading_day("2026-03-09", 7 * 3600)); // Before open
     }
 
-    // ── P1-01: BST transition tests ──
+    // ── BST transition tests ──
     #[test]
     fn test_bst_2026_transition() {
         // 2026 BST starts: Mar 29 at 01:00 UTC = 1774746000
@@ -323,46 +425,44 @@ mod tests {
     }
 
     #[test]
-    fn test_bst_london_secs_shift() {
+    fn test_utc_secs_extraction() {
         let clock = Clock::new(vec![]);
-        // During BST: 07:00 UTC should become 08:00 London
-        // Mar 30 2026 07:00 UTC = 1774746000 + 86400 (Mar 30) + 3600*7 (07:00)
-        // Mar 30 = Mar 29 + 1 day. BST start epoch is Mar 29 01:00.
-        // Mar 30 07:00 UTC = 1774746000 + 86400 + 6*3600 = 1774746000 + 86400 + 21600
-        let bst_epoch_ns = (1_774_746_000u64 + 86400 + 6 * 3600) * 1_000_000_000;
-        let london_secs = clock.now_london_secs(bst_epoch_ns);
-        // 07:00 UTC + 1hr BST = 08:00 London = 28800
-        assert_eq!(london_secs, 8 * 3600, "7:00 UTC during BST = 8:00 London");
+        // Test that now_utc_secs correctly extracts seconds from midnight UTC
+        // Mar 30 2026 07:00 UTC = 1774746000 + 86400 + 6*3600 = 1774839600
+        let utc_epoch_ns = 1_774_839_600u64 * 1_000_000_000;
+        let utc_secs = clock.now_utc_secs(utc_epoch_ns);
+        // Should be 07:00 UTC = 7*3600 = 25200 seconds from midnight
+        assert_eq!(utc_secs, 7 * 3600, "07:00 UTC = 25200 seconds from midnight");
     }
 
-    // ── Phase 11: TradingMode tests ──
+    // ── Phase 11: TradingMode tests (UTC-based) ──
     #[test]
-    fn test_trading_mode_transitions() {
-        // Unified: Active from 23:00-21:00, Dark from 21:00-23:00
-        // ModeA sub-mode: 23:00-08:00 (Asian + pre-market)
-        assert_eq!(TradingMode::from_london_secs(23 * 3600), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_london_secs(0), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_london_secs(3 * 3600), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_london_secs(7 * 3600 + 59 * 60), TradingMode::ModeA);
+    fn test_trading_mode_transitions_utc() {
+        // Unified: Active from 22:00-20:00 UTC, Dark from 20:00-22:00 UTC
+        // ModeA sub-mode: 22:00-06:00 UTC (Asian + pre-market)
+        assert_eq!(TradingMode::from_utc_secs(22 * 3600), TradingMode::ModeA);
+        assert_eq!(TradingMode::from_utc_secs(0), TradingMode::ModeA);
+        assert_eq!(TradingMode::from_utc_secs(3 * 3600), TradingMode::ModeA);
+        assert_eq!(TradingMode::from_utc_secs(5 * 3600 + 59 * 60), TradingMode::ModeA);
 
-        // ModeB sub-mode: 08:00-14:30 (European)
-        assert_eq!(TradingMode::from_london_secs(8 * 3600), TradingMode::ModeB);
-        assert_eq!(TradingMode::from_london_secs(12 * 3600), TradingMode::ModeB);
-        assert_eq!(TradingMode::from_london_secs(14 * 3600 + 29 * 60), TradingMode::ModeB);
+        // ModeB sub-mode: 06:00-12:30 UTC (European)
+        assert_eq!(TradingMode::from_utc_secs(6 * 3600), TradingMode::ModeB);
+        assert_eq!(TradingMode::from_utc_secs(10 * 3600), TradingMode::ModeB);
+        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 29 * 60), TradingMode::ModeB);
 
-        // ModeBPlus sub-mode: 14:30-16:35 (US overlap)
-        assert_eq!(TradingMode::from_london_secs(14 * 3600 + 30 * 60), TradingMode::ModeBPlus);
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 34 * 60), TradingMode::ModeBPlus);
+        // ModeBPlus sub-mode: 12:30-14:35 UTC (US overlap)
+        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 30 * 60), TradingMode::ModeBPlus);
+        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 34 * 60), TradingMode::ModeBPlus);
 
-        // ModeC sub-mode: 16:35-21:00 (US-only)
-        assert_eq!(TradingMode::from_london_secs(16 * 3600 + 35 * 60), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_london_secs(18 * 3600), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_london_secs(20 * 3600 + 59 * 60), TradingMode::ModeC);
+        // ModeC sub-mode: 14:35-20:00 UTC (US-only)
+        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 35 * 60), TradingMode::ModeC);
+        assert_eq!(TradingMode::from_utc_secs(17 * 3600), TradingMode::ModeC);
+        assert_eq!(TradingMode::from_utc_secs(19 * 3600 + 59 * 60), TradingMode::ModeC);
 
-        // Dark: 21:00-23:00 (maintenance window)
-        assert_eq!(TradingMode::from_london_secs(21 * 3600), TradingMode::Dark);
-        assert_eq!(TradingMode::from_london_secs(22 * 3600), TradingMode::Dark);
-        assert_eq!(TradingMode::from_london_secs(22 * 3600 + 59 * 60), TradingMode::Dark);
+        // Dark: 20:00-22:00 UTC (maintenance window)
+        assert_eq!(TradingMode::from_utc_secs(20 * 3600), TradingMode::Dark);
+        assert_eq!(TradingMode::from_utc_secs(21 * 3600), TradingMode::Dark);
+        assert_eq!(TradingMode::from_utc_secs(21 * 3600 + 59 * 60), TradingMode::Dark);
     }
 
     #[test]
