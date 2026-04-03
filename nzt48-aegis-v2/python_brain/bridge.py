@@ -5343,6 +5343,30 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.write(f"MacroNowcast error (non-fatal): {e}\n")
         sys.stderr.flush()
 
+    # ── BOOK 206: MULTI-LEG ARBITRAGE (SIGNAL GENERATOR) ──
+    # Check for exploitable vol rank extremes across paired ETFs.
+    multileg_signal = None
+    try:
+        from python_brain.strategies.multi_leg_arbitrage import multi_leg_arb_signal
+        multileg_signal = multi_leg_arb_signal(ticker_id, msg, ind, effective_floor, _kelly_for, common_fields)
+    except ImportError:
+        pass
+    except Exception as e:
+        sys.stderr.write(f"Book 206 MULTILEG error (non-fatal): {e}\n")
+        sys.stderr.flush()
+
+    # ── BOOK 168: PAIRS TRADING / STATISTICAL ARBITRAGE (SIGNAL GENERATOR) ──
+    # Generate pairs trading signal if cointegrated pair exists.
+    pairs_stat_arb_signal = None
+    try:
+        from python_brain.strategies.statistical_arbitrage import pairs_trading_signal as pairs_arb_signal_fn
+        pairs_stat_arb_signal = pairs_arb_signal_fn(ticker_id, msg, ind, effective_floor, _kelly_for, common_fields)
+    except ImportError:
+        pass
+    except Exception as e:
+        sys.stderr.write(f"Book 168 PAIRS error (non-fatal): {e}\n")
+        sys.stderr.flush()
+
     # Return ALL signals sorted by confidence — no artificial bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
@@ -5351,7 +5375,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         vol_comp_signal, rebal_signal, nav_signal, alpha_signal, lead_lag_signal,
         emat_signal, attn_signal, swarm_signal, hft_signal, negrisk_signal,
         highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
-        drift_signal, coint_signal, latarb_signal, nowcast_signal,
+        drift_signal, coint_signal, latarb_signal, nowcast_signal, multileg_signal, pairs_stat_arb_signal,
     ] if s]
 
     # ── BOOK 179: CAPITAL-PHASE STRATEGY FILTERING (CONSUME _phase1_strategies) ──
