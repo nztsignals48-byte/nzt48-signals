@@ -531,13 +531,13 @@ def classify_entries(
             if rvol_rising and not np.isnan(rvol_arr[i - 1]) and rvol_arr[i - 1] < rvol_arr[i]:
                 entries.append((i, "TypeB"))
 
-        # Type C (OverboughtFade): RSI > overbought + price rising + volume declining (divergence)
-        # Matches Rust entry_engine.rs detect_overbought_fade()
-        if (i > 0 and not np.isnan(vol_ma20[i])
-                and rsi[i] > c_rsi_overbought
-                and closes[i] > closes[i - 1]
-                and volumes[i] < vol_ma20[i]):
-            entries.append((i, "TypeC"))
+        # Type C (OverboughtFade): DISABLED — 39.04% WR, 0.805x PF (negative edge in backtest)
+        # Short-side fades conflict with ISA long-only structure; overbought RSI in trending markets
+        # if (i > 0 and not np.isnan(vol_ma20[i])
+        #         and rsi[i] > c_rsi_overbought
+        #         and closes[i] > closes[i - 1]
+        #         and volumes[i] < vol_ma20[i]):
+        #     entries.append((i, "TypeC"))
 
         # Type D (SupportBounce): Price within proximity_pct of daily low + RSI in range
         # Matches Rust entry_engine.rs detect_support_bounce()
@@ -561,20 +561,18 @@ def classify_entries(
         if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
             entries.append((i, "TypeF"))
 
-        # ── S1: Microstructure Momentum (tick-ratio proxy on bars) ──
-        # On bar data: use close-to-close direction as tick proxy + RVOL + spread proxy
-        if i >= 20:
-            up_bars = sum(1 for j in range(i-20, i) if closes[j] > closes[j-1])
-            tick_ratio = up_bars / 20.0
-            # BB z-score for spread compression proxy
-            sma20_val = np.mean(closes[i-20:i])
-            std20_val = np.std(closes[i-20:i])
-            if std20_val > 1e-9:
-                z = (closes[i] - sma20_val) / std20_val
-                # S1 fires: 60%+ up-bars + rvol > 1.0 + price above SMA + not extreme z
-                if tick_ratio > 0.58 and rvol_arr[i] > 1.0 and closes[i] > sma20_val and abs(z) < 2.5:
-                    if not np.isnan(atr[i]) if atr is not None else True:
-                        entries.append((i, "S1_Microstructure"))
+        # ── S1: Microstructure Momentum ── DISABLED — 40.05% WR, 0.532x PF (negative edge)
+        # Bar-based tick proxy is too noisy; needs real tick data for meaningful signal
+        # if i >= 20:
+        #     up_bars = sum(1 for j in range(i-20, i) if closes[j] > closes[j-1])
+        #     tick_ratio = up_bars / 20.0
+        #     sma20_val = np.mean(closes[i-20:i])
+        #     std20_val = np.std(closes[i-20:i])
+        #     if std20_val > 1e-9:
+        #         z = (closes[i] - sma20_val) / std20_val
+        #         if tick_ratio > 0.58 and rvol_arr[i] > 1.0 and closes[i] > sma20_val and abs(z) < 2.5:
+        #             if not np.isnan(atr[i]) if atr is not None else True:
+        #                 entries.append((i, "S1_Microstructure"))
 
         # ── S2: Statistical Reversion (BB z-score + RSI oversold) ──
         if i >= 20 and regime != "trending":
@@ -598,11 +596,12 @@ def classify_entries(
                     if mom12 > 0.005:
                         entries.append((i, "S3_MacroTrend"))
 
-        # ── S6: Catalyst (gap continuation) ──
-        if i > 0 and closes[i-1] > 0:
-            gap = (closes[i] - closes[i-1]) / closes[i-1] * 100.0
-            if gap > 1.5 and rvol_arr[i] > 2.0:
-                entries.append((i, "S6_Catalyst"))
+        # ── S6: Catalyst (gap continuation) ── DISABLED — 12.95% WR, 0.007x PF (catastrophic)
+        # Gap continuation is mean-reverting in liquid markets; needs fundamental redesign
+        # if i > 0 and closes[i-1] > 0:
+        #     gap = (closes[i] - closes[i-1]) / closes[i-1] * 100.0
+        #     if gap > 1.5 and rvol_arr[i] > 2.0:
+        #         entries.append((i, "S6_Catalyst"))
 
     return entries
 

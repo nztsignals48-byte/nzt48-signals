@@ -803,10 +803,11 @@ def run_pipeline(
     filter_start = time.monotonic()
 
     arbiter = RiskArbiterPy.from_config_toml(cfg_path)
-    # Enable simulation mode: relax cash buffer, portfolio heat, drawdown checks
+    # Simulation mode: relax capital/velocity limits for exhaustive signal exploration
+    # but KEEP live gates (confidence, spread, blacklist, regime) to reflect real filtering
     arbiter.simulation_mode = True
-    arbiter.paper_uses_live_gates = False
-    # Remove trade limits for exhaustive simulation
+    arbiter.paper_uses_live_gates = True  # FIX: enforce confidence/spread/regime gates in backtest
+    # Remove trade limits for exhaustive simulation (velocity/heat relaxed for signal quality study)
     arbiter.config.daily_trade_limit = 999999
     arbiter.config.system_velocity_max = 999999
     arbiter.config.velocity_check_max_intents = 999999
