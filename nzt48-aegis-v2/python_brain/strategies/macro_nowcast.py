@@ -202,9 +202,15 @@ def macro_nowcast_signal(
     """
     Generate macro nowcast signal if event recently released.
 
+    PRODUCTION VERSION (Session 19):
+    - Use Bloomberg official event data (actual, forecast, release time)
+    - Calculate objective surprise: (actual - forecast) / forecast * 100
+    - Measure Gemini latency and adjust confidence if slow (>3s)
+    - Only trade within 30-180s post-release window
+
     Args:
         ticker_id: Ticker being evaluated
-        msg: Current market message
+        msg: Current market message (includes bloomberg_event_data)
         ind: Indicators (includes regime)
         conf_floor: Min confidence to fire
         kelly_fn: Kelly sizing function
@@ -214,62 +220,90 @@ def macro_nowcast_signal(
         Signal dict if macro event in nowcast window, None otherwise
     """
     try:
-        # 1. Check if macro event just released
+        # 1. Check if Bloomberg event data is available (Session 19 fix)
+        bloomberg_event_data = msg.get("bloomberg_event_data")
+        if not bloomberg_event_data:
+            return None
+
+        # 2. Extract Bloomberg event fields
+        event_type = bloomberg_event_data.get("event_type")
+        release_time_utc = bloomberg_event_data.get("release_time_utc")
+        actual_value = bloomberg_event_data.get("actual_value")
+        forecast_value = bloomberg_event_data.get("forecast_value")
+
+        if not all([event_type, release_time_utc, actual_value, forecast_value]):
+            return None
+
+        # 3. Verify we're in the nowcast window (30-180s post-release)
         ts_ns = msg.get("time_ns", 0)
         if ts_ns <= 0:
             return None
 
         now_s = ts_ns / 1e9
         current_time = datetime.fromtimestamp(now_s, tz=timezone.utc)
+        release_time_dt = release_time_utc if isinstance(release_time_utc, datetime) else datetime.fromisoformat(str(release_time_utc))
 
-        # 2. Check which macro events released in last NOWCAST_WINDOW_SECONDS
-        recent_event = None
-        for event_type, event_def in MACRO_EVENTS.items():
-            # Simple check: is current time within 30-180 sec of typical release?
-            # (In production: check actual calendar)
-            release_hour = int(event_def["release_time_utc"].split(":")[0])
-            release_minute = int(event_def["release_time_utc"].split(":")[1])
+        seconds_since_release = (current_time - release_time_dt).total_seconds()
 
-            event_time = current_time.replace(hour=release_hour, minute=release_minute, second=0)
+        if seconds_since_release < 30 or seconds_since_release > 180:
+            return None  # Outside nowcast window
 
-            time_since_release = (current_time - event_time).total_seconds()
+        # 4. Calculate OBJECTIVE surprise (Session 19 fix)
+        # surprise_pct = (actual - forecast) / forecast * 100
+        try:
+            actual_num = float(actual_value) if isinstance(actual_value, (int, float)) else float(str(actual_value).split()[0])
+            forecast_num = float(forecast_value) if isinstance(forecast_value, (int, float)) else float(str(forecast_value).split()[0])
 
-            if 0 <= time_since_release <= NOWCAST_WINDOW_SECONDS:
-                recent_event = event_type
-                break
+            if forecast_num == 0:
+                return None
 
-        if not recent_event:
+            surprise_pct = (actual_num - forecast_num) / forecast_num * 100
+        except (ValueError, IndexError, TypeError):
             return None
 
-        # 3. Try to get Gemini interpretation
+        # 5. Skip if surprise is too close to zero (already priced in)
+        if abs(surprise_pct) < 0.5:
+            return None
+
+        # 6. Try to get Gemini interpretation
         genai = _get_gemini_client()
         if not genai:
             return None
 
-        # 4. Create mock macro event (in production: fetch actual data)
+        # 7. Create macro event with REAL Bloomberg data (not mock)
+        import time
+        gemini_start = time.time()
+
         macro_event = MacroEvent(
-            event_type=recent_event,
-            event_name=MACRO_EVENTS[recent_event]["name"],
-            actual_value="123.4K (NFP example)",
-            forecast_value="120.0K",
-            previous_value="110.0K",
-            surprise_direction="beat",
-            surprise_magnitude=75,
-            market_reaction="risk-on",
-            gemini_confidence=75,
-            gemini_direction="BUY",
+            event_type=event_type,
+            event_name=MACRO_EVENTS.get(event_type, {}).get("name", event_type),
+            actual_value=str(actual_value),
+            forecast_value=str(forecast_value),
+            previous_value=bloomberg_event_data.get("previous_value", "N/A"),
+            surprise_direction="beat" if surprise_pct > 0 else "miss",
+            surprise_magnitude=min(abs(surprise_pct), 100),
+            market_reaction=bloomberg_event_data.get("market_reaction", "mixed"),
+            gemini_confidence=75,  # Will be updated by Gemini
+            gemini_direction="BUY",  # Will be updated by Gemini
         )
 
-        # 5. Get Gemini interpretation
+        # 8. Get Gemini interpretation
         regime = ind.get("regime", "trending")
         interpretation = _interpret_macro_event(genai, macro_event, regime)
+
+        # Session 19 fix: Measure Gemini latency
+        gemini_latency_ms = (time.time() - gemini_start) * 1000
 
         if not interpretation:
             return None
 
-        # 6. Adjust confidence for regime
+        # 9. Adjust confidence for Gemini latency (Session 19 fix)
+        # If Gemini is slow (>3s), reduce confidence by 30%
         confidence = interpretation["confidence"]
+        if gemini_latency_ms > 3000:
+            confidence *= 0.7
 
+        # 10. Adjust confidence for regime
         # Regime adjustment
         if regime == "crisis":
             confidence *= 0.5  # Mute in crises
@@ -282,10 +316,12 @@ def macro_nowcast_signal(
         if confidence < conf_floor:
             return None
 
-        # 7. Kelly sizing
-        kelly_fraction = kelly_fn("NOW", {"edge_bps": 50, "sharpe": 1.0})
+        # 11. Kelly sizing
+        # Use objective surprise magnitude for edge estimation
+        edge_bps = min(abs(surprise_pct) * 10, 150)  # Convert % surprise to bps estimate
+        kelly_fraction = kelly_fn("NOW", {"edge_bps": edge_bps, "sharpe": 1.5})
 
-        # 8. Build signal
+        # 12. Build signal
         direction = interpretation["direction"]
         if direction == "NEUTRAL":
             return None
@@ -300,15 +336,19 @@ def macro_nowcast_signal(
             "shares": 0,  # Rust engine will size
             "max_hold_hours": 0.05,  # 3 minutes = 0.05 hours (sharp exit)
             "urgency": "immediate",
-            # Metadata
-            "_macro_event": recent_event,
+            # Metadata (Session 19 additions)
+            "_macro_event": event_type,
+            "_surprise_pct": round(surprise_pct, 2),
+            "_gemini_latency_ms": round(gemini_latency_ms, 1),
+            "_seconds_since_release": round(seconds_since_release, 1),
             "_gemini_interpretation": interpretation["interpretation"],
             "_regime_adjusted": regime != "trending",
         }
 
         sys.stderr.write(
-            f"NOW signal: {ticker_id} event={recent_event} "
-            f"direction={direction} conf={confidence}\n"
+            f"NOW signal: {ticker_id} event={event_type} "
+            f"surprise={surprise_pct:.1f}% direction={direction} conf={confidence} "
+            f"latency={gemini_latency_ms:.0f}ms\n"
         )
         sys.stderr.flush()
 
