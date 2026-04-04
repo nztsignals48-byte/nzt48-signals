@@ -533,7 +533,7 @@ def run_full_enrichment(
         log.info("Earnings calendar: %d upcoming events", len(earnings))
 
     # ── News (Finnhub + NewsAPI + Benzinga) ──
-    finnhub_news = fetch_finnhub_news(us_symbols[:10])
+    finnhub_news = fetch_finnhub_news(us_symbols[:5])
     if finnhub_news:
         result["news"].update(finnhub_news)
         result["sources_available"].append("finnhub")
@@ -547,13 +547,13 @@ def run_full_enrichment(
     else:
         result["sources_failed"].append("newsapi")
 
-    benzinga_news = fetch_benzinga_news(us_symbols[:10])
+    benzinga_news = fetch_benzinga_news(us_symbols[:5])
     if benzinga_news:
         result["news"]["_benzinga_general"] = benzinga_news
         result["sources_available"].append("benzinga")
 
     # ── Analyst Recommendations (Finnhub) ──
-    for sym in us_symbols[:10]:
+    for sym in us_symbols[:5]:
         rec = fetch_finnhub_recommendation(sym)
         if rec:
             result["analyst_recommendations"][sym] = rec
