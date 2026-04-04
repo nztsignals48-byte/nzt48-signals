@@ -394,6 +394,167 @@ except Exception as e:
 " >> "$LOG" 2>&1
 log "STEP 27: ML nightly DONE"
 
+# ══════════════════════════════════════════════════════════════════════════
+# NEW INTEGRATION STEPS (Session 22 — institutional enrichment pipeline)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── STEP 28: Exchange calendar generation (exchange_calendars) ──
+log "STEP 28: exchange calendar generation"
+python3 -c "
+try:
+    from python_brain.feeds.exchange_calendar_provider import generate_exchange_schedules
+    result = generate_exchange_schedules()
+    n = len(result.get('exchanges', {}))
+    print(f'Exchange calendars: {n} exchanges scheduled')
+except Exception as e:
+    print(f'Exchange calendars skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 28: exchange calendars DONE"
+
+# ── STEP 29: FRED macro data fetch (fredapi) ──
+log "STEP 29: FRED macro data fetch"
+python3 -c "
+try:
+    from python_brain.feeds.fred_provider import fetch_macro_data
+    result = fetch_macro_data()
+    n = len(result.get('latest', {}))
+    print(f'FRED macro: {n} series fetched')
+except Exception as e:
+    print(f'FRED macro skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 29: FRED macro DONE"
+
+# ── STEP 30: Global macro data (pandas-datareader) ──
+log "STEP 30: global macro data fetch"
+python3 -c "
+try:
+    from python_brain.feeds.global_macro_provider import fetch_global_macro
+    result = fetch_global_macro()
+    n = len(result.get('rates', {}))
+    print(f'Global macro: {n} rates fetched')
+except Exception as e:
+    print(f'Global macro skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 30: global macro DONE"
+
+# ── STEP 31: Markov regime detection (statsmodels) ──
+log "STEP 31: Markov regime detection"
+python3 -c "
+try:
+    from python_brain.regime.markov_regime import run_regime_detection
+    result = run_regime_detection()
+    if result:
+        print(f'Regime: {result.current_regime} (p={result.regime_probability:.3f})')
+    else:
+        print('Regime detection: insufficient data')
+except Exception as e:
+    print(f'Regime detection skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 31: regime detection DONE"
+
+# ── STEP 32: Multi-source data enrichment (TwelveData, FMP, Finnhub, etc.) ──
+log "STEP 32: multi-source data enrichment"
+python3 -c "
+try:
+    from python_brain.feeds.multi_source_aggregator import run_full_enrichment
+    result = run_full_enrichment()
+    ok = len(result.get('sources_available', []))
+    fail = len(result.get('sources_failed', []))
+    print(f'Enrichment: {ok} sources OK, {fail} failed, '
+          f'{len(result.get(\"quotes\", {}))} quotes, '
+          f'{len(result.get(\"earnings_calendar\", []))} earnings events')
+except Exception as e:
+    print(f'Enrichment skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 32: enrichment DONE"
+
+# ── STEP 33: SEC EDGAR filing download (sec-edgar-downloader) ──
+log "STEP 33: SEC EDGAR filing download"
+python3 -c "
+try:
+    from python_brain.feeds.sec_edgar_provider import get_material_events
+    events = get_material_events(days_back=7)
+    print(f'SEC filings: {len(events)} material events in last 7d')
+except Exception as e:
+    print(f'SEC filings skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 33: SEC filings DONE"
+
+# ── STEP 34: FinBERT sentiment scoring ──
+log "STEP 34: FinBERT sentiment scoring"
+python3 -c "
+try:
+    from python_brain.feeds.sentiment_provider import score_sec_filings
+    results = score_sec_filings()
+    print(f'Sentiment: {len(results)} tickers scored')
+except Exception as e:
+    print(f'Sentiment scoring skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 34: sentiment scoring DONE"
+
+# ── STEP 35: SciPy parameter optimization ──
+log "STEP 35: SciPy parameter optimization"
+python3 -c "
+try:
+    from python_brain.ouroboros.scipy_optimizer import run_and_save
+    result = run_and_save()
+    if result:
+        print(f'Optimization: converged={result.converged}, '
+              f'improvement={result.improvement_pct:+.1f}%')
+    else:
+        print('Optimization: insufficient data')
+except Exception as e:
+    print(f'Optimization skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 35: optimization DONE"
+
+# ── STEP 36: Riskfolio portfolio optimization ──
+log "STEP 36: riskfolio portfolio optimization"
+python3 -c "
+try:
+    from python_brain.portfolio.riskfolio_optimizer import run_portfolio_rebalance
+    result = run_portfolio_rebalance()
+    if result:
+        weights = result.get('weights', {})
+        top = max(weights, key=weights.get) if weights else 'N/A'
+        print(f'Riskfolio: {len(weights)} strategies, '
+              f'top={top} ({weights.get(top, 0):.1%})')
+    else:
+        print('Riskfolio: insufficient data')
+except Exception as e:
+    print(f'Riskfolio skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 36: riskfolio DONE"
+
+# ── STEP 37: QuantStats tearsheet generation ──
+log "STEP 37: QuantStats tearsheet generation"
+python3 -c "
+try:
+    from python_brain.metrics.tearsheet_generator import generate_tearsheet
+    import json
+    pnl_path = '/app/data/strategy_pnl_history.json'
+    try:
+        with open(pnl_path) as f:
+            data = json.load(f)
+        all_returns = []
+        for returns in data.values():
+            if isinstance(returns, list):
+                all_returns.extend(returns)
+        if all_returns and len(all_returns) > 20:
+            path = generate_tearsheet(all_returns, title='AEGIS V2 Nightly Tearsheet')
+            if path:
+                print(f'Tearsheet: {path}')
+            else:
+                print('Tearsheet: generation returned None')
+        else:
+            print(f'Tearsheet: insufficient returns ({len(all_returns)})')
+    except FileNotFoundError:
+        print('Tearsheet: strategy_pnl_history.json not found')
+except Exception as e:
+    print(f'Tearsheet skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 37: tearsheet DONE"
+
 log "=========================================="
-log "NIGHTLY PIPELINE COMPLETE (27 steps)"
+log "NIGHTLY PIPELINE COMPLETE (37 steps)"
 log "=========================================="

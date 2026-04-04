@@ -13,3 +13,31 @@ requests>=2.31.0
 google-generativeai>=0.8.0
 websocket-client>=1.7.0   # Polygon.io WebSocket market data feed
 # anthropic SDK removed — Claude uses CLI (`claude -p`), not Python SDK
+
+# ── Phase 1: Quick Wins ──
+exchange-calendars>=4.5     # Apache 2.0 — exact exchange schedules (holidays, half-days, early closes)
+quantstats>=0.0.62          # Apache 2.0 — institutional tearsheet generation
+empyrical-reloaded>=0.5.10  # Apache 2.0 — validated Sharpe/Sortino/Calmar/max_drawdown
+
+# ── Phase 2: Real Math ──
+arch>=7.0                   # NCSA (permissive) — GARCH(1,1)/EGARCH volatility modeling
+statsmodels>=0.14           # BSD-3 — Markov-switching regime detection, cointegration, ADF
+scipy>=1.12                 # BSD-3 — constrained parameter optimization (L-BFGS-B)
+pandas>=2.2                 # BSD-3 — required by exchange-calendars, quantstats, arch
+pandas-ta>=0.3.14b1         # MIT — 200+ validated technical indicators
+
+# ── Phase 3: Portfolio Optimization ──
+cvxpy>=1.5                  # Apache 2.0 — convex portfolio optimization (Kelly, risk budgeting)
+riskfolio-lib>=6.0          # BSD-3 — HRP, CVaR, risk parity, Black-Litterman
+
+# ── Phase 4: Macro Data Pipeline ──
+fredapi>=0.5                # Apache 2.0 — FRED API (Fed funds, yield curve, CPI, VIX)
+sec-edgar-downloader>=5.0   # MIT — automated SEC 8-K/10-Q filing downloads
+pandas-datareader>=0.10     # BSD-3 — unified FRED + World Bank + OECD + Eurostat
+
+# ── Phase 5: LLM Safety + Intelligence ──
+instructor>=1.5             # MIT — Pydantic schema enforcement for Gemini/Claude outputs
+pydantic>=2.5               # MIT — required by instructor for schema validation
+
+# ── Phase 6: Data Architecture (incremental) ──
+polars>=1.0                 # MIT — 10-50x faster DataFrame ops (Rust-based)

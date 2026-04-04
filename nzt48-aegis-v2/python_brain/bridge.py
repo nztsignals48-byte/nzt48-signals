@@ -55,7 +55,59 @@ try:
 except ImportError:
     _HAS_ENTRY_CLF = False
 
+# ── Session 22: New institutional integration imports ──
+# Validated metrics (empyrical-reloaded)
+try:
+    from python_brain.metrics.validated_metrics import (
+        sharpe_ratio as _sharpe_ratio,
+        sortino_ratio as _sortino_ratio,
+        max_drawdown as _max_drawdown,
+        compute_all_metrics as _compute_all_metrics,
+    )
+    _HAS_VALIDATED_METRICS = True
+except ImportError:
+    _HAS_VALIDATED_METRICS = False
+
+# Exchange calendar awareness
+try:
+    from python_brain.feeds.exchange_calendar_provider import is_market_open as _is_market_open
+    _HAS_EXCHANGE_CAL = True
+except ImportError:
+    _HAS_EXCHANGE_CAL = False
+
+# Macro data for regime/signal enrichment
+try:
+    from python_brain.feeds.fred_provider import load_macro_data as _load_macro_data
+    _HAS_FRED = True
+except ImportError:
+    _HAS_FRED = False
+
+# Multi-source enrichment data
+try:
+    from python_brain.feeds.multi_source_aggregator import (
+        fetch_twelvedata_quote as _fetch_td_quote,
+    )
+    _HAS_ENRICHMENT = True
+except ImportError:
+    _HAS_ENRICHMENT = False
+
+# LLM output validation
+try:
+    from python_brain.ouroboros.llm_validator import validate_strategy_weights as _validate_weights
+    _HAS_LLM_VALIDATOR = True
+except ImportError:
+    _HAS_LLM_VALIDATOR = False
+
 MAX_BARS = 500
+
+# ── Cached enrichment data (loaded once, refreshed every 30min) ──
+_enrichment_cache = {}
+_enrichment_last_load = 0.0
+_ENRICHMENT_RELOAD_INTERVAL = 1800.0  # 30 minutes
+
+_macro_cache = {}
+_macro_last_load = 0.0
+_MACRO_RELOAD_INTERVAL = 3600.0  # 1 hour
 
 # Heartbeat: write every 30s so the watchdog knows we're alive
 _last_heartbeat_time = 0.0
@@ -1657,6 +1709,103 @@ _adaptive_entry_confidence = {}  # Thompson Sampler per-type confidence floors
 
 _adaptive_params_last_load = 0.0
 _ADAPTIVE_RELOAD_INTERVAL = 300.0  # Reload every 5 min to pick up nightly changes
+
+
+def _load_enrichment_data():
+    """Load nightly enrichment data (macro, regime, multi-source) into memory.
+
+    Called periodically to consume data produced by nightly pipeline steps 28-37.
+    Provides macro context for FOmcDrift, regime detection, and sentiment enrichment.
+    """
+    global _enrichment_cache, _enrichment_last_load
+    global _macro_cache, _macro_last_load
+
+    _now = time.time()
+
+    # Load macro data (FRED + global)
+    if _now - _macro_last_load >= _MACRO_RELOAD_INTERVAL:
+        _macro_last_load = _now
+        if _HAS_FRED:
+            try:
+                _macro_cache = _load_macro_data()
+                if _macro_cache.get("latest"):
+                    sys.stderr.write(
+                        f"Bridge: macro data loaded — VIX={_macro_cache['latest'].get('vix_official', '?')}, "
+                        f"yield_curve={_macro_cache['latest'].get('yield_curve_spread', '?')}\n"
+                    )
+                    sys.stderr.flush()
+            except Exception as e:
+                sys.stderr.write(f"Bridge: macro data load failed: {e}\n")
+                sys.stderr.flush()
+
+    # Load enrichment data (TwelveData, FMP, Finnhub, etc.)
+    if _now - _enrichment_last_load >= _ENRICHMENT_RELOAD_INTERVAL:
+        _enrichment_last_load = _now
+        enrich_path = "/app/config/enrichment_data.json"
+        if os.path.exists(enrich_path):
+            try:
+                with open(enrich_path) as f:
+                    _enrichment_cache = json.load(f)
+                sources = _enrichment_cache.get("sources_available", [])
+                sys.stderr.write(f"Bridge: enrichment loaded — {len(sources)} sources: {sources}\n")
+                sys.stderr.flush()
+            except Exception as e:
+                sys.stderr.write(f"Bridge: enrichment load failed: {e}\n")
+                sys.stderr.flush()
+
+        # Load regime state
+        regime_path = "/app/config/regime_state.json"
+        if os.path.exists(regime_path):
+            try:
+                with open(regime_path) as f:
+                    regime_data = json.load(f)
+                regime_name = regime_data.get("current_regime", "UNKNOWN")
+                regime_prob = regime_data.get("regime_probability", 0)
+                sys.stderr.write(
+                    f"Bridge: regime state loaded — {regime_name} (p={regime_prob:.3f})\n"
+                )
+                sys.stderr.flush()
+            except Exception:
+                pass
+
+
+def _get_macro_vix() -> float:
+    """Get current VIX from macro cache (FRED data). Fallback to 21.0."""
+    return _macro_cache.get("latest", {}).get("vix_official", 21.0)
+
+
+def _get_yield_curve_inverted() -> bool:
+    """Check if yield curve is inverted from macro cache."""
+    return _macro_cache.get("regime_inputs", {}).get("yield_curve_inverted", False)
+
+
+def _get_enrichment_sentiment(ticker: str) -> float:
+    """Get sentiment composite score for a ticker from enrichment data.
+
+    Returns value in [-1, +1]. 0.0 = neutral (default).
+    """
+    # Check sentiment summary from FinBERT
+    try:
+        sentiment_path = "/app/data/sec_filings/sentiment_summary.json"
+        if os.path.exists(sentiment_path):
+            with open(sentiment_path) as f:
+                data = json.load(f)
+            ticker_data = data.get("tickers", {}).get(ticker, {})
+            return ticker_data.get("composite_score", 0.0)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _is_exchange_open(exchange_mic: str) -> bool:
+    """Check if an exchange is currently open using exchange_calendars."""
+    if not _HAS_EXCHANGE_CAL:
+        return True  # Fail-open
+    try:
+        return _is_market_open(exchange_mic)
+    except Exception:
+        return True  # Fail-open
+
 
 def _load_adaptive_params():
     """Load adaptive parameters from dynamic_weights.toml AND nightly recommendations.
@@ -8212,6 +8361,15 @@ def main():
         sys.stderr.write(f"Bridge: DataManager failed (non-fatal): {e}\n")
         sys.stderr.flush()
 
+    # ── Session 22: Load institutional enrichment data on startup ──
+    try:
+        _load_enrichment_data()
+        sys.stderr.write("Bridge: enrichment data loaded (macro + regime + multi-source)\n")
+        sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"Bridge: enrichment load failed (non-fatal): {e}\n")
+        sys.stderr.flush()
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -8248,6 +8406,12 @@ def main():
             except Exception as esc_err:
                 sys.stderr.write(f"Escalation tick error (non-fatal): {esc_err}\n")
                 sys.stderr.flush()
+
+            # Session 22: Periodic enrichment data reload
+            try:
+                _load_enrichment_data()
+            except Exception:
+                pass
 
         if msg_type == "tick":
             try:

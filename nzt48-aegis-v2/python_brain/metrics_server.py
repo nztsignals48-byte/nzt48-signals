@@ -1,6 +1,6 @@
-"""Minimal Prometheus metrics endpoint for AEGIS V2.
+"""Enhanced Prometheus metrics endpoint for AEGIS V2.
 Runs on port 9090 inside the container. Scraped by Prometheus every 15s.
-Reads WAL size, equity, trade count from files. No dependencies beyond stdlib.
+Reads WAL size, equity, trade count, regime state, macro data, enrichment status.
 """
 import http.server
 import json
@@ -63,6 +63,78 @@ def _collect_metrics():
         with open("/proc/uptime") as f:
             uptime = float(f.read().split()[0])
             lines.append(f"aegis_uptime_seconds {uptime:.0f}")
+    except Exception:
+        pass
+
+    # ── NEW: Regime state metrics ──
+    regime_file = "/app/config/regime_state.json"
+    if os.path.exists(regime_file):
+        try:
+            with open(regime_file) as f:
+                regime = json.load(f)
+            regime_name = regime.get("current_regime", "UNKNOWN")
+            regime_prob = regime.get("regime_probability", 0)
+            # Encode regime as numeric: LOW_VOL=0, NORMAL=1, HIGH_VOL=2
+            regime_code = {"LOW_VOL": 0, "NORMAL": 1, "HIGH_VOL": 2}.get(regime_name, -1)
+            lines.append(f"aegis_regime_state {regime_code}")
+            lines.append(f"aegis_regime_probability {regime_prob:.3f}")
+            for label, prob in regime.get("smoothed_probs", {}).items():
+                safe_label = label.lower().replace(" ", "_")
+                lines.append(f'aegis_regime_prob{{regime="{safe_label}"}} {prob:.3f}')
+        except Exception:
+            pass
+
+    # ── NEW: Macro data metrics ──
+    macro_file = "/app/config/macro_data.json"
+    if os.path.exists(macro_file):
+        try:
+            with open(macro_file) as f:
+                macro = json.load(f)
+            latest = macro.get("latest", {})
+            for name, val in latest.items():
+                if isinstance(val, (int, float)):
+                    safe_name = name.lower().replace(" ", "_")
+                    lines.append(f'aegis_macro_{safe_name} {val}')
+        except Exception:
+            pass
+
+    # ── NEW: Enrichment source health ──
+    enrich_file = "/app/config/enrichment_data.json"
+    if os.path.exists(enrich_file):
+        try:
+            with open(enrich_file) as f:
+                enrich = json.load(f)
+            ok = len(enrich.get("sources_available", []))
+            fail = len(enrich.get("sources_failed", []))
+            lines.append(f"aegis_enrichment_sources_ok {ok}")
+            lines.append(f"aegis_enrichment_sources_failed {fail}")
+            lines.append(f"aegis_enrichment_quotes {len(enrich.get('quotes', {}))}")
+        except Exception:
+            pass
+
+    # ── NEW: Portfolio allocation metrics ──
+    alloc_file = "/app/data/portfolio_allocation.json"
+    if os.path.exists(alloc_file):
+        try:
+            with open(alloc_file) as f:
+                alloc = json.load(f)
+            for strategy, weight in alloc.get("weights", {}).items():
+                safe_name = strategy.lower().replace(" ", "_")
+                lines.append(f'aegis_portfolio_weight{{strategy="{safe_name}"}} {weight:.4f}')
+        except Exception:
+            pass
+
+    # ── NEW: Redis memory ──
+    try:
+        import redis
+        r = redis.Redis(host="aegis-redis", port=6379, password=os.environ.get("REDIS_PASSWORD", ""))
+        info = r.info("memory")
+        used = info.get("used_memory", 0)
+        maxmem = info.get("maxmemory", 268435456)  # 256MB default
+        lines.append(f"aegis_redis_used_bytes {used}")
+        lines.append(f"aegis_redis_max_bytes {maxmem}")
+        if maxmem > 0:
+            lines.append(f"aegis_redis_usage_pct {used / maxmem * 100:.1f}")
     except Exception:
         pass
 

@@ -66,6 +66,43 @@ python3 -m python_brain.ouroboros.persistent_memory 2>/dev/null || echo "No syst
 echo "Running config_writer (pre-boot refresh)..."
 python3 -m python_brain.ouroboros.config_writer 2>&1 || echo "Config writer failed (non-fatal — engine will use existing file)"
 
+# Session 22: Generate exchange calendars at boot (consumed by risk_arbiter)
+echo "Generating exchange calendars..."
+python3 -c "
+try:
+    from python_brain.feeds.exchange_calendar_provider import generate_exchange_schedules
+    result = generate_exchange_schedules()
+    print(f'Exchange calendars: {len(result.get(\"exchanges\", {}))} exchanges')
+except Exception as e:
+    print(f'Exchange calendars failed (non-fatal): {e}')
+" 2>&1 || echo "Exchange calendar generation failed (non-fatal)"
+
+# Session 22: Fetch FRED macro data at boot (consumed by bridge.py regime detection)
+echo "Fetching FRED macro data..."
+python3 -c "
+try:
+    from python_brain.feeds.fred_provider import fetch_macro_data
+    result = fetch_macro_data()
+    print(f'FRED macro: {len(result.get(\"latest\", {}))} series')
+except Exception as e:
+    print(f'FRED macro failed (non-fatal): {e}')
+" 2>&1 || echo "FRED macro fetch failed (non-fatal)"
+
+# Session 22: Run multi-source enrichment at boot
+echo "Running multi-source data enrichment..."
+python3 -c "
+try:
+    from python_brain.feeds.multi_source_aggregator import run_full_enrichment
+    result = run_full_enrichment()
+    ok = len(result.get('sources_available', []))
+    print(f'Enrichment: {ok} sources OK')
+except Exception as e:
+    print(f'Enrichment failed (non-fatal): {e}')
+" 2>&1 || echo "Enrichment failed (non-fatal)"
+
+# Session 22: Create data directories for new modules
+mkdir -p /app/data/reports /app/data/sec_filings
+
 echo "Starting WAL watcher (Telegram notifications)..."
 python3 -m python_brain.ouroboros.wal_watcher \
     --wal-dir /app/events \
