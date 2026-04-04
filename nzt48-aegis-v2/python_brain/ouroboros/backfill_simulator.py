@@ -87,6 +87,12 @@ try:
 except ImportError:
     _HAS_ROLLING_KELLY = False
 
+try:
+    from python_brain.alphas.alpha_factory import AlphaFactory
+    _HAS_ALPHA_FACTORY = True
+except ImportError:
+    _HAS_ALPHA_FACTORY = False
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -113,6 +119,41 @@ RVOL_ENTRY_THRESHOLD = 0.7  # Was 1.8 — lowered to match live (Sprint 5 T-05)
 VOLUME_SURGE_MULT = 2.5  # TypeB-TIGHT: only genuine volume anomalies (BT-003 validated)
 
 STARTING_EQUITY = 10_000.0  # GBP
+
+# Per-entry-type cooldown (bars) — prevents noise amplification from rapid re-firing
+# In live: velocity limit (CHECK 19) does this. In backtest: explicit cooldown per ticker+type.
+ENTRY_COOLDOWN_BARS: Dict[str, int] = {
+    "TypeA": 10,       # DipRecovery: wait 10 bars (~10h on 60m) between entries
+    "TypeB": 5,        # EarlyRunner: momentum can chain, shorter cooldown
+    "TypeD": 10,       # SupportBounce: structural pattern, don't over-trade
+    "TypeE": 8,        # IBS reversion: wait for IBS reset
+    "TypeF": 8,        # OBV divergence: accumulation pattern takes time
+    "S2_Reversion": 10,      # Bollinger z-score reversion
+    "S3_MacroTrend": 20,     # SMA crossover: noisy, long cooldown
+    "S5_OvernightCarry": 20, # Gap plays: 1 per day max
+    "VolCompression": 40,    # Squeeze: very rare event, long cooldown
+    "FOmcDrift": 20,         # FOMC: max 1 per event window
+    "NAVArbitrage": 15,      # ETP discount: wait for convergence
+    "RebalancingFlow": 20,   # Rebalancing: 1 per window
+}
+
+# Maximum entries per ticker per day (prevents single-ticker domination)
+MAX_ENTRIES_PER_TICKER_PER_DAY = 5
+
+# Per-exchange slippage model (bps round-trip, applied on top of spread costs)
+# Mirrors bridge.py _calculate_trade_costs: base slippage + VPIN/Amihud scaling
+SLIPPAGE_BPS_PER_EXCHANGE: Dict[str, float] = {
+    "US": 2.0,        # Very liquid, tight spreads
+    "LSE": 4.0,       # Less liquid, wider spreads (ETPs)
+    "TSE": 3.0,       # Moderate
+    "HKEX": 6.0,      # Wider spreads, stamp duty
+    "XETRA": 3.0,     # Moderate
+    "Euronext": 3.5,   # Moderate
+    "SGX": 4.0,       # Less liquid
+}
+
+# Minimum edge (net of all costs) to accept a trade — matches CHECK 29 in risk arbiter
+MIN_NET_EDGE_PCT = 0.10  # 10bps minimum expected net edge
 
 # Parallel download settings
 DOWNLOAD_WORKERS = 10   # ThreadPoolExecutor concurrency for yfinance
@@ -447,7 +488,7 @@ def _compute_obv(closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Entry signal classification — NO COOLDOWN, NO DAILY CAP
+# Entry signal classification — WITH COOLDOWN AND DAILY CAP (adversarial fix)
 # ---------------------------------------------------------------------------
 def classify_entries(
     closes: np.ndarray,
@@ -472,7 +513,8 @@ def classify_entries(
       Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
 
     Each type is evaluated independently per bar (a bar can produce multiple signals).
-    No cooldown, no daily cap — captures ALL possible signals for Ouroboros learning.
+    Per-entry-type cooldowns enforce minimum spacing between signals (mirrors CHECK 19
+    velocity limit in live). Daily cap per ticker prevents single-ticker domination.
 
     Returns list of (bar_index, entry_type).
     """
@@ -483,6 +525,12 @@ def classify_entries(
     n = len(closes)
     if n < 25:
         return entries
+
+    # Cooldown tracking: last entry bar per entry_type
+    last_entry_bar: Dict[str, int] = {}
+    # Daily cap tracking: entries per calendar day
+    daily_entry_count: Dict[str, int] = defaultdict(int)
+    current_day: Optional[str] = None
 
     # Config thresholds
     a_rsi_oversold = cfg.get("type_a_rsi_oversold", 40.0)
@@ -534,6 +582,32 @@ def classify_entries(
                 current_day_low = min(current_day_low, lows[i])
             daily_low[i] = current_day_low
 
+    # --- Cooldown + daily cap helper ---
+    def _can_enter(bar_idx: int, entry_type: str) -> bool:
+        """Check cooldown and daily cap before allowing an entry."""
+        # Cooldown check: minimum bars between same entry type
+        cooldown = ENTRY_COOLDOWN_BARS.get(entry_type, 5)
+        last_bar = last_entry_bar.get(entry_type, -9999)
+        if bar_idx - last_bar < cooldown:
+            return False
+        # Daily cap check
+        if dates is not None and bar_idx < len(dates):
+            day = str(dates[bar_idx])[:10]
+        else:
+            day = str(bar_idx // 24)  # Approximate day from bar index
+        if daily_entry_count[day] >= MAX_ENTRIES_PER_TICKER_PER_DAY:
+            return False
+        return True
+
+    def _record_entry(bar_idx: int, entry_type: str) -> None:
+        """Record an entry for cooldown and daily cap tracking."""
+        last_entry_bar[entry_type] = bar_idx
+        if dates is not None and bar_idx < len(dates):
+            day = str(dates[bar_idx])[:10]
+        else:
+            day = str(bar_idx // 24)
+        daily_entry_count[day] += 1
+
     # --- Scan for entries ---
     # Skip first 25 bars for indicator warmup; leave 5 bars for exit simulation
     start_bar = max(25, b_momentum_bars + 1)
@@ -551,7 +625,9 @@ def classify_entries(
                     and vol_ma20[i] > 0
                     and volumes[i] > vol_ma20[i] * a_vol_spike_mult
                     and (recent_high_20[i] - closes[i]) / atr[i] >= a_drop_atr_mult):
-                entries.append((i, "TypeA"))
+                if _can_enter(i, "TypeA"):
+                    entries.append((i, "TypeA"))
+                    _record_entry(i, "TypeA")
 
         # Type B (EarlyRunner): RVOL rising for N consecutive bars + RSI in range
         # Matches Rust entry_engine.rs detect_early_runner()
@@ -566,7 +642,9 @@ def classify_entries(
                     break
             # Also check the last pair: rvol[i-1] < rvol[i]
             if rvol_rising and not np.isnan(rvol_arr[i - 1]) and rvol_arr[i - 1] < rvol_arr[i]:
-                entries.append((i, "TypeB"))
+                if _can_enter(i, "TypeB"):
+                    entries.append((i, "TypeB"))
+                    _record_entry(i, "TypeB")
 
         # Type C (OverboughtFade): DISABLED — 39.04% WR, 0.805x PF (negative edge in backtest)
         # Short-side fades conflict with ISA long-only structure; overbought RSI in trending markets
@@ -582,7 +660,9 @@ def classify_entries(
                 and rsi[i] >= d_rsi_low and rsi[i] <= d_rsi_high):
             pct_above_low = ((closes[i] - daily_low[i]) / daily_low[i]) * 100.0
             if pct_above_low <= d_proximity_pct:
-                entries.append((i, "TypeD"))
+                if _can_enter(i, "TypeD"):
+                    entries.append((i, "TypeD"))
+                    _record_entry(i, "TypeD")
 
         # Type E (IBSMeanReversion): IBS < threshold + RVOL > threshold
         # Matches Rust entry_engine.rs detect_ibs_mean_reversion()
@@ -592,11 +672,15 @@ def classify_entries(
             if bar_range > 1e-9 and rvol_arr[i] > e_rvol_threshold:
                 ibs_val = (closes[i] - lows[i]) / bar_range
                 if ibs_val < e_ibs_threshold:
-                    entries.append((i, "TypeE"))
+                    if _can_enter(i, "TypeE"):
+                        entries.append((i, "TypeE"))
+                        _record_entry(i, "TypeE")
 
         # Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
         if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
-            entries.append((i, "TypeF"))
+            if _can_enter(i, "TypeF"):
+                entries.append((i, "TypeF"))
+                _record_entry(i, "TypeF")
 
         # ── S1: Microstructure Momentum ── DISABLED — 40.05% WR, 0.532x PF (negative edge)
         # Bar-based tick proxy is too noisy; needs real tick data for meaningful signal
@@ -620,18 +704,22 @@ def classify_entries(
                 rsi2 = compute_rsi(closes[max(0,i-10):i+1], period=2)
                 rsi2_val = rsi2[-1] if len(rsi2) > 0 and not np.isnan(rsi2[-1]) else 50.0
                 if z_s2 < -1.5 and rsi2_val < 20.0:
-                    entries.append((i, "S2_Reversion"))
+                    if _can_enter(i, "S2_Reversion"):
+                        entries.append((i, "S2_Reversion"))
+                        _record_entry(i, "S2_Reversion")
 
-        # ── S3: Macro Trend (SMA crossover + momentum) ──
-        if i >= 20 and regime != "mean_reverting":
-            sma5 = np.mean(closes[i-5:i])
-            sma20_s3 = np.mean(closes[i-20:i])
-            if sma5 > sma20_s3 and closes[i] > sma5:
-                # 12-bar momentum
-                if i >= 12 and closes[i-12] > 0:
-                    mom12 = (closes[i] - closes[i-12]) / closes[i-12]
-                    if mom12 > 0.005:
-                        entries.append((i, "S3_MacroTrend"))
+        # ── S3: Macro Trend ── DISABLED — S22: PF 0.948, WR 48.1% (Tier 3, negative edge)
+        # SMA crossover too noisy on 60m bars; needs regime-aware entry criteria redesign
+        # if i >= 20 and regime != "mean_reverting":
+        #     sma5 = np.mean(closes[i-5:i])
+        #     sma20_s3 = np.mean(closes[i-20:i])
+        #     if sma5 > sma20_s3 and closes[i] > sma5:
+        #         if i >= 12 and closes[i-12] > 0:
+        #             mom12 = (closes[i] - closes[i-12]) / closes[i-12]
+        #             if mom12 > 0.005:
+        #                 if _can_enter(i, "S3_MacroTrend"):
+        #                     entries.append((i, "S3_MacroTrend"))
+        #                     _record_entry(i, "S3_MacroTrend")
 
         # ── S6: Catalyst (gap continuation) ── DISABLED — 12.95% WR, 0.007x PF (catastrophic)
         # Gap continuation is mean-reverting in liquid markets; needs fundamental redesign
@@ -640,52 +728,41 @@ def classify_entries(
         #     if gap > 1.5 and rvol_arr[i] > 2.0:
         #         entries.append((i, "S6_Catalyst"))
 
-    # ── VolCompression (Book 22): Keltner squeeze breakout — per-bar scan ──
-    # Live system scans for squeeze on every bar. We replicate by running
-    # detect_squeeze on a sliding 120-bar window.
-    if _HAS_VOL_COMPRESSION and highs is not None and lows is not None and n >= 130:
-        vc_window = 120
-        for vc_i in range(vc_window + 5, n - 5, 20):  # Step by 20 bars (squeeze is multi-bar)
-            try:
-                vc_start = max(0, vc_i - vc_window)
-                sig = detect_squeeze(
-                    closes[vc_start:vc_i + 1],
-                    highs[vc_start:vc_i + 1],
-                    lows[vc_start:vc_i + 1],
-                    volumes[vc_start:vc_i + 1],
-                )
-                if (sig is not None
-                        and sig.squeeze_score >= 0.7
-                        and sig.breakout_direction == "up"):
-                    entries.append((vc_i, "VolCompression"))
-            except Exception:
-                pass
+    # ── VolCompression (Book 22) ── DISABLED — S22: PF 0.727, only 1,669 trades (Tier 3)
+    # Keltner squeeze too rare and unreliable on historical OHLCV data.
+    # Needs real-time L2 data for meaningful squeeze detection.
+    # if _HAS_VOL_COMPRESSION and highs is not None and lows is not None and n >= 130:
+    #     vc_window = 120
+    #     for vc_i in range(vc_window + 5, n - 5, 20):
+    #         try:
+    #             vc_start = max(0, vc_i - vc_window)
+    #             sig = detect_squeeze(closes[vc_start:vc_i+1], highs[vc_start:vc_i+1],
+    #                                  lows[vc_start:vc_i+1], volumes[vc_start:vc_i+1])
+    #             if sig and sig.squeeze_score >= 0.7 and sig.breakout_direction == "up":
+    #                 if _can_enter(vc_i, "VolCompression"):
+    #                     entries.append((vc_i, "VolCompression"))
+    #                     _record_entry(vc_i, "VolCompression")
+    #         except Exception: pass
 
-    # ── S5: Overnight Carry / IBS_OvernightGap (Book 40) ──
-    # Detect overnight gaps on leveraged ETPs and ISA-eligible instruments.
-    # If a 3x+ ETP gaps down >1% at open, buy the mean-reversion bounce.
-    if highs is not None and lows is not None and dates is not None:
-        prev_day = None
-        for oc_i in range(1, n - 5):
-            try:
-                day = str(dates[oc_i])[:10]
-            except Exception:
-                continue
-            try:
-                prev_day_str = str(dates[oc_i - 1])[:10]
-            except Exception:
-                continue
-            if day != prev_day_str and prev_day_str != prev_day:
-                # New day boundary detected — check gap
-                prev_day = prev_day_str
-                if closes[oc_i - 1] > 0:
-                    gap_pct = (closes[oc_i] - closes[oc_i - 1]) / closes[oc_i - 1]
-                    # Gap down >1% + IBS < 0.2 = overnight carry bounce signal
-                    bar_range = highs[oc_i] - lows[oc_i]
-                    if bar_range > 1e-9:
-                        ibs = (closes[oc_i] - lows[oc_i]) / bar_range
-                        if gap_pct < -0.01 and ibs < 0.20:
-                            entries.append((oc_i, "S5_OvernightCarry"))
+    # ── S5: Overnight Carry ── DISABLED — S22: PF 0.934, WR 49.9% (Tier 3, negative edge)
+    # Overnight gap carry doesn't hold on broad universe with 60m bar granularity.
+    # Needs tick-level gap detection with ETP-specific filtering to work.
+    # if highs is not None and lows is not None and dates is not None:
+    #     prev_day = None
+    #     for oc_i in range(1, n - 5):
+    #         try: day = str(dates[oc_i])[:10]
+    #         except Exception: continue
+    #         try: prev_day_str = str(dates[oc_i - 1])[:10]
+    #         except Exception: continue
+    #         if day != prev_day_str and prev_day_str != prev_day:
+    #             prev_day = prev_day_str
+    #             if closes[oc_i - 1] > 0:
+    #                 gap_pct = (closes[oc_i] - closes[oc_i - 1]) / closes[oc_i - 1]
+    #                 bar_range = highs[oc_i] - lows[oc_i]
+    #                 if bar_range > 1e-9:
+    #                     ibs = (closes[oc_i] - lows[oc_i]) / bar_range
+    #                     if gap_pct < -0.01 and ibs < 0.20:
+    #                         entries.append((oc_i, "S5_OvernightCarry"))
 
     return entries
 
@@ -899,31 +976,35 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
         highs=highs, lows=lows, atr=atr, dates=dates,
     )
 
-    # Cost model: determine per-exchange cost and currency
-    cost_pct = COSTS_PER_EXCHANGE.get(exchange, 0.003)
+    # Cost model: determine per-exchange cost, slippage, and currency
+    # 3-component model: spread+commission (from COSTS_PER_EXCHANGE) + slippage + FX
+    spread_comm_pct = COSTS_PER_EXCHANGE.get(exchange, 0.003)
+    slippage_pct = SLIPPAGE_BPS_PER_EXCHANGE.get(exchange, 3.0) / 10000.0  # bps → fraction
     currency_map = _load_currency_map()
     currency = currency_map.get(ticker, "USD")
     # Add FX conversion cost for non-GBP instruments on LSE
     fx_cost = FX_CONVERSION_COST if (exchange == "LSE" and currency != "GBP") else 0.0
-    total_cost_pct = cost_pct + fx_cost
+    total_cost_pct = spread_comm_pct + slippage_pct + fx_cost
     fx_rate = FX_TO_GBP.get(currency, FX_TO_GBP.get("USD", 0.79))
 
-    # Confidence per entry type (baseline before calendar adjustment)
+    # Confidence per entry type — CALIBRATED from Session 22 backtest actual PF+WR
+    # Tier 1 (PF>1.05): higher confidence. Tier 2 (1.0<PF<1.05): moderate. Tier 3: disabled.
+    # Formula: base = 50 + (PF - 1.0) * 100, clamped [55, 85]
     confidence_map = {
         "TypeA": ENTRY_TYPE_CONFIG.get("type_a_confidence", 65.0),
-        "TypeB": ENTRY_TYPE_CONFIG.get("type_b_confidence", 82.0),
-        "TypeC": ENTRY_TYPE_CONFIG.get("type_c_confidence", 72.0),
-        "TypeD": ENTRY_TYPE_CONFIG.get("type_d_confidence", 80.0),
-        "TypeE": ENTRY_TYPE_CONFIG.get("type_e_confidence", 70.0),
-        "TypeF": ENTRY_TYPE_CONFIG.get("type_f_confidence", 68.0),
+        "TypeB": 58.0,          # S22: PF 0.981, WR 48.9% — below break-even, low confidence
+        "TypeC": 72.0,          # Disabled
+        "TypeD": 72.0,          # S22: PF 1.075, WR 50.3% — Tier 1
+        "TypeE": 64.0,          # S22: PF 1.039, WR 49.4% — Tier 2
+        "TypeF": 62.0,          # S22: PF 1.024, WR 49.6% — Tier 2
         "S2_Reversion": 62.0,
-        "S3_MacroTrend": 60.0,
-        "VolCompression": 74.0,  # Book 22: squeeze breakouts are high-confidence
+        "S3_MacroTrend": 55.0,  # S22: PF 0.948 — Tier 3, reduced confidence
+        "VolCompression": 55.0, # S22: PF 0.727 — Tier 3, very weak
         "RebalancingFlow": 65.0,
-        "NAVArbitrage": 62.0,   # Book 132: ETP discount/premium
-        "S5_OvernightCarry": 64.0,  # Book 40: overnight gap carry
+        "NAVArbitrage": 69.0,   # S22: PF 1.189 — Tier 1, strong edge
+        "S5_OvernightCarry": 55.0,  # S22: PF 0.934 — Tier 3, negative
         "CalendarAnomaly": 63.0,
-        "FOmcDrift": 66.0,     # Book 24: post-FOMC drift
+        "FOmcDrift": 74.0,     # S22: PF 1.368 — Tier 1, strongest signal
     }
 
     # Pre-compute FOMC dates in the data range (third Wednesday of Jan/Mar/May/Jul/Sep/Nov)
@@ -942,6 +1023,31 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
             return d.weekday() == 2 and 15 <= d.day <= 21
         except Exception:
             return False
+
+    # ── Cooldown tracking for FOMC + NAV entries (separate from classify_entries scope) ──
+    _st_last_entry_bar: Dict[str, int] = {}
+    _st_daily_entry_count: Dict[str, int] = defaultdict(int)
+
+    def _can_enter(bar_idx: int, entry_type: str) -> bool:
+        cooldown = ENTRY_COOLDOWN_BARS.get(entry_type, 5)
+        last_bar = _st_last_entry_bar.get(entry_type, -9999)
+        if bar_idx - last_bar < cooldown:
+            return False
+        if bar_idx < len(dates):
+            day = str(dates[bar_idx])[:10]
+        else:
+            day = str(bar_idx // 24)
+        if _st_daily_entry_count[day] >= MAX_ENTRIES_PER_TICKER_PER_DAY:
+            return False
+        return True
+
+    def _record_entry(bar_idx: int, entry_type: str) -> None:
+        _st_last_entry_bar[entry_type] = bar_idx
+        if bar_idx < len(dates):
+            day = str(dates[bar_idx])[:10]
+        else:
+            day = str(bar_idx // 24)
+        _st_daily_entry_count[day] += 1
 
     # ── FOMC Drift entries (Book 24): buy on FOMC day + next day ──
     # In live mode, the exact time window is 15-45 min post-announcement.
@@ -965,7 +1071,9 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
                     if dates[fi][:10] in _fomc_day_set:
                         ts = index_list[fi]
                         if hasattr(ts, 'hour') and 18 <= ts.hour <= 20:
-                            entries.append((fi, "FOmcDrift"))
+                            if _can_enter(fi, "FOmcDrift"):
+                                entries.append((fi, "FOmcDrift"))
+                                _record_entry(fi, "FOmcDrift")
                 except Exception:
                     pass
 
@@ -983,26 +1091,38 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
                 discount_pct = (closes[bar_idx] - sma20_nav[ni]) / sma20_nav[ni] * 100
                 # ETP trading at >2% discount to SMA20 = potential NAV arb
                 if discount_pct < -2.0 and rvol_arr[bar_idx] > 0.5:
-                    entries.append((bar_idx, "NAVArbitrage"))
+                    if _can_enter(bar_idx, "NAVArbitrage"):
+                        entries.append((bar_idx, "NAVArbitrage"))
+                        _record_entry(bar_idx, "NAVArbitrage")
 
     for entry_bar, entry_type in entries:
         entry_price = closes[entry_bar]
         if entry_price <= 0 or not np.isfinite(entry_price):
             continue
 
+        # Apply entry slippage: buying at ask = close + half spread
+        # This is adverse for longs (we pay more than close price)
+        entry_slip_pct = slippage_pct / 2.0  # Half the round-trip slippage on entry
+        slipped_entry = entry_price * (1.0 + entry_slip_pct)
+
         exit_bar, exit_price, rung = simulate_chandelier_exit(
-            closes, highs, lows, atr, entry_bar, entry_price,
+            closes, highs, lows, atr, entry_bar, slipped_entry,
         )
 
         if not np.isfinite(exit_price):
             continue
 
-        pnl = exit_price - entry_price
-        pnl_pct = pnl / entry_price * 100.0
+        # Apply exit slippage: selling at bid = exit - half spread
+        exit_slip_pct = slippage_pct / 2.0
+        slipped_exit = exit_price * (1.0 - exit_slip_pct)
 
-        # Apply cost model
-        net_pnl = pnl - (entry_price * total_cost_pct)
-        net_pnl_pct = pnl_pct - (total_cost_pct * 100.0)
+        pnl = slipped_exit - slipped_entry
+        pnl_pct = pnl / slipped_entry * 100.0
+
+        # Apply spread+commission cost model (slippage already baked into prices above)
+        cost_for_spread_comm = spread_comm_pct + fx_cost
+        net_pnl = pnl - (slipped_entry * cost_for_spread_comm)
+        net_pnl_pct = pnl_pct - (cost_for_spread_comm * 100.0)
         gbp_pnl = net_pnl * fx_rate
 
         # Guard against NaN/Inf propagation from extreme prices

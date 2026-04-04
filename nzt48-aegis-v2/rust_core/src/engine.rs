@@ -3149,9 +3149,29 @@ impl<B: BrokerAdapter> Engine<B> {
                 });
             }
             1102 => {
-                // Reconnected (H44) → reconcile then auto-clear Halt if safe
+                // Reconnected (H44) → reconcile positions + orders then auto-clear Halt if safe
                 eprintln!("IBKR ERROR 1102: {message} → reconcile + resubscribe");
                 let _ = self.reconcile();
+                // FIX (adversarial audit): Also reconcile open orders on reconnect.
+                // Without this, orders placed before disconnect may be orphaned at IBKR
+                // while the engine thinks they don't exist (or vice versa).
+                if let Ok(broker_orders) = self.broker.request_open_orders() {
+                    let orphans = reconciler::detect_orphaned_orders(&self.tracked_orders, &broker_orders);
+                    if !orphans.is_empty() {
+                        eprintln!(
+                            "IBKR 1102: {} orphaned orders found after reconnect, cancelling",
+                            orphans.len()
+                        );
+                        for oid in &orphans {
+                            let _ = self.broker.cancel_order(oid);
+                        }
+                        self.write_wal(WalPayload::RiskStateChange {
+                            from: format!("{:?}", self.arbiter.regime),
+                            to: format!("{:?}", self.arbiter.regime),
+                            trigger: format!("orphan_cleanup_1102: {} orders cancelled", orphans.len()),
+                        });
+                    }
+                }
                 // FIX: Re-subscribe to all market data after reconnect.
                 // IBKR drops all subscriptions on disconnect (Error 1100).
                 // Without resubscribing, engine receives zero ticks after reconnect.

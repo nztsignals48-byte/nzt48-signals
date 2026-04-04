@@ -1264,7 +1264,44 @@ def generate_dynamic_weights_toml(
       best, worst, <regime_name> = <scale_float>
       [kelly_fractions]
       t1, t2, t3
+
+    Guardrails (adversarial audit fixes):
+      - Staleness: if last WAL event is >7 days old, skip all adaptive tuning
+      - Min sample: adaptive floor only adjusts after 20+ cumulative trades
+      - Max step: Thompson sampler limited to ±5/cycle (pre-existing)
     """
+    # --- GUARDRAIL: Staleness check ---
+    # If the most recent WAL event is >7 days old, the system hasn't traded recently.
+    # Don't tune on stale data — use defaults and let paper trading collect fresh evidence.
+    _STALE_DAYS = 7
+    if events:
+        import time as _time_grd
+        latest_ts = max(
+            (e.get("timestamp_ns", e.get("timestamp", 0)) for e in events if isinstance(e, dict)),
+            default=0,
+        )
+        # timestamp_ns → seconds
+        if latest_ts > 1e15:
+            latest_ts = latest_ts / 1e9
+        elif latest_ts > 1e12:
+            latest_ts = latest_ts / 1e3
+        age_days = (_time_grd.time() - latest_ts) / 86400.0 if latest_ts > 0 else 999
+        if age_days > _STALE_DAYS:
+            log.warning(
+                "GUARDRAIL: Latest WAL event is %.1f days old (>%d). "
+                "Skipping adaptive tuning — writing safe defaults.",
+                age_days, _STALE_DAYS
+            )
+            # Return minimal safe defaults
+            return (
+                "schema_version = 1\n"
+                "# Stale data guardrail: no adaptive tuning (last event %.1f days ago)\n"
+                "\n[bayesian]\nwin_rate = 0.5\ntrade_count = 0\nsharpe_ratio = 0.0\n"
+                "dsr = 0.0\ndsr_significant = false\n"
+                "\n[exit]\nchandelier_atr_mult = 2.0\nrung5_rate = 0.0\n"
+                "\n[signal]\nconfidence_floor = 65\n"
+            ) % age_days
+
     # --- Bayesian section ---
     # Prefer cumulative stats from persistent memory (if available)
     # Falls back to single-day metrics if memory not loaded yet
@@ -1393,7 +1430,9 @@ def generate_dynamic_weights_toml(
     FLOOR_MAX = 80   # Absolute maximum (crisis conditions → very selective)
     FLOOR_DEFAULT = 65  # Starting point / no-data default
     adaptive_floor = FLOOR_DEFAULT
-    if bayesian["trade_count"] >= 20:
+    # GUARDRAIL: Require 50+ trades (not 20) before adjusting floor.
+    # Prevents recency bias from small samples during paper trading ramp-up.
+    if bayesian["trade_count"] >= 50:
         wr = bayesian["win_rate"]
         if wr > 0.55:
             adaptive_floor = 55   # winning consistently → lower floor, capture more
