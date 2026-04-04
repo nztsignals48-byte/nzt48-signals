@@ -1,7 +1,7 @@
 {
   "_meta": {
     "version": 2,
-    "description": "CANONICAL strategy registry — single source of truth for all 51 strategy metadata.",
+    "description": "CANONICAL strategy registry — single source of truth for all 51 strategies. Session 30: mass activation.",
     "created": "2026-03-24",
     "updated": "2026-04-04",
     "authority": "This file governs live/shadow/disabled status. Code MUST read this.",
@@ -34,12 +34,12 @@
       "status": "disabled", "description": "Overnight gap capture. Disabled: negative edge with real costs."
     },
     "S6_Catalyst": {
-      "id": "S6", "name": "Event Catalyst", "family": "event_driven",
-      "status": "shadow", "description": "Event-driven catalyst trades (earnings, M&A, guidance)."
+      "id": "S6", "name": "Event Gap Fade", "family": "event_driven",
+      "status": "live", "description": "REDESIGNED Session 30: fade gap-downs near macro events in MR regimes. Replaces gap continuation (13% WR). Filters: gap<-1%, hurst<0.55, rvol<3, IBS<0.3, spread<20bps."
     },
     "S7_TailHedge": {
       "id": "S7", "name": "Tail Risk Hedge", "family": "hedging",
-      "status": "shadow", "description": "Tail risk hedging overlay. Activates on VIX >25 or 3-sigma moves."
+      "status": "live", "description": "Tail risk hedging overlay. Activates on VIX >25 or 3-sigma moves. Activated Session 30."
     },
     "NAVArbitrage": {
       "id": "NAVArbitrage", "name": "ETF NAV Arbitrage", "family": "arbitrage",
@@ -71,7 +71,7 @@
     },
     "TypeC_OverboughtFade": {
       "id": "TypeC", "name": "Overbought Fade", "family": "mean_reversion",
-      "status": "shadow", "description": "RSI > 80 + price rising + volume declining. Rare trigger."
+      "status": "live", "description": "RSI > 80 + price rising + volume declining. Rare trigger. Activated Session 30."
     },
     "VanguardSniper_Momentum": {
       "id": "VanguardSniper", "name": "Vanguard Sniper (ADX Momentum)", "family": "momentum",
@@ -79,11 +79,11 @@
     },
     "Orchestrator_VWAPDip": {
       "id": "Orchestrator_S17", "name": "VWAP Dip Buy", "family": "mean_reversion",
-      "status": "shadow", "description": "VWAP sigma deviation mean-reversion. Multi-regime adaptive."
+      "status": "live", "description": "VWAP sigma deviation mean-reversion. Multi-regime adaptive. Activated Session 30."
     },
     "VolExpansion": {
       "id": "VolExpansion", "name": "Volatility Expansion Breakout", "family": "momentum",
-      "status": "shadow", "description": "RVOL > 2.0 + ADX > 20 + Hurst > 0.5."
+      "status": "live", "description": "RVOL > 2.0 + ADX > 20 + Hurst > 0.5. Activated Session 30."
     },
     "VolCompression": {
       "id": "VolCompression", "name": "Volatility Compression", "family": "volatility",
@@ -91,19 +91,19 @@
     },
     "ORB_Breakout": {
       "id": "ORB", "name": "Opening Range Breakout", "family": "momentum",
-      "status": "shadow", "description": "US session 14:45-15:30 UTC opening range breakout."
+      "status": "live", "description": "US session 14:45-15:30 UTC opening range breakout. Activated Session 30."
     },
     "GapFade": {
       "id": "GapFade", "name": "Gap Fade", "family": "mean_reversion",
-      "status": "shadow", "description": "Gap-down > 1% + RVOL < 2. Event-driven gap fade."
+      "status": "live", "description": "Gap-down > 1% + RVOL < 2. Event-driven gap fade. Activated Session 30."
     },
     "RebalancingFlow": {
       "id": "RebalancingFlow", "name": "Rebalancing Flow", "family": "structural",
-      "status": "shadow", "description": "Index rebalancing + quarter-end institutional flow signals."
+      "status": "live", "description": "Index rebalancing + quarter-end institutional flow signals. Activated Session 30."
     },
     "NegRiskArb": {
       "id": "NegRiskArb", "name": "Leveraged ETF Tracking Error", "family": "arbitrage",
-      "status": "shadow", "description": "Leveraged ETF tracking error exploitation. Negative risk arbitrage."
+      "status": "live", "description": "Leveraged ETF tracking error exploitation. Negative risk arbitrage. Activated Session 30."
     },
     "PairsReversion": {
       "id": "PairsReversion", "name": "Pairs Reversion", "family": "statistical_arbitrage",
@@ -115,43 +115,43 @@
     },
     "AlphaFactory": {
       "id": "AlphaFactory", "name": "Alpha Factory", "family": "meta_strategy",
-      "status": "shadow", "description": "Meta-strategy factory generating synthetic signals from factor combinations."
+      "status": "live", "description": "Meta-strategy factory generating synthetic signals from factor combinations. IC calibrates over ~50 trades. Activated Session 30."
     },
     "LeadLag": {
       "id": "LeadLag", "name": "Lead-Lag Correlation", "family": "microstructure",
-      "status": "shadow", "description": "Cross-asset lead-lag detection (Hayashi-Yoshida correlation)."
+      "status": "live", "description": "Cross-asset lead-lag detection (Hayashi-Yoshida correlation). Activated Session 30."
     },
     "EMAT_Attention": {
       "id": "EMAT_Attention", "name": "EMA Temporal Attention", "family": "momentum",
-      "status": "shadow", "description": "Exponential moving average temporal attention scoring."
+      "status": "live", "description": "EMA temporal attention scoring. Random-init weights, calibrates via paper trading. Activated Session 30."
     },
     "TemporalAttention": {
       "id": "TemporalAttention", "name": "Temporal Attention", "family": "ml_signals",
-      "status": "shadow", "description": "Temporal pattern attention mechanism for regime-aware signals."
+      "status": "live", "description": "Temporal attention for regime-aware signals. Random-init weights, calibrates via paper trading. Activated Session 30."
     },
     "SwarmPredictor": {
       "id": "SwarmPredictor", "name": "Swarm Predictor", "family": "ensemble",
-      "status": "shadow", "description": "50+ LLM agent swarm consensus signal."
+      "status": "live", "description": "50-agent deterministic swarm consensus. Self-calibrating via wealth accumulation (~1000 tick warm-up). Activated Session 30."
     },
     "HFT_Probability": {
       "id": "HFT_Probability", "name": "HFT Probability", "family": "microstructure",
-      "status": "shadow", "description": "High-frequency probability scoring (tick-level order flow)."
+      "status": "live", "description": "5-state Markov chain probability scoring (tick-level order flow). Activated Session 30."
     },
     "HighFlyer": {
       "id": "HighFlyer", "name": "High Flyer", "family": "momentum",
-      "status": "shadow", "description": "Retail flow-driven momentum detection (unusual volume + social)."
+      "status": "live", "description": "Retail flow-driven momentum detection (unusual volume + social). Activated Session 30."
     },
     "NightRider": {
       "id": "NightRider", "name": "Night Rider", "family": "carry",
-      "status": "shadow", "description": "Overnight/pre-market momentum capture (after-hours drift)."
+      "status": "live", "description": "Overnight reversal — buy >1.5% decliners near close, hold overnight. Activated Session 30."
     },
     "EventDrift": {
       "id": "EventDrift", "name": "Event Drift", "family": "event_driven",
-      "status": "shadow", "description": "General event-driven drift detection (CPI, NFP, BOE, earnings)."
+      "status": "live", "description": "General event-driven drift detection (CPI, NFP, BOE, earnings). Activated Session 30."
     },
     "CopyTrading": {
-      "id": "CopyTrading", "name": "Copy Trading", "family": "external_signals",
-      "status": "shadow", "description": "Signal replication from validated external sources."
+      "id": "CopyTrading", "name": "Copy Trading", "family": "ensemble",
+      "status": "live", "description": "Internal best-strategy replication. Fires when highest-Sharpe live strategy fires, with -5 confidence discount. Redesigned Session 30."
     },
     "IVSURF_SkewDirectional": {
       "id": "IVSURF_Skew", "name": "IV Surface Skew", "family": "options",
@@ -159,7 +159,7 @@
     },
     "ApexScout": {
       "id": "ApexScout", "name": "Apex Scout", "family": "institutional_flow",
-      "status": "shadow", "description": "Institutional flow detection from large block trades."
+      "status": "live", "description": "RVOL anomaly + institutional flow detection from large block trades. Activated Session 30."
     },
     "HEDGE_InverseETP": {
       "id": "HEDGE_InverseETP", "name": "Inverse ETP Hedge", "family": "hedging",
@@ -167,23 +167,23 @@
     },
     "HEDGE_VIXAllocation": {
       "id": "HEDGE_VIXAlloc", "name": "VIX Allocation", "family": "hedging",
-      "status": "shadow", "description": "VIX-based dynamic allocation overlay."
+      "status": "live", "description": "VIX-based dynamic allocation overlay. Activated Session 30."
     },
     "HEDGE_CashRaise": {
       "id": "HEDGE_CashRaise", "name": "Cash Raise", "family": "hedging",
-      "status": "shadow", "description": "Systematic cash raise during high-risk regimes."
+      "status": "live", "description": "Systematic cash raise during high-risk regimes (posterior > 0.40). Activated Session 30."
     },
     "Orchestrator_TrendFollow": {
       "id": "Orchestrator_trend", "name": "Trend Following Orchestrator", "family": "trend",
-      "status": "shadow", "description": "Multi-regime trend-following orchestration."
+      "status": "live", "description": "Multi-regime trend-following orchestration. Activated Session 30."
     },
     "Orchestrator_MomentumBurst": {
       "id": "Orchestrator_burst", "name": "Momentum Burst Orchestrator", "family": "momentum",
-      "status": "shadow", "description": "Short-term momentum burst detection."
+      "status": "live", "description": "Short-term momentum burst detection. Activated Session 30."
     },
     "InsiderFlow": {
       "id": "InsiderFlow", "name": "SEC Insider Trading", "family": "alternative_data",
-      "status": "shadow", "description": "SEC Form 4 cluster buy detection (edgartools). Session 26."
+      "status": "live", "description": "SEC Form 4 cluster buy detection (edgartools, free API). Activated Session 30."
     },
     "SentimentOverlay": {
       "id": "SentimentOverlay", "name": "FinBERT Sentiment", "family": "alternative_data",
@@ -199,19 +199,19 @@
     },
     "CryptoFearGreed": {
       "id": "CryptoFearGreed", "name": "Crypto Fear/Greed Index", "family": "macro_overlay",
-      "status": "shadow", "description": "Crypto market sentiment as risk-on/risk-off macro signal. Session 27."
+      "status": "live", "description": "Crypto market sentiment as risk-on/risk-off macro signal (free API). Activated Session 30."
     },
     "OrderFlowImbalance": {
       "id": "OrderFlowImbalance", "name": "Order Flow Imbalance", "family": "microstructure",
-      "status": "shadow", "description": "LOB order flow imbalance detection (nautilustrader-inspired). Session 27."
+      "status": "live", "description": "LOB order flow imbalance detection (bid/ask L1 from IBKR). Activated Session 30."
     },
     "SocialSentiment": {
       "id": "SocialSentiment", "name": "StockTwits Social Sentiment", "family": "alternative_data",
-      "status": "shadow", "description": "StockTwits + Reddit sentiment aggregation. Session 27."
+      "status": "live", "description": "StockTwits social sentiment aggregation (free API, 200 req/hr). Activated Session 30."
     },
     "KalmanHedge": {
       "id": "KalmanHedge", "name": "Kalman Filter Dynamic Hedge", "family": "statistical_arbitrage",
-      "status": "shadow", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Session 27."
+      "status": "live", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Activated Session 30."
     },
     "SectorRotation": {
       "id": "SectorRotation", "name": "Sector Rotation", "family": "macro_rotation",
@@ -235,7 +235,7 @@
     "us_power_hour": "19:00-20:00 UTC (closing volume)",
     "dark": "20:00-22:00 UTC (maintenance + Ouroboros nightly)"
   },
-  "strategy_count": 50,
+  "strategy_count": 51,
   "families": [
     "momentum", "mean_reversion", "microstructure", "volatility", "carry",
     "event_driven", "hedging", "arbitrage", "statistical_arbitrage", "meta_strategy",

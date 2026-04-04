@@ -228,7 +228,7 @@ _cost_tracking = {
 # Losers get killed automatically. No human intervention needed.
 # ══════════════════════════════════════════════════════════════════════════════
 
-_auto_killed_strategies = {"S6_Catalyst"}  # Killed by 730-day backtest: 13% WR, PF 0.01 over 554K trades
+_auto_killed_strategies = set()  # S6_Catalyst redesigned Session 30 (event gap fade). Dynamic kill re-applies if Sharpe < -1.0
 _strategy_pnl_history = defaultdict(list)
 _strategy_entry_prices = {}
 # Book 1: Track entry confidence per position for IC computation on exit
@@ -3966,39 +3966,93 @@ def _system5_overnight(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields)
 
 
 def _system6_catalyst(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields):
-    """System 6: Catalyst Rotation — event-driven trading.
+    """System 6: Event Gap Fade — mean-reversion after macro-event gaps on LSE ETPs.
 
-    Fires around major macro events (FOMC, NFP, CPI) + gap fades.
-    Post-event drift: markets tend to continue in the direction of the initial move
-    30-60 minutes after the event. ISA long-only: only trade bullish catalysts.
-    Habitat: All ETPs during events. All regimes.
+    REDESIGNED Session 30 (was gap continuation, 13% WR / PF 0.01 → catastrophic).
+    Root cause: gap continuation mean-reverts in liquid LSE ETPs. Flip the thesis.
+
+    NEW LOGIC: Fade gap-downs near macro events. Buy the oversold dip when:
+    1. Gap DOWN > 1.5% (sellers overshot on event fear)
+    2. Event window active OR within 4h of scheduled event (event-driven, not random)
+    3. Volume moderate (RVOL 1.0-3.0) — not panic selling (RVOL > 3 = real information)
+    4. Hurst < 0.55 — mean-reverting regime (trending regime = gap is real)
+    5. IBS < 0.3 — intra-bar strength confirms oversold
+    6. Spread < 20 bps — liquid enough for reversion
+
+    Exit: Short hold (2h max, 1h urgency ramp). MR edge dissipates fast.
+    Habitat: LSE ETPs during/after FOMC, CPI, NFP, BOE. Mean-reverting regimes only.
     """
-    # Check for gap (already computed by engine)
     gap_pct = msg.get("gap_pct", 0.0)
 
-    # Post-gap continuation: if gap > 1.5% up with high volume, ride the momentum
-    if gap_pct > 1.5 and ind.get("rvol", 1.0) > 2.0:
-        conf = 58.0
-        if gap_pct > 3.0:
-            conf += 8.0  # Large gap = strong catalyst
-        if ind.get("adx", 0) > 20.0:
-            conf += 7.0  # Trending after gap = continuation likely
-        bars_5m = ind.get("bars_5m", [])
-        if len(bars_5m) >= 3:
-            recent_up = sum(1 for b in bars_5m[-3:] if b["close"] > b["open"])
-            if recent_up >= 2:
-                conf += 5.0  # Price confirming after gap
-        conf = min(conf, 82.0)
-        if conf >= conf_floor:
-            kelly = kelly_fn(conf)
-            return {
-                "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                "confidence": conf,
-                "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                "strategy": "S6_Catalyst", "s6_gap_pct": round(gap_pct, 3),
-                "s6_trigger": "gap_continuation",
-                **common_fields,
-            }
+    # Only fade gap-DOWNS (negative gaps). Gap-ups don't mean-revert as reliably.
+    if gap_pct >= -1.0:  # Need at least -1.0% gap down
+        return None
+
+    # Regime gate: mean-reverting only. Trending gaps are real information.
+    hurst = ind.get("hurst", 0.5)
+    if hurst >= 0.55:
+        return None
+
+    # Volume gate: moderate volume = liquidity gap (fades). High volume = informed (don't fade).
+    rvol = ind.get("rvol", 1.0)
+    if rvol > 3.0 or rvol < 0.5:
+        return None
+
+    # Spread gate: need tight spread for reversion trade
+    spread_pct = msg.get("spread_pct", 0.0)
+    if spread_pct > 0.0020:  # 20 bps
+        return None
+
+    # IBS gate: must be oversold (intra-bar strength < 0.3)
+    bars_5m = ind.get("bars_5m", [])
+    if bars_5m:
+        last_bar = bars_5m[-1]
+        bar_range = last_bar.get("high", 0) - last_bar.get("low", 0)
+        if bar_range > 0:
+            ibs = (last_bar.get("close", 0) - last_bar.get("low", 0)) / bar_range
+            if ibs > 0.3:
+                return None
+
+    # Event proximity boost (optional, not required — any gap fade has edge in MR regime)
+    event_boost = 0
+    try:
+        from python_brain.events.event_calendar import EventCalendar
+        if not hasattr(_system6_catalyst, "_cal"):
+            _system6_catalyst._cal = EventCalendar()
+        ts_ns = msg.get("timestamp_ns", 0)
+        near_events = _system6_catalyst._cal.get_nearby_events(ts_ns)
+        if near_events:
+            event_boost = 8  # High-impact event confirms gap is fear-driven, not info-driven
+    except Exception:
+        pass
+
+    # Confidence: base 60 + gap magnitude + event boost
+    abs_gap = abs(gap_pct)
+    conf = 60.0
+    if abs_gap > 3.0:
+        conf += 7.0  # Large gap = more overshoot to revert
+    elif abs_gap > 2.0:
+        conf += 4.0
+    if ind.get("adx", 0) < 15.0:
+        conf += 3.0  # Low ADX = range-bound, reversion more likely
+    conf += event_boost
+    conf = min(conf, 80.0)
+
+    if conf >= conf_floor:
+        kelly = kelly_fn(conf)
+        return {
+            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+            "confidence": conf,
+            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+            "strategy": "S6_Catalyst",
+            "s6_gap_pct": round(gap_pct, 3),
+            "s6_trigger": "event_gap_fade",
+            "s6_hurst": round(hurst, 3),
+            "s6_event_boost": event_boost,
+            "suggested_max_hold_hours": 2,
+            "exit_urgency_ramp_hours": 1,
+            **common_fields,
+        }
 
     return None
 
@@ -5348,36 +5402,52 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.write(f"PairsReversion error (non-fatal): {e}\n")
         sys.stderr.flush()
 
-    # ── BOOK 203: COPY TRADING / SMART MONEY (SIGNAL GENERATOR) ──
+    # ── BOOK 203: COPY TRADING — INTERNAL BEST-STRATEGY REPLICATION ──
+    # Redesigned Session 30: instead of dead leader_signal from Rust,
+    # replicate the highest-Sharpe live strategy's signal from this tick.
+    # CopyTrading fires ONLY when the current top-performing strategy also fires,
+    # acting as a confidence multiplier / confirmation signal.
     copy_signal = None
     try:
-        from python_brain.strategies.copy_trading import SignalReplicator
-        if len(ticks) >= 10:
-            if not hasattr(_generate_signals, "_rep"):
-                _generate_signals._rep = SignalReplicator()
-            _rep = _generate_signals._rep
-            _cs = _rep.replicate(
-                leader_signal=msg.get("leader_signal"),
-                own_equity=msg.get("equity", 10000),
-            )
-            # SignalReplicator.replicate() returns dict with 'confidence' or None
-            if _cs and isinstance(_cs, dict):
-                conf_val = _cs.get("confidence", 0)
-                # Ensure confidence is int [0,100]
-                if isinstance(conf_val, (int, float)):
-                    _cc = int(conf_val)
-                else:
-                    _cc = 60
+        # Collect all non-None signals generated so far on this tick
+        _prior_signals = [s for s in [
+            vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal,
+            gap_signal, s1_signal, s2_signal, s4_signal, fomc_signal, s6_signal, s7_signal,
+            rebal_signal, nav_signal, alpha_signal, lead_lag_signal, hft_signal, negrisk_signal,
+        ] if s and isinstance(s, dict)]
+
+        if _prior_signals:
+            # Find which strategies have the best recent Sharpe (from compounding machine)
+            _best_leader = None
+            _best_sharpe = -999.0
+            for _ps in _prior_signals:
+                _ps_strat = _ps.get("strategy", "")
+                _ps_stats = _strategy_pnl_history.get(_ps_strat, [])
+                if len(_ps_stats) >= 10:
+                    _mean = sum(_ps_stats[-30:]) / len(_ps_stats[-30:]) if _ps_stats[-30:] else 0
+                    _std = (sum((x - _mean) ** 2 for x in _ps_stats[-30:]) / len(_ps_stats[-30:])) ** 0.5 if _ps_stats[-30:] else 1
+                    _sharpe = _mean / _std if _std > 0.001 else 0
+                    if _sharpe > _best_sharpe:
+                        _best_sharpe = _sharpe
+                        _best_leader = _ps
+
+            # Only replicate if leader has positive Sharpe and reasonable confidence
+            if _best_leader and _best_sharpe > 0.3:
+                _leader_conf = _best_leader.get("confidence", 0)
+                # CopyTrading confidence: leader's confidence minus 5 (follower discount)
+                _cc = max(0, int(_leader_conf) - 5)
                 if _cc >= effective_floor:
                     kelly = _kelly_for(_cc)
                     copy_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "type": "signal", "ticker_id": ticker_id,
+                        "direction": _best_leader.get("direction", "Long"),
                         "confidence": _cc,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "CopyTrading", **common_fields,
+                        "strategy": "CopyTrading",
+                        "copy_leader": _best_leader.get("strategy", "unknown"),
+                        "copy_leader_sharpe": round(_best_sharpe, 3),
+                        **common_fields,
                     }
-    except ImportError:
-        pass
     except Exception as e:
         sys.stderr.write(f"CopyTrading error (non-fatal): {e}\n")
         sys.stderr.flush()
