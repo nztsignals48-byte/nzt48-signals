@@ -60,17 +60,31 @@ def fetch_twelvedata_quote(symbols: List[str]) -> Dict[str, Any]:
         )
         if resp.status_code == 200:
             data = resp.json()
+            # Handle rate limit response inside 200
+            if isinstance(data, dict) and data.get("code") == 429:
+                log.warning("TwelveData: rate limited (429)")
             # Handle single vs batch response
-            if isinstance(data, dict) and "symbol" in data:
+            elif isinstance(data, dict) and "symbol" in data:
                 data = {data["symbol"]: data}
-            for sym, quote in data.items():
-                if isinstance(quote, dict) and "close" in quote:
-                    results[sym] = {
-                        "price": float(quote.get("close", 0)),
-                        "change_pct": float(quote.get("percent_change", 0)),
-                        "volume": int(quote.get("volume", 0)),
-                        "source": "twelvedata",
-                    }
+                for sym, quote in data.items():
+                    if isinstance(quote, dict) and "close" in quote:
+                        results[sym] = {
+                            "price": float(quote.get("close", 0)),
+                            "change_pct": float(quote.get("percent_change", 0)),
+                            "volume": int(quote.get("volume", 0)),
+                            "source": "twelvedata",
+                        }
+            elif isinstance(data, dict):
+                for sym, quote in data.items():
+                    if isinstance(quote, dict) and "close" in quote:
+                        results[sym] = {
+                            "price": float(quote.get("close", 0)),
+                            "change_pct": float(quote.get("percent_change", 0)),
+                            "volume": int(quote.get("volume", 0)),
+                            "source": "twelvedata",
+                        }
+        elif resp.status_code == 429:
+            log.warning("TwelveData: rate limited (HTTP 429)")
         log.info("TwelveData: %d quotes fetched", len(results))
     except Exception as e:
         log.warning("TwelveData failed: %s", str(e)[:100])
@@ -106,8 +120,9 @@ def fetch_fmp_financials(symbols: List[str]) -> Dict[str, Any]:
         return {}
 
     results = {}
-    for symbol in symbols[:20]:  # Rate limit
+    for symbol in symbols[:15]:  # Rate limit
         try:
+            # Try v3 key-metrics endpoint first, fall back to profile
             resp = requests.get(
                 f"https://financialmodelingprep.com/api/v3/key-metrics-ttm/{symbol}",
                 params={"apikey": key},
@@ -126,9 +141,30 @@ def fetch_fmp_financials(symbols: List[str]) -> Dict[str, Any]:
                         "market_cap": metrics.get("marketCapTTM"),
                         "source": "fmp",
                     }
-        except Exception:
-            pass
-        time.sleep(0.2)  # Rate limit
+            elif resp.status_code in (403, 401):
+                # FMP legacy endpoint deprecated — try profile endpoint
+                resp2 = requests.get(
+                    f"https://financialmodelingprep.com/api/v3/profile/{symbol}",
+                    params={"apikey": key},
+                    timeout=_TIMEOUT,
+                )
+                if resp2.status_code == 200:
+                    data2 = resp2.json()
+                    if data2 and isinstance(data2, list):
+                        p = data2[0]
+                        results[symbol] = {
+                            "pe_ratio": p.get("pe"),
+                            "market_cap": p.get("mktCap"),
+                            "beta": p.get("beta"),
+                            "price": p.get("price"),
+                            "source": "fmp",
+                        }
+                elif resp2.status_code in (403, 401):
+                    log.warning("FMP: API key rejected (both endpoints). Skipping.")
+                    break  # Don't waste calls if key is invalid
+        except Exception as e:
+            log.debug("FMP %s failed: %s", symbol, str(e)[:80])
+        time.sleep(0.25)  # Rate limit
 
     log.info("FMP: %d company financials fetched", len(results))
     return results
@@ -150,18 +186,21 @@ def fetch_fmp_earnings_calendar(days_ahead: int = 14) -> List[Dict[str, Any]]:
         )
         if resp.status_code == 200:
             data = resp.json()
-            log.info("FMP: %d upcoming earnings events", len(data))
-            return [
-                {
-                    "ticker": e.get("symbol"),
-                    "date": e.get("date"),
-                    "eps_estimate": e.get("epsEstimated"),
-                    "revenue_estimate": e.get("revenueEstimated"),
-                    "event_type": "EARNINGS",
-                    "source": "fmp",
-                }
-                for e in data if e.get("symbol")
-            ]
+            if isinstance(data, list):
+                log.info("FMP: %d upcoming earnings events", len(data))
+                return [
+                    {
+                        "ticker": e.get("symbol"),
+                        "date": e.get("date"),
+                        "eps_estimate": e.get("epsEstimated"),
+                        "revenue_estimate": e.get("revenueEstimated"),
+                        "event_type": "EARNINGS",
+                        "source": "fmp",
+                    }
+                    for e in data if e.get("symbol")
+                ]
+        elif resp.status_code in (403, 401):
+            log.warning("FMP earnings calendar: API rejected (legacy endpoint)")
     except Exception as e:
         log.warning("FMP earnings calendar failed: %s", str(e)[:100])
 
@@ -258,15 +297,15 @@ def fetch_newsapi_headlines(query: str = "stock market") -> List[Dict[str, Any]]
         )
         if resp.status_code == 200:
             data = resp.json()
-            articles = data.get("articles", [])
+            articles = data.get("articles") or []
             log.info("NewsAPI: %d articles for '%s'", len(articles), query)
             return [
                 {
-                    "title": a.get("title", ""),
-                    "description": a.get("description", "")[:200],
+                    "title": a.get("title") or "",
+                    "description": (a.get("description") or "")[:200],
                     "published_at": a.get("publishedAt"),
-                    "source": a.get("source", {}).get("name", "newsapi"),
-                    "url": a.get("url", ""),
+                    "source": (a.get("source") or {}).get("name", "newsapi"),
+                    "url": a.get("url") or "",
                 }
                 for a in articles
             ]
@@ -424,7 +463,7 @@ def run_full_enrichment(
         output_path = os.environ.get("AEGIS_CONFIG_DIR", "/app/config") + "/enrichment_data.json"
 
     if symbols is None:
-        # Load from contracts.toml
+        # Load from contracts.toml — limit to US symbols for API enrichment
         try:
             import tomli as tomllib
         except ImportError:
@@ -438,7 +477,10 @@ def run_full_enrichment(
             try:
                 with open(contracts_path, "rb") as f:
                     data = tomllib.load(f)
-                symbols = [c["symbol"] for c in data.get("contracts", []) if c.get("symbol")]
+                all_syms = [c["symbol"] for c in data.get("contracts", []) if c.get("symbol")]
+                # Use only US equities (no suffix) and limit to 50 for API rate limits
+                us_syms = [s for s in all_syms if "." not in s][:50]
+                symbols = us_syms if us_syms else all_syms[:50]
             except Exception:
                 symbols = []
 

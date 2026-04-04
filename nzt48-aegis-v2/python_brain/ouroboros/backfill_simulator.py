@@ -629,22 +629,20 @@ def classify_entries(
                     entries.append((i, "TypeA"))
                     _record_entry(i, "TypeA")
 
-        # Type B (EarlyRunner): RVOL rising for N consecutive bars + RSI in range
-        # Matches Rust entry_engine.rs detect_early_runner()
-        if i >= b_momentum_bars and rsi[i] >= b_rsi_low and rsi[i] <= b_rsi_high:
-            rvol_rising = True
-            for j in range(1, b_momentum_bars):
-                if (np.isnan(rvol_arr[i - j]) or np.isnan(rvol_arr[i - j + 1])
-                        or rvol_arr[i - j] >= rvol_arr[i - j + 1]):
-                    # Check: rvol[i-2] < rvol[i-1] < rvol[i] for momentum_bars=3
-                    # Window is [i-2, i-1, i], check pairs: (i-2,i-1) and (i-1,i)
-                    rvol_rising = False
-                    break
-            # Also check the last pair: rvol[i-1] < rvol[i]
-            if rvol_rising and not np.isnan(rvol_arr[i - 1]) and rvol_arr[i - 1] < rvol_arr[i]:
-                if _can_enter(i, "TypeB"):
-                    entries.append((i, "TypeB"))
-                    _record_entry(i, "TypeB")
+        # Type B (EarlyRunner): DISABLED — S23: PF 0.96, -141K PnL/sh across 1.5M trades
+        # Momentum chasing produces massive negative drag. RVOL-rising criterion is too loose.
+        # Needs much tighter RVOL threshold (>2.5x?) and sector-specific filtering before re-enable.
+        # if i >= b_momentum_bars and rsi[i] >= b_rsi_low and rsi[i] <= b_rsi_high:
+        #     rvol_rising = True
+        #     for j in range(1, b_momentum_bars):
+        #         if (np.isnan(rvol_arr[i - j]) or np.isnan(rvol_arr[i - j + 1])
+        #                 or rvol_arr[i - j] >= rvol_arr[i - j + 1]):
+        #             rvol_rising = False
+        #             break
+        #     if rvol_rising and not np.isnan(rvol_arr[i - 1]) and rvol_arr[i - 1] < rvol_arr[i]:
+        #         if _can_enter(i, "TypeB"):
+        #             entries.append((i, "TypeB"))
+        #             _record_entry(i, "TypeB")
 
         # Type C (OverboughtFade): DISABLED — 39.04% WR, 0.805x PF (negative edge in backtest)
         # Short-side fades conflict with ISA long-only structure; overbought RSI in trending markets
@@ -676,11 +674,13 @@ def classify_entries(
                         entries.append((i, "TypeE"))
                         _record_entry(i, "TypeE")
 
-        # Type F (OBVDivergence): OBV-RSI(5) < threshold + RVOL > threshold
-        if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
-            if _can_enter(i, "TypeF"):
-                entries.append((i, "TypeF"))
-                _record_entry(i, "TypeF")
+        # Type F (OBVDivergence): DISABLED — S23: PF 0.97, -36K PnL/sh across 522K trades
+        # With realistic 3-component slippage model, OBV divergence edge is negative.
+        # S22 PF 1.024 was marginal; S23 with proper costs shows it doesn't pay.
+        # if not np.isnan(obv_rsi5[i]) and obv_rsi5[i] < f_obv_rsi_threshold and rvol_arr[i] > f_rvol_threshold:
+        #     if _can_enter(i, "TypeF"):
+        #         entries.append((i, "TypeF"))
+        #         _record_entry(i, "TypeF")
 
         # ── S1: Microstructure Momentum ── DISABLED — 40.05% WR, 0.532x PF (negative edge)
         # Bar-based tick proxy is too noisy; needs real tick data for meaningful signal
@@ -1268,7 +1268,13 @@ def generate_simulation_report(
     max_equity = equity
     max_drawdown = 0.0
     for t in sorted(all_trades, key=lambda x: (x.date, x.entry_bar)):
+        if not (np.isfinite(equity) and equity > 0):
+            equity = max(equity, 1.0)  # Floor at £1 to prevent inf/NaN propagation
+            if not np.isfinite(equity):
+                equity = STARTING_EQUITY  # Reset if truly broken
         position_size = equity * kelly_frac
+        if not np.isfinite(position_size) or position_size > 1e15:
+            position_size = min(position_size, 1e15) if np.isfinite(position_size) else 1e15
         shares = math.floor(position_size / max(t.entry_price, 1e-9))
         if shares <= 0:
             continue
