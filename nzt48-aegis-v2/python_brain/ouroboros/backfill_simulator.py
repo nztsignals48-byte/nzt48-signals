@@ -50,6 +50,43 @@ from brain.indicators.hurst import classify_regime, estimate_hurst
 from brain.indicators.volume_analytics import calculate_rvol
 from python_brain.ouroboros.contract_loader import load_yfinance_symbols, load_leverage_map
 
+# Live strategy overlays — wired from the full strategy module set
+try:
+    from python_brain.strategies.vol_compression import detect_squeeze
+    _HAS_VOL_COMPRESSION = True
+except ImportError:
+    _HAS_VOL_COMPRESSION = False
+
+try:
+    from python_brain.strategies.calendar_anomalies import get_calendar_adjustment
+    _HAS_CALENDAR_ANOMALIES = True
+except ImportError:
+    _HAS_CALENDAR_ANOMALIES = False
+
+try:
+    from python_brain.strategies.nav_arbitrage import NAVTracker
+    _HAS_NAV_ARBITRAGE = True
+except ImportError:
+    _HAS_NAV_ARBITRAGE = False
+
+try:
+    from python_brain.strategies.rebalancing_flow import predict_rebalancing, ETP_REBALANCING_MAP
+    _HAS_REBALANCING_FLOW = True
+except ImportError:
+    _HAS_REBALANCING_FLOW = False
+
+try:
+    from python_brain.strategies.fomc_drift import get_drift_signal, _EVENT_PROFILES
+    _HAS_FOMC_DRIFT = True
+except ImportError:
+    _HAS_FOMC_DRIFT = False
+
+try:
+    from python_brain.sizing.rolling_kelly import RollingKellyEstimator, DrawdownStager, STAGE_CONFIG, DrawdownStage
+    _HAS_ROLLING_KELLY = True
+except ImportError:
+    _HAS_ROLLING_KELLY = False
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -603,6 +640,53 @@ def classify_entries(
         #     if gap > 1.5 and rvol_arr[i] > 2.0:
         #         entries.append((i, "S6_Catalyst"))
 
+    # ── VolCompression (Book 22): Keltner squeeze breakout — per-bar scan ──
+    # Live system scans for squeeze on every bar. We replicate by running
+    # detect_squeeze on a sliding 120-bar window.
+    if _HAS_VOL_COMPRESSION and highs is not None and lows is not None and n >= 130:
+        vc_window = 120
+        for vc_i in range(vc_window + 5, n - 5, 5):  # Step by 5 bars for performance
+            try:
+                vc_start = max(0, vc_i - vc_window)
+                sig = detect_squeeze(
+                    closes[vc_start:vc_i + 1],
+                    highs[vc_start:vc_i + 1],
+                    lows[vc_start:vc_i + 1],
+                    volumes[vc_start:vc_i + 1],
+                )
+                if (sig is not None
+                        and sig.squeeze_score >= 0.7
+                        and sig.breakout_direction == "up"):
+                    entries.append((vc_i, "VolCompression"))
+            except Exception:
+                pass
+
+    # ── S5: Overnight Carry / IBS_OvernightGap (Book 40) ──
+    # Detect overnight gaps on leveraged ETPs and ISA-eligible instruments.
+    # If a 3x+ ETP gaps down >1% at open, buy the mean-reversion bounce.
+    if highs is not None and lows is not None and dates is not None:
+        prev_day = None
+        for oc_i in range(1, n - 5):
+            try:
+                day = str(dates[oc_i])[:10]
+            except Exception:
+                continue
+            try:
+                prev_day_str = str(dates[oc_i - 1])[:10]
+            except Exception:
+                continue
+            if day != prev_day_str and prev_day_str != prev_day:
+                # New day boundary detected — check gap
+                prev_day = prev_day_str
+                if closes[oc_i - 1] > 0:
+                    gap_pct = (closes[oc_i] - closes[oc_i - 1]) / closes[oc_i - 1]
+                    # Gap down >1% + IBS < 0.2 = overnight carry bounce signal
+                    bar_range = highs[oc_i] - lows[oc_i]
+                    if bar_range > 1e-9:
+                        ibs = (closes[oc_i] - lows[oc_i]) / bar_range
+                        if gap_pct < -0.01 and ibs < 0.20:
+                            entries.append((oc_i, "S5_OvernightCarry"))
+
     return entries
 
 
@@ -780,7 +864,7 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     total_cost_pct = cost_pct + fx_cost
     fx_rate = FX_TO_GBP.get(currency, FX_TO_GBP.get("USD", 0.79))
 
-    # Confidence per entry type
+    # Confidence per entry type (baseline before calendar adjustment)
     confidence_map = {
         "TypeA": ENTRY_TYPE_CONFIG.get("type_a_confidence", 65.0),
         "TypeB": ENTRY_TYPE_CONFIG.get("type_b_confidence", 82.0),
@@ -788,7 +872,63 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
         "TypeD": ENTRY_TYPE_CONFIG.get("type_d_confidence", 80.0),
         "TypeE": ENTRY_TYPE_CONFIG.get("type_e_confidence", 70.0),
         "TypeF": ENTRY_TYPE_CONFIG.get("type_f_confidence", 68.0),
+        "S2_Reversion": 62.0,
+        "S3_MacroTrend": 60.0,
+        "VolCompression": 74.0,  # Book 22: squeeze breakouts are high-confidence
+        "RebalancingFlow": 65.0,
+        "NAVArbitrage": 62.0,   # Book 132: ETP discount/premium
+        "S5_OvernightCarry": 64.0,  # Book 40: overnight gap carry
+        "CalendarAnomaly": 63.0,
+        "FOmcDrift": 66.0,     # Book 24: post-FOMC drift
     }
+
+    # Pre-compute FOMC dates in the data range (third Wednesday of Jan/Mar/May/Jul/Sep/Nov)
+    # These are approximate — real FOMC dates come from event_calendar.json in live mode.
+    # In backtest we use the rule: 3rd Wednesday of FOMC months.
+    _fomc_months = {1, 3, 5, 7, 9, 11}
+
+    def _is_fomc_day(date_str: str) -> bool:
+        """Approximate FOMC day detection: 3rd Wednesday of FOMC months."""
+        try:
+            from datetime import datetime as _dt
+            d = _dt.strptime(date_str[:10], "%Y-%m-%d")
+            if d.month not in _fomc_months:
+                return False
+            # 3rd Wednesday: weekday()==2 and 15 <= day <= 21
+            return d.weekday() == 2 and 15 <= d.day <= 21
+        except Exception:
+            return False
+
+    # ── FOMC Drift entries (Book 24): buy on FOMC day + next day ──
+    # In live mode, the exact time window is 15-45 min post-announcement.
+    # In backtest with 60m bars, we enter on the FOMC bar closest to 19:00 UTC
+    # (2pm ET announcement) and the bar after.
+    if has_datetime and _HAS_FOMC_DRIFT:
+        for fi in range(25, n - 5):
+            try:
+                date_str = dates[fi]
+                if _is_fomc_day(date_str):
+                    ts = index_list[fi]
+                    if hasattr(ts, 'hour') and 18 <= ts.hour <= 20:
+                        entries.append((fi, "FOmcDrift"))
+            except Exception:
+                pass
+
+    # ── NAV Arbitrage entries (Book 132): ETP discount/premium for LSE ETPs ──
+    if _HAS_NAV_ARBITRAGE and ticker.endswith(".L") and n >= 30:
+        # For ETP tickers, compute rolling premium/discount vs SMA proxy
+        # In live mode, NAVTracker uses real underlying returns.
+        # In backtest, we use price-to-SMA20 deviation as a NAV proxy.
+        sma20_nav = np.convolve(closes, np.ones(20) / 20, mode='valid')
+        for ni in range(len(sma20_nav)):
+            bar_idx = ni + 19  # offset from convolution
+            if bar_idx < 25 or bar_idx >= n - 5:
+                continue
+            if sma20_nav[ni] > 0:
+                discount_pct = (closes[bar_idx] - sma20_nav[ni]) / sma20_nav[ni] * 100
+                # ETP trading at >2% discount to SMA20 = potential NAV arb
+                if discount_pct < -2.0 and rvol_arr[bar_idx] > 0.5:
+                    entries.append((bar_idx, "NAVArbitrage"))
 
     for entry_bar, entry_type in entries:
         entry_price = closes[entry_bar]
@@ -817,6 +957,7 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
         # Extract hour and weekday from index if available
         entry_hour = -1
         entry_weekday = -1
+        entry_date_str = dates[entry_bar] if entry_bar < len(dates) else "unknown"
         if has_datetime and entry_bar < len(index_list):
             ts = index_list[entry_bar]
             try:
@@ -825,9 +966,38 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
             except AttributeError:
                 pass
 
+        # Calendar anomaly confidence adjustment (Book 171)
+        base_confidence = confidence_map.get(entry_type, 70.0)
+        cal_confidence = base_confidence
+        if _HAS_CALENDAR_ANOMALIES and entry_weekday >= 0:
+            try:
+                from datetime import datetime as _dt2
+                _d = _dt2.strptime(entry_date_str[:10], "%Y-%m-%d")
+                cal_adj = get_calendar_adjustment(
+                    year=_d.year, month=_d.month, day=_d.day,
+                    weekday=entry_weekday, hour=max(entry_hour, 0),
+                )
+                cal_confidence = base_confidence + cal_adj.confidence_delta
+            except Exception:
+                cal_confidence = base_confidence
+
+        # FOMC day: suppress signals on FOMC announcement days
+        # (live engine blocks entries; backtest marks them for transparency)
+        is_fomc = _is_fomc_day(entry_date_str)
+        if is_fomc:
+            # Reduce confidence on FOMC day (market regime uncertain)
+            cal_confidence = max(cal_confidence - 10, 40.0)
+
+        # Rebalancing flow window (Book 36): 19:00-20:00 UTC is ETP rebalancing
+        # Boost confidence for entries in this window — institutional flow is predictable
+        if entry_hour == 19:
+            cal_confidence = min(cal_confidence + 5, 100.0)
+            if entry_type not in confidence_map:
+                entry_type = "RebalancingFlow"  # Re-label only if unclassified
+
         trades.append(SimTrade(
             ticker=ticker,
-            date=dates[entry_bar] if entry_bar < len(dates) else "unknown",
+            date=entry_date_str,
             entry_type=entry_type,
             entry_price=entry_price,
             exit_price=exit_price,
@@ -841,7 +1011,7 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
             exchange=exchange,
             entry_hour=entry_hour,
             entry_weekday=entry_weekday,
-            confidence=confidence_map.get(entry_type, 70.0),
+            confidence=round(cal_confidence, 1),
             cost_pct=total_cost_pct * 100.0,
             net_pnl=net_pnl,
             net_pnl_pct=net_pnl_pct,
@@ -1001,7 +1171,9 @@ def generate_simulation_report(
     # --- PER-ENTRY-TYPE ---
     lines += ["", "PER-ENTRY-TYPE PERFORMANCE", "-" * 80]
     lines.append(f"  {'Type':10s} {'Trades':>8s} {'Wins':>7s} {'WR':>6s} {'PF':>7s} {'PnL/sh':>12s} {'Avg Rung':>10s}")
-    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"]:
+    for etype in ["TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF",
+                   "S2_Reversion", "S3_MacroTrend", "S5_OvernightCarry",
+                   "VolCompression", "NAVArbitrage", "FOmcDrift", "RebalancingFlow"]:
         tt = by_type.get(etype, [])
         if not tt:
             lines.append(f"  {etype:10s} {'0':>8s} {'--':>7s} {'--':>6s} {'--':>7s} {'--':>12s} {'--':>10s}")
