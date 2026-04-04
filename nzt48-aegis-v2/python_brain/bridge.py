@@ -1708,6 +1708,7 @@ _adaptive_entry_confidence = {}  # Thompson Sampler per-type confidence floors
 
 
 _adaptive_params_last_load = 0.0
+_adaptive_params_mtime = 0.0  # Track file mtime to skip redundant reloads
 _ADAPTIVE_RELOAD_INTERVAL = 300.0  # Reload every 5 min to pick up nightly changes
 
 
@@ -1813,7 +1814,7 @@ def _load_adaptive_params():
     Reloads every 5 minutes so nightly pipeline outputs feed back into live trading.
     Sources: dynamic_weights.toml (Ouroboros), nightly_recommendations.json (nightly_v6).
     """
-    global _adaptive_params_loaded, _adaptive_params_last_load
+    global _adaptive_params_loaded, _adaptive_params_last_load, _adaptive_params_mtime
     global _adaptive_chandelier_atr, _adaptive_spread_veto
     global _adaptive_entry_weights, _adaptive_exchange_weights, _adaptive_kelly_cap
     global _adaptive_entry_confidence
@@ -1826,6 +1827,15 @@ def _load_adaptive_params():
     dw_path = "/app/config/dynamic_weights.toml"
     if not os.path.exists(dw_path):
         return
+
+    # Phase 0.1: mtime-based skip — don't re-parse if file hasn't changed
+    try:
+        current_mtime = os.path.getmtime(dw_path)
+        if current_mtime == _adaptive_params_mtime:
+            return  # File unchanged since last read
+        _adaptive_params_mtime = current_mtime
+    except OSError:
+        pass
 
     try:
         try:
