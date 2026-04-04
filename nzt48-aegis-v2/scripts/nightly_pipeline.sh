@@ -631,6 +631,42 @@ print('  SHAP: importance report runs when LightGBM model is trained')
 fi
 log "STEP 43: SHAP DONE"
 
+# ── STEP 44: Congressional trading scan (Quiver Quant) ──
+log "STEP 44: Congressional trading scan"
+if python3 -c "from python_brain.feeds.congressional_tracker import run_congressional_scan; run_congressional_scan()" 2>>"$LOG"; then
+    log "STEP 44: Congressional DONE"
+else
+    log "WARNING: Congressional scan failed (non-critical)"
+fi
+log "STEP 44: Congressional DONE"
+
+# ── STEP 45: Social sentiment scan (StockTwits) ──
+log "STEP 45: Social sentiment scan"
+if python3 -c "from python_brain.feeds.social_sentiment import run_social_scan; run_social_scan()" 2>>"$LOG"; then
+    log "STEP 45: Social sentiment DONE"
+else
+    log "WARNING: Social sentiment scan failed (non-critical)"
+fi
+log "STEP 45: Social DONE"
+
+# ── STEP 46: Unusual options flow scan ──
+log "STEP 46: Options flow scan"
+if python3 -c "from python_brain.feeds.options_flow import run_options_scan; run_options_scan()" 2>>"$LOG"; then
+    log "STEP 46: Options flow DONE"
+else
+    log "WARNING: Options flow scan failed (non-critical)"
+fi
+log "STEP 46: Options DONE"
+
+# ── STEP 47: Crypto Fear/Greed macro overlay ──
+log "STEP 47: Crypto Fear/Greed"
+if python3 -c "from python_brain.feeds.crypto_fear_greed import run_fear_greed_scan; run_fear_greed_scan()" 2>>"$LOG"; then
+    log "STEP 47: Crypto Fear/Greed DONE"
+else
+    log "WARNING: Crypto Fear/Greed scan failed (non-critical)"
+fi
+log "STEP 47: Fear/Greed DONE"
+
 log "=========================================="
-log "NIGHTLY PIPELINE COMPLETE (43 steps)"
+log "NIGHTLY PIPELINE COMPLETE (47 steps)"
 log "=========================================="

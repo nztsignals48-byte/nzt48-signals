@@ -5719,6 +5719,83 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass  # Fail-open: insider data is advisory
 
+    # ── SESSION 27: CONGRESSIONAL TRADING OVERLAY ──
+    try:
+        _cong_path = "/app/data/congressional_signals.json"
+        if os.path.exists(_cong_path):
+            _cong_age = time.time() - os.path.getmtime(_cong_path)
+            if _cong_age < 86400:
+                with open(_cong_path) as _cong_f:
+                    _cong_data = json.load(_cong_f)
+                _cong_tickers = _cong_data.get("tickers", {})
+                _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+                _cong_info = _cong_tickers.get(_ticker_sym)
+                if _cong_info and isinstance(_cong_info, dict):
+                    _cong_delta = _cong_info.get("confidence_delta", 0)
+                    if _cong_delta != 0:
+                        for sig in all_signals:
+                            sig["confidence"] = max(0, min(100, sig["confidence"] + _cong_delta))
+                            sig["congressional_signal"] = "cluster_buy" if _cong_info.get("cluster_buy") else "activity"
+    except Exception:
+        pass
+
+    # ── SESSION 27: SOCIAL SENTIMENT OVERLAY ──
+    try:
+        _social_path = "/app/data/social_sentiment.json"
+        if os.path.exists(_social_path):
+            _social_age = time.time() - os.path.getmtime(_social_path)
+            if _social_age < 86400:
+                with open(_social_path) as _soc_f:
+                    _social_data = json.load(_soc_f)
+                _social_tickers = _social_data.get("tickers", {})
+                _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+                _soc_info = _social_tickers.get(_ticker_sym)
+                if _soc_info and isinstance(_soc_info, dict):
+                    _soc_delta = _soc_info.get("confidence_delta", 0)
+                    if _soc_delta != 0:
+                        for sig in all_signals:
+                            sig["confidence"] = max(0, min(100, sig["confidence"] + _soc_delta))
+                            sig["social_sentiment"] = round(_soc_info.get("bullish_pct", 50), 1)
+    except Exception:
+        pass
+
+    # ── SESSION 27: OPTIONS FLOW OVERLAY ──
+    try:
+        _opt_path = "/app/data/options_flow_signals.json"
+        if os.path.exists(_opt_path):
+            _opt_age = time.time() - os.path.getmtime(_opt_path)
+            if _opt_age < 86400:
+                with open(_opt_path) as _opt_f:
+                    _opt_data = json.load(_opt_f)
+                _opt_tickers = _opt_data.get("tickers", {})
+                _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+                _opt_info = _opt_tickers.get(_ticker_sym)
+                if _opt_info and isinstance(_opt_info, dict):
+                    _opt_delta = _opt_info.get("confidence_delta", 0)
+                    if _opt_delta != 0:
+                        for sig in all_signals:
+                            sig["confidence"] = max(0, min(100, sig["confidence"] + _opt_delta))
+                            sig["options_flow"] = _opt_info.get("signals", [])
+    except Exception:
+        pass
+
+    # ── SESSION 27: CRYPTO FEAR/GREED MACRO OVERLAY ──
+    try:
+        _fg_path = "/app/data/crypto_fear_greed.json"
+        if os.path.exists(_fg_path):
+            _fg_age = time.time() - os.path.getmtime(_fg_path)
+            if _fg_age < 86400:
+                with open(_fg_path) as _fg_f:
+                    _fg_data = json.load(_fg_f)
+                _fg_overlay = _fg_data.get("overlay", {})
+                _fg_delta = _fg_overlay.get("confidence_delta", 0)
+                if _fg_delta != 0:
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, min(100, sig["confidence"] + _fg_delta))
+                        sig["crypto_fear_greed"] = _fg_overlay.get("description", "")
+    except Exception:
+        pass
+
     # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
     _mtc = msg.get("_mins_to_close", 999)
     _STRATEGY_CUTOFFS = {
