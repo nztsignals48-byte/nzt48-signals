@@ -903,8 +903,9 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     # In live mode, the exact time window is 15-45 min post-announcement.
     # In backtest with 60m bars, we enter on the FOMC bar closest to 19:00 UTC
     # (2pm ET announcement) and the bar after.
+    _n = len(closes)
     if has_datetime and _HAS_FOMC_DRIFT:
-        for fi in range(25, n - 5):
+        for fi in range(25, _n - 5):
             try:
                 date_str = dates[fi]
                 if _is_fomc_day(date_str):
@@ -915,14 +916,14 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
                 pass
 
     # ── NAV Arbitrage entries (Book 132): ETP discount/premium for LSE ETPs ──
-    if _HAS_NAV_ARBITRAGE and ticker.endswith(".L") and n >= 30:
+    if _HAS_NAV_ARBITRAGE and ticker.endswith(".L") and _n >= 30:
         # For ETP tickers, compute rolling premium/discount vs SMA proxy
         # In live mode, NAVTracker uses real underlying returns.
         # In backtest, we use price-to-SMA20 deviation as a NAV proxy.
         sma20_nav = np.convolve(closes, np.ones(20) / 20, mode='valid')
         for ni in range(len(sma20_nav)):
             bar_idx = ni + 19  # offset from convolution
-            if bar_idx < 25 or bar_idx >= n - 5:
+            if bar_idx < 25 or bar_idx >= _n - 5:
                 continue
             if sma20_nav[ni] > 0:
                 discount_pct = (closes[bar_idx] - sma20_nav[ni]) / sma20_nav[ni] * 100
