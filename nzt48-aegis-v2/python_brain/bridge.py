@@ -5648,6 +5648,49 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         except Exception:
             pass  # Fail-open: classifier error → no filtering
 
+    # ── SESSION 26: LightGBM META-MODEL SIGNAL SCORER ──
+    # Score all signals with LightGBM meta-model probability of profit.
+    # Different from Book 23 entry classifier: this is a trained binary model
+    # on actual trade outcomes, not just entry features.
+    try:
+        from python_brain.ml.lightgbm_scorer import score_batch as _lgb_score_batch
+        if all_signals:
+            _lgb_probs = _lgb_score_batch(all_signals)
+            for _i, _prob in enumerate(_lgb_probs):
+                if _prob is not None:
+                    all_signals[_i]["lgb_meta_prob"] = round(_prob, 3)
+                    # Strong meta-model signal: adjust confidence
+                    if _prob > 0.70:
+                        all_signals[_i]["confidence"] = min(100, all_signals[_i]["confidence"] + 3)
+                    elif _prob < 0.30:
+                        all_signals[_i]["confidence"] = max(0, all_signals[_i]["confidence"] - 5)
+    except ImportError:
+        pass
+    except Exception:
+        pass  # Fail-open: meta-model is advisory
+
+    # ── SESSION 26: INSIDER TRADING CONFIDENCE OVERLAY ──
+    # If SEC Form 4 cluster buys detected, boost confidence.
+    try:
+        _insider_path = "/app/data/insider_signals.json"
+        if os.path.exists(_insider_path):
+            _insider_age = time.time() - os.path.getmtime(_insider_path)
+            if _insider_age < 86400:  # Fresh within 24h
+                with open(_insider_path) as _ins_f:
+                    _insider_data = json.load(_ins_f)
+                _insider_tickers = _insider_data.get("tickers", {})
+                _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+                _ins_info = _insider_tickers.get(_ticker_sym)
+                if _ins_info and isinstance(_ins_info, dict):
+                    _ins_delta = _ins_info.get("confidence_delta", 0)
+                    if _ins_delta != 0:
+                        for sig in all_signals:
+                            sig["confidence"] = max(0, min(100, sig["confidence"] + _ins_delta))
+                            sig["insider_signal"] = "cluster_buy" if _ins_info.get("cluster_buy") else "activity"
+                            sig["insider_delta"] = _ins_delta
+    except Exception:
+        pass  # Fail-open: insider data is advisory
+
     # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
     _mtc = msg.get("_mins_to_close", 999)
     _STRATEGY_CUTOFFS = {
@@ -5850,6 +5893,23 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 sig["regime_alert"] = _regime_result.action
     except ImportError:
         pass
+
+    # ── SENTIMENT CONFIDENCE OVERLAY (Session 26: wire _get_enrichment_sentiment) ──
+    # FinBERT composite score [-1, +1] adjusts signal confidence: +/- up to 5 pts.
+    # Positive sentiment → slight boost. Negative sentiment → slight penalty.
+    # Fail-open: if sentiment unavailable, delta = 0.
+    try:
+        _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+        if _ticker_sym:
+            _sent_score = _get_enrichment_sentiment(_ticker_sym)
+            if abs(_sent_score) > 0.05:  # Only adjust if sentiment is non-trivial
+                _sent_delta = int(round(_sent_score * 5.0))  # [-5, +5] range
+                for sig in all_signals:
+                    sig["confidence"] = max(0, min(100, sig["confidence"] + _sent_delta))
+                    sig["sentiment_score"] = round(_sent_score, 3)
+                    sig["sentiment_delta"] = _sent_delta
+    except Exception:
+        pass  # Fail-open: sentiment is advisory, never blocks signals
 
     # ── BOOK 124: VOL REGIME CLUSTERING (5-state) ──
     # Provides richer regime classification and sizing multiplier.
@@ -7549,6 +7609,35 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 sig["kelly_fraction"] *= 0.8
                 sig["shares"] = max(1, int(sig["shares"] * 0.8))
                 sig["sector_overlap"] = True
+
+    # ── PORTFOLIO OPTIMIZER WEIGHTS (Session 26: wire riskfolio into sizing) ──
+    # Load portfolio_allocation.json (produced by nightly STEP 22 riskfolio_optimizer).
+    # If a strategy has an assigned weight < 0.10, halve its Kelly.
+    # If a strategy has weight > 0.25, boost Kelly by 20%.
+    # Fail-open: if file missing or stale, no adjustment.
+    try:
+        _pa_path = "/app/data/portfolio_allocation.json"
+        if os.path.exists(_pa_path):
+            _pa_age = time.time() - os.path.getmtime(_pa_path)
+            if _pa_age < 86400:  # Fresh within 24h
+                with open(_pa_path) as _pa_f:
+                    _pa_data = json.load(_pa_f)
+                _pa_weights = _pa_data.get("weights", {})
+                if _pa_weights:
+                    for sig in all_signals:
+                        _strat_name = sig.get("strategy", "")
+                        _pw = _pa_weights.get(_strat_name)
+                        if _pw is not None:
+                            if _pw < 0.10:
+                                sig["kelly_fraction"] *= 0.5
+                                sig["shares"] = max(1, int(sig["shares"] * 0.5))
+                                sig["portfolio_weight"] = round(_pw, 3)
+                            elif _pw > 0.25:
+                                sig["kelly_fraction"] *= 1.2
+                                sig["shares"] = max(1, int(sig["shares"] * 1.2))
+                                sig["portfolio_weight"] = round(_pw, 3)
+    except Exception:
+        pass  # Fail-open: portfolio optimizer output is advisory
 
     # Select best signal after all adjustments — edge-weighted ranking
     all_signals.sort(key=lambda s: _edge_score(s), reverse=True)

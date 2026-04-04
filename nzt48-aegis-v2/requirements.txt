@@ -43,3 +43,14 @@ pydantic>=2.5               # MIT — required by instructor for schema validati
 polars>=1.0                 # MIT — 10-50x faster DataFrame ops (Rust-based)
 pyarrow>=16.0               # Apache 2.0 — zero-copy Rust↔Python bridge (future Arrow migration)
 # arcticdb omitted — requires LMDB C library; install manually when ready for Phase 6.3
+
+# ── Phase 7: ML Pipeline + Signal Quality ──
+lightgbm>=4.3               # MIT — gradient boosting meta-model for signal scoring
+optuna>=3.6                 # MIT — Bayesian hyperparameter optimization (TPE)
+evidently>=0.4              # Apache 2.0 — data/model drift detection + monitoring
+pandera>=0.20               # MIT — DataFrame schema validation at pipeline boundaries
+shap>=0.45                  # MIT — Shapley value model interpretability
+
+# ── Phase 8: Alternative Data ──
+edgartools>=3.0             # MIT — SEC EDGAR Form 4 insider trading signals
+tsfresh>=0.20               # MIT — automated time-series feature engineering (794 features)

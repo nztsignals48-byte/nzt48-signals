@@ -1895,6 +1895,37 @@ def run_config_writer() -> int:
     # is the canonical watchlist writer; Gemini core universe already feeds into
     # ticker_selector via the every-2-hour cron. Dead code removed.
 
+    # --- 0.5: LLM Validator — validate Gemini/Claude recommendations (Session 26 wire) ---
+    # If nightly recommendations contain LLM-generated parameters, validate them
+    # against Pydantic schemas before they influence dynamic_weights.toml.
+    try:
+        from python_brain.ouroboros.llm_validator import validate_strategy_weights
+        _llm_params = {
+            "heat_limit": recs.get("heat_limit_pct", recs.get("heat_limit")),
+            "chandelier_atr_mult": recs.get("chandelier_atr_mult"),
+            "confidence_floor": recs.get("confidence_floor"),
+            "kelly_cap": recs.get("kelly_cap"),
+            "spread_veto_pct": recs.get("spread_veto_pct"),
+        }
+        # Only validate if any LLM-sourced params are present
+        if any(v is not None for v in _llm_params.values()):
+            _llm_params = {k: v for k, v in _llm_params.items() if v is not None}
+            validated = validate_strategy_weights(_llm_params)
+            if validated is None:
+                log.warning("LLM VALIDATOR: recommendation params REJECTED — using safe defaults")
+                # Zero out LLM-influenced keys to prevent bad data reaching TOML
+                for k in ("heat_limit_pct", "chandelier_atr_mult", "confidence_floor", "kelly_cap"):
+                    recs.pop(k, None)
+            else:
+                log.info("LLM VALIDATOR: recommendation params VALIDATED — %s", validated)
+                # Apply validated values back
+                for k, v in validated.items():
+                    recs[k] = v
+    except ImportError:
+        pass  # Fail-open: validator not installed
+    except Exception as e:
+        log.warning("LLM validator failed (non-fatal): %s — proceeding with raw recs", e)
+
     # --- 1. dynamic_weights.toml (always written, even with defaults) ---
     try:
         dw_content = generate_dynamic_weights_toml(recs, metrics, history, events)
