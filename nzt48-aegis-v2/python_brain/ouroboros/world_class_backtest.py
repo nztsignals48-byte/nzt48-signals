@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import hashlib
 import json
 import logging
@@ -241,12 +242,10 @@ def _compute_equity_curve_with_metrics(
 # Trade ledger export
 # ---------------------------------------------------------------------------
 def export_trade_ledger(
-    trades: List[SimTrade],
-    approved_set: set,  # set of (ticker, date, entry_bar) for approved trades
-    veto_map: Dict[Tuple, List[str]],  # (ticker, date, entry_bar) -> vetoes
+    approved_results: List[Any],  # List of FilteredTrade (approved only)
     output_path: Path,
 ) -> None:
-    """Export full per-trade CSV ledger. Every trade, every field."""
+    """Export approved trade CSV ledger (approved trades only for memory efficiency)."""
     fieldnames = [
         "trade_id", "ticker", "date", "entry_bar", "exit_bar", "hold_bars",
         "entry_type", "exchange", "regime", "currency",
@@ -254,16 +253,16 @@ def export_trade_ledger(
         "pnl_gross", "pnl_pct_gross", "cost_pct", "net_pnl", "net_pnl_pct", "gbp_pnl",
         "rung_achieved", "confidence",
         "entry_hour_utc", "entry_weekday",
-        "approved", "vetoes",
     ]
 
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for idx, t in enumerate(sorted(trades, key=lambda x: (x.date, x.entry_bar)), start=1):
-            key = (t.ticker, t.date, t.entry_bar)
-            approved = key in approved_set
-            vetoes = "; ".join(veto_map.get(key, []))
+        for idx, ft in enumerate(
+            sorted(approved_results, key=lambda x: (x.trade.date, x.trade.entry_bar)),
+            start=1,
+        ):
+            t = ft.trade
             writer.writerow({
                 "trade_id": idx,
                 "ticker": t.ticker,
@@ -287,11 +286,9 @@ def export_trade_ledger(
                 "confidence": t.confidence,
                 "entry_hour_utc": t.entry_hour,
                 "entry_weekday": t.entry_weekday,
-                "approved": 1 if approved else 0,
-                "vetoes": vetoes,
             })
 
-    log.info("Trade ledger exported: %s (%d trades)", output_path, len(trades))
+    log.info("Trade ledger exported: %s (%d approved trades)", output_path, len(approved_results))
 
 
 # ---------------------------------------------------------------------------
@@ -433,26 +430,49 @@ def run_world_class_backtest(
     exchange_map = _build_exchange_map()
     leverage_map = load_leverage_map()
 
-    # --- Fetch historical data ---
+    # --- Chunked fetch + simulate (avoids OOM on 4,635 tickers × 730 days) ---
+    SIM_CHUNK_SIZE = 500
     fetch_start = time.monotonic()
     period = f"{days}d"
-    data = _fetch(tickers, period=period, interval=interval)
-    elapsed_fetch = time.monotonic() - fetch_start
-    tickers_with_data = len(data)
-    log.info("Fetched: %d/%d tickers in %.1fs", tickers_with_data, len(tickers), elapsed_fetch)
+    all_trades: List[SimTrade] = []
+    tickers_with_data = 0
+    num_chunks = math.ceil(len(tickers) / SIM_CHUNK_SIZE)
+    sim_accum = 0.0
 
-    if not data:
-        log.error("No data fetched. Aborting.")
+    for chunk_idx in range(num_chunks):
+        chunk_start_i = chunk_idx * SIM_CHUNK_SIZE
+        chunk_end_i = min(chunk_start_i + SIM_CHUNK_SIZE, len(tickers))
+        chunk_tickers = tickers[chunk_start_i:chunk_end_i]
+
+        log.info("Chunk %d/%d: fetching %d tickers...", chunk_idx + 1, num_chunks, len(chunk_tickers))
+        chunk_data = _fetch(chunk_tickers, period=period, interval=interval)
+        if not chunk_data:
+            log.warning("Chunk %d: no data, skipping", chunk_idx + 1)
+            continue
+
+        tickers_with_data += len(chunk_data)
+        _sim_start = time.monotonic()
+        for ticker, df in chunk_data.items():
+            t_list = simulate_ticker(ticker, df)
+            all_trades.extend(t_list)
+        sim_accum += time.monotonic() - _sim_start
+
+        log.info("Chunk %d/%d complete: %d tickers, total %d trades so far",
+                 chunk_idx + 1, num_chunks, len(chunk_data), len(all_trades))
+        del chunk_data
+        gc.collect()
+
+    elapsed_fetch = time.monotonic() - fetch_start  # includes both fetch and sim
+    elapsed_sim = sim_accum
+    log.info("Simulation: %d raw trades from %d/%d tickers in %.1fs total",
+             len(all_trades), tickers_with_data, len(tickers), elapsed_fetch)
+
+    if not all_trades:
+        log.error("No trades simulated. Aborting.")
         return
 
-    # --- Simulate ---
-    sim_start = time.monotonic()
-    all_trades: List[SimTrade] = []
-    for ticker, df in data.items():
-        t_list = simulate_ticker(ticker, df)
-        all_trades.extend(t_list)
-    elapsed_sim = time.monotonic() - sim_start
-    log.info("Simulation: %d raw trades in %.1fs", len(all_trades), elapsed_sim)
+    # Compute raw stats before filter (so we can free all_trades after)
+    raw_total = len(all_trades)
 
     # --- Risk arbiter filter ---
     filter_start = time.monotonic()
@@ -462,29 +482,23 @@ def run_world_class_backtest(
     arbiter.config.daily_trade_limit = 999999   # No per-day limit in aggregate
     arbiter.config.system_velocity_max = 999999
 
-    filtered_results = filter_trades_through_arbiter(
-        all_trades, arbiter, exchange_map, leverage_map,
-    )
+    # filter_trades_through_arbiter returns (approved_results, veto_counts, missed_winners, vetoed_count)
+    # Streaming: only approved FilteredTrade objects are stored; vetoed stats computed inline
+    approved_results, veto_counts_stream, missed_winners_stream, vetoed_count = \
+        filter_trades_through_arbiter(all_trades, arbiter, exchange_map, leverage_map)
     elapsed_filter = time.monotonic() - filter_start
 
-    approved_trades = [ft.trade for ft in filtered_results if ft.approved]
-    vetoed_results = [ft for ft in filtered_results if not ft.approved]
-    approved_set = {(ft.trade.ticker, ft.trade.date, ft.trade.entry_bar) for ft in filtered_results if ft.approved}
-    veto_map = {
-        (ft.trade.ticker, ft.trade.date, ft.trade.entry_bar): ft.vetoes
-        for ft in filtered_results if not ft.approved
-    }
+    # Free all_trades (no longer needed — approved trades are in approved_results)
+    del all_trades
+    gc.collect()
 
-    veto_counts: Dict[str, int] = defaultdict(int)
-    for ft in vetoed_results:
-        for v in ft.vetoes:
-            check_id = v.split(":")[0].strip()
-            veto_counts[check_id] += 1
+    approved_trades = [ft.trade for ft in approved_results]
+    veto_counts = dict(sorted(veto_counts_stream.items(), key=lambda x: -x[1]))
 
     log.info(
         "Risk filter: %d approved, %d vetoed (%.1f%% veto rate) in %.1fs",
-        len(approved_trades), len(vetoed_results),
-        len(vetoed_results) / max(len(filtered_results), 1) * 100,
+        len(approved_trades), vetoed_count,
+        vetoed_count / max(raw_total, 1) * 100,
         elapsed_filter,
     )
 
@@ -533,17 +547,16 @@ def run_world_class_backtest(
     by_ticker_map: Dict[str, List[SimTrade]] = defaultdict(list)
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-    for ft in filtered_results:
-        if ft.approved:
-            by_exchange[ft.exchange].append(ft.trade)
-            by_entry_type[ft.trade.entry_type].append(ft.trade)
-            by_hour[ft.hour_of_day].append(ft.trade)
-            by_dow[ft.day_of_week].append(ft.trade)
-            by_ticker_map[ft.trade.ticker].append(ft.trade)
+    for ft in approved_results:
+        by_exchange[ft.exchange].append(ft.trade)
+        by_entry_type[ft.trade.entry_type].append(ft.trade)
+        by_hour[ft.hour_of_day].append(ft.trade)
+        by_dow[ft.day_of_week].append(ft.trade)
+        by_ticker_map[ft.trade.ticker].append(ft.trade)
 
-    # --- Export trade ledger CSV ---
+    # --- Export trade ledger CSV (approved trades only) ---
     ledger_path = out_dir / "trade_ledger.csv"
-    export_trade_ledger(all_trades, approved_set, veto_map, ledger_path)
+    export_trade_ledger(approved_results, ledger_path)
 
     # --- Build comprehensive results dict ---
     elapsed_total = time.monotonic() - run_start
@@ -588,10 +601,10 @@ def run_world_class_backtest(
         "enabled_strategies": ENABLED_STRATEGIES,
         "disabled_strategies": DISABLED_STRATEGIES,
         "summary": {
-            "raw_total_trades": len(all_trades),
+            "raw_total_trades": raw_total,
             "filtered_total_trades": len(approved_trades),
-            "vetoed_trades": len(vetoed_results),
-            "veto_rate": round(len(vetoed_results) / max(len(filtered_results), 1), 4),
+            "vetoed_trades": vetoed_count,
+            "veto_rate": round(vetoed_count / max(raw_total, 1), 4),
             "win_rate": round(wr, 4),
             "profit_factor": round(pf, 3),
             "expectancy_per_trade": round(expectancy, 4),
