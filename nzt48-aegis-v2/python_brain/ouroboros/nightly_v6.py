@@ -161,32 +161,89 @@ class AlphaDecaySignal:
 # 1. Trade Analysis
 # ---------------------------------------------------------------------------
 def _load_trades_polars(wal_files: List[Path], date_str: str) -> Optional[List[TradeRecord]]:
-    """Phase 6.1: Polars-accelerated WAL reader. Returns None if Polars unavailable."""
+    """Phase 6.1: Polars-accelerated WAL reader.
+
+    Reads all ndjson WAL files, filters for PositionClosed events, extracts
+    trade fields using Polars struct unnesting. Returns None on any failure
+    (falls back to Python reader).
+    """
     if not _HAS_POLARS:
         return None
     try:
         existing = [str(f) for f in wal_files if f.exists()]
         if not existing:
             return []
-        # Scan all ndjson files, extract only PositionClosed events
-        frames = []
+
+        # Read all WAL files as raw text, parse JSON lines
+        all_lines: List[str] = []
         for path in existing:
             try:
-                df = pl.read_ndjson(path)
-                if "payload" in df.columns:
-                    frames.append(df)
+                with open(path) as f:
+                    all_lines.extend(line.strip() for line in f if line.strip())
             except Exception:
                 continue
-        if not frames:
+        if not all_lines:
             return []
-        combined = pl.concat(frames, how="diagonal_relaxed")
-        # Filter for PositionClosed — payload is a struct/JSON column
-        # Polars ndjson reads nested JSON as struct columns
-        # Fall back to Python reader if schema doesn't have expected structure
-        if "payload" not in combined.columns:
-            return None
-        log.info("Polars: loaded %d WAL events from %d files", len(combined), len(existing))
-        return None  # Schema varies too much; fall through to Python reader
+
+        # Parse JSON and filter for PositionClosed events using Polars
+        records = []
+        for line in all_lines:
+            try:
+                event = json.loads(line)
+                payload = event.get("payload", {})
+                if "PositionClosed" in payload:
+                    records.append(payload["PositionClosed"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        if not records:
+            return []
+
+        # Use Polars DataFrame for fast columnar filtering
+        df = pl.DataFrame(records)
+
+        # Date filter: only trades that exited TODAY
+        if "exit_time_ns" in df.columns:
+            df = df.with_columns(
+                (pl.col("exit_time_ns") / 1e9).cast(pl.Datetime("ms")).dt.strftime("%Y-%m-%d").alias("exit_date")
+            )
+            df = df.filter(pl.col("exit_date") == date_str)
+
+        if len(df) == 0:
+            return []
+
+        # Convert to TradeRecord list
+        trades = []
+        for row in df.iter_rows(named=True):
+            trades.append(TradeRecord(
+                ticker=row.get("symbol", f"TID_{row.get('ticker_id', '?')}"),
+                ticker_id=row.get("ticker_id", -1),
+                pnl=row.get("final_pnl", 0.0),
+                entry_price=row.get("entry_price", 0.0),
+                exit_price=row.get("exit_price", 0.0),
+                entry_time_ns=row.get("entry_time_ns", 0),
+                exit_time_ns=row.get("exit_time_ns", 0),
+                entry_type=row.get("entry_type", "Unclassified"),
+                strategy=row.get("strategy", "Unclassified"),
+                regime_at_entry=row.get("regime_at_entry", row.get("regime", "unknown")),
+                rung_achieved=row.get("highest_rung", 0),
+                confidence=row.get("confidence", 0.0),
+                exchange=row.get("exchange", ""),
+                gross_pnl=row.get("gross_pnl", 0.0),
+                total_commission=row.get("total_commission", 0.0),
+                spread_at_entry_pct=row.get("spread_at_entry_pct", 0.0),
+                spread_at_exit_pct=row.get("spread_at_exit_pct", 0.0),
+                mae=row.get("mae", 0.0),
+                mfe=row.get("mfe", 0.0),
+                hold_time_mins=row.get("hold_time_mins", 0),
+                entry_session_phase=row.get("entry_session_phase", ""),
+                vwap_dist_at_entry_pct=row.get("vwap_dist_at_entry_pct", 0.0),
+                atr_pct_at_entry=row.get("atr_pct_at_entry", 0.01),
+                qty=row.get("qty", 1),
+            ))
+
+        log.info("Polars: loaded %d trades for %s from %d files", len(trades), date_str, len(existing))
+        return trades
     except Exception as e:
         log.debug("Polars WAL reader failed (falling back to Python): %s", str(e)[:100])
         return None
