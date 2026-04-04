@@ -645,7 +645,7 @@ def classify_entries(
     # detect_squeeze on a sliding 120-bar window.
     if _HAS_VOL_COMPRESSION and highs is not None and lows is not None and n >= 130:
         vc_window = 120
-        for vc_i in range(vc_window + 5, n - 5, 5):  # Step by 5 bars for performance
+        for vc_i in range(vc_window + 5, n - 5, 20):  # Step by 20 bars (squeeze is multi-bar)
             try:
                 vc_start = max(0, vc_i - vc_window)
                 sig = detect_squeeze(
@@ -741,7 +741,10 @@ def simulate_chandelier_exit(
 def _fetch_single_ticker(ticker: str, period: str, interval: str) -> Tuple[str, Any]:
     """Fetch a single ticker via yfinance. Returns (ticker, df_or_None).
 
-    Thread-safe: each call creates its own yfinance download session.
+    NOTE: This is kept for backwards compatibility but should not be used in
+    parallel threads — yfinance's session cache is not thread-safe and causes
+    ticker data to be mixed up across concurrent downloads.
+    Use fetch_historical_data_parallel() which uses chunked batch downloads instead.
     """
     try:
         import yfinance as yf
@@ -752,9 +755,14 @@ def _fetch_single_ticker(ticker: str, period: str, interval: str) -> Tuple[str, 
         df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
         if df is None or df.empty:
             return ticker, None
-        # Flatten MultiIndex columns if present
-        if hasattr(df.columns, 'levels'):
-            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        # Extract ticker-specific slice from MultiIndex (yfinance 1.2.0+ always returns MultiIndex)
+        if df.columns.nlevels > 1:
+            tickers_in_data = list(df.columns.get_level_values(1).unique())
+            target = ticker if ticker in tickers_in_data else (tickers_in_data[0] if tickers_in_data else None)
+            if target:
+                df = df.xs(target, level=1, axis=1)
+            else:
+                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
         return ticker, df
     except Exception:
         return ticker, None
@@ -766,13 +774,14 @@ def fetch_historical_data_parallel(
     interval: str = "5m",
     max_workers: int = DOWNLOAD_WORKERS,
 ) -> Dict[str, Any]:
-    """Fetch historical data via yfinance using parallel ThreadPoolExecutor.
+    """Fetch historical data via yfinance using chunked batch downloads.
 
-    Downloads up to max_workers tickers simultaneously for ~10x speedup
-    over sequential fetching.
+    Uses yfinance batch download (not parallel threads) to avoid session cache
+    contamination that caused different tickers to receive each other's data.
+    Downloads up to 100 tickers per batch for API compatibility.
     """
     try:
-        import yfinance as yf  # noqa: F401 — verify import before spawning threads
+        import yfinance as yf
     except ImportError:
         log.error("yfinance not installed. Run: pip install yfinance")
         return {}
@@ -781,25 +790,60 @@ def fetch_historical_data_parallel(
     total = len(tickers)
     fetched = 0
     failed = 0
+    BATCH_SIZE = 100  # yfinance handles up to ~100 tickers per batch reliably
 
-    log.info("Fetching %d tickers (%s, %s) with %d parallel workers...", total, period, interval, max_workers)
+    log.info("Fetching %d tickers (%s, %s) in batches of %d...", total, period, interval, BATCH_SIZE)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_fetch_single_ticker, ticker, period, interval): ticker
-            for ticker in tickers
-        }
+    for batch_start in range(0, total, BATCH_SIZE):
+        batch = tickers[batch_start: batch_start + BATCH_SIZE]
+        try:
+            # Use group_by='column' (default) — returns MultiIndex (field, ticker)
+            batch_df = yf.download(
+                batch, period=period, interval=interval,
+                progress=False, auto_adjust=True,
+            )
+            if batch_df is None or batch_df.empty:
+                failed += len(batch)
+                fetched += len(batch)
+                continue
 
-        for future in as_completed(futures):
-            ticker, df = future.result()
-            fetched += 1
-            if df is not None:
-                data[ticker] = df
+            # Detect MultiIndex orientation and extract per-ticker slices
+            if batch_df.columns.nlevels > 1:
+                lvl0 = list(batch_df.columns.get_level_values(0).unique())
+                lvl1 = list(batch_df.columns.get_level_values(1).unique())
+                # Determine which level holds tickers vs. field names
+                _fields = {'Close', 'High', 'Low', 'Open', 'Volume'}
+                if set(lvl0).intersection(_fields):
+                    # (field, ticker) layout — use xs(ticker, level=1)
+                    ticker_level = 1
+                else:
+                    # (ticker, field) layout — use xs(ticker, level=0)
+                    ticker_level = 0
+
+                for ticker in batch:
+                    try:
+                        ticker_df = batch_df.xs(ticker, level=ticker_level, axis=1)
+                        if ticker_df is not None and not ticker_df.empty and "Close" in ticker_df.columns:
+                            data[ticker] = ticker_df
+                        else:
+                            failed += 1
+                    except (KeyError, Exception):
+                        failed += 1
             else:
-                failed += 1
-            if fetched % 100 == 0 or fetched == total:
-                log.info("  Progress: %d/%d fetched (%d with data, %d empty/failed)",
-                         fetched, total, len(data), failed)
+                # Flat DataFrame — only valid if single ticker in batch
+                if len(batch) == 1 and "Close" in batch_df.columns:
+                    data[batch[0]] = batch_df
+                else:
+                    failed += len(batch)
+            fetched += len(batch)
+        except Exception as e:
+            log.warning("Batch fetch failed for %d tickers: %s", len(batch), e)
+            failed += len(batch)
+            fetched += len(batch)
+
+        if fetched % 500 == 0 or fetched >= total:
+            log.info("  Progress: %d/%d fetched (%d with data, %d empty/failed)",
+                     fetched, total, len(data), failed)
 
     log.info("Download complete: %d/%d tickers returned data (%d failed)", len(data), total, failed)
     return data
@@ -905,15 +949,25 @@ def simulate_ticker(ticker: str, df: Any) -> List[SimTrade]:
     # (2pm ET announcement) and the bar after.
     _n = len(closes)
     if has_datetime and _HAS_FOMC_DRIFT:
+        # Pre-compute FOMC day set to avoid strptime per-bar
+        _fomc_day_set: set = set()
         for fi in range(25, _n - 5):
             try:
-                date_str = dates[fi]
-                if _is_fomc_day(date_str):
-                    ts = index_list[fi]
-                    if hasattr(ts, 'hour') and 18 <= ts.hour <= 20:
-                        entries.append((fi, "FOmcDrift"))
+                d_str = dates[fi][:10]
+                if d_str not in _fomc_day_set and _is_fomc_day(d_str):
+                    _fomc_day_set.add(d_str)
             except Exception:
                 pass
+        # Now scan only bars on FOMC days
+        if _fomc_day_set:
+            for fi in range(25, _n - 5):
+                try:
+                    if dates[fi][:10] in _fomc_day_set:
+                        ts = index_list[fi]
+                        if hasattr(ts, 'hour') and 18 <= ts.hour <= 20:
+                            entries.append((fi, "FOmcDrift"))
+                except Exception:
+                    pass
 
     # ── NAV Arbitrage entries (Book 132): ETP discount/premium for LSE ETPs ──
     if _HAS_NAV_ARBITRAGE and ticker.endswith(".L") and _n >= 30:
