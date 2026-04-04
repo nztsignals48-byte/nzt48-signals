@@ -889,7 +889,7 @@ fn main() {
                         // during entry-allowed hours means Python is likely broken
                         if consecutive_no_signal == 5000 {
                             eprintln!(
-                                "WARNING: SIGNAL DROUGHT — {} consecutive ticks with no signal during ModeB. Python bridge may be broken.",
+                                "WARNING: SIGNAL DROUGHT — {} consecutive ticks with no signal during active session. Python bridge may be broken.",
                                 consecutive_no_signal
                             );
                         }
@@ -917,7 +917,7 @@ fn main() {
                     // P3-B: During MODE_A, accumulate 60-second OHLCV snapshots for ApexScout.
                     let snapshot_ready = engine.record_apex_snapshot(&t);
 
-                    if snapshot_ready && matches!(engine.current_mode, rust_core::clock::TradingMode::ModeA) {
+                    if snapshot_ready && engine.current_mode.allows_entries() {
                         // 60-second window completed — evaluate via ApexScout
                         let snapshots = engine.get_apex_snapshots(t.ticker_id);
 
@@ -932,7 +932,7 @@ fn main() {
                                 && apex_signal.confidence > 50.0 {
                                     // ApexScout generated a tradeable signal (>50% confidence)
                                     eprintln!(
-                                        "APEX: ModeA signal on ticker={}, confidence={:.1}%, kelly={:.3}, strategy={}",
+                                        "APEX: Asia signal on ticker={}, confidence={:.1}%, kelly={:.3}, strategy={}",
                                         t.ticker_id.0, apex_signal.confidence, apex_signal.kelly_fraction, apex_signal.strategy
                                     );
 

@@ -18,7 +18,7 @@ use crate::hayashi_yoshida::HayashiYoshidaEngine;
 use crate::portfolio::PortfolioState;
 use crate::isa_gate::IsaGate;
 use crate::overnight_carry::CarryManager;
-use crate::scanner::{HotScanner, RotationScanner};
+use crate::scanner::{MomentumScanner, SectorRotationScanner};
 use crate::smart_router::SmartRouter;
 use crate::subscription_manager::SubscriptionManager;
 use crate::session_manager::SessionMode;
@@ -353,10 +353,12 @@ pub struct Engine<B: BrokerAdapter> {
     pub last_trading_date: Option<String>,
     /// P3-A: Per-ticker GARCH(1,1) inference for real-time vol forecasting.
     pub garch_registry: GarchRegistry,
-    /// P3-B: HotScanner for volatility-momentum signal detection on Apex tickers.
-    pub hot_scanner: HotScanner,
-    /// P3-C: RotationScanner for sector rotation signal detection during Mode B.
-    pub rotation_scanner: RotationScanner,
+    /// Momentum scanner: volatility-momentum signal detection across all tickers.
+    pub momentum_scanner: MomentumScanner,
+    /// Sector rotation scanner: sector leadership changes across all sessions.
+    pub sector_rotation_scanner: SectorRotationScanner,
+    /// Per-ticker MomentumScanner scores (wired into scanner_score in EvalContext).
+    pub scanner_scores: HashMap<TickerId, f64>,
     /// P3-D: Executioner for order lifecycle management.
     pub executioner: Executioner,
     /// P3-D: SmartRouter for cost-based order routing (passthrough in Crucible).
@@ -414,7 +416,7 @@ pub struct Engine<B: BrokerAdapter> {
     pub wal_compressor: WalCompressor,
     /// P19: State checkpoint manager (hourly, FNV-1a hash).
     pub checkpoint_mgr: CheckpointManager,
-    /// P21: Multi-session mode manager (Dark/ModeA/ModeB/Auction/Carry).
+    /// P21: Session mode manager (Dark/Active/Carry — unified 22h architecture).
     pub session_mgr: SessionManager,
     /// P21: Last session mode (for detecting transitions).
     pub last_session_mode: SessionMode,
@@ -609,8 +611,9 @@ impl<B: BrokerAdapter> Engine<B> {
             current_mode: TradingMode::Dark,
             last_trading_date: None,
             garch_registry: GarchRegistry::empty(),
-            hot_scanner: HotScanner::new(30.0, 10), // Score threshold 30, max 10 candidates
-            rotation_scanner: RotationScanner::new(0.05, 10), // 5% rotation strength threshold, max 10 candidates
+            momentum_scanner: MomentumScanner::new(30.0, 10), // Score threshold 30, max 10 candidates
+            sector_rotation_scanner: SectorRotationScanner::new(0.05, 10), // 5% rotation strength threshold, max 10 candidates
+            scanner_scores: HashMap::new(),
             executioner: Executioner::new(),
             smart_router: SmartRouter::with_costs(IsaGate::new("2026-04-06"), ibkr_commission),
             subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
@@ -1544,7 +1547,7 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // Phase 11: In Dark mode, no new entries.
-        // ModeC (17:00-20:00 London) allows US-session trading.
+        // Dark mode: no new entries (maintenance window 20:00-22:00 UTC).
         // NOTE: Exits are processed ABOVE this gate — only entries are blocked.
         if matches!(self.current_mode, TradingMode::Dark) {
             return;
@@ -1556,14 +1559,16 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
-        // APEX_TICK: Route Apex tickers to HotScanner during Mode A
-        if matches!(self.current_mode, TradingMode::ModeA) && self.universe.is_apex(tid) {
-            eprintln!("APEX_TICK: ticker={}, price={:.4}, volume={}", tid.0, tick.last, tick.volume);
+        // Route Apex tickers to MomentumScanner during all active sessions
+        if self.current_mode.allows_entries() && self.universe.is_apex(tid) {
+            eprintln!("MOMENTUM_SCAN: ticker={}, price={:.4}, volume={}", tid.0, tick.last, tick.volume);
 
-            // Process through HotScanner for volatility-momentum scoring
+            // Process through MomentumScanner for volatility-momentum scoring
             if let Some(candidate) = self.process_apex_tick(&tick) {
+                // Wire scanner score into per-ticker store for EvalContext consumption
+                self.scanner_scores.insert(tid, candidate.score);
                 eprintln!(
-                    "APEX_SCORE_HIGH: ticker={}, score={:.1} → buffering for evaluation",
+                    "MOMENTUM_SCORE_HIGH: ticker={}, score={:.1} → buffering for evaluation",
                     tid.0, candidate.score
                 );
                 // Score > threshold (30): buffer the tick for 60s snapshot evaluation
@@ -1590,7 +1595,7 @@ impl<B: BrokerAdapter> Engine<B> {
 
                     // Buffer for Python Brain evaluation
                     self.apex_snapshots.entry(tid).or_default().push_back(snapshot_json);
-                    eprintln!("APEX_SEND: ticker={}, snapshot queued for Python Brain", tid.0);
+                    eprintln!("MOMENTUM_SNAP: ticker={}, snapshot queued for Python Brain", tid.0);
 
                     // Start new candle
                     *candle = ApexCandle::new(tick.last, tick.volume, self.now_ns);
@@ -1599,16 +1604,21 @@ impl<B: BrokerAdapter> Engine<B> {
                     candle.update(tick.last, tick.volume);
                 }
             }
-            // Apex tickers only get Apex processing in Mode A, don't fallthrough to Vanguard logic
+            // Apex tickers get momentum scanner processing; don't fallthrough to main signal logic
             return;
         }
 
-        // P3-3.2 AUDIT: RotationScanner — instantiated but NEVER CALLED (dead code).
-        // HotScanner — called in process_apex_tick() but output score discarded (logged only).
-        // RegimeDetector — called at line ~1004, only has_jump used; hurst_regime+confidence unused.
-        // scanner_score — wired from sig.confidence in EvalContext (item 3.4).
-        // TODO(P3+): Wire HotScanner score into scanner_score for Apex tickers.
-        // TODO(P3+): Feed RotationScanner with sector-level snapshots during ModeB.
+        // AUDIT (Session 27): MomentumScanner — wired to process_apex_tick(), scores buffered.
+        // SectorRotationScanner — fed via nightly pipeline sector snapshots.
+        // scanner_score — wired from sig.confidence in EvalContext.
+        // WIRED: MomentumScanner score feeds into scanner_score in EvalContext (line ~1850).
+        // Feed ALL tickers through MomentumScanner for universal scoring.
+        {
+            let atr = self.current_atr(tid);
+            if let Some(candidate) = self.momentum_scanner.on_tick(tid, tick.last, tick.volume as u64, atr, self.now_ns) {
+                self.scanner_scores.insert(tid, candidate.score);
+            }
+        }
 
         // P1-2.19: Record data age for telemetry.
         {
@@ -1712,12 +1722,12 @@ impl<B: BrokerAdapter> Engine<B> {
             }
         }
 
-        // Phase 11: Only ModeB allows new entries (replaces H35 cutoff + auction checks)
+        // Phase 11: Only active sessions allow new entries (replaces legacy cutoff)
         if !self.current_mode.allows_entries() {
             return;
         }
 
-        // Auction period check: no entries during auctions (ModeB refinement, UTC-based)
+        // Auction period check: no entries during exchange auctions (UTC-based)
         if Clock::is_auction_utc(utc_secs, is_bst) {
             return;
         }
@@ -1778,11 +1788,10 @@ impl<B: BrokerAdapter> Engine<B> {
             self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
         }
 
-        // P6-E: European session entry gating (supplement to ModeB check).
-        // Only enforce XLON open hours during ModeB (European-only).
-        // During ModeBPlus/ModeC, US tickers trade — don't gate on XLON.
-        // During ModeA, Asian tickers trade — don't gate on XLON.
-        if matches!(self.current_mode, TradingMode::ModeB) {
+        // P6-E: European session entry gating — enforce XLON open hours during Europe session only.
+        // During USOverlap/USSession, US tickers trade — don't gate on XLON.
+        // During Asia, Asian tickers trade — don't gate on XLON.
+        if matches!(self.current_mode, TradingMode::Europe) {
             if !self.european_session.entry_allowed("XLON", utc_secs) {
                 return;
             }
@@ -1842,8 +1851,9 @@ impl<B: BrokerAdapter> Engine<B> {
             ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
             ticker_locked: ticker_score.map_or(false, |s| s.locked),
             ticker_position_count: self.portfolio.position_count_for(&tid),
-            // P2-3.4: Wire scanner_score from signal confidence (was -1.0 sentinel, silently passing CHECK 26).
-            scanner_score: sig.confidence,
+            // P2-3.4: Wire scanner_score from MomentumScanner (real Rust-side score, not Python confidence proxy).
+            // Falls back to signal confidence if no scanner score available for this ticker.
+            scanner_score: self.scanner_scores.get(&tid).copied().unwrap_or(sig.confidence),
             // WIRED Sprint 2 (2026-03-21): pass computed values to risk evaluation
             evt_cvar,
             kalman_divergence,
@@ -2602,7 +2612,6 @@ impl<B: BrokerAdapter> Engine<B> {
             );
 
             // Carry manager — freeze/unfreeze stops at session boundaries
-            #[allow(deprecated)]
             match (self.last_session_mode, current_mode) {
                 // Active → Dark/Carry: freeze stops (entering maintenance/overnight)
                 (_, SessionMode::Dark) | (_, SessionMode::Carry)
@@ -2621,11 +2630,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 }
                 // Dark/Carry → Active: unfreeze stops
                 (SessionMode::Dark, SessionMode::Active) |
-                (SessionMode::Carry, SessionMode::Active) |
-                (SessionMode::Dark, SessionMode::ModeA) |
-                (SessionMode::Carry, SessionMode::ModeA) |
-                (SessionMode::Carry, SessionMode::ModeB) |
-                (SessionMode::Carry, SessionMode::ModeC) => {
+                (SessionMode::Carry, SessionMode::Active) => {
                     let unfrozen = self.carry_manager.unfreeze_all_stops();
                     if unfrozen > 0 {
                         let tickers: Vec<TickerId> = self.positions.keys().copied().collect();
@@ -2658,9 +2663,9 @@ impl<B: BrokerAdapter> Engine<B> {
         // P15: Check for pending split events.
         self.check_pending_splits();
 
-        // P6-D: Log Asian session status during Mode A hours.
+        // P6-D: Log Asian session status during Asia hours.
         let utc_secs = (self.now_ns / 1_000_000_000) as u32 % 86400;
-        if self.asian_session.is_mode_a(utc_secs) {
+        if self.asian_session.is_asia_session(utc_secs) {
             let open = self.asian_session.open_exchanges(utc_secs);
             if !open.is_empty() {
                 eprintln!("ASIAN_SESSION: {} exchanges open: {:?}", open.len(), open);
@@ -2703,10 +2708,7 @@ impl<B: BrokerAdapter> Engine<B> {
         const ROTATION_INTERVAL_NS: u64 = 15 * 60 * 1_000_000_000; // 15 minutes
         if self.now_ns >= self.last_watchlist_rotation_ns + ROTATION_INTERVAL_NS {
             let mode = self.session_mgr.mode();
-            #[allow(deprecated)]
-            if matches!(mode, SessionMode::Active
-                | SessionMode::ModeA | SessionMode::ModeB
-                | SessionMode::ModeBPlus | SessionMode::ModeC) {
+            if matches!(mode, SessionMode::Active) {
                 eprintln!("SCANNER_80_20: full rotation triggered (mode={})", mode);
                 self.rotate_subscriptions_from_watchlist();
             }
@@ -2715,10 +2717,7 @@ impl<B: BrokerAdapter> Engine<B> {
         {
             // Dark-horse-only rotation: swap just the 20 dark horse slots.
             let mode = self.session_mgr.mode();
-            #[allow(deprecated)]
-            if matches!(mode, SessionMode::Active
-                | SessionMode::ModeA | SessionMode::ModeB
-                | SessionMode::ModeBPlus | SessionMode::ModeC) {
+            if matches!(mode, SessionMode::Active) {
                 eprintln!("SCANNER_80_20: dark horse rotation triggered (mode={})", mode);
                 self.rotate_dark_horse_slots();
             }
@@ -3095,11 +3094,11 @@ impl<B: BrokerAdapter> Engine<B> {
         }
     }
 
-    /// P3-B: Process an Apex tick through HotScanner for momentum/volume signals.
+    /// Process a tick through MomentumScanner for volatility-momentum signals.
     /// Returns a signal candidate if the scanner score exceeds threshold.
     pub fn process_apex_tick(&mut self, tick: &MarketTick) -> Option<crate::scanner::SignalCandidate> {
         let atr = self.current_atr(tick.ticker_id);
-        self.hot_scanner.on_tick(
+        self.momentum_scanner.on_tick(
             tick.ticker_id,
             tick.last,
             0, // Volume from bar data not available in tick — use 0 for now
@@ -3606,11 +3605,9 @@ impl<B: BrokerAdapter> Engine<B> {
     /// P21: Apply subscription rotation for a mode transition.
     /// Unified architecture: Active mode subscribes to 100 tickers across all markets.
     /// Dark mode suspends all subscriptions.
-    #[allow(deprecated)]
     fn apply_mode_subscription_rotation(&mut self, new_mode: SessionMode) {
         match new_mode {
-            SessionMode::Active | SessionMode::ModeA | SessionMode::ModeB
-            | SessionMode::ModeBPlus | SessionMode::ModeC | SessionMode::Auction => {
+            SessionMode::Active => {
                 eprintln!("SUBSCRIBE: Mode transition → ACTIVE (all 6 markets, 100 tickers, 15-min refresh)");
                 self.rotate_subscriptions_from_watchlist();
                 // Unfreeze any carry stops when entering active trading

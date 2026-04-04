@@ -141,6 +141,34 @@ try:
 except ImportError:
     _HAS_LLM_VALIDATOR = False
 
+# Order Flow Imbalance (LOB-inspired microstructure signal)
+try:
+    from python_brain.features.order_flow_imbalance import get_tracker as _get_ofi_tracker
+    _HAS_OFI = True
+except ImportError:
+    _HAS_OFI = False
+
+# Kalman filter for dynamic hedge ratios (pairs trading)
+try:
+    from python_brain.features.kalman_hedge import get_manager as _get_kalman_mgr
+    _HAS_KALMAN = True
+except ImportError:
+    _HAS_KALMAN = False
+
+# Outlier detection for anomalous signals
+try:
+    from python_brain.features.outlier_detector import get_detector as _get_outlier_detector
+    _HAS_OUTLIER = True
+except ImportError:
+    _HAS_OUTLIER = False
+
+# Congressional/insider smart money tracker
+try:
+    from python_brain.feeds.congressional_tracker import get_tracker as _get_cong_tracker
+    _HAS_CONGRESSIONAL = True
+except ImportError:
+    _HAS_CONGRESSIONAL = False
+
 MAX_BARS = 500
 
 # ── Cached enrichment data (loaded once, refreshed every 30min) ──
@@ -7638,6 +7666,65 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                                 sig["portfolio_weight"] = round(_pw, 3)
     except Exception:
         pass  # Fail-open: portfolio optimizer output is advisory
+
+    # ── ORDER FLOW IMBALANCE (LOB microstructure signal) ──
+    # OFI confirms or opposes signal direction from bid/ask dynamics.
+    if _HAS_OFI:
+        try:
+            _ofi_tracker = _get_ofi_tracker()
+            _bid = msg.get("bid", 0.0)
+            _ask = msg.get("ask", 0.0)
+            _ofi_result = _ofi_tracker.update(ticker_id, _bid, _ask,
+                                               bid_size=msg.get("bid_size", 0),
+                                               ask_size=msg.get("ask_size", 0),
+                                               now_ns=msg.get("timestamp_ns", 0))
+            if _ofi_result is not None:
+                for sig in all_signals:
+                    _ofi_adj = _ofi_tracker.confidence_adjustment(
+                        ticker_id, sig.get("direction", "Long"))
+                    if abs(_ofi_adj) > 0.5:
+                        sig["confidence"] = max(0, min(100, sig["confidence"] + int(_ofi_adj)))
+                        sig["ofi_score"] = round(_ofi_result, 1)
+                        sig["ofi_adjustment"] = round(_ofi_adj, 1)
+        except Exception:
+            pass
+
+    # ── OUTLIER DETECTION (anomalous signal filter) ──
+    # Flags signals with abnormal feature combinations before execution.
+    if _HAS_OUTLIER:
+        try:
+            _outlier_det = _get_outlier_detector()
+            for sig in all_signals:
+                _ol_features = {
+                    "confidence": sig.get("confidence", 50),
+                    "rvol": ind.get("rvol", 1.0),
+                    "spread_bps": ind.get("spread_bps", 10.0),
+                    "kelly_frac": sig.get("kelly_fraction", 0.01),
+                    "atr_pct": ind.get("atr_pct", 1.0),
+                    "vol_ratio": ind.get("vol_ratio", 1.0),
+                }
+                _ol_penalty = _outlier_det.confidence_penalty(
+                    _ol_features, strategy=sig.get("strategy", ""))
+                if _ol_penalty < 0:
+                    sig["confidence"] = max(0, sig["confidence"] + int(_ol_penalty))
+                    sig["outlier_penalty"] = int(_ol_penalty)
+        except Exception:
+            pass
+
+    # ── CONGRESSIONAL SMART MONEY OVERLAY ──
+    # Cluster congressional buying/selling adjusts confidence.
+    if _HAS_CONGRESSIONAL:
+        try:
+            _cong = _get_cong_tracker()
+            _sym_cong = ticker_symbols.get(ticker_id, "")
+            if _sym_cong:
+                _cong_adj = _cong.confidence_overlay(_sym_cong)
+                if abs(_cong_adj) > 0.5:
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, min(100, sig["confidence"] + int(_cong_adj)))
+                        sig["congressional_adj"] = int(_cong_adj)
+        except Exception:
+            pass
 
     # Select best signal after all adjustments — edge-weighted ranking
     all_signals.sort(key=lambda s: _edge_score(s), reverse=True)
