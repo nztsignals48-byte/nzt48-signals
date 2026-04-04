@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import logging
 import math
@@ -344,6 +345,11 @@ def filter_trades_through_arbiter(
     # Sort trades chronologically for stateful simulation
     sorted_trades = sorted(all_trades, key=lambda t: (t.date, t.entry_bar))
 
+    # Streaming accumulators for vetoed trade stats (avoids storing 16M objects)
+    _veto_counts: Dict[str, int] = defaultdict(int)
+    _vetoed_count: int = 0
+    _missed_winner_buf: List[Dict[str, Any]] = []
+
     # Fresh portfolio for each simulation run — state tracks across all trades
     portfolio = PortfolioState(
         equity=STARTING_EQUITY,
@@ -509,16 +515,44 @@ def filter_trades_through_arbiter(
             else:
                 portfolio.consecutive_stop_losses = 0
 
-        results.append(FilteredTrade(
+        ft = FilteredTrade(
             trade=trade,
             approved=approved,
             vetoes=vetoes,
             exchange=exchange,
             day_of_week=day_of_week,
             hour_of_day=hour_of_day,
-        ))
+        )
 
-    return results
+        if approved:
+            # Keep approved trades — needed for breakdowns and ledger
+            results.append(ft)
+        else:
+            # For vetoed trades: only accumulate streaming stats, don't store object.
+            # This avoids keeping 16M+ FilteredTrade objects in RAM.
+            # Veto counts: extract CHECK_N prefix from each veto reason
+            for veto in vetoes:
+                check_id = veto.split(":")[0].strip() if ":" in veto else veto
+                _veto_counts[check_id] += 1
+            _vetoed_count += 1
+            # Track missed winners (profitable trades blocked by risk filter)
+            if trade.pnl > 0:
+                _missed_winner_buf.append({
+                    "ticker": trade.ticker,
+                    "date": trade.date,
+                    "entry_type": trade.entry_type,
+                    "pnl": round(trade.pnl, 4),
+                    "pnl_pct": round(trade.pnl_pct, 2),
+                    "rung_achieved": trade.rung_achieved,
+                    "vetoes": vetoes,
+                    "exchange": exchange,
+                })
+                # Keep only top 100 candidates (sorted later, trimmed to 20)
+                if len(_missed_winner_buf) > 100:
+                    _missed_winner_buf.sort(key=lambda x: -x["pnl"])
+                    _missed_winner_buf = _missed_winner_buf[:100]
+
+    return results, dict(_veto_counts), _missed_winner_buf, _vetoed_count
 
 
 # ---------------------------------------------------------------------------
@@ -562,8 +596,16 @@ def _compute_equity_curve(trades: List[SimTrade]) -> Tuple[float, float, float]:
 # Core: build the full pipeline result
 # ---------------------------------------------------------------------------
 def build_pipeline_result(
-    all_trades: List[SimTrade],
-    filtered_results: List[FilteredTrade],
+    approved_results: List[FilteredTrade],
+    streaming_veto_counts: Dict[str, int],
+    streaming_missed_winners: List[Dict[str, Any]],
+    vetoed_count: int,
+    raw_total: int,
+    raw_wins: int,
+    raw_losses: int,
+    raw_gross_wins: float,
+    raw_gross_losses: float,
+    raw_total_pnl: float,
     days: int,
     interval: str,
     tickers_requested: int,
@@ -573,17 +615,16 @@ def build_pipeline_result(
     elapsed_filter: float,
     elapsed_total: float,
 ) -> PipelineResult:
-    """Assemble the comprehensive pipeline result from raw and filtered trades."""
+    """Assemble the comprehensive pipeline result.
 
-    # Approved and vetoed trade lists
-    approved_trades = [ft.trade for ft in filtered_results if ft.approved]
-    vetoed_results = [ft for ft in filtered_results if not ft.approved]
+    NOTE: approved_results contains ONLY approved FilteredTrade objects.
+    Vetoed trade stats (veto_counts, missed_winners) were computed streaming
+    inside filter_trades_through_arbiter to avoid keeping 16M objects in RAM.
+    Raw stats (raw_wins, raw_losses, etc.) are pre-computed before filter.
+    """
 
-    # Raw stats
-    raw_wins = [t for t in all_trades if t.pnl > 0]
-    raw_losses = [t for t in all_trades if t.pnl <= 0]
-    raw_gross_wins = sum(t.pnl for t in raw_wins)
-    raw_gross_losses = abs(sum(t.pnl for t in raw_losses))
+    # All approved trades (already filtered)
+    approved_trades = [ft.trade for ft in approved_results]
 
     # Filtered stats
     filt_wins = [t for t in approved_trades if t.pnl > 0]
@@ -591,54 +632,33 @@ def build_pipeline_result(
     filt_gross_wins = sum(t.pnl for t in filt_wins)
     filt_gross_losses = abs(sum(t.pnl for t in filt_losses))
 
-    # Veto analysis: count which CHECKs fire most
-    veto_counts: Dict[str, int] = defaultdict(int)
-    for ft in vetoed_results:
-        for veto in ft.vetoes:
-            # Extract CHECK_N prefix
-            check_id = veto.split(":")[0].strip() if ":" in veto else veto
-            veto_counts[check_id] += 1
-    veto_counts = dict(sorted(veto_counts.items(), key=lambda x: -x[1]))
+    # Veto analysis: use streaming counts computed during filter pass
+    veto_counts = dict(sorted(streaming_veto_counts.items(), key=lambda x: -x[1]))
 
-    # Breakdowns (filtered/approved trades only)
+    # Breakdowns (approved trades only)
     by_exchange: Dict[str, List[SimTrade]] = defaultdict(list)
     by_entry_type: Dict[str, List[SimTrade]] = defaultdict(list)
     by_ticker: Dict[str, List[SimTrade]] = defaultdict(list)
     by_dow: Dict[str, List[SimTrade]] = defaultdict(list)
     by_hour: Dict[str, List[SimTrade]] = defaultdict(list)
 
-    for ft in filtered_results:
-        if ft.approved:
-            by_exchange[ft.exchange].append(ft.trade)
-            by_entry_type[ft.trade.entry_type].append(ft.trade)
-            by_ticker[ft.trade.ticker].append(ft.trade)
-            by_dow[ft.day_of_week].append(ft.trade)
-            by_hour[str(ft.hour_of_day)].append(ft.trade)
+    for ft in approved_results:
+        by_exchange[ft.exchange].append(ft.trade)
+        by_entry_type[ft.trade.entry_type].append(ft.trade)
+        by_ticker[ft.trade.ticker].append(ft.trade)
+        by_dow[ft.day_of_week].append(ft.trade)
+        by_hour[str(ft.hour_of_day)].append(ft.trade)
 
     # Equity curve
     ending_equity, return_pct, max_dd_pct = _compute_equity_curve(approved_trades)
 
-    # Missed winners: vetoed trades that would have been profitable
-    missed_winners = []
-    for ft in vetoed_results:
-        if ft.trade.pnl > 0:
-            missed_winners.append({
-                "ticker": ft.trade.ticker,
-                "date": ft.trade.date,
-                "entry_type": ft.trade.entry_type,
-                "pnl": round(ft.trade.pnl, 4),
-                "pnl_pct": round(ft.trade.pnl_pct, 2),
-                "rung_achieved": ft.trade.rung_achieved,
-                "vetoes": ft.vetoes,
-                "exchange": ft.exchange,
-            })
-    missed_winners.sort(key=lambda x: -x["pnl"])
-    missed_winners = missed_winners[:20]  # Top 20
+    # Missed winners: use streaming buffer collected during filter pass
+    missed_winners = sorted(streaming_missed_winners, key=lambda x: -x["pnl"])[:20]
 
     # Bad approvals: approved trades that lost money
     bad_approvals = []
-    for ft in filtered_results:
-        if ft.approved and ft.trade.pnl < 0:
+    for ft in approved_results:
+        if ft.trade.pnl < 0:
             bad_approvals.append({
                 "ticker": ft.trade.ticker,
                 "date": ft.trade.date,
@@ -651,7 +671,6 @@ def build_pipeline_result(
     bad_approvals.sort(key=lambda x: x["pnl"])
     bad_approvals = bad_approvals[:20]  # Top 20 worst
 
-    raw_total = len(all_trades)
     filt_total = len(approved_trades)
 
     return PipelineResult(
@@ -665,11 +684,11 @@ def build_pipeline_result(
         elapsed_filter_secs=round(elapsed_filter, 1),
         elapsed_total_secs=round(elapsed_total, 1),
         raw_total_trades=raw_total,
-        raw_wins=len(raw_wins),
-        raw_losses=len(raw_losses),
-        raw_win_rate=round(len(raw_wins) / max(raw_total, 1), 4),
+        raw_wins=raw_wins,
+        raw_losses=raw_losses,
+        raw_win_rate=round(raw_wins / max(raw_total, 1), 4),
         raw_profit_factor=round(raw_gross_wins / max(raw_gross_losses, 1e-9), 3),
-        raw_total_pnl=round(sum(t.pnl for t in all_trades), 4),
+        raw_total_pnl=round(raw_total_pnl, 4),
         filtered_total_trades=filt_total,
         filtered_wins=len(filt_wins),
         filtered_losses=len(filt_losses),
@@ -677,7 +696,7 @@ def build_pipeline_result(
         filtered_profit_factor=round(filt_gross_wins / max(filt_gross_losses, 1e-9), 3),
         filtered_total_pnl=round(sum(t.pnl for t in approved_trades), 4),
         veto_counts=veto_counts,
-        veto_rate=round(len(vetoed_results) / max(raw_total, 1), 4),
+        veto_rate=round(vetoed_count / max(raw_total, 1), 4),
         by_exchange={k: _compute_group_stats(v) for k, v in sorted(by_exchange.items())},
         by_entry_type={k: _compute_group_stats(v) for k, v in sorted(by_entry_type.items())},
         by_ticker={k: _compute_group_stats(v) for k, v in sorted(by_ticker.items())},
@@ -689,7 +708,7 @@ def build_pipeline_result(
         max_drawdown_pct=round(max_dd_pct, 2),
         missed_winners=missed_winners,
         bad_approvals=bad_approvals,
-        all_filtered_trades=filtered_results,
+        all_filtered_trades=approved_results,  # Only approved trades now
     )
 
 
@@ -719,10 +738,11 @@ def save_report(result: PipelineResult, output_dir: Path) -> Path:
     output_path.write_text(json.dumps(report_dict, indent=2, default=str))
     log.info("Report saved: %s", output_path)
 
-    # ── Export TRADE_LEDGER.csv alongside JSON report ──
+    # ── Export TRADE_LEDGER.csv — approved trades only (vetoed omitted for speed) ──
     try:
         import csv
         ledger_path = output_dir / f"TRADE_LEDGER_{timestamp}.csv"
+        approved_count = 0
         with open(ledger_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([
@@ -732,10 +752,13 @@ def save_report(result: PipelineResult, output_dir: Path) -> Path:
                 "confidence", "regime", "cost_pct", "currency",
                 "entry_hour", "entry_weekday",
             ])
-            for idx, ft in enumerate(result.all_filtered_trades, 1):
+            for ft in result.all_filtered_trades:
+                if not ft.approved:
+                    continue
+                approved_count += 1
                 t = ft.trade
                 writer.writerow([
-                    idx, t.ticker, t.date, t.entry_type, t.exchange,
+                    approved_count, t.ticker, t.date, t.entry_type, t.exchange,
                     f"{t.entry_price:.6f}", f"{t.exit_price:.6f}",
                     f"{t.pnl:.6f}", f"{t.pnl_pct:.4f}",
                     f"{t.net_pnl:.6f}", f"{t.net_pnl_pct:.4f}",
@@ -743,7 +766,7 @@ def save_report(result: PipelineResult, output_dir: Path) -> Path:
                     f"{t.confidence:.1f}", t.regime, f"{t.cost_pct:.4f}",
                     t.currency, t.entry_hour, t.entry_weekday,
                 ])
-        log.info("Trade ledger saved: %s (%d trades)", ledger_path, len(result.all_filtered_trades))
+        log.info("Trade ledger saved: %s (%d approved trades)", ledger_path, approved_count)
     except Exception as e:
         log.warning("Failed to export trade ledger CSV: %s", e)
 
@@ -917,33 +940,74 @@ def run_pipeline(
     except Exception:
         pass
 
-    # --- Step 1: Fetch historical data ---
+    # --- Steps 1+2: Chunked fetch + simulate (avoids OOM on large universes) ---
+    # Fetch and simulate in chunks of SIM_CHUNK_SIZE tickers to bound peak memory.
+    # Each chunk is fetched, simulated, and freed before the next chunk starts.
+    SIM_CHUNK_SIZE = 500
     fetch_start = time.monotonic()
     period = f"{days}d"
-    data = fetch_historical_data(tickers, period=period, interval=interval)
-    elapsed_fetch = time.monotonic() - fetch_start
+    all_trades: List[SimTrade] = []
+    tickers_with_data = 0
+    num_chunks = math.ceil(tickers_requested / SIM_CHUNK_SIZE)
+    sim_elapsed_accum = 0.0
 
-    if not data:
+    for chunk_idx in range(num_chunks):
+        chunk_start_i = chunk_idx * SIM_CHUNK_SIZE
+        chunk_end_i = min(chunk_start_i + SIM_CHUNK_SIZE, tickers_requested)
+        chunk_tickers = tickers[chunk_start_i:chunk_end_i]
+
+        log.info("Chunk %d/%d: fetching tickers %d-%d (%d tickers)...",
+                 chunk_idx + 1, num_chunks, chunk_start_i + 1, chunk_end_i, len(chunk_tickers))
+
+        chunk_data = fetch_historical_data(chunk_tickers, period=period, interval=interval)
+        if not chunk_data:
+            log.warning("Chunk %d: no data fetched, skipping", chunk_idx + 1)
+            continue
+
+        tickers_with_data += len(chunk_data)
+
+        # Simulate trades for this chunk
+        _sim_start = time.monotonic()
+        chunk_trades = 0
+        for ticker, df in chunk_data.items():
+            if ticker in blacklist:
+                continue
+            trades = simulate_ticker(ticker, df)
+            all_trades.extend(trades)
+            chunk_trades += len(trades)
+        sim_elapsed_accum += time.monotonic() - _sim_start
+
+        log.info("Chunk %d/%d complete: %d tickers, %d trades (running total: %d)",
+                 chunk_idx + 1, num_chunks, len(chunk_data), chunk_trades, len(all_trades))
+
+        # Free chunk data immediately to reclaim memory
+        del chunk_data
+        gc.collect()
+
+    elapsed_fetch = time.monotonic() - fetch_start  # includes both fetch and simulate
+    elapsed_simulate = sim_elapsed_accum  # pure simulation time
+
+    if not all_trades and tickers_with_data == 0:
         log.error("No historical data fetched. Aborting.")
         raise RuntimeError("No historical data fetched")
 
-    tickers_with_data = len(data)
-    log.info("Data fetched for %d/%d tickers in %.1fs", tickers_with_data, tickers_requested, elapsed_fetch)
+    log.info("Data fetched for %d/%d tickers; %d raw trades simulated in %.1fs",
+             tickers_with_data, tickers_requested, len(all_trades), elapsed_fetch)
 
-    # --- Step 2: Simulate trades (backfill_simulator logic) ---
-    sim_start = time.monotonic()
-    all_trades: List[SimTrade] = []
-    for ticker, df in data.items():
-        if ticker in blacklist:
-            log.info("  %s: SKIPPED (blacklisted)", ticker)
-            continue
-        trades = simulate_ticker(ticker, df)
-        all_trades.extend(trades)
-        if trades:
-            log.debug("  %s: %d trades", ticker, len(trades))
-
-    elapsed_simulate = time.monotonic() - sim_start
-    log.info("Simulation complete: %d raw trades in %.1fs", len(all_trades), elapsed_simulate)
+    # Compute raw stats in one pass before filter (avoids iterating 16M trades post-filter)
+    _raw_wins = 0
+    _raw_losses = 0
+    _raw_gross_wins = 0.0
+    _raw_gross_losses = 0.0
+    _raw_total_pnl = 0.0
+    for _t in all_trades:
+        _raw_total_pnl += _t.pnl
+        if _t.pnl > 0:
+            _raw_wins += 1
+            _raw_gross_wins += _t.pnl
+        else:
+            _raw_losses += 1
+            _raw_gross_losses += abs(_t.pnl)
 
     # --- Step 3: Initialize risk arbiter and filter ---
     filter_start = time.monotonic()
@@ -957,14 +1021,11 @@ def run_pipeline(
     arbiter.config.daily_trade_limit = 999999
     arbiter.config.system_velocity_max = 999999
     arbiter.config.velocity_check_max_intents = 999999
-    # Widen drawdown thresholds for simulation: the single-equity-stream model processes
-    # thousands of trades/day (vs 3-position live), so live DD thresholds (4%/15%) cascade
-    # unrealistically.  Quality gates (confidence, spread, GARCH, scanner, structural) remain
-    # at live values — these are the gates that actually measure signal quality.
-    arbiter.config.daily_drawdown_pct = 25.0       # live = 4%
-    arbiter.config.weekly_drawdown_pct = 40.0       # live = 7%
-    arbiter.config.peak_drawdown_halt_pct = 60.0    # live = 15%
-    arbiter.config.equity_floor_pct = 30.0          # live = 70%
+    # NOTE: Drawdown gates (CHECK 18/30/31/32) are naturally inactive in backtest because
+    # portfolio.equity is not updated per-trade (stays at STARTING_EQUITY). This is by design:
+    # the single-equity-stream model can't realistically simulate drawdown for 16M+ trades
+    # across 4,600 tickers. Quality gates (confidence, spread, GARCH, scanner, structural)
+    # remain at live values. Equity curve is computed separately in _compute_equity_curve().
 
     log.info(
         "Risk arbiter loaded: confidence_floor=%.1f, spread_veto=%.3f%%, "
@@ -975,24 +1036,37 @@ def run_pipeline(
         len(arbiter.ticker_blacklist),
     )
 
-    filtered_results = filter_trades_through_arbiter(
-        all_trades, arbiter, exchange_map, leverage_map,
-    )
+    # filter_trades_through_arbiter returns (approved_results, veto_counts, missed_winners, vetoed_count)
+    # to avoid keeping 16M+ FilteredTrade objects in RAM (only approved trades are stored).
+    approved_results, streaming_veto_counts, streaming_missed_winners, vetoed_count = \
+        filter_trades_through_arbiter(all_trades, arbiter, exchange_map, leverage_map)
     elapsed_filter = time.monotonic() - filter_start
     log.info("Risk filter complete in %.1fs", elapsed_filter)
 
-    approved_count = sum(1 for ft in filtered_results if ft.approved)
-    vetoed_count = len(filtered_results) - approved_count
+    approved_count = len(approved_results)
+    total_filtered = approved_count + vetoed_count
     log.info("Results: %d approved, %d vetoed (%.1f%% veto rate)",
              approved_count, vetoed_count,
-             vetoed_count / max(len(filtered_results), 1) * 100)
+             vetoed_count / max(total_filtered, 1) * 100)
+
+    # Free raw trades list after filter (they're referenced only via approved_results now)
+    del all_trades
+    gc.collect()
 
     # --- Step 4: Build result ---
     elapsed_total = time.monotonic() - total_start
 
     result = build_pipeline_result(
-        all_trades=all_trades,
-        filtered_results=filtered_results,
+        approved_results=approved_results,
+        streaming_veto_counts=streaming_veto_counts,
+        streaming_missed_winners=streaming_missed_winners,
+        vetoed_count=vetoed_count,
+        raw_total=approved_count + vetoed_count,
+        raw_wins=_raw_wins,
+        raw_losses=_raw_losses,
+        raw_gross_wins=_raw_gross_wins,
+        raw_gross_losses=_raw_gross_losses,
+        raw_total_pnl=_raw_total_pnl,
         days=days,
         interval=interval,
         tickers_requested=tickers_requested,
