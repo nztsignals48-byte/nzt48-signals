@@ -13,6 +13,8 @@ use crate::config::RiskConfig;
 pub enum ConfigError {
     Io(std::io::Error),
     Parse(String),
+    /// Session 28 (Phase 7.3): Config validation failure (pre-SIGHUP safety gate).
+    Validation(Vec<String>),
 }
 
 impl From<std::io::Error> for ConfigError {
@@ -26,6 +28,7 @@ impl std::fmt::Display for ConfigError {
         match self {
             ConfigError::Io(e) => write!(f, "config IO: {e}"),
             ConfigError::Parse(msg) => write!(f, "config parse: {msg}"),
+            ConfigError::Validation(errors) => write!(f, "config validation: {}", errors.join("; ")),
         }
     }
 }
@@ -1407,6 +1410,126 @@ impl EngineConfig {
     /// Load contracts from a standalone path (for hot-reload via SIGHUP).
     pub fn load_contracts_standalone(path: &Path) -> Result<Vec<ContractEntry>, ConfigError> {
         Self::load_contracts(path)
+    }
+
+    /// Session 28 (Phase 7.3): Validate config before applying (pre-SIGHUP safety gate).
+    ///
+    /// Checks for divide-by-zero, NaN/Inf, out-of-bounds, and other crash-prone values.
+    /// Returns Ok(()) if valid, Err(Validation(errors)) if any checks fail.
+    /// MUST be called before applying hot-reloaded config to prevent engine crash.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let mut errors = Vec::new();
+        let r = &self.risk;
+
+        // ── Division-by-zero guards ──
+        if r.max_positions == 0 {
+            errors.push("max_positions=0 (division by zero in heat calc)".into());
+        }
+        if r.portfolio_heat_limit_pct <= 0.0 || !r.portfolio_heat_limit_pct.is_finite() {
+            errors.push(format!("portfolio_heat_limit_pct={} (must be >0, finite)", r.portfolio_heat_limit_pct));
+        }
+
+        // ── Float sanity: NaN/Inf rejection ──
+        if !r.confidence_floor.is_finite() {
+            errors.push(format!("confidence_floor={} (NaN/Inf)", r.confidence_floor));
+        }
+        if !r.daily_drawdown_pct.is_finite() {
+            errors.push(format!("daily_drawdown_pct={} (NaN/Inf)", r.daily_drawdown_pct));
+        }
+        if !r.cash_buffer_pct.is_finite() {
+            errors.push(format!("cash_buffer_pct={} (NaN/Inf)", r.cash_buffer_pct));
+        }
+        if !r.spread_veto_pct.is_finite() {
+            errors.push(format!("spread_veto_pct={} (NaN/Inf)", r.spread_veto_pct));
+        }
+
+        // ── Range checks ──
+        if r.confidence_floor < 0.0 || r.confidence_floor > 100.0 {
+            errors.push(format!("confidence_floor={} (must be [0, 100])", r.confidence_floor));
+        }
+        if r.daily_drawdown_pct <= 0.0 {
+            errors.push(format!("daily_drawdown_pct={} (must be >0, disables halt at 0)", r.daily_drawdown_pct));
+        }
+        if r.daily_drawdown_pct > 20.0 {
+            errors.push(format!("daily_drawdown_pct={} (>20% is dangerously high)", r.daily_drawdown_pct));
+        }
+        if r.cash_buffer_pct >= 100.0 {
+            errors.push(format!("cash_buffer_pct={} (>=100% leaves no capital for trading)", r.cash_buffer_pct));
+        }
+        if r.portfolio_heat_limit_pct > 50.0 {
+            errors.push(format!("portfolio_heat_limit_pct={} (>50% is dangerously concentrated)", r.portfolio_heat_limit_pct));
+        }
+        if r.max_positions > 20 {
+            errors.push(format!("max_positions={} (>20 exceeds ISA diversification sense)", r.max_positions));
+        }
+        if r.spread_veto_pct <= 0.0 {
+            errors.push(format!("spread_veto_pct={} (must be >0, allows infinite-spread trades at 0)", r.spread_veto_pct));
+        }
+
+        // ── Execution config ──
+        if !self.slippage_pct.is_finite() || self.slippage_pct < 0.0 {
+            errors.push(format!("slippage_pct={} (must be >=0, finite)", self.slippage_pct));
+        }
+
+        // ── Costs config ──
+        let c = &self.costs;
+        if !c.round_trip_fee_pct.is_finite() || c.round_trip_fee_pct < 0.0 {
+            errors.push(format!("round_trip_fee_pct={} (must be >=0, finite)", c.round_trip_fee_pct));
+        }
+        if c.round_trip_fee_pct > 5.0 {
+            errors.push(format!("round_trip_fee_pct={} (>5% kills all edge)", c.round_trip_fee_pct));
+        }
+
+        // ── Crucible/equity ──
+        let cr = &self.crucible;
+        if cr.starting_equity_gbp <= 0.0 || !cr.starting_equity_gbp.is_finite() {
+            errors.push(format!("starting_equity_gbp={} (must be >0, finite)", cr.starting_equity_gbp));
+        }
+
+        // ── Chandelier stop ──
+        let ch = &self.chandelier;
+        if ch.atr_floor_pct <= 0.0 || !ch.atr_floor_pct.is_finite() {
+            errors.push(format!("chandelier.atr_floor_pct={} (must be >0, finite — 0 crashes ATR stop)", ch.atr_floor_pct));
+        }
+
+        // ── Kelly ──
+        if r.kelly_ramp_clamp_max <= 0.0 || !r.kelly_ramp_clamp_max.is_finite() {
+            errors.push(format!("kelly_ramp_clamp_max={} (must be >0, finite)", r.kelly_ramp_clamp_max));
+        }
+        if r.kelly_ramp_clamp_min < 0.0 || !r.kelly_ramp_clamp_min.is_finite() {
+            errors.push(format!("kelly_ramp_clamp_min={} (must be >=0, finite)", r.kelly_ramp_clamp_min));
+        }
+        if r.kelly_ramp_clamp_min > r.kelly_ramp_clamp_max {
+            errors.push(format!("kelly_ramp_clamp_min ({}) > kelly_ramp_clamp_max ({})", r.kelly_ramp_clamp_min, r.kelly_ramp_clamp_max));
+        }
+
+        // ── ISA limits ──
+        if r.isa_annual_limit_gbp <= 0.0 || !r.isa_annual_limit_gbp.is_finite() {
+            errors.push(format!("isa_annual_limit_gbp={} (must be >0, finite)", r.isa_annual_limit_gbp));
+        }
+
+        // ── Contracts ──
+        for (idx, contract) in self.contracts.iter().enumerate() {
+            if contract.symbol.is_empty() {
+                errors.push(format!("contracts[{}]: empty symbol", idx));
+            }
+            if contract.leverage < 1 || contract.leverage > 10 {
+                errors.push(format!("contracts[{}] ({}): leverage={} (must be [1,10])", idx, contract.symbol, contract.leverage));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigError::Validation(errors))
+        }
+    }
+
+    /// Validate config.toml at a path without fully loading the engine config.
+    /// Used by pre-SIGHUP validation scripts.
+    pub fn validate_config_file(config_dir: &Path) -> Result<(), ConfigError> {
+        let config = Self::load(config_dir)?;
+        config.validate()
     }
 
     fn load_holidays(path: &Path) -> Result<Vec<String>, ConfigError> {

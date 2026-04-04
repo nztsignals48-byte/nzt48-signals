@@ -155,6 +155,19 @@ try:
 except ImportError:
     _HAS_KALMAN = False
 
+# Session 28→29: Arrow IPC codec for file-based zero-copy bridge (Phase 6.6)
+try:
+    from python_brain.ipc.arrow_codec import TickBatchCodec as _ArrowTickCodec, SignalCodec as _ArrowSignalCodec
+    _HAS_ARROW = True
+except ImportError:
+    _HAS_ARROW = False
+
+# Arrow IPC file paths (tmpfs for zero-copy)
+_ARROW_TICK_PATH = "/dev/shm/aegis_tick.arrow"
+_ARROW_SIGNAL_PATH = "/dev/shm/aegis_signal.arrow"
+_arrow_tick_codec = _ArrowTickCodec() if _HAS_ARROW else None
+_arrow_signal_codec = _ArrowSignalCodec() if _HAS_ARROW else None
+
 # Outlier detection for anomalous signals
 try:
     from python_brain.features.outlier_detector import get_detector as _get_outlier_detector
@@ -637,6 +650,18 @@ _last_vwap_date = {}  # ticker_id → date string "YYYY-MM-DD"
 
 # Ticker ID → symbol mapping (populated from tick messages)
 ticker_symbols = {}
+
+# Session 28: Per-symbol last price cache for Kalman pairs (both legs needed per tick).
+_kalman_price_cache = {}  # symbol → last_price (float)
+# Reverse lookup: symbol → pair_key for ETP_PAIRS
+_KALMAN_PAIR_LOOKUP = {}
+try:
+    from python_brain.strategies.pairs import ETP_PAIRS as _KP_ETP_PAIRS
+    for _kp_name, (_kp_long, _kp_inv) in _KP_ETP_PAIRS.items():
+        _KALMAN_PAIR_LOOKUP[_kp_long] = (_kp_name, "long", _kp_inv)
+        _KALMAN_PAIR_LOOKUP[_kp_inv] = (_kp_name, "inverse", _kp_long)
+except ImportError:
+    _KP_ETP_PAIRS = {}
 
 # ── BOOK 77: CROSS-MARKET LEAD-LAG BUFFER ──
 # Stores recent bar closes per leader symbol for cross-ticker lag detection.
@@ -5243,10 +5268,26 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.flush()
 
     # ── BOOK 125/126: PAIRS SPREAD REVERSION (SIGNAL GENERATOR) ──
+    # Session 28: Kalman hedge filter feeds dynamic hedge ratios into pairs signals.
     pairs_signal = None
     try:
         from python_brain.strategies.pairs import detect_pair_signal
         symbol = ticker_symbols.get(ticker_id, "")
+
+        # Session 28: Feed Kalman price cache + update filter for this pair leg.
+        _kalman_info = None
+        if symbol and _HAS_KALMAN and symbol in _KALMAN_PAIR_LOOKUP:
+            _kp_pair_name, _kp_role, _kp_counterpart = _KALMAN_PAIR_LOOKUP[symbol]
+            _kalman_price_cache[symbol] = msg.get("last", 0.0)
+            _kp_other_price = _kalman_price_cache.get(_kp_counterpart, 0.0)
+            if _kp_other_price > 0 and msg.get("last", 0) > 0:
+                _km = _get_kalman_mgr()
+                # Convention: Y=long (dependent), X=inverse (independent)
+                if _kp_role == "long":
+                    _kalman_info = _km.update_pair(_kp_pair_name, msg["last"], _kp_other_price)
+                else:
+                    _kalman_info = _km.update_pair(_kp_pair_name, _kp_other_price, msg["last"])
+
         if symbol and bars_5m and len(bars_5m) >= 20:
             _pair_sig = detect_pair_signal(
                 symbol=symbol,
@@ -5256,6 +5297,17 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             # detect_pair_signal returns dict with 'confidence', 'z_score' or None
             if _pair_sig and isinstance(_pair_sig, dict):
                 conf_val = _pair_sig.get("confidence", 0)
+                # Session 28: Override z-score with Kalman z-score when available (more adaptive).
+                if _kalman_info and _kalman_info.get("n_obs", 0) >= 60:
+                    _kz = _kalman_info.get("zscore", 0)
+                    if abs(_kz) > 0:
+                        _pair_sig["z_score"] = _kz
+                        _pair_sig["kalman_hedge_ratio"] = _kalman_info.get("hedge_ratio", 1.0)
+                        _pair_sig["kalman_half_life"] = _kalman_info.get("half_life")
+                        # Boost confidence if Kalman agrees with OLS direction
+                        if (_kz > 2.0 and _pair_sig.get("z_score", 0) > 0) or \
+                           (_kz < -2.0 and _pair_sig.get("z_score", 0) < 0):
+                            conf_val = min(95, int(conf_val) + 5)
                 # Ensure confidence is int [0,100]
                 if isinstance(conf_val, (int, float)):
                     _pc = int(conf_val)
@@ -5270,6 +5322,26 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "strategy": "PairsReversion", "z_score": _pair_sig.get("z_score", 0),
                         **common_fields,
                     }
+                    if _kalman_info:
+                        pairs_signal["kalman_hedge_ratio"] = _kalman_info.get("hedge_ratio", 1.0)
+            # Session 28: Kalman-only signal when OLS detect_pair_signal misses but Kalman fires.
+            elif _kalman_info and _kalman_info.get("n_obs", 0) >= 60:
+                _kz = _kalman_info.get("zscore", 0)
+                _khl = _kalman_info.get("half_life")
+                if abs(_kz) >= 2.0 and _khl is not None and _khl < 50.0:
+                    _kconf = min(85, 55 + int((abs(_kz) - 2.0) * 10))
+                    if _kconf >= effective_floor:
+                        kelly = _kelly_for(_kconf)
+                        pairs_signal = {
+                            "type": "signal", "ticker_id": ticker_id,
+                            "direction": "Long" if _kz < -2.0 else "Short",
+                            "confidence": _kconf,
+                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                            "strategy": "PairsReversion", "z_score": round(_kz, 3),
+                            "kalman_hedge_ratio": _kalman_info.get("hedge_ratio", 1.0),
+                            "kalman_half_life": _khl,
+                            **common_fields,
+                        }
     except ImportError:
         pass
     except Exception as e:
@@ -8630,7 +8702,7 @@ def _heartbeat_daemon():
 def main():
     """Main loop: read JSON lines from stdin, write responses to stdout."""
     global _last_heartbeat_time
-    sys.stderr.write("Python Brain Bridge: started\n")
+    sys.stderr.write(f"Python Brain Bridge: started (arrow={'yes' if _HAS_ARROW else 'no'})\n")
     sys.stderr.flush()
 
     # Start background heartbeat daemon (ensures watchdog sees alive signal even if main loop blocks)
@@ -8757,6 +8829,39 @@ def main():
                     pass  # Fail-open on unexpected errors
 
             print(json.dumps(response), flush=True)
+
+        elif msg_type == "arrow_tick" and _HAS_ARROW:
+            # Session 29: Arrow IPC file-based hot path.
+            # Rust writes tick as Arrow IPC to /dev/shm/aegis_tick.arrow,
+            # sends {"type":"arrow_tick"} via stdin. We decode, process, encode
+            # response to /dev/shm/aegis_signal.arrow, ack via stdout.
+            try:
+                with open(_ARROW_TICK_PATH, "rb") as f:
+                    tick_bytes = f.read()
+                tick_dict = _arrow_tick_codec.decode_single(tick_bytes)
+                if tick_dict is None:
+                    response = {"type": "error", "error": "arrow decode returned None"}
+                else:
+                    response = process_tick(tick_dict)
+                    # Schema validation
+                    if response.get("type") == "signal":
+                        try:
+                            from python_brain.validation.signal_schema import NormalizedSignal
+                            _v = NormalizedSignal.from_dict(response)
+                            _v.validate()
+                            response = _v.to_dict()
+                        except (ValueError, ImportError):
+                            pass
+                    # Write response as Arrow IPC
+                    sig_bytes = _arrow_signal_codec.encode(response)
+                    with open(_ARROW_SIGNAL_PATH, "wb") as f:
+                        f.write(sig_bytes)
+            except Exception as e:
+                sys.stderr.write(f"Bridge: arrow_tick error: {e}\n")
+                sys.stderr.flush()
+                response = {"type": "error", "error": str(e)}
+            # Lightweight ack (Rust reads the full response from Arrow file)
+            print(json.dumps({"type": "arrow_ack", "resp_type": response.get("type", "error")}), flush=True)
 
         elif msg_type == "apex_snapshot":
             # P6-I: Apex Scout evaluation for Apex-class tickers (60s OHLCV snapshots).

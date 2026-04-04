@@ -1,7 +1,7 @@
 {
   "_meta": {
     "version": 2,
-    "description": "CANONICAL strategy registry — single source of truth for all 44+ strategy metadata.",
+    "description": "CANONICAL strategy registry — single source of truth for all 51 strategy metadata.",
     "created": "2026-03-24",
     "updated": "2026-04-04",
     "authority": "This file governs live/shadow/disabled status. Code MUST read this.",
@@ -107,11 +107,11 @@
     },
     "PairsReversion": {
       "id": "PairsReversion", "name": "Pairs Reversion", "family": "statistical_arbitrage",
-      "status": "shadow", "description": "Cointegrated pairs trading on spread z-score."
+      "status": "live", "description": "Cointegrated pairs trading on spread z-score. Kalman+OLS hybrid. Activated Session 29."
     },
     "CointPairs": {
       "id": "CointPairs", "name": "Cointegration Pairs", "family": "statistical_arbitrage",
-      "status": "shadow", "description": "Engle-Granger cointegration test + Johansen rank detection."
+      "status": "live", "description": "Engle-Granger cointegration test + Johansen rank detection. Activated Session 29."
     },
     "AlphaFactory": {
       "id": "AlphaFactory", "name": "Alpha Factory", "family": "meta_strategy",
@@ -212,6 +212,10 @@
     "KalmanHedge": {
       "id": "KalmanHedge", "name": "Kalman Filter Dynamic Hedge", "family": "statistical_arbitrage",
       "status": "shadow", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Session 27."
+    },
+    "SectorRotation": {
+      "id": "SectorRotation", "name": "Sector Rotation", "family": "macro_rotation",
+      "status": "live", "description": "Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
     }
   },
   "regime_definitions": {

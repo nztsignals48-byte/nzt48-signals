@@ -24,10 +24,14 @@ ctrlc = "3"
 signal-hook = "0.3"
 chrono = "0.4"
 chrono-tz = "0.8"
+arrow = { version = "53", features = ["ipc"], optional = true }
 
 [features]
 default = []
+arrow_ipc = ["arrow"]
 # STRIPPED: quantum_apex, neural_hawkes, dqn_signal_weighting — theater code removed 2026-03-21
+# Phase 6.6→6.7 (Session 29): Arrow IPC wired. Enable with `--features arrow_ipc`.
+# Python-side codec: python_brain/ipc/arrow_codec.py. Rust-side: python_bridge.rs evaluate_tick_arrow().
 
 # NOTE: cc build-dependency removed — was only needed for quantum_apex.cpp FFI
 # [build-dependencies]

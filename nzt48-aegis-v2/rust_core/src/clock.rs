@@ -409,9 +409,9 @@ mod tests {
     #[test]
     fn test_trading_day() {
         let clock = Clock::new(vec!["2026-12-25".to_string()]);
-        assert!(clock.is_trading_day("2026-03-09", 10 * 3600)); // Normal day
-        assert!(!clock.is_trading_day("2026-12-25", 10 * 3600)); // Holiday
-        assert!(!clock.is_trading_day("2026-03-09", 7 * 3600)); // Before open
+        assert!(clock.is_trading_day("2026-03-09", 10 * 3600, false)); // Normal day (GMT)
+        assert!(!clock.is_trading_day("2026-12-25", 10 * 3600, false)); // Holiday
+        assert!(!clock.is_trading_day("2026-03-09", 7 * 3600, false)); // Before open
     }
 
     // ── BST transition tests ──

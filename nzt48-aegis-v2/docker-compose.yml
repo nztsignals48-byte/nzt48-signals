@@ -44,6 +44,7 @@ services:
       - UW_API_KEY=${UW_API_KEY:-}
       - EODHD_API_KEY=${EODHD_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - QUIVER_API_KEY=${QUIVER_API_KEY:-}
     volumes:
       - ./config:/app/config
       - aegis-events:/app/events

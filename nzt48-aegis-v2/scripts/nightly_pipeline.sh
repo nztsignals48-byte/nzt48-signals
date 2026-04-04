@@ -633,7 +633,7 @@ log "STEP 43: SHAP DONE"
 
 # ── STEP 44: Congressional trading scan (Quiver Quant) ──
 log "STEP 44: Congressional trading scan"
-if python3 -c "from python_brain.feeds.congressional_tracker import run_congressional_scan; run_congressional_scan()" 2>>"$LOG"; then
+if python3 -c "from python_brain.feeds.congressional_tracker import run_smart_money_scan; run_smart_money_scan()" 2>>"$LOG"; then
     log "STEP 44: Congressional DONE"
 else
     log "WARNING: Congressional scan failed (non-critical)"
@@ -667,6 +667,39 @@ else
 fi
 log "STEP 47: Fear/Greed DONE"
 
+# ── STEP 48: Kalman hedge ratio snapshot (Session 28) ──
+log "STEP 48: Kalman hedge snapshot"
+if python3 -c "from python_brain.features.kalman_hedge import save_snapshot; save_snapshot()" 2>>"$LOG"; then
+    log "STEP 48: Kalman hedge snapshot DONE"
+else
+    log "WARNING: Kalman hedge snapshot failed (non-critical)"
+fi
+log "STEP 48: Kalman DONE"
+
+# ── STEP 49: ArcticDB WAL ingestion (Phase 6.3, Session 28) ──
+log "STEP 49: ArcticDB WAL ingestion"
+if python3 -c "from python_brain.warehouse.arcticdb_store import ingest_today_wal; n = ingest_today_wal(); print(f'ArcticDB: {n} records ingested')" 2>>"$LOG"; then
+    log "STEP 49: ArcticDB ingestion DONE"
+else
+    log "WARNING: ArcticDB ingestion failed (non-critical)"
+fi
+log "STEP 49: ArcticDB DONE"
+
+# ── STEP 50: ArcticDB compaction (Phase 6.3, Session 29) ──
+# Reclaim LMDB space after version deletes. Run weekly (Sunday) to avoid nightly latency.
+DOW=$(date +%u)  # 1=Mon ... 7=Sun
+if [ "$DOW" -eq 7 ]; then
+    log "STEP 50: ArcticDB compaction (Sunday)"
+    if python3 -c "from python_brain.warehouse.arcticdb_store import get_store; get_store().compact(); print('ArcticDB: compaction complete')" 2>>"$LOG"; then
+        log "STEP 50: ArcticDB compaction DONE"
+    else
+        log "WARNING: ArcticDB compaction failed (non-critical)"
+    fi
+else
+    log "STEP 50: ArcticDB compaction SKIPPED (not Sunday, DOW=$DOW)"
+fi
+log "STEP 50: ArcticDB compact DONE"
+
 log "=========================================="
-log "NIGHTLY PIPELINE COMPLETE (47 steps)"
+log "NIGHTLY PIPELINE COMPLETE (50 steps)"
 log "=========================================="

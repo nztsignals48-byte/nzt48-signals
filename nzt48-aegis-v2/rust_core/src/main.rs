@@ -138,6 +138,13 @@ fn main() {
         eprintln!("V10: WAL schema version={}", expected_schema);
     }
 
+    // Session 28 (Phase 7.3): Full config validation at startup — catches NaN, div-by-zero, bounds.
+    if let Err(e) = config.validate() {
+        eprintln!("FATAL [Phase 7.3]: Config validation failed: {e}");
+        std::process::exit(1);
+    }
+    eprintln!("CONFIG VALIDATION: all checks passed");
+
     // N8b: Live mode startup assertions — refuse to trade if params are unsafe
     if IS_LIVE {
         let r = &config.risk;
@@ -680,8 +687,13 @@ fn main() {
             }
 
             // HOT-RELOAD: Also reload dynamic_weights.toml (config_writer sends SIGHUP after writing)
+            // Session 28 (Phase 7.3): Validate dynamic weights before applying.
             let new_dw = ouroboros_loader::load_dynamic_weights(&config_dir);
-            if (new_dw.chandelier_atr_mult - dw.chandelier_atr_mult).abs() > 1e-6
+            if new_dw.chandelier_atr_mult <= 0.0 || !new_dw.chandelier_atr_mult.is_finite() {
+                eprintln!("HOT-RELOAD REJECTED: chandelier_atr_mult={} (invalid — must be >0, finite)", new_dw.chandelier_atr_mult);
+            } else if new_dw.bayesian_win_rate < 0.0 || new_dw.bayesian_win_rate > 1.0 || !new_dw.bayesian_win_rate.is_finite() {
+                eprintln!("HOT-RELOAD REJECTED: bayesian_win_rate={} (invalid — must be [0, 1], finite)", new_dw.bayesian_win_rate);
+            } else if (new_dw.chandelier_atr_mult - dw.chandelier_atr_mult).abs() > 1e-6
                 || (new_dw.bayesian_win_rate - dw.bayesian_win_rate).abs() > 1e-6
                 || new_dw.kelly_fractions != dw.kelly_fractions
             {

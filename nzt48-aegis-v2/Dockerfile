@@ -37,7 +37,8 @@ RUN cd rust_core && maturin build --release --interpreter python3.12
 FROM python:3.12-bookworm
 
 # tini: lightweight init for PID 1 — reaps zombie child processes
-RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+# liblmdb0: LMDB C library required by ArcticDB (Phase 6.3)
+RUN apt-get update && apt-get install -y --no-install-recommends tini liblmdb0 && rm -rf /var/lib/apt/lists/*
 
 # Sprint S03: Node.js 22 + Claude Code CLI ($0/month via Max subscription)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

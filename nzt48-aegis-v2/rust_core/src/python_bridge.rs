@@ -546,6 +546,226 @@ impl PythonBridge {
         })
     }
 
+    /// Arrow IPC version of evaluate_tick — writes tick as Arrow IPC to /dev/shm,
+    /// signals Python via stdin, reads response from /dev/shm Arrow file.
+    /// Feature-gated behind `arrow_ipc`. Falls back to JSON on any error.
+    #[cfg(feature = "arrow_ipc")]
+    pub fn evaluate_tick_arrow(
+        &mut self,
+        tick: &MarketTick,
+        high: f64,
+        low: f64,
+        ctx: &TickContext,
+    ) -> Option<BrainSignal> {
+        use arrow::array::*;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::ipc::writer::StreamWriter;
+        use arrow::ipc::reader::StreamReader;
+        use arrow::record_batch::RecordBatch;
+        use std::sync::Arc;
+
+        let regime_str = match ctx.regime {
+            RiskRegime::Normal => "normal",
+            RiskRegime::Reduce => "reduce",
+            RiskRegime::Flatten => "flatten",
+            RiskRegime::Halt => "halt",
+        };
+        let leverage = self.leverage_map.get(&tick.ticker_id).copied().unwrap_or(ctx.leverage);
+
+        // Build Arrow record batch matching TICK_SCHEMA from arrow_codec.py
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("ticker_id", DataType::UInt32, false),
+            Field::new("last", DataType::Float64, false),
+            Field::new("high", DataType::Float64, false),
+            Field::new("low", DataType::Float64, false),
+            Field::new("bid", DataType::Float64, false),
+            Field::new("ask", DataType::Float64, false),
+            Field::new("volume", DataType::UInt64, false),
+            Field::new("timestamp_ns", DataType::UInt64, false),
+            Field::new("win_rate", DataType::Float64, false),
+            Field::new("total_trades", DataType::UInt32, false),
+            Field::new("avg_win", DataType::Float64, false),
+            Field::new("avg_loss", DataType::Float64, false),
+            Field::new("leverage", DataType::UInt32, false),
+            Field::new("realized_vol", DataType::Float64, false),
+            Field::new("correlation", DataType::Float64, false),
+            Field::new("drawdown_pct", DataType::Float64, false),
+            Field::new("amihud", DataType::Float64, false),
+            Field::new("regime", DataType::Utf8, false),
+            Field::new("spread_pct", DataType::Float64, false),
+            Field::new("time_fraction", DataType::Float64, false),
+            Field::new("heat_pct", DataType::Float64, false),
+            Field::new("equity", DataType::Float64, false),
+            Field::new("vix", DataType::Float64, false),
+            Field::new("london_time_secs", DataType::UInt32, false),
+            Field::new("gap_pct", DataType::Float64, false),
+            Field::new("symbol", DataType::Utf8, false),
+            Field::new("open_positions", DataType::UInt32, false),
+            Field::new("trades_today", DataType::UInt32, false),
+        ]));
+
+        let batch = match RecordBatch::try_new(schema.clone(), vec![
+            Arc::new(UInt32Array::from(vec![tick.ticker_id.0])),
+            Arc::new(Float64Array::from(vec![tick.last])),
+            Arc::new(Float64Array::from(vec![high])),
+            Arc::new(Float64Array::from(vec![low])),
+            Arc::new(Float64Array::from(vec![tick.bid])),
+            Arc::new(Float64Array::from(vec![tick.ask])),
+            Arc::new(UInt64Array::from(vec![tick.volume])),
+            Arc::new(UInt64Array::from(vec![tick.timestamp_ns])),
+            Arc::new(Float64Array::from(vec![ctx.win_rate])),
+            Arc::new(UInt32Array::from(vec![ctx.total_trades])),
+            Arc::new(Float64Array::from(vec![ctx.avg_win])),
+            Arc::new(Float64Array::from(vec![ctx.avg_loss])),
+            Arc::new(UInt32Array::from(vec![leverage])),
+            Arc::new(Float64Array::from(vec![ctx.realized_vol])),
+            Arc::new(Float64Array::from(vec![ctx.correlation])),
+            Arc::new(Float64Array::from(vec![ctx.drawdown_pct])),
+            Arc::new(Float64Array::from(vec![ctx.amihud])),
+            Arc::new(StringArray::from(vec![regime_str])),
+            Arc::new(Float64Array::from(vec![ctx.spread_pct])),
+            Arc::new(Float64Array::from(vec![ctx.time_fraction])),
+            Arc::new(Float64Array::from(vec![ctx.heat_pct])),
+            Arc::new(Float64Array::from(vec![ctx.equity])),
+            Arc::new(Float64Array::from(vec![ctx.vix])),
+            Arc::new(UInt32Array::from(vec![ctx.london_time_secs])),
+            Arc::new(Float64Array::from(vec![ctx.gap_pct])),
+            Arc::new(StringArray::from(vec![ctx.symbol.as_str()])),
+            Arc::new(UInt32Array::from(vec![ctx.open_positions])),
+            Arc::new(UInt32Array::from(vec![ctx.trades_today])),
+        ]) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Arrow IPC: batch creation failed: {e}, falling back to JSON");
+                return self.evaluate_tick(tick, high, low, ctx);
+            }
+        };
+
+        // Write to /dev/shm
+        let tick_path = "/dev/shm/aegis_tick.arrow";
+        let mut file = match std::fs::File::create(tick_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Arrow IPC: cannot create {tick_path}: {e}, falling back to JSON");
+                return self.evaluate_tick(tick, high, low, ctx);
+            }
+        };
+
+        let mut writer = match StreamWriter::try_new(&mut file, &schema) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Arrow IPC: stream writer failed: {e}, falling back to JSON");
+                return self.evaluate_tick(tick, high, low, ctx);
+            }
+        };
+        if writer.write(&batch).is_err() || writer.finish().is_err() {
+            eprintln!("Arrow IPC: write failed, falling back to JSON");
+            return self.evaluate_tick(tick, high, low, ctx);
+        }
+        drop(file);
+
+        // Signal Python to read the Arrow file
+        if writeln!(self.stdin, r#"{{"type":"arrow_tick"}}"#).is_err() {
+            self.needs_respawn = true;
+            return None;
+        }
+        let _ = self.stdin.flush();
+
+        // Read ack from Python (lightweight JSON with resp_type)
+        let ack_line = match self.read_line_timeout() {
+            Some(line) => line,
+            None => return None,
+        };
+
+        let ack: serde_json::Value = match serde_json::from_str(ack_line.trim()) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+
+        let resp_type = ack.get("resp_type").and_then(|v| v.as_str()).unwrap_or("error");
+        if resp_type != "signal" {
+            return None;
+        }
+
+        // Read full signal response from Arrow file
+        let signal_path = "/dev/shm/aegis_signal.arrow";
+        let signal_file = match std::fs::File::open(signal_path) {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+        let reader = match StreamReader::try_new(signal_file, None) {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+
+        for batch_result in reader {
+            let batch = match batch_result {
+                Ok(b) => b,
+                Err(_) => return None,
+            };
+            if batch.num_rows() == 0 { return None; }
+
+            // Extract fields from Arrow batch
+            let get_f64 = |name: &str| -> f64 {
+                batch.column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                    .map(|a| a.value(0))
+                    .unwrap_or(0.0)
+            };
+            let get_i32 = |name: &str| -> i32 {
+                batch.column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<Int32Array>())
+                    .map(|a| a.value(0))
+                    .unwrap_or(0)
+            };
+            let get_str = |name: &str| -> String {
+                batch.column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .and_then(|a| if a.is_null(0) { None } else { Some(a.value(0).to_string()) })
+                    .unwrap_or_default()
+            };
+            let get_opt_f64 = |name: &str| -> Option<f64> {
+                batch.column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                    .and_then(|a| if a.is_null(0) || a.value(0) == 0.0 { None } else { Some(a.value(0)) })
+            };
+            let get_opt_str = |name: &str| -> Option<String> {
+                batch.column_by_name(name)
+                    .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                    .and_then(|a| if a.is_null(0) || a.value(0).is_empty() { None } else { Some(a.value(0).to_string()) })
+            };
+
+            self.consecutive_errors = 0;
+            self.consecutive_empty = 0;
+
+            return Some(BrainSignal {
+                direction: get_str("direction"),
+                confidence: get_f64("confidence"),
+                kelly_fraction: get_f64("kelly_fraction"),
+                shares: get_i32("shares") as u32,
+                strategy: get_str("strategy"),
+                rvol: get_f64("rvol"),
+                hurst: get_f64("hurst"),
+                adx: get_f64("adx"),
+                vol_slope: get_f64("vol_slope"),
+                vwap_dist_pct: get_f64("vwap_dist_pct"),
+                structural_score: get_f64("structural_score"),
+                entry_type: get_str("entry_type"),
+                rsi: get_f64("rsi"),
+                ibs: get_f64("ibs"),
+                suggested_initial_stop_atr_mult: get_opt_f64("suggested_initial_stop_atr_mult"),
+                suggested_rung3_atr: None,
+                exit_trail_bias: get_opt_str("exit_trail_bias"),
+                max_hold_hours: get_opt_f64("max_hold_hours"),
+                suggested_max_hold_hours: None,
+                exit_urgency_ramp_hours: None,
+                min_profit_target_pct: None,
+                execution_algo: get_opt_str("execution_algo"),
+            });
+        }
+        None
+    }
+
     /// Send 60-second OHLCV snapshots to ApexScout for evaluation.
     /// Returns None if no signal or if communication fails.
     pub fn evaluate_apex_snapshot(
@@ -709,6 +929,12 @@ mod tests {
                 time_fraction: 0.6,
                 heat_pct: 3.2,
                 equity: 10_500.0,
+                vix: 0.0,
+                london_time_secs: 0,
+                gap_pct: 0.0,
+                symbol: String::new(),
+                open_positions: 0,
+                trades_today: 0,
             };
             // Prevent optimization elision
             std::hint::black_box(&ctx);

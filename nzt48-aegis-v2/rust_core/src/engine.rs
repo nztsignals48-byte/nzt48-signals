@@ -359,6 +359,8 @@ pub struct Engine<B: BrokerAdapter> {
     pub sector_rotation_scanner: SectorRotationScanner,
     /// Per-ticker MomentumScanner scores (wired into scanner_score in EvalContext).
     pub scanner_scores: HashMap<TickerId, f64>,
+    /// Session 28: Last time SectorRotationScanner was recomputed (ns, 60s cadence).
+    pub last_sector_recompute_ns: u64,
     /// P3-D: Executioner for order lifecycle management.
     pub executioner: Executioner,
     /// P3-D: SmartRouter for cost-based order routing (passthrough in Crucible).
@@ -614,6 +616,7 @@ impl<B: BrokerAdapter> Engine<B> {
             momentum_scanner: MomentumScanner::new(30.0, 10), // Score threshold 30, max 10 candidates
             sector_rotation_scanner: SectorRotationScanner::new(0.05, 10), // 5% rotation strength threshold, max 10 candidates
             scanner_scores: HashMap::new(),
+            last_sector_recompute_ns: 0,
             executioner: Executioner::new(),
             smart_router: SmartRouter::with_costs(IsaGate::new("2026-04-06"), ibkr_commission),
             subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
@@ -871,6 +874,9 @@ impl<B: BrokerAdapter> Engine<B> {
                 .insert(ticker_id, BarHistory::new(500));
             // P5-C: Register ticker in Thompson sampler for allocation learning.
             self.thompson_sampler.register(ticker_id);
+            // Session 28: Register ticker in SectorRotationScanner for sector leadership tracking.
+            let sector = sector_for_ticker(ticker_id);
+            self.sector_rotation_scanner.register_ticker(ticker_id, &format!("{:?}", sector));
             eprintln!(
                 "STARTUP: registered ticker={} symbol={} class={:?}",
                 idx, ticker.symbol, class
@@ -1609,7 +1615,7 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // AUDIT (Session 27): MomentumScanner — wired to process_apex_tick(), scores buffered.
-        // SectorRotationScanner — fed via nightly pipeline sector snapshots.
+        // WIRED (Session 28): SectorRotationScanner — fed on every tick, recomputed every 60s.
         // scanner_score — wired from sig.confidence in EvalContext.
         // WIRED: MomentumScanner score feeds into scanner_score in EvalContext (line ~1850).
         // Feed ALL tickers through MomentumScanner for universal scoring.
@@ -1617,6 +1623,28 @@ impl<B: BrokerAdapter> Engine<B> {
             let atr = self.current_atr(tid);
             if let Some(candidate) = self.momentum_scanner.on_tick(tid, tick.last, tick.volume as u64, atr, self.now_ns) {
                 self.scanner_scores.insert(tid, candidate.score);
+            }
+        }
+        // Session 28: Feed SectorRotationScanner with price snapshots and recompute every 60s.
+        {
+            self.sector_rotation_scanner.on_snapshot(tid, tick.last);
+            // Recompute sectors every 60s (reuse last_sector_recompute_ns timestamp).
+            let sixty_sec_ns = 60_000_000_000u64;
+            if self.now_ns.saturating_sub(self.last_sector_recompute_ns) >= sixty_sec_ns {
+                self.sector_rotation_scanner.recompute_sectors();
+                let candidates = self.sector_rotation_scanner.rotation_candidates(self.now_ns);
+                for c in &candidates {
+                    // Merge rotation score: take max of existing momentum score vs rotation score.
+                    let existing = self.scanner_scores.get(&c.ticker_id).copied().unwrap_or(0.0);
+                    if c.score > existing {
+                        self.scanner_scores.insert(c.ticker_id, c.score);
+                    }
+                }
+                if !candidates.is_empty() {
+                    eprintln!("SECTOR_ROTATION: {} candidates emitted, top score={:.1}",
+                        candidates.len(), candidates[0].score);
+                }
+                self.last_sector_recompute_ns = self.now_ns;
             }
         }
 
