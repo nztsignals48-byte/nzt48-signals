@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -513,15 +514,48 @@ def _get_session_preferred_tickers(session_window: str) -> List[str]:
     except (ValueError, IndexError):
         return []
 
-    # WIRED (Sprint 3 / Sprint 7A): Dynamic session-preferred tickers.
-    # Previously hardcoded 12 LSE ETPs. Now returns empty — preferences are driven by:
-    # 1. Thompson Sampler top-K ranking (/app/data/thompson_top_k.json)
-    # 2. Ouroboros per-session performance stats
-    # 3. Scanner results from IBKR
-    # The calling code falls back to general ranking when this returns empty.
-    # TODO(Sprint 6): Load session preferences from Ouroboros persistent_memory
-    #   based on per-session win rate per instrument.
-    return []
+    # WIRED (Session 27): Load Thompson Sampler top-K ranking from Rust engine.
+    # Rust engine writes thompson_top_k.json with top 5 tickers ranked by
+    # expected return (Log-Normal Thompson Sampling, Russo et al. 2018).
+    # These become "preferred tickers" and get +30 session_fit bonus.
+    import json as _json
+    from pathlib import Path as _Path
+
+    thompson_path = _Path(os.environ.get("AEGIS_DATA_DIR", "/app/data")) / "thompson_top_k.json"
+    preferred = []
+    try:
+        if thompson_path.exists():
+            _age = time.time() - thompson_path.stat().st_mtime
+            if _age < 3600:  # Only use if < 1 hour old
+                with open(thompson_path) as _f:
+                    _data = _json.load(_f)
+                # Format: list of {"ticker_id": N, "expected_return": X, "pulls": N}
+                if isinstance(_data, list):
+                    # Map ticker_ids to symbols via contracts.toml
+                    _contracts_path = os.environ.get("AEGIS_CONFIG_DIR", "/app/config") + "/contracts.toml"
+                    _id_to_sym = {}
+                    try:
+                        try:
+                            import tomllib as _tomllib
+                        except ImportError:
+                            import tomli as _tomllib
+                        with open(_contracts_path, "rb") as _cf:
+                            _cfg = _tomllib.load(_cf)
+                        for c in _cfg.get("contracts", []):
+                            if c.get("ticker_id") and c.get("symbol"):
+                                _id_to_sym[c["ticker_id"]] = c["symbol"]
+                    except Exception:
+                        pass
+                    for entry in _data[:10]:
+                        tid = entry.get("ticker_id")
+                        sym = _id_to_sym.get(tid)
+                        if sym:
+                            preferred.append(sym)
+                    if preferred:
+                        log.info("Thompson preferred tickers: %s", preferred[:5])
+    except Exception:
+        pass
+    return preferred
 
 
 # ---------------------------------------------------------------------------

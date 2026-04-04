@@ -142,15 +142,12 @@ mod tests {
         assert_eq!(format!("{}", mode), "DARK", "Dark displays as DARK");
     }
 
-    /// Test 6.11: Legacy mode compat — all display as ACTIVE
+    /// Test 6.11: Session modes display correctly
     #[test]
-    #[allow(deprecated)]
-    fn test_legacy_modes_display_active() {
-        assert_eq!(format!("{}", SessionMode::ModeA), "ACTIVE");
-        assert_eq!(format!("{}", SessionMode::ModeB), "ACTIVE");
-        assert_eq!(format!("{}", SessionMode::ModeBPlus), "ACTIVE");
-        assert_eq!(format!("{}", SessionMode::ModeC), "ACTIVE");
-        assert_eq!(format!("{}", SessionMode::Auction), "ACTIVE");
+    fn test_session_modes_display() {
+        assert_eq!(format!("{}", SessionMode::Active), "ACTIVE");
+        assert_eq!(format!("{}", SessionMode::Dark), "DARK");
+        assert_eq!(format!("{}", SessionMode::Carry), "CARRY");
     }
 
     /// Test 6.12: Entries and scanning in Active

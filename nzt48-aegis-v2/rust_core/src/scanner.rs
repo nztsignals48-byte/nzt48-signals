@@ -1,6 +1,6 @@
-//! Phase 13: HotScanner + RotationScanner signal stack.
-//! HotScanner: volatility-momentum scanner for Vanguard tickers (continuous ticks).
-//! RotationScanner: sector rotation scanner for Apex tickers (60s snapshots).
+//! Signal Scanner Stack — institutional multi-strategy signal generation.
+//! MomentumScanner: volatility-momentum scanner for all tickers (continuous ticks).
+//! SectorRotationScanner: sector rotation scanner for sector-level snapshots.
 //! Both produce ranked signal candidates for the Python Brain to refine.
 
 use std::collections::HashMap;
@@ -25,15 +25,17 @@ pub struct SignalCandidate {
 /// Scanner that produced the signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScannerSource {
-    HotScanner,
-    RotationScanner,
+    /// Real-time volatility-momentum scanner (tick-level).
+    MomentumScanner,
+    /// Sector rotation scanner (60s snapshots, relative strength).
+    SectorRotation,
 }
 
 // ────────────────────────────────────────────
-// HotScanner: volatility + momentum on Vanguard tickers
+// MomentumScanner: volatility + momentum on all active tickers
 // ────────────────────────────────────────────
 
-/// Per-ticker tracking state for the HotScanner.
+/// Per-ticker tracking state for the MomentumScanner.
 #[derive(Clone, Debug)]
 struct HotState {
     /// Recent tick prices for momentum calculation (last N ticks).
@@ -133,8 +135,8 @@ impl HotState {
     }
 }
 
-/// HotScanner: real-time volatility-momentum signal generator.
-pub struct HotScanner {
+/// MomentumScanner: real-time volatility-momentum signal generator.
+pub struct MomentumScanner {
     states: HashMap<TickerId, HotState>,
     /// P5-B: Per-ticker Student-t Kalman filters for price smoothing.
     kalman_filters: HashMap<TickerId, StudentTKalmanFilter>,
@@ -144,7 +146,7 @@ pub struct HotScanner {
     pub max_candidates: usize,
 }
 
-impl HotScanner {
+impl MomentumScanner {
     pub fn new(score_threshold: f64, max_candidates: usize) -> Self {
         Self {
             states: HashMap::new(),
@@ -186,7 +188,7 @@ impl HotScanner {
                 ticker_id,
                 score,
                 direction_bias: state.momentum,
-                source: ScannerSource::HotScanner,
+                source: ScannerSource::MomentumScanner,
                 timestamp_ns: now_ns,
             })
         } else {
@@ -204,7 +206,7 @@ impl HotScanner {
                 ticker_id: tid,
                 score: s.last_score,
                 direction_bias: s.momentum,
-                source: ScannerSource::HotScanner,
+                source: ScannerSource::MomentumScanner,
                 timestamp_ns: now_ns,
             })
             .collect();
@@ -225,7 +227,7 @@ impl HotScanner {
 }
 
 // ────────────────────────────────────────────
-// RotationScanner: sector rotation on Apex tickers
+// SectorRotationScanner: sector rotation signal generation
 // ────────────────────────────────────────────
 
 /// Sector performance tracker.
@@ -244,8 +246,8 @@ struct SectorState {
     relative_strength: f64,
 }
 
-/// RotationScanner: identifies sector leadership changes.
-pub struct RotationScanner {
+/// SectorRotationScanner: identifies sector leadership changes.
+pub struct SectorRotationScanner {
     sectors: HashMap<String, SectorState>,
     /// Per-ticker return tracking (60s snapshots).
     ticker_returns: HashMap<TickerId, f64>,
@@ -257,7 +259,7 @@ pub struct RotationScanner {
     pub max_candidates: usize,
 }
 
-impl RotationScanner {
+impl SectorRotationScanner {
     pub fn new(rotation_threshold: f64, max_candidates: usize) -> Self {
         Self {
             sectors: HashMap::new(),
@@ -356,7 +358,7 @@ impl RotationScanner {
                         ticker_id: tid,
                         score: score.min(100.0),
                         direction_bias: ret,
-                        source: ScannerSource::RotationScanner,
+                        source: ScannerSource::SectorRotation,
                         timestamp_ns: now_ns,
                     });
                 }
@@ -385,11 +387,11 @@ impl RotationScanner {
 mod tests {
     use super::*;
 
-    // ── HotScanner tests ──
+    // ── MomentumScanner tests ──
 
     #[test]
     fn test_hot_scanner_below_threshold_no_signal() {
-        let mut scanner = HotScanner::new(50.0, 10);
+        let mut scanner = MomentumScanner::new(50.0, 10);
         // Low-volume, low-momentum tick
         let result = scanner.on_tick(TickerId(1), 100.0, 100, 1.0, 1_000_000_000);
         assert!(result.is_none());
@@ -397,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_hot_scanner_volume_surge_generates_signal() {
-        let mut scanner = HotScanner::new(30.0, 10);
+        let mut scanner = MomentumScanner::new(30.0, 10);
         // Build up baseline volume (20 ticks at volume=1000)
         for i in 0..20 {
             scanner.on_tick(TickerId(1), 100.0 + i as f64 * 0.1, 1000, 2.0, i * 1_000_000_000);
@@ -406,13 +408,13 @@ mod tests {
         let result = scanner.on_tick(TickerId(1), 102.0, 5000, 2.0, 20_000_000_000);
         assert!(result.is_some());
         let sig = result.expect("signal");
-        assert_eq!(sig.source, ScannerSource::HotScanner);
+        assert_eq!(sig.source, ScannerSource::MomentumScanner);
         assert!(sig.score >= 30.0);
     }
 
     #[test]
     fn test_hot_scanner_top_candidates_ranked() {
-        let mut scanner = HotScanner::new(20.0, 5);
+        let mut scanner = MomentumScanner::new(20.0, 5);
         // Ticker 1: moderate activity
         for i in 0..25 {
             scanner.on_tick(TickerId(1), 100.0 + i as f64 * 0.1, 1000, 2.0, i * 1_000_000_000);
@@ -432,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_hot_scanner_max_candidates_limit() {
-        let mut scanner = HotScanner::new(0.0, 3); // threshold=0 → all emit
+        let mut scanner = MomentumScanner::new(0.0, 3); // threshold=0 → all emit
         for tid in 0..10 {
             for i in 0..25 {
                 scanner.on_tick(
@@ -450,18 +452,18 @@ mod tests {
 
     #[test]
     fn test_hot_scanner_reset() {
-        let mut scanner = HotScanner::new(50.0, 10);
+        let mut scanner = MomentumScanner::new(50.0, 10);
         scanner.on_tick(TickerId(1), 100.0, 1000, 2.0, 1_000_000_000);
         assert_eq!(scanner.tracked_count(), 1);
         scanner.reset();
         assert_eq!(scanner.tracked_count(), 0);
     }
 
-    // ── RotationScanner tests ──
+    // ── SectorRotationScanner tests ──
 
     #[test]
     fn test_rotation_scanner_register_tickers() {
-        let mut scanner = RotationScanner::new(0.005, 10);
+        let mut scanner = SectorRotationScanner::new(0.005, 10);
         scanner.register_ticker(TickerId(1), "Technology");
         scanner.register_ticker(TickerId(2), "Technology");
         scanner.register_ticker(TickerId(3), "Energy");
@@ -470,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_rotation_scanner_snapshot_updates() {
-        let mut scanner = RotationScanner::new(0.005, 10);
+        let mut scanner = SectorRotationScanner::new(0.005, 10);
         scanner.register_ticker(TickerId(1), "Technology");
 
         // First snapshot: no return (no previous price)
@@ -486,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_rotation_scanner_sector_recompute() {
-        let mut scanner = RotationScanner::new(0.005, 10);
+        let mut scanner = SectorRotationScanner::new(0.005, 10);
         scanner.register_ticker(TickerId(1), "Tech");
         scanner.register_ticker(TickerId(2), "Tech");
         scanner.register_ticker(TickerId(3), "Energy");
@@ -511,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_rotation_scanner_candidates() {
-        let mut scanner = RotationScanner::new(0.001, 10);
+        let mut scanner = SectorRotationScanner::new(0.001, 10);
         scanner.register_ticker(TickerId(1), "Tech");
         scanner.register_ticker(TickerId(2), "Energy");
 
@@ -530,14 +532,14 @@ mod tests {
         let candidates = scanner.rotation_candidates(5_000_000_000);
         // Tech should appear as a rotation candidate (improving relative strength)
         if !candidates.is_empty() {
-            assert_eq!(candidates[0].source, ScannerSource::RotationScanner);
+            assert_eq!(candidates[0].source, ScannerSource::SectorRotation);
             assert!(candidates[0].score > 0.0);
         }
     }
 
     #[test]
     fn test_rotation_scanner_reset() {
-        let mut scanner = RotationScanner::new(0.005, 10);
+        let mut scanner = SectorRotationScanner::new(0.005, 10);
         scanner.register_ticker(TickerId(1), "Tech");
         assert_eq!(scanner.sector_count(), 1);
         scanner.reset();
@@ -550,7 +552,7 @@ mod tests {
             ticker_id: TickerId(5),
             score: 75.0,
             direction_bias: 0.015,
-            source: ScannerSource::HotScanner,
+            source: ScannerSource::MomentumScanner,
             timestamp_ns: 1_000_000_000,
         };
         assert_eq!(c.ticker_id, TickerId(5));

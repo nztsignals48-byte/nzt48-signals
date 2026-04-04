@@ -1,8 +1,9 @@
 {
   "_meta": {
-    "version": 1,
-    "description": "CANONICAL strategy registry — single source of truth for all strategy metadata.",
+    "version": 2,
+    "description": "CANONICAL strategy registry — single source of truth for all 44+ strategy metadata.",
     "created": "2026-03-24",
+    "updated": "2026-04-04",
     "authority": "This file governs live/shadow/disabled status. Code MUST read this.",
     "rules": [
       "Every strategy has exactly ONE entry here.",
@@ -12,202 +13,205 @@
     ]
   },
   "strategies": {
-    "TypeB_EarlyRunner": {
-      "id": "TypeB",
-      "name": "Early Runner (Momentum Continuation)",
-      "family": "momentum",
-      "status": "live",
-      "description": "3-bar rising RVOL with RSI 30-70. Best backtest edge (52.4% WR, PF 1.96).",
-      "python_source": "VanguardSniper",
-      "python_classifier": "bridge.py:classify_entry_type → TypeB",
-      "rust_detector": "entry_engine.rs:EarlyRunnerDetector (QUARANTINED — not called at runtime)",
-      "config_path": "config.toml [entry_types] type_b_*",
-      "strategies_toml": null,
-      "backtest_tag": "TypeB",
-      "nightly_tag": "TypeB",
-      "reporting_tag": "TypeB",
-      "regime_allowed": ["trend_up", "trend_down", "high_vol_trend", "low_vol_compression"],
-      "regime_blocked": ["high_vol_chop", "event_distorted"],
-      "regime_reduced": [],
-      "session_allowed": ["lse_main", "us_open", "us_power_hour", "asia_main"],
-      "session_blocked": ["us_premarket", "us_after_hours"]
+    "S1_Microstructure": {
+      "id": "S1", "name": "Microstructure Alpha", "family": "microstructure",
+      "status": "live", "description": "Spread/volume microstructure edge detection. Primary alpha source."
     },
-    "VanguardSniper_Momentum": {
-      "id": "VanguardSniper",
-      "name": "Vanguard Sniper (Base Momentum)",
-      "family": "momentum",
-      "status": "live",
-      "description": "Multi-factor momentum scoring. Only proven signal producer (33 trades).",
-      "python_source": "VanguardSniper (bridge.py:1302)",
-      "python_classifier": "Unclassified (when not matching TypeA-F)",
-      "rust_detector": null,
-      "config_path": "python_brain/brain/config.py",
-      "strategies_toml": null,
-      "backtest_tag": "VanguardSniper",
-      "nightly_tag": "VanguardSniper",
-      "reporting_tag": "Momentum",
-      "regime_allowed": ["trend_up", "high_vol_trend", "low_vol_compression"],
-      "regime_blocked": ["high_vol_chop"],
-      "regime_reduced": ["trend_down", "event_distorted"],
-      "session_allowed": ["lse_main", "us_open", "us_power_hour", "asia_main"],
-      "session_blocked": ["us_premarket", "us_after_hours"]
+    "S2_Reversion": {
+      "id": "S2", "name": "Mean Reversion", "family": "mean_reversion",
+      "status": "live", "description": "Statistical mean reversion on z-score extremes."
+    },
+    "S3_MacroTrend": {
+      "id": "S3", "name": "Macro Trend Following", "family": "trend",
+      "status": "disabled", "description": "Macro-driven trend following. Disabled: insufficient edge in backtest."
+    },
+    "S4_VolPremium": {
+      "id": "S4", "name": "Volatility Premium", "family": "volatility",
+      "status": "live", "description": "Short-vol premium harvesting + long-vol rebound. Modes: short_vol, long_rebound."
+    },
+    "S5_OvernightCarry": {
+      "id": "S5", "name": "Overnight Carry", "family": "carry",
+      "status": "disabled", "description": "Overnight gap capture. Disabled: negative edge with real costs."
+    },
+    "S6_Catalyst": {
+      "id": "S6", "name": "Event Catalyst", "family": "event_driven",
+      "status": "shadow", "description": "Event-driven catalyst trades (earnings, M&A, guidance)."
+    },
+    "S7_TailHedge": {
+      "id": "S7", "name": "Tail Risk Hedge", "family": "hedging",
+      "status": "shadow", "description": "Tail risk hedging overlay. Activates on VIX >25 or 3-sigma moves."
+    },
+    "NAVArbitrage": {
+      "id": "NAVArbitrage", "name": "ETF NAV Arbitrage", "family": "arbitrage",
+      "status": "live", "description": "ETF premium/discount to NAV arbitrage. +28K PnL/sh. Best performer."
     },
     "TypeE_IBS": {
-      "id": "TypeE",
-      "name": "IBS Mean Reversion",
-      "family": "mean_reversion",
-      "status": "shadow",
-      "description": "IBS < threshold + RVOL > 1.0. 3 trades observed but not yet validated.",
-      "python_source": "IBS_MeanReversion (bridge.py:1342)",
-      "python_classifier": "bridge.py:classify_entry_type → TypeE",
-      "rust_detector": "entry_engine.rs:IBSMeanReversionDetector (QUARANTINED)",
-      "config_path": "config.toml [entry_types] type_e_*",
-      "strategies_toml": "strategies.toml [strategy.ibs_mean_reversion]",
-      "backtest_tag": "TypeE",
-      "nightly_tag": "TypeE",
-      "reporting_tag": "IBS_MR",
-      "regime_allowed": ["low_vol_compression"],
-      "regime_blocked": ["trend_up", "trend_down", "high_vol_trend", "high_vol_chop", "event_distorted"],
-      "regime_reduced": [],
-      "session_allowed": ["lse_main", "us_power_hour"],
-      "session_blocked": ["us_premarket", "us_after_hours", "asia_main"]
+      "id": "TypeE", "name": "IBS Mean Reversion", "family": "mean_reversion",
+      "status": "live", "description": "Intra-bar strength mean reversion. +14K PnL/sh."
     },
-    "TypeA_DipRecovery": {
-      "id": "TypeA",
-      "name": "Dip Recovery",
-      "family": "mean_reversion",
-      "status": "disabled",
-      "description": "RSI oversold + volume spike + price drop. Backtest WR 29.5% — net loser.",
-      "python_source": "VanguardSniper (classified in Stage 4)",
-      "python_classifier": "bridge.py:classify_entry_type → TypeA",
-      "rust_detector": "entry_engine.rs:DipRecoveryDetector (QUARANTINED)",
-      "config_path": "config.toml [entry_types] type_a_*",
-      "backtest_tag": "TypeA",
-      "nightly_tag": "TypeA",
-      "reporting_tag": "DipRecovery",
-      "regime_allowed": [],
-      "regime_blocked": ["ALL"],
-      "session_allowed": [],
-      "session_blocked": ["ALL"]
+    "FOmcDrift": {
+      "id": "FOmcDrift", "name": "FOMC Drift", "family": "event_driven",
+      "status": "live", "description": "Pre/post FOMC announcement drift. T-1 and T+N variants. +12K PnL/sh."
     },
     "TypeD_SupportBounce": {
-      "id": "TypeD",
-      "name": "Support Bounce",
-      "family": "mean_reversion",
-      "status": "disabled",
-      "description": "Price near daily low + RSI 25-35. Backtest WR 24.1% — net loser.",
-      "python_source": "VanguardSniper (classified in Stage 4)",
-      "python_classifier": "bridge.py:classify_entry_type → TypeD",
-      "rust_detector": "entry_engine.rs:SupportBounceDetector (QUARANTINED)",
-      "config_path": "config.toml [entry_types] type_d_*",
-      "backtest_tag": "TypeD",
-      "nightly_tag": "TypeD",
-      "reporting_tag": "SupportBounce",
-      "regime_allowed": [],
-      "regime_blocked": ["ALL"],
-      "session_allowed": [],
-      "session_blocked": ["ALL"]
+      "id": "TypeD", "name": "Support Bounce", "family": "mean_reversion",
+      "status": "live", "description": "Price near daily low + RSI 25-35. +3.6K PnL/sh."
     },
-    "TypeC_OverboughtFade": {
-      "id": "TypeC",
-      "name": "Overbought Fade",
-      "family": "mean_reversion",
-      "status": "shadow",
-      "description": "RSI > 80 + price rising + volume declining. Rare trigger, unproven.",
-      "python_source": "VanguardSniper (classified in Stage 4)",
-      "python_classifier": "bridge.py:classify_entry_type → TypeC",
-      "rust_detector": "entry_engine.rs:OverboughtFadeDetector (QUARANTINED)",
-      "config_path": "config.toml [entry_types] type_c_*",
-      "backtest_tag": "TypeC",
-      "nightly_tag": "TypeC",
-      "reporting_tag": "OverboughtFade",
-      "regime_allowed": ["trend_up"],
-      "regime_blocked": ["trend_down", "high_vol_chop", "event_distorted"],
-      "regime_reduced": ["high_vol_trend"],
-      "session_allowed": ["lse_main", "us_open"],
-      "session_blocked": ["us_premarket", "us_after_hours"]
+    "TypeA_DipRecovery": {
+      "id": "TypeA", "name": "Dip Recovery", "family": "mean_reversion",
+      "status": "live", "description": "RSI oversold + volume spike recovery. Marginal edge."
+    },
+    "TypeB_EarlyRunner": {
+      "id": "TypeB", "name": "Early Runner (Momentum Continuation)", "family": "momentum",
+      "status": "disabled", "description": "3-bar rising RVOL. Disabled: -141K drag in adversarial audit."
     },
     "TypeF_OBVDivergence": {
-      "id": "TypeF",
-      "name": "OBV Divergence",
-      "family": "mean_reversion",
-      "status": "shadow",
-      "description": "OBV-RSI < 30 + RVOL > 0.7. Volume divergence signal. Unproven.",
-      "python_source": "VanguardSniper (classified in Stage 4)",
-      "python_classifier": "bridge.py:classify_entry_type → TypeF",
-      "rust_detector": "entry_engine.rs:OBVDivergenceDetector (QUARANTINED)",
-      "config_path": "config.toml [entry_types] type_f_*",
-      "backtest_tag": "TypeF",
-      "nightly_tag": "TypeF",
-      "reporting_tag": "OBVDivergence",
-      "regime_allowed": ["low_vol_compression"],
-      "regime_blocked": ["high_vol_trend", "high_vol_chop", "event_distorted"],
-      "session_allowed": ["lse_main"],
-      "session_blocked": ["us_premarket", "us_after_hours"]
+      "id": "TypeF", "name": "OBV Divergence", "family": "mean_reversion",
+      "status": "disabled", "description": "OBV-RSI divergence. Disabled: -36K with real costs."
+    },
+    "TypeC_OverboughtFade": {
+      "id": "TypeC", "name": "Overbought Fade", "family": "mean_reversion",
+      "status": "shadow", "description": "RSI > 80 + price rising + volume declining. Rare trigger."
+    },
+    "VanguardSniper_Momentum": {
+      "id": "VanguardSniper", "name": "Vanguard Sniper (ADX Momentum)", "family": "momentum",
+      "status": "live", "description": "Multi-factor ADX momentum scoring. Primary signal producer."
     },
     "Orchestrator_VWAPDip": {
-      "id": "Orchestrator_S17",
-      "name": "VWAP Dip Buy",
-      "family": "mean_reversion",
-      "status": "shadow",
-      "description": "VWAP sigma deviation mean-reversion. 0 production trades.",
-      "python_source": "Orchestrator (bridge.py:1318)",
-      "config_path": "strategies.toml [strategy.vwap_dip_buy]",
-      "backtest_tag": "Orchestrator_S17",
-      "nightly_tag": "Orchestrator",
-      "reporting_tag": "VWAPDip",
-      "regime_allowed": ["low_vol_compression"],
-      "regime_blocked": ["trend_up", "trend_down", "high_vol_trend"],
-      "session_allowed": ["lse_main", "us_midday"],
-      "session_blocked": ["us_premarket", "us_after_hours"]
+      "id": "Orchestrator_S17", "name": "VWAP Dip Buy", "family": "mean_reversion",
+      "status": "shadow", "description": "VWAP sigma deviation mean-reversion. Multi-regime adaptive."
     },
     "VolExpansion": {
-      "id": "VolExpansion",
-      "name": "Volatility Expansion Breakout",
-      "family": "momentum",
-      "status": "shadow",
-      "description": "RVOL > 2.0 + ADX > 20 + Hurst > 0.5. 0 production trades.",
-      "python_source": "VolExpansion (bridge.py:1370)",
-      "config_path": "inline in bridge.py",
-      "backtest_tag": "VolExpansion",
-      "nightly_tag": "VolExpansion",
-      "reporting_tag": "VolExp",
-      "regime_allowed": ["high_vol_trend"],
-      "regime_blocked": ["low_vol_compression", "high_vol_chop"],
-      "session_allowed": ["lse_main", "us_open"],
-      "session_blocked": ["us_after_hours"]
+      "id": "VolExpansion", "name": "Volatility Expansion Breakout", "family": "momentum",
+      "status": "shadow", "description": "RVOL > 2.0 + ADX > 20 + Hurst > 0.5."
+    },
+    "VolCompression": {
+      "id": "VolCompression", "name": "Volatility Compression", "family": "volatility",
+      "status": "disabled", "description": "Bollinger squeeze detection. Disabled: insufficient edge."
     },
     "ORB_Breakout": {
-      "id": "ORB",
-      "name": "Opening Range Breakout",
-      "family": "momentum",
-      "status": "shadow",
-      "description": "US session 14:45-15:30 UTC only. 0 production trades.",
-      "python_source": "ORB_Breakout (bridge.py:1401)",
-      "config_path": "inline in bridge.py",
-      "backtest_tag": "ORB",
-      "nightly_tag": "ORB",
-      "reporting_tag": "ORB",
-      "regime_allowed": ["trend_up", "high_vol_trend"],
-      "regime_blocked": ["high_vol_chop", "event_distorted"],
-      "session_allowed": ["us_open"],
-      "session_blocked": ["ALL_EXCEPT_US_OPEN"]
+      "id": "ORB", "name": "Opening Range Breakout", "family": "momentum",
+      "status": "shadow", "description": "US session 14:45-15:30 UTC opening range breakout."
     },
     "GapFade": {
-      "id": "GapFade",
-      "name": "Gap Fade",
-      "family": "mean_reversion",
-      "status": "shadow",
-      "description": "Gap-down > 1% + RVOL < 2. Event-driven. 0 production trades.",
-      "python_source": "GapFade (bridge.py:1440)",
-      "config_path": "inline in bridge.py + strategies.toml [strategy.gap_fade]",
-      "backtest_tag": "GapFade",
-      "nightly_tag": "GapFade",
-      "reporting_tag": "GapFade",
-      "regime_allowed": ["trend_down", "high_vol_chop"],
-      "regime_blocked": ["event_distorted"],
-      "session_allowed": ["lse_main", "us_open"],
-      "session_blocked": ["us_after_hours"]
+      "id": "GapFade", "name": "Gap Fade", "family": "mean_reversion",
+      "status": "shadow", "description": "Gap-down > 1% + RVOL < 2. Event-driven gap fade."
+    },
+    "RebalancingFlow": {
+      "id": "RebalancingFlow", "name": "Rebalancing Flow", "family": "structural",
+      "status": "shadow", "description": "Index rebalancing + quarter-end institutional flow signals."
+    },
+    "NegRiskArb": {
+      "id": "NegRiskArb", "name": "Leveraged ETF Tracking Error", "family": "arbitrage",
+      "status": "shadow", "description": "Leveraged ETF tracking error exploitation. Negative risk arbitrage."
+    },
+    "PairsReversion": {
+      "id": "PairsReversion", "name": "Pairs Reversion", "family": "statistical_arbitrage",
+      "status": "shadow", "description": "Cointegrated pairs trading on spread z-score."
+    },
+    "CointPairs": {
+      "id": "CointPairs", "name": "Cointegration Pairs", "family": "statistical_arbitrage",
+      "status": "shadow", "description": "Engle-Granger cointegration test + Johansen rank detection."
+    },
+    "AlphaFactory": {
+      "id": "AlphaFactory", "name": "Alpha Factory", "family": "meta_strategy",
+      "status": "shadow", "description": "Meta-strategy factory generating synthetic signals from factor combinations."
+    },
+    "LeadLag": {
+      "id": "LeadLag", "name": "Lead-Lag Correlation", "family": "microstructure",
+      "status": "shadow", "description": "Cross-asset lead-lag detection (Hayashi-Yoshida correlation)."
+    },
+    "EMAT_Attention": {
+      "id": "EMAT_Attention", "name": "EMA Temporal Attention", "family": "momentum",
+      "status": "shadow", "description": "Exponential moving average temporal attention scoring."
+    },
+    "TemporalAttention": {
+      "id": "TemporalAttention", "name": "Temporal Attention", "family": "ml_signals",
+      "status": "shadow", "description": "Temporal pattern attention mechanism for regime-aware signals."
+    },
+    "SwarmPredictor": {
+      "id": "SwarmPredictor", "name": "Swarm Predictor", "family": "ensemble",
+      "status": "shadow", "description": "50+ LLM agent swarm consensus signal."
+    },
+    "HFT_Probability": {
+      "id": "HFT_Probability", "name": "HFT Probability", "family": "microstructure",
+      "status": "shadow", "description": "High-frequency probability scoring (tick-level order flow)."
+    },
+    "HighFlyer": {
+      "id": "HighFlyer", "name": "High Flyer", "family": "momentum",
+      "status": "shadow", "description": "Retail flow-driven momentum detection (unusual volume + social)."
+    },
+    "NightRider": {
+      "id": "NightRider", "name": "Night Rider", "family": "carry",
+      "status": "shadow", "description": "Overnight/pre-market momentum capture (after-hours drift)."
+    },
+    "EventDrift": {
+      "id": "EventDrift", "name": "Event Drift", "family": "event_driven",
+      "status": "shadow", "description": "General event-driven drift detection (CPI, NFP, BOE, earnings)."
+    },
+    "CopyTrading": {
+      "id": "CopyTrading", "name": "Copy Trading", "family": "external_signals",
+      "status": "shadow", "description": "Signal replication from validated external sources."
+    },
+    "IVSURF_SkewDirectional": {
+      "id": "IVSURF_Skew", "name": "IV Surface Skew", "family": "options",
+      "status": "shadow", "description": "Implied volatility surface skew directional signal."
+    },
+    "ApexScout": {
+      "id": "ApexScout", "name": "Apex Scout", "family": "institutional_flow",
+      "status": "shadow", "description": "Institutional flow detection from large block trades."
+    },
+    "HEDGE_InverseETP": {
+      "id": "HEDGE_InverseETP", "name": "Inverse ETP Hedge", "family": "hedging",
+      "status": "live", "description": "Inverse ETP overlay for portfolio tail risk hedging."
+    },
+    "HEDGE_VIXAllocation": {
+      "id": "HEDGE_VIXAlloc", "name": "VIX Allocation", "family": "hedging",
+      "status": "shadow", "description": "VIX-based dynamic allocation overlay."
+    },
+    "HEDGE_CashRaise": {
+      "id": "HEDGE_CashRaise", "name": "Cash Raise", "family": "hedging",
+      "status": "shadow", "description": "Systematic cash raise during high-risk regimes."
+    },
+    "Orchestrator_TrendFollow": {
+      "id": "Orchestrator_trend", "name": "Trend Following Orchestrator", "family": "trend",
+      "status": "shadow", "description": "Multi-regime trend-following orchestration."
+    },
+    "Orchestrator_MomentumBurst": {
+      "id": "Orchestrator_burst", "name": "Momentum Burst Orchestrator", "family": "momentum",
+      "status": "shadow", "description": "Short-term momentum burst detection."
+    },
+    "InsiderFlow": {
+      "id": "InsiderFlow", "name": "SEC Insider Trading", "family": "alternative_data",
+      "status": "shadow", "description": "SEC Form 4 cluster buy detection (edgartools). Session 26."
+    },
+    "SentimentOverlay": {
+      "id": "SentimentOverlay", "name": "FinBERT Sentiment", "family": "alternative_data",
+      "status": "live", "description": "FinBERT NLP sentiment overlay from 11 news APIs. Session 25-26."
+    },
+    "CongressionalTrading": {
+      "id": "CongressTrading", "name": "Congressional Trading", "family": "alternative_data",
+      "status": "shadow", "description": "US Congressional stock trading signals (Quiver Quant API). Session 27."
+    },
+    "OptionsFlow": {
+      "id": "OptionsFlow", "name": "Unusual Options Flow", "family": "options",
+      "status": "shadow", "description": "Unusual options activity detection from CBOE data. Session 27."
+    },
+    "CryptoFearGreed": {
+      "id": "CryptoFearGreed", "name": "Crypto Fear/Greed Index", "family": "macro_overlay",
+      "status": "shadow", "description": "Crypto market sentiment as risk-on/risk-off macro signal. Session 27."
+    },
+    "OrderFlowImbalance": {
+      "id": "OrderFlowImbalance", "name": "Order Flow Imbalance", "family": "microstructure",
+      "status": "shadow", "description": "LOB order flow imbalance detection (nautilustrader-inspired). Session 27."
+    },
+    "SocialSentiment": {
+      "id": "SocialSentiment", "name": "StockTwits Social Sentiment", "family": "alternative_data",
+      "status": "shadow", "description": "StockTwits + Reddit sentiment aggregation. Session 27."
+    },
+    "KalmanHedge": {
+      "id": "KalmanHedge", "name": "Kalman Filter Dynamic Hedge", "family": "statistical_arbitrage",
+      "status": "shadow", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Session 27."
     }
   },
   "regime_definitions": {
@@ -219,12 +223,19 @@
     "event_distorted": "Within 15min of FOMC/CPI/NFP/BOE or VIX > 30"
   },
   "session_definitions": {
-    "asia_main": "01:00-08:00 UTC (HKEX, TSE, SGX, ASX, KRX)",
-    "lse_main": "08:00-16:30 UTC (LSE, LSEETF, XETRA, EURONEXT)",
-    "us_premarket": "12:00-14:30 UTC (pre-market thin liquidity)",
+    "asia_main": "22:00-06:00 UTC (HKEX, TSE, SGX, ASX, KRX)",
+    "lse_main": "06:00-12:30 UTC (LSE, LSEETF, XETRA, EURONEXT)",
+    "us_overlap": "12:30-14:35 UTC (LSE + NYSE/NASDAQ overlap)",
     "us_open": "14:30-15:30 UTC (opening impulse)",
     "us_midday": "15:30-19:00 UTC (midday decay)",
-    "us_power_hour": "19:00-21:00 UTC (closing volume)",
-    "us_after_hours": "21:00-23:00 UTC (thin, avoid)"
-  }
+    "us_power_hour": "19:00-20:00 UTC (closing volume)",
+    "dark": "20:00-22:00 UTC (maintenance + Ouroboros nightly)"
+  },
+  "strategy_count": 50,
+  "families": [
+    "momentum", "mean_reversion", "microstructure", "volatility", "carry",
+    "event_driven", "hedging", "arbitrage", "statistical_arbitrage", "meta_strategy",
+    "ml_signals", "ensemble", "external_signals", "options", "institutional_flow",
+    "alternative_data", "macro_overlay", "structural", "trend"
+  ]
 }

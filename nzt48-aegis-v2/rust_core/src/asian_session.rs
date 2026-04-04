@@ -67,8 +67,8 @@ impl AsianSession {
         }
     }
 
-    /// Is the Mode A window active? (23:00-08:00 UTC, crosses midnight)
-    pub fn is_mode_a(&self, utc_secs: u32) -> bool {
+    /// Is the Asia session window active? (23:00-08:00 UTC, crosses midnight)
+    pub fn is_asia_session(&self, utc_secs: u32) -> bool {
         !(MODE_A_END_UTC_SECS..MODE_A_START_UTC_SECS).contains(&utc_secs)
     }
 
@@ -206,17 +206,17 @@ mod tests {
     fn test_mode_a_window() {
         let session = AsianSession::new();
         // 23:00 UTC is Mode A start
-        assert!(session.is_mode_a(23 * 3600));
+        assert!(session.is_asia_session(23 * 3600));
         // 23:30 UTC
-        assert!(session.is_mode_a(23 * 3600 + 30 * 60));
+        assert!(session.is_asia_session(23 * 3600 + 30 * 60));
         // 02:00 UTC (after midnight, still Mode A)
-        assert!(session.is_mode_a(2 * 3600));
+        assert!(session.is_asia_session(2 * 3600));
         // 07:59 UTC (still Mode A)
-        assert!(session.is_mode_a(7 * 3600 + 59 * 60));
+        assert!(session.is_asia_session(7 * 3600 + 59 * 60));
         // 08:00 UTC (Mode A ends)
-        assert!(!session.is_mode_a(8 * 3600));
+        assert!(!session.is_asia_session(8 * 3600));
         // 12:00 UTC (well outside Mode A)
-        assert!(!session.is_mode_a(12 * 3600));
+        assert!(!session.is_asia_session(12 * 3600));
     }
 
     #[test]

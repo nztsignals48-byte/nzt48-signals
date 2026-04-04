@@ -159,7 +159,21 @@ The adversarial audit also identified strong components that need no changes:
 | TypeF (OBV) | 522,027 | 49.2% | -36,104 | **Negative → DISABLED** |
 | TypeB (Momentum) | 1,495,758 | 48.7% | -141,711 | **Negative → DISABLED** |
 
-**Without TypeB+TypeF:** 1,073,666 trades, +57,063 PnL/share — **net positive portfolio**.
+**Session 24 (TypeB+TypeF disabled):** 1,073,280 trades, PF **1.021**, +57,235 PnL/share — **net positive portfolio**.
+
+### Session 24 Final Results (5 strategies, post-all-fixes)
+
+| Strategy | Trades | WR | PnL/share | Notes |
+|----------|--------|-----|-----------|-------|
+| NAVArbitrage | 16,054 | 50.2% | +27,988 | Strongest edge (LSE ETPs) |
+| TypeE (IBS) | 791,971 | 49.2% | +14,014 | Workhorse (IBS mean reversion) |
+| FOmcDrift | 49,625 | 49.3% | +11,652 | Event-driven alpha |
+| TypeD (Support) | 209,722 | 49.9% | +3,600 | Support bounce, reliable |
+| TypeA (Dip) | 5,908 | 42.5% | -19 | Marginal, keep for diversification |
+
+**Best hours:** 11:00 UTC (+55K), 10:00 UTC (+31K), 12:00 UTC (+29K) — London morning session dominates.
+
+**Best days:** Monday (+33K), Friday (+30K), Tuesday (+22K). Thursday is the only negative day (-30K).
 
 ### Key Insight
 The realistic 3-component cost model (spread + slippage + FX) changed the picture:

@@ -7,48 +7,28 @@
 //! Market closures are handled naturally — tickers from closed markets
 //! score lower in Ouroboros and rotate out on the next 15-min refresh.
 
-/// Trading session mode — simplified unified architecture.
+/// Trading session mode — unified 3-state architecture.
+/// All 36+ strategies run in Active mode across 6 markets simultaneously.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionMode {
     /// No trading — maintenance window (21:00-23:00 London).
+    /// Ouroboros nightly pipeline runs here.
     Dark,
     /// Unified active mode — all 6 markets monitored simultaneously.
     /// Runs 22 hours/day: 23:00-21:00 London.
     /// 100 tickers (IBKR max), refreshed every 15 min by Ouroboros.
-    /// LSE leveraged/inverse ETPs always prioritised (first 12 slots).
+    /// 36+ strategies: momentum, mean-reversion, macro, pairs, options.
     Active,
     /// Overnight carry management (positions held during Dark hours).
     Carry,
-    // Legacy aliases — kept for backwards compatibility during transition.
-    // All map to Active internally. Use Dark/Active/Carry instead.
-    /// Legacy: Asian session (now maps to Active). Use `Active` instead.
-    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
-    ModeA,
-    /// Legacy: European session (now maps to Active). Use `Active` instead.
-    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
-    ModeB,
-    /// Legacy: US overlap (now maps to Active). Use `Active` instead.
-    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
-    ModeBPlus,
-    /// Legacy: US-only (now maps to Active). Use `Active` instead.
-    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
-    ModeC,
-    /// Legacy: Auction (now maps to Active). Use `Active` instead.
-    #[deprecated(since = "3.7.0", note = "Use SessionMode::Active — unified 22h active window")]
-    Auction,
 }
 
 impl std::fmt::Display for SessionMode {
-    #[allow(deprecated)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionMode::Dark => write!(f, "DARK"),
             SessionMode::Active => write!(f, "ACTIVE"),
             SessionMode::Carry => write!(f, "CARRY"),
-            // Legacy modes display as ACTIVE
-            SessionMode::ModeA | SessionMode::ModeB |
-            SessionMode::ModeBPlus | SessionMode::ModeC |
-            SessionMode::Auction => write!(f, "ACTIVE"),
         }
     }
 }
@@ -149,20 +129,13 @@ impl SessionManager {
     }
 
     /// Whether new entries are allowed in the current mode.
-    #[allow(deprecated)]
     pub fn entries_allowed(&self) -> bool {
-        matches!(self.current_mode, SessionMode::Active
-            | SessionMode::ModeA | SessionMode::ModeB
-            | SessionMode::ModeBPlus | SessionMode::ModeC
-            | SessionMode::Auction)
+        matches!(self.current_mode, SessionMode::Active)
     }
 
     /// Whether scanning is active in the current mode.
-    #[allow(deprecated)]
     pub fn scanning_active(&self) -> bool {
-        matches!(self.current_mode, SessionMode::Active
-            | SessionMode::ModeA | SessionMode::ModeB
-            | SessionMode::ModeBPlus | SessionMode::ModeC)
+        matches!(self.current_mode, SessionMode::Active)
     }
 
     /// Get transition history.

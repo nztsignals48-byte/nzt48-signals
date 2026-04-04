@@ -56,13 +56,19 @@ pub const EOD_PHASE3_UTC_BST: u32 = 15 * 3600 + 25 * 60;
 /// and converts to seconds-from-midnight-UTC for all mode checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TradingMode {
-    /// Active: 22:00-20:00 UTC. Full trading across all 6 markets.
-    /// Sub-modes (ModeA/B/B+/C) are kept for legacy compatibility but all allow entries/exits.
-    ModeA,
-    ModeB,
-    ModeBPlus,
-    ModeC,
-    /// Dark: 20:00-22:00 UTC. Maintenance window.
+    /// Asia/pre-market session: 22:00-06:00 UTC.
+    /// HKEX, TSE, SGX, ASX, KRX + pre-market scanning.
+    Asia,
+    /// European session: 06:00-12:30 UTC.
+    /// LSE, XETRA, EURONEXT — peak leveraged ETP volume.
+    Europe,
+    /// US overlap session: 12:30-14:35 UTC.
+    /// LSE + NYSE/NASDAQ open — highest cross-market liquidity.
+    USOverlap,
+    /// US-only session: 14:35-20:00 UTC.
+    /// NYSE, NASDAQ power hours — post-LSE close.
+    USSession,
+    /// Dark: 20:00-22:00 UTC. Maintenance + Ouroboros nightly pipeline.
     Dark,
 }
 
@@ -71,7 +77,7 @@ impl TradingMode {
     /// This is the ONLY method that should be called. Input must be:
     /// `(current_utc_epoch_ns / 1_000_000_000) % 86400` = seconds from midnight UTC.
     ///
-    /// Active: 22:00-23:59 UTC and 00:00-20:00 UTC (wraps midnight, 22 hours).
+    /// Active sessions: 22:00-20:00 UTC (22 hours across 4 session windows).
     /// Dark: 20:00-22:00 UTC (2-hour maintenance window).
     pub fn from_utc_secs(utc_secs_from_midnight: u32) -> Self {
         const ACTIVE_START: u32 = 22 * 3600;  // 22:00 UTC
@@ -79,12 +85,12 @@ impl TradingMode {
 
         // Active hours: 22:00-23:59 and 00:00-20:00 (wraps midnight)
         if utc_secs_from_midnight >= ACTIVE_START || utc_secs_from_midnight < DARK_START {
-            // Return sub-mode for telemetry (all have identical permissions)
+            // Return session window for telemetry (all have identical permissions)
             match utc_secs_from_midnight {
-                t if t >= ACTIVE_START || t < 6 * 3600 => TradingMode::ModeA,       // 22:00-06:00 UTC (Asia/pre-market)
-                t if t < 12 * 3600 + 30 * 60 => TradingMode::ModeB,                 // 06:00-12:30 UTC (Europe)
-                t if t < 14 * 3600 + 35 * 60 => TradingMode::ModeBPlus,             // 12:30-14:35 UTC (US overlap)
-                _ => TradingMode::ModeC,                                             // 14:35-20:00 UTC (US-only)
+                t if t >= ACTIVE_START || t < 6 * 3600 => TradingMode::Asia,        // 22:00-06:00 UTC (HKEX/TSE/SGX/ASX/KRX)
+                t if t < 12 * 3600 + 30 * 60 => TradingMode::Europe,                // 06:00-12:30 UTC (LSE/XETRA/EURONEXT)
+                t if t < 14 * 3600 + 35 * 60 => TradingMode::USOverlap,             // 12:30-14:35 UTC (LSE + NYSE/NASDAQ)
+                _ => TradingMode::USSession,                                         // 14:35-20:00 UTC (NYSE/NASDAQ only)
             }
         } else {
             TradingMode::Dark
@@ -439,25 +445,25 @@ mod tests {
     #[test]
     fn test_trading_mode_transitions_utc() {
         // Unified: Active from 22:00-20:00 UTC, Dark from 20:00-22:00 UTC
-        // ModeA sub-mode: 22:00-06:00 UTC (Asian + pre-market)
-        assert_eq!(TradingMode::from_utc_secs(22 * 3600), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_utc_secs(0), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_utc_secs(3 * 3600), TradingMode::ModeA);
-        assert_eq!(TradingMode::from_utc_secs(5 * 3600 + 59 * 60), TradingMode::ModeA);
+        // Asia session: 22:00-06:00 UTC (HKEX/TSE/SGX/ASX/KRX + pre-market)
+        assert_eq!(TradingMode::from_utc_secs(22 * 3600), TradingMode::Asia);
+        assert_eq!(TradingMode::from_utc_secs(0), TradingMode::Asia);
+        assert_eq!(TradingMode::from_utc_secs(3 * 3600), TradingMode::Asia);
+        assert_eq!(TradingMode::from_utc_secs(5 * 3600 + 59 * 60), TradingMode::Asia);
 
-        // ModeB sub-mode: 06:00-12:30 UTC (European)
-        assert_eq!(TradingMode::from_utc_secs(6 * 3600), TradingMode::ModeB);
-        assert_eq!(TradingMode::from_utc_secs(10 * 3600), TradingMode::ModeB);
-        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 29 * 60), TradingMode::ModeB);
+        // Europe session: 06:00-12:30 UTC (LSE/XETRA/EURONEXT)
+        assert_eq!(TradingMode::from_utc_secs(6 * 3600), TradingMode::Europe);
+        assert_eq!(TradingMode::from_utc_secs(10 * 3600), TradingMode::Europe);
+        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 29 * 60), TradingMode::Europe);
 
-        // ModeBPlus sub-mode: 12:30-14:35 UTC (US overlap)
-        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 30 * 60), TradingMode::ModeBPlus);
-        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 34 * 60), TradingMode::ModeBPlus);
+        // USOverlap session: 12:30-14:35 UTC (LSE + NYSE/NASDAQ)
+        assert_eq!(TradingMode::from_utc_secs(12 * 3600 + 30 * 60), TradingMode::USOverlap);
+        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 34 * 60), TradingMode::USOverlap);
 
-        // ModeC sub-mode: 14:35-20:00 UTC (US-only)
-        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 35 * 60), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_utc_secs(17 * 3600), TradingMode::ModeC);
-        assert_eq!(TradingMode::from_utc_secs(19 * 3600 + 59 * 60), TradingMode::ModeC);
+        // USSession: 14:35-20:00 UTC (NYSE/NASDAQ only)
+        assert_eq!(TradingMode::from_utc_secs(14 * 3600 + 35 * 60), TradingMode::USSession);
+        assert_eq!(TradingMode::from_utc_secs(17 * 3600), TradingMode::USSession);
+        assert_eq!(TradingMode::from_utc_secs(19 * 3600 + 59 * 60), TradingMode::USSession);
 
         // Dark: 20:00-22:00 UTC (maintenance window)
         assert_eq!(TradingMode::from_utc_secs(20 * 3600), TradingMode::Dark);
@@ -468,29 +474,29 @@ mod tests {
     #[test]
     fn test_trading_mode_entry_rules() {
         // All non-Dark modes allow entries (unified 22-hour trading)
-        assert!(TradingMode::ModeA.allows_entries());
-        assert!(TradingMode::ModeB.allows_entries());
-        assert!(TradingMode::ModeBPlus.allows_entries());
-        assert!(TradingMode::ModeC.allows_entries());
+        assert!(TradingMode::Asia.allows_entries());
+        assert!(TradingMode::Europe.allows_entries());
+        assert!(TradingMode::USOverlap.allows_entries());
+        assert!(TradingMode::USSession.allows_entries());
         assert!(!TradingMode::Dark.allows_entries());
     }
 
     #[test]
     fn test_trading_mode_exit_rules() {
         // All non-Dark modes allow exits
-        assert!(TradingMode::ModeA.allows_exits());
-        assert!(TradingMode::ModeB.allows_exits());
-        assert!(TradingMode::ModeBPlus.allows_exits());
-        assert!(TradingMode::ModeC.allows_exits());
+        assert!(TradingMode::Asia.allows_exits());
+        assert!(TradingMode::Europe.allows_exits());
+        assert!(TradingMode::USOverlap.allows_exits());
+        assert!(TradingMode::USSession.allows_exits());
         assert!(!TradingMode::Dark.allows_exits());
     }
 
     #[test]
     fn test_trading_mode_market_data() {
-        assert!(TradingMode::ModeA.requires_market_data());
-        assert!(TradingMode::ModeB.requires_market_data());
-        assert!(TradingMode::ModeBPlus.requires_market_data());
-        assert!(TradingMode::ModeC.requires_market_data());
+        assert!(TradingMode::Asia.requires_market_data());
+        assert!(TradingMode::Europe.requires_market_data());
+        assert!(TradingMode::USOverlap.requires_market_data());
+        assert!(TradingMode::USSession.requires_market_data());
         assert!(!TradingMode::Dark.requires_market_data());
     }
 }
