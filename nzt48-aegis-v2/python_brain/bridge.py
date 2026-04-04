@@ -11,12 +11,55 @@ Best signal wins (highest confidence). Runs 12-factor Kelly sizing when generate
 """
 
 import json
+import logging
 import math
 import os
 import sys
 import time
 import threading
 from collections import defaultdict, deque
+
+# Phase 7.4: Structured JSON logging
+# When AEGIS_JSON_LOGS=1, emit machine-parseable JSON to stderr.
+# Otherwise, emit human-readable text (default, backward-compatible).
+_JSON_LOGS = os.environ.get("AEGIS_JSON_LOGS", "") == "1"
+
+
+class _JsonFormatter(logging.Formatter):
+    """Structured JSON log formatter for log aggregation (ELK, CloudWatch)."""
+    def format(self, record):
+        return json.dumps({
+            "ts": record.created,
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+            "module": record.module,
+        }, default=str)
+
+
+# Configure bridge logger
+_bridge_log = logging.getLogger("bridge")
+_bridge_log.setLevel(logging.INFO)
+_bridge_handler = logging.StreamHandler(sys.stderr)
+if _JSON_LOGS:
+    _bridge_handler.setFormatter(_JsonFormatter())
+else:
+    _bridge_handler.setFormatter(logging.Formatter("%(asctime)s [Bridge] %(levelname)s %(message)s"))
+_bridge_log.addHandler(_bridge_handler)
+_bridge_log.propagate = False
+
+
+def _log(msg: str, level: str = "INFO") -> None:
+    """Unified bridge log function — uses structured logger when available.
+
+    Backward-compatible: still writes to stderr for Rust bridge reader.
+    """
+    if _JSON_LOGS:
+        _bridge_log.log(getattr(logging, level, logging.INFO), msg)
+    else:
+        sys.stderr.write(f"Bridge: {msg}\n")
+        sys.stderr.flush()
+
 
 # Add python_brain to path so brain.* imports work (strategies use `from brain.config import ...`)
 sys.path.insert(0, "/app/python_brain")

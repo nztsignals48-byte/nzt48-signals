@@ -1,16 +1,43 @@
-# AEGIS V2 — Rust core + Python brain + Ouroboros cron
+# AEGIS V2 — Multi-stage build: Rust core + Python brain + Ouroboros cron
+# Phase 7.1: Builder → Runtime split reduces image from ~6.3GB to ~2.5GB
 # Target: x86_64 (EC2 c7i-flex.large)
 
-FROM python:3.12-bookworm
-
-# tini: lightweight init for PID 1 — reaps zombie child processes
-RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+# ════════════════════════════════════════════════════════════════
+# STAGE 1: Builder — compile Rust binary + PyO3 wheel
+# ════════════════════════════════════════════════════════════════
+FROM python:3.12-bookworm AS builder
 
 # Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && . "$HOME/.cargo/env" \
     && rustup install 1.94.0 && rustup default 1.94.0
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+# Python build deps (maturin needed for PyO3 wheel)
+COPY requirements.txt ./
+RUN pip install --no-cache-dir maturin>=1.5
+
+# Copy Rust source for compilation
+COPY Cargo.toml Cargo.lock ./
+COPY rust_core/ rust_core/
+
+# Build aegis binary (release, optimized for icelake)
+ENV RUSTFLAGS="-C target-cpu=icelake-server"
+RUN cargo build --release --bin aegis 2>&1 \
+    && strip target/release/aegis
+
+# Build PyO3 extension wheel
+RUN cd rust_core && maturin build --release --interpreter python3.12
+
+# ════════════════════════════════════════════════════════════════
+# STAGE 2: Runtime — slim image with only what we need
+# ════════════════════════════════════════════════════════════════
+FROM python:3.12-bookworm
+
+# tini: lightweight init for PID 1 — reaps zombie child processes
+RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
 
 # Sprint S03: Node.js 22 + Claude Code CLI ($0/month via Max subscription)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -28,26 +55,20 @@ RUN curl -fsSLO "$SUPERCRONIC_URL" \
 
 WORKDIR /app
 
-# Python dependencies first (cache layer)
+# Python dependencies (cache layer)
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all source
-COPY Cargo.toml Cargo.lock ./
-COPY rust_core/ rust_core/
+# Copy compiled artifacts from builder
+COPY --from=builder /app/target/release/aegis /usr/local/bin/aegis
+COPY --from=builder /app/target/wheels/rust_core-*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/rust_core-*.whl && rm -f /tmp/rust_core-*.whl
+
+# Copy Python source (no Rust source, no target dir, no Cargo caches)
 COPY python_brain/ python_brain/
 COPY ouroboros/ ouroboros/
 COPY scripts/ scripts/
 COPY CLAUDE.md ./
-
-# Build aegis binary (release) — build from workspace root
-ENV RUSTFLAGS="-C target-cpu=icelake-server"
-RUN cargo build --release --bin aegis 2>&1
-RUN cp target/release/aegis /usr/local/bin/aegis && strip /usr/local/bin/aegis
-
-# Build PyO3 extension module (build wheel + install)
-RUN cd rust_core && maturin build --release --interpreter python3.12 \
-    && pip install --no-cache-dir /app/target/wheels/rust_core-*.whl
 
 # Ouroboros crontab: 23:50 ET = 04:50 UTC (EST) or 03:50 UTC (EDT)
 COPY crontab /app/crontab

@@ -29,3 +29,22 @@ find "${BACKUP_DIR}" -name "aegis_backup_*.tar.gz" -mtime +30 -delete 2>/dev/nul
 
 KEPT=$(ls -1 "${BACKUP_DIR}"/aegis_backup_*.tar.gz 2>/dev/null | wc -l)
 echo "[Backup] Retained ${KEPT} backup(s)"
+
+# Phase 7.2: S3 backup (optional) — sync archive to S3 if AWS CLI + bucket configured
+S3_BUCKET="${AEGIS_BACKUP_S3_BUCKET:-}"
+if [ -n "${S3_BUCKET}" ] && command -v aws &>/dev/null; then
+    echo "[Backup] Uploading to s3://${S3_BUCKET}/backups/..."
+    aws s3 cp "${ARCHIVE}" "s3://${S3_BUCKET}/backups/" --quiet 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "[Backup] S3 upload OK: s3://${S3_BUCKET}/backups/$(basename ${ARCHIVE})"
+    else
+        echo "[Backup] S3 upload FAILED (non-fatal)"
+    fi
+    # Also sync config and WAL metadata (not full WAL — too large)
+    aws s3 sync /app/config/ "s3://${S3_BUCKET}/config/" --quiet --exclude "*.tmp" 2>/dev/null || true
+    echo "[Backup] S3 config sync done"
+else
+    if [ -n "${S3_BUCKET}" ]; then
+        echo "[Backup] WARN: AEGIS_BACKUP_S3_BUCKET set but aws CLI not found"
+    fi
+fi

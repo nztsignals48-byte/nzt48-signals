@@ -217,23 +217,41 @@ impl RiskArbiter {
         // P2-3.3: Enforce live gates even in paper mode when paper_uses_live_gates=true.
         let enforce_live_gates = !self.simulation_mode || self.paper_uses_live_gates;
 
-        // CHECK 1: ISA Safety — side == Short → HALT + REJECT (P0)
-        if intent_side == Direction::Short {
+        // Phase 0.3: Checks reordered by rejection frequency. Cheapest/most-common
+        // rejections first to short-circuit before expensive portfolio lookups.
+
+        // CHECK 8: Broker Connected — most frequent rejection (weekend, disconnect)
+        if !ctx.broker_connected {
             self.regime = RiskRegime::Halt;
-            return self.reject(VetoReason::IsaShortSellBlocked, ts);
+            return self.reject(VetoReason::BrokerDisconnected, ts);
         }
 
-        // CHECK 2: Inverse Mutual Exclusion (H32)
-        if let Some(blocker) = portfolio.inverse_blocker(intent_ticker) {
+        // CHECK 7: Data Staleness — > 120s → HALT (second most frequent)
+        if ctx.last_tick_age_secs > self.config.stale_data_threshold_secs {
+            self.regime = RiskRegime::Halt;
             return self.reject(
-                VetoReason::InverseMutualExclusion { blocker: blocker.0 },
+                VetoReason::StaleData {
+                    age_secs: ctx.last_tick_age_secs,
+                },
                 ts,
             );
+        }
+
+        // CHECK 9: WAL Available
+        if !ctx.wal_available {
+            self.regime = RiskRegime::Halt;
+            return self.reject(VetoReason::WalUnavailable, ts);
         }
 
         // CHECK 5: Risk Regime — HALT/FLATTEN → REJECT all entries
         if self.regime >= RiskRegime::Flatten {
             return self.reject(VetoReason::RejectToHalt, ts);
+        }
+
+        // CHECK 1: ISA Safety — side == Short → HALT + REJECT (P0)
+        if intent_side == Direction::Short {
+            self.regime = RiskRegime::Halt;
+            return self.reject(VetoReason::IsaShortSellBlocked, ts);
         }
 
         // CHECK 6: Max Positions — filled + pending >= max (H34)
@@ -252,27 +270,12 @@ impl RiskArbiter {
             }
         }
 
-        // CHECK 7: Data Staleness — > 120s → HALT
-        if ctx.last_tick_age_secs > self.config.stale_data_threshold_secs {
-            self.regime = RiskRegime::Halt;
+        // CHECK 2: Inverse Mutual Exclusion (H32) — requires portfolio lookup
+        if let Some(blocker) = portfolio.inverse_blocker(intent_ticker) {
             return self.reject(
-                VetoReason::StaleData {
-                    age_secs: ctx.last_tick_age_secs,
-                },
+                VetoReason::InverseMutualExclusion { blocker: blocker.0 },
                 ts,
             );
-        }
-
-        // CHECK 8: Broker Connected
-        if !ctx.broker_connected {
-            self.regime = RiskRegime::Halt;
-            return self.reject(VetoReason::BrokerDisconnected, ts);
-        }
-
-        // CHECK 9: WAL Available
-        if !ctx.wal_available {
-            self.regime = RiskRegime::Halt;
-            return self.reject(VetoReason::WalUnavailable, ts);
         }
 
         // CHECK 10: Confidence Floor — FIXED (Sprint 5, T-07): leverage-aware.

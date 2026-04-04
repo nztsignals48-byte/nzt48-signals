@@ -17,11 +17,18 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+
 
 def calculate_rsi(closes: List[float], period: int = 2) -> Optional[float]:
     """Calculate Relative Strength Index.
 
     Uses Wilder's smoothing method (exponential moving average of gains/losses).
+    Phase 2.5: numpy-vectorized diff + initial avg when numpy is available.
 
     Args:
         closes: List of closing prices. Minimum period + 1 values required.
@@ -33,24 +40,30 @@ def calculate_rsi(closes: List[float], period: int = 2) -> Optional[float]:
     if len(closes) < period + 1 or period < 1:
         return None
 
-    # Calculate price changes
-    changes: List[float] = []
-    for i in range(1, len(closes)):
-        changes.append(closes[i] - closes[i - 1])
+    if _HAS_NUMPY:
+        arr = np.asarray(closes, dtype=np.float64)
+        changes = np.diff(arr)
+        gains = np.maximum(changes[:period], 0.0)
+        losses = np.maximum(-changes[:period], 0.0)
+        avg_gain = float(gains.mean())
+        avg_loss = float(losses.mean())
+    else:
+        changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        avg_gain = sum(max(c, 0.0) for c in changes[:period]) / period
+        avg_loss = sum(max(-c, 0.0) for c in changes[:period]) / period
 
-    # Initial average gain/loss over first 'period' changes
-    gains = [max(c, 0.0) for c in changes[:period]]
-    losses = [max(-c, 0.0) for c in changes[:period]]
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    # Wilder's smoothing for remaining changes
-    for i in range(period, len(changes)):
-        gain = max(changes[i], 0.0)
-        loss = max(-changes[i], 0.0)
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
+    # Wilder's smoothing for remaining changes (sequential dependency)
+    if _HAS_NUMPY:
+        for i in range(period, len(changes)):
+            c = float(changes[i])
+            avg_gain = (avg_gain * (period - 1) + max(c, 0.0)) / period
+            avg_loss = (avg_loss * (period - 1) + max(-c, 0.0)) / period
+    else:
+        for i in range(period, len(changes)):
+            gain = max(changes[i], 0.0)
+            loss = max(-changes[i], 0.0)
+            avg_gain = (avg_gain * (period - 1) + gain) / period
+            avg_loss = (avg_loss * (period - 1) + loss) / period
 
     # H61: zero-division guard
     if avg_loss <= 0.0:
@@ -88,6 +101,8 @@ def calculate_ibs(high: float, low: float, close: float) -> Optional[float]:
 def calculate_sma(values: List[float], period: int) -> Optional[float]:
     """Calculate Simple Moving Average.
 
+    Phase 2.5: numpy-vectorized when available (significant for SMA-200).
+
     Args:
         values: List of values.
         period: SMA period.
@@ -97,6 +112,8 @@ def calculate_sma(values: List[float], period: int) -> Optional[float]:
     """
     if len(values) < period or period < 1:
         return None
+    if _HAS_NUMPY:
+        return float(np.mean(values[-period:]))
     return sum(values[-period:]) / period
 
 
