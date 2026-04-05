@@ -117,6 +117,28 @@ pub struct MarketTick {
     /// Average daily volume over 90 days (generic tick 165)
     #[pyo3(get)]
     pub avg_volume: i64,
+    // ── AUDIT-FIX: 7 additional tick types ──
+    /// 52-week high price (TickType 20)
+    #[pyo3(get)]
+    pub high_52wk: f64,
+    /// 52-week low price (TickType 19)
+    #[pyo3(get)]
+    pub low_52wk: f64,
+    /// Short-term volume 3-minute (TickType 63)
+    #[pyo3(get)]
+    pub short_term_vol_3min: i64,
+    /// Short-term volume 5-minute (TickType 64)
+    #[pyo3(get)]
+    pub short_term_vol_5min: i64,
+    /// Short-term volume 10-minute (TickType 65)
+    #[pyo3(get)]
+    pub short_term_vol_10min: i64,
+    /// Regulatory imbalance (TickType 61)
+    #[pyo3(get)]
+    pub regulatory_imbalance: f64,
+    /// Average option volume (TickType 87)
+    #[pyo3(get)]
+    pub avg_opt_volume: i64,
     // ── L2 Depth metrics (from reqMktDepth order book) ──
     /// Sum of all bid sizes across 5 depth levels
     #[pyo3(get)]
@@ -153,6 +175,8 @@ impl MarketTick {
         auction_volume=0, auction_imbalance=0.0, etf_nav_close=0.0, etf_nav_last=0.0,
         etf_nav_bid=0.0, etf_nav_ask=0.0, opt_call_oi=0, opt_put_oi=0, opt_call_vol=0,
         opt_put_vol=0, opt_impl_vol=0.0, opt_hist_vol=0.0, avg_volume=0,
+        high_52wk=0.0, low_52wk=0.0, short_term_vol_3min=0, short_term_vol_5min=0,
+        short_term_vol_10min=0, regulatory_imbalance=0.0, avg_opt_volume=0,
         total_bid_depth=0.0, total_ask_depth=0.0, depth_imbalance=0.0,
         bid_wall_price=0.0, ask_wall_price=0.0, spread_depth_1=0.0,
         spread_depth_5=0.0, book_pressure=0.0))]
@@ -191,6 +215,13 @@ impl MarketTick {
         opt_impl_vol: f64,
         opt_hist_vol: f64,
         avg_volume: i64,
+        high_52wk: f64,
+        low_52wk: f64,
+        short_term_vol_3min: i64,
+        short_term_vol_5min: i64,
+        short_term_vol_10min: i64,
+        regulatory_imbalance: f64,
+        avg_opt_volume: i64,
         total_bid_depth: f64,
         total_ask_depth: f64,
         depth_imbalance: f64,
@@ -234,6 +265,13 @@ impl MarketTick {
             opt_impl_vol,
             opt_hist_vol,
             avg_volume,
+            high_52wk,
+            low_52wk,
+            short_term_vol_3min,
+            short_term_vol_5min,
+            short_term_vol_10min,
+            regulatory_imbalance,
+            avg_opt_volume,
             total_bid_depth,
             total_ask_depth,
             depth_imbalance,
@@ -289,6 +327,13 @@ impl Default for MarketTick {
             opt_impl_vol: 0.0,
             opt_hist_vol: 0.0,
             avg_volume: 0,
+            high_52wk: 0.0,
+            low_52wk: 0.0,
+            short_term_vol_3min: 0,
+            short_term_vol_5min: 0,
+            short_term_vol_10min: 0,
+            regulatory_imbalance: 0.0,
+            avg_opt_volume: 0,
             total_bid_depth: 0.0,
             total_ask_depth: 0.0,
             depth_imbalance: 0.0,

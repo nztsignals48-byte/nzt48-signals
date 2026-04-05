@@ -223,8 +223,8 @@ impl FxRateTable {
         if currency == Currency::GBP {
             return 0.0;
         }
-        // IBKR FX spread: ~0.002% (2 basis points) for major pairs
-        let spread_cost = position_gbp * 0.00002;
+        // IBKR FX spread: ~0.02% (2 basis points) for major pairs
+        let spread_cost = position_gbp * 0.0002;
         // Minimum fee dominates for small positions
         spread_cost.max(self.fx_minimum_fee_gbp)
     }

@@ -446,6 +446,10 @@ impl PythonBridge {
                 r#""etf_nav_bid":{:.6},"etf_nav_ask":{:.6},"opt_call_oi":{},"opt_put_oi":{},"#,
                 r#""opt_call_vol":{},"opt_put_vol":{},"opt_impl_vol":{:.4},"opt_hist_vol":{:.4},"#,
                 r#""avg_volume":{},"#,
+                // AUDIT-FIX: 7 additional tick types
+                r#""high_52wk":{:.6},"low_52wk":{:.6},"short_term_vol_3min":{},"#,
+                r#""short_term_vol_5min":{},"short_term_vol_10min":{},"#,
+                r#""regulatory_imbalance":{:.2},"avg_opt_volume":{},"#,
                 // L2 depth metrics
                 r#""total_bid_depth":{:.2},"total_ask_depth":{:.2},"depth_imbalance":{:.6},"#,
                 r#""bid_wall_price":{:.6},"ask_wall_price":{:.6},"spread_depth_1":{:.6},"#,
@@ -508,6 +512,14 @@ impl PythonBridge {
             tick.opt_impl_vol,
             tick.opt_hist_vol,
             tick.avg_volume,
+            // AUDIT-FIX: 7 additional tick types
+            tick.high_52wk,
+            tick.low_52wk,
+            tick.short_term_vol_3min,
+            tick.short_term_vol_5min,
+            tick.short_term_vol_10min,
+            tick.regulatory_imbalance,
+            tick.avg_opt_volume,
             // L2 depth metrics
             tick.total_bid_depth,
             tick.total_ask_depth,

@@ -12,6 +12,8 @@ trade_count = 64             # Actual trade count
 sharpe_ratio = 0.000000
 dsr = 0.000000
 dsr_significant = false
+avg_win = 0.030000           # AUDIT-FIX HIGH#2: Average winner return (3%). Ouroboros tunes nightly.
+avg_loss = 0.015000          # AUDIT-FIX HIGH#2: Average loser return (1.5%). Ouroboros tunes nightly.
 
 [exit]
 chandelier_atr_mult = 1.50   # P2-B0.8: Reset to config.toml [chandelier] initial_stop_atr_mult default

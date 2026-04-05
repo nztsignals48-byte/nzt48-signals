@@ -124,6 +124,14 @@ struct TickAccumulator {
     opt_impl_vol: f64,
     opt_hist_vol: f64,
     avg_volume: i64,
+    // ── AUDIT-FIX: 7 additional tick types ──
+    high_52wk: f64,
+    low_52wk: f64,
+    short_term_vol_3min: i64,
+    short_term_vol_5min: i64,
+    short_term_vol_10min: i64,
+    regulatory_imbalance: f64,
+    avg_opt_volume: i64,
 }
 
 impl Default for TickAccumulator {
@@ -163,6 +171,13 @@ impl Default for TickAccumulator {
             opt_impl_vol: 0.0,
             opt_hist_vol: 0.0,
             avg_volume: 0,
+            high_52wk: 0.0,
+            low_52wk: 0.0,
+            short_term_vol_3min: 0,
+            short_term_vol_5min: 0,
+            short_term_vol_10min: 0,
+            regulatory_imbalance: 0.0,
+            avg_opt_volume: 0,
         }
     }
 }
@@ -1007,6 +1022,9 @@ impl IbkrBroker {
                                 TickType::EtfNavLast => { acc.etf_nav_last = tp.price; }
                                 TickType::EtfNavBid => { acc.etf_nav_bid = tp.price; }
                                 TickType::EtfNavAsk => { acc.etf_nav_ask = tp.price; }
+                                // AUDIT-FIX: 52-week high/low (TickType 20/19)
+                                TickType::High52Week => { acc.high_52wk = tp.price; }
+                                TickType::Low52Week => { acc.low_52wk = tp.price; }
                                 _ => {}
                             }
                         }
@@ -1047,6 +1065,20 @@ impl IbkrBroker {
                                 }
                                 TickType::AvgVolume => {
                                     acc.avg_volume = ts.size as i64;
+                                }
+                                // AUDIT-FIX: Short-term volumes (TickType 63/64/65)
+                                TickType::ShortTermVolume3Min => {
+                                    acc.short_term_vol_3min = ts.size as i64;
+                                }
+                                TickType::ShortTermVolume5Min => {
+                                    acc.short_term_vol_5min = ts.size as i64;
+                                }
+                                TickType::ShortTermVolume10Min => {
+                                    acc.short_term_vol_10min = ts.size as i64;
+                                }
+                                // AUDIT-FIX: Regulatory imbalance (TickType 61)
+                                TickType::RegulatoryImbalance => {
+                                    acc.regulatory_imbalance = ts.size as f64;
                                 }
                                 _ => {}
                             }
@@ -1094,6 +1126,8 @@ impl IbkrBroker {
                                 TickType::RtHistoricalVol => { acc.rt_hist_vol = tg.value; }
                                 TickType::OptionImpliedVol => { acc.opt_impl_vol = tg.value; }
                                 TickType::OptionHistoricalVol => { acc.opt_hist_vol = tg.value; }
+                                // AUDIT-FIX: Average option volume (TickType 87)
+                                TickType::AvgOptVolume => { acc.avg_opt_volume = tg.value as i64; }
                                 _ => {}
                             }
                         }
@@ -1153,6 +1187,14 @@ impl IbkrBroker {
                             opt_impl_vol: acc.opt_impl_vol,
                             opt_hist_vol: acc.opt_hist_vol,
                             avg_volume: acc.avg_volume,
+                            // AUDIT-FIX: 7 additional tick types
+                            high_52wk: acc.high_52wk,
+                            low_52wk: acc.low_52wk,
+                            short_term_vol_3min: acc.short_term_vol_3min,
+                            short_term_vol_5min: acc.short_term_vol_5min,
+                            short_term_vol_10min: acc.short_term_vol_10min,
+                            regulatory_imbalance: acc.regulatory_imbalance,
+                            avg_opt_volume: acc.avg_opt_volume,
                             // Depth metrics stamped later in step 5 (after depth polling)
                             ..Default::default()
                         };

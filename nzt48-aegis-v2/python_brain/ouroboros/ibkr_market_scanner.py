@@ -268,6 +268,7 @@ EXCHANGE_LOCATIONS: Dict[str, str] = {
     "EURONEXT": "STK.EU.SBF",  # Euronext Paris
     "SGX": "STK.HK.SGX",       # Singapore Exchange (under HK region in IBKR)
     "ASX": "STK.HK.ASX",       # Australian Securities Exchange
+    "KRX": "STK.HK.KSE",      # AUDIT-FIX: Korea Exchange (under HK region in IBKR)
 }
 
 # Session windows (UTC hours). Markets that are open get scanner allocations.

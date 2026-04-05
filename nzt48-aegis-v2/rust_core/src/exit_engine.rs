@@ -153,20 +153,10 @@ impl ChandelierStrategy {
         if let Some(r3) = suggested_rung3_atr {
             s.rung3_trail_atr = r3.clamp(0.3, 3.0);
         }
-        // Apply trail bias: "wide" = 1.3x all ATRs, "tight" = 0.7x
-        match exit_trail_bias {
-            Some("wide") => {
-                s.rung3_trail_atr *= 1.3;
-                s.rung4_trail_atr *= 1.3;
-                s.rung5_trail_atr *= 1.3;
-            }
-            Some("tight") => {
-                s.rung3_trail_atr *= 0.7;
-                s.rung4_trail_atr *= 0.7;
-                s.rung5_trail_atr *= 0.7;
-            }
-            _ => {}
-        }
+        // AUDIT-FIX HIGH#3: trail_bias was applied TWICE — once here and once in
+        // compute_stop(). Removed from here. Bias is now applied ONLY in compute_stop()
+        // per-tick, using pos.exit_trail_bias (stored on the PositionState).
+        let _ = exit_trail_bias; // suppress unused warning — bias applied in compute_stop()
         s
     }
 }

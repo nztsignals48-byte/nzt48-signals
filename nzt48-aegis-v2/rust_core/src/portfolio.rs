@@ -80,6 +80,9 @@ pub struct PortfolioState {
     pub initial_equity: f64,
     /// Sprint 10: Weekly high-water mark (reset Monday 00:00 UTC).
     pub weekly_high_water_mark: f64,
+    /// AUDIT-FIX MEDIUM#6: All-time high-water mark (never resets).
+    /// Used for peak_drawdown_pct(). Separate from daily high_water_mark.
+    pub all_time_hwm: f64,
 }
 
 impl PortfolioState {
@@ -107,6 +110,7 @@ impl PortfolioState {
             daily_trade_count: 0,
             initial_equity: equity,
             weekly_high_water_mark: equity,
+            all_time_hwm: equity,
         }
     }
 
@@ -248,11 +252,13 @@ impl PortfolioState {
     }
 
     /// Sprint 10: Peak drawdown from all-time HWM (%).
+    /// AUDIT-FIX MEDIUM#6: Now uses all_time_hwm (never resets) instead of
+    /// daily high_water_mark which resets every trading day.
     pub fn peak_drawdown_pct(&self) -> f64 {
-        if self.high_water_mark <= 0.0 {
+        if self.all_time_hwm <= 0.0 {
             return 0.0;
         }
-        (self.high_water_mark - self.equity) / self.high_water_mark * 100.0
+        (self.all_time_hwm - self.equity) / self.all_time_hwm * 100.0
     }
 
     /// Cash as percentage of equity.
@@ -315,6 +321,10 @@ impl PortfolioState {
     pub fn update_high_water(&mut self) {
         if self.equity > self.high_water_mark {
             self.high_water_mark = self.equity;
+        }
+        // AUDIT-FIX MEDIUM#6: Update all-time HWM (never resets, unlike daily HWM).
+        if self.equity > self.all_time_hwm {
+            self.all_time_hwm = self.equity;
         }
     }
 

@@ -683,6 +683,7 @@ fn main() {
     let reconnect_interval_ns: u64 = 60_000_000_000; // 60s between reconnect attempts
     let mut last_kill_check_ns: u64 = 0;
     let mut paused = false;
+    let mut fx_stale_warned = false; // AUDIT-FIX MEDIUM#11: throttle FX staleness warnings
 
     // N10a: Data directory for kill switch files
     let data_dir = std::path::PathBuf::from(
@@ -809,6 +810,22 @@ fn main() {
             format!("day-{total_days}")
         };
         engine.maybe_daily_reset(&current_date);
+
+        // AUDIT-FIX MEDIUM#11: Check FX rate staleness and warn (do NOT block trading).
+        {
+            let fx_stale = engine.fx_table.is_stale(loop_start);
+            if fx_stale && !fx_stale_warned {
+                eprintln!(
+                    "WARNING: FX rates stale (>24h since last update). Non-GBP position sizing may be inaccurate. \
+                     Last update: {}ns, now: {}ns",
+                    engine.fx_table.last_update_ns, loop_start,
+                );
+                fx_stale_warned = true;
+            } else if !fx_stale && fx_stale_warned {
+                eprintln!("FX rates refreshed — staleness warning cleared.");
+                fx_stale_warned = false;
+            }
+        }
 
         // HOT-RELOAD: Check if contract_expander.py signaled us via SIGHUP
         if reload_flag.compare_exchange(true, false, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
@@ -1011,13 +1028,11 @@ fn main() {
                     let ctx = TickContext {
                         win_rate: dw.bayesian_win_rate,
                         total_trades: dw.trade_count,
-                        // FIX: Was hardcoded 0.02/0.02 → Kelly permanently 0.0.
-                        // Kelly = WR - (1-WR)/(W/L). With 0.02/0.02, W/L=1.0, Kelly = WR-0.5 = negative.
-                        // Realistic 3x ETP: avg winner ~3% (Chandelier captures 2-3x stop width),
-                        // avg loser ~1.5% (ATR stop = ~1.5% on 3x ETP). W/L = 2.0.
-                        // Kelly at 40% WR: 0.40 - 0.60/2.0 = 0.10 (positive).
-                        avg_win: 0.03,
-                        avg_loss: 0.015,
+                        // AUDIT-FIX HIGH#2: avg_win/avg_loss loaded from Ouroboros dynamic_weights.toml
+                        // [bayesian] section. Defaults to 0.03/0.015 if not in TOML.
+                        // Previously hardcoded here, bypassing Ouroboros nightly tuning.
+                        avg_win: dw.avg_win,
+                        avg_loss: dw.avg_loss,
                         leverage: engine
                             .config
                             .contracts

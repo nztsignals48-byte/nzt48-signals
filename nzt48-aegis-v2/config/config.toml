@@ -70,17 +70,18 @@ gap_cooldown_mins = 15
 synthetic_halt_limp_secs = 30     # Per-ticker Limp Mode threshold
 synthetic_halt_full_secs = 120    # Per-ticker full HALT threshold
 
-# Sprint 7: Per-exchange entry cutoffs (local time at each exchange).
-# Engine checks ticker's exchange → applies correct cutoff.
-# Format: "HH:MM" in exchange-local timezone.
+# AUDIT-FIX HIGH#5: Per-exchange entry cutoffs in LONDON TIME (UTC+0 winter, UTC+1 BST).
+# Engine interprets HH:MM as London time — all values must be London-time equivalents.
+# Format: "HH:MM" in London timezone.
 [timing.exchange_cutoffs]
-LSE = "15:45"                     # London local (45min before 16:30 close)
-US = "15:30"                      # New York local (30min before 16:00 close)
-HKEX = "15:30"                    # Hong Kong local (30min before 16:00 close)
-TSE = "14:30"                     # Tokyo local (30min before 15:00 close)
-XETRA = "17:00"                   # Frankfurt local (30min before 17:30 close)
-EURONEXT = "17:00"                # Paris local (30min before 17:30 close)
-SGX = "16:30"                     # Singapore local (30min before 17:00 close)
+LSE = "15:45"                     # London (45min before 16:30 close) — already correct
+US = "20:00"                      # US 3:30PM ET = 20:30 London BST; 20:00 for safety margin
+HKEX = "08:30"                    # HKEX close 16:00 HKT = 09:00 London; cutoff 30min before
+TSE = "05:30"                     # TSE close 15:00 JST = 06:00 London; cutoff 30min before
+XETRA = "16:00"                   # XETRA close 17:30 CET = 16:30 London; cutoff 30min before
+EURONEXT = "16:00"                # Euronext close 17:30 CET = 16:30 London; cutoff 30min before
+SGX = "08:30"                     # SGX close 17:00 SGT = 09:00 London; cutoff 30min before
+KRX = "06:00"                     # KRX close 15:30 KST = 06:30 London; cutoff 30min before
 
 # P3.3: Per-exchange stale data threshold (seconds).
 # If no tick received for this many seconds, mark data stale and reject new entries.
@@ -271,7 +272,7 @@ reconnect_backoff_secs = [1, 2, 4, 8, 16, 32, 60]
 rate_limit_msgs_per_sec = 50
 reqmktdata_pacing_ms = 10
 historical_data_max_per_10min = 60
-max_simultaneous_lines = 200        # Upgraded from 100        # IBKR reqMktData limit per client (100 concurrent)
+max_simultaneous_lines = 100        # AUDIT-FIX HIGH#9: IBKR limit: 100 per client ID
 
 [rotation]
 # Dynamic subscription rotation — 100 IBKR lines across 300 tickers.

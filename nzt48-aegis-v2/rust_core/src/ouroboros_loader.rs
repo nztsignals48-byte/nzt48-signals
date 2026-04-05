@@ -22,6 +22,12 @@ pub struct DynamicWeights {
     /// Tickers blacklisted by Ouroboros (WR < 30% over 10+ trades).
     /// Engine should reject signals for these tickers.
     pub ticker_blacklist: Vec<String>,
+    /// Average winner return (fraction, e.g. 0.03 = 3%). Used by Kelly formula.
+    /// Loaded from [bayesian] avg_win in dynamic_weights.toml.
+    pub avg_win: f64,
+    /// Average loser return (fraction, e.g. 0.015 = 1.5%). Used by Kelly formula.
+    /// Loaded from [bayesian] avg_loss in dynamic_weights.toml.
+    pub avg_loss: f64,
 }
 
 impl Default for DynamicWeights {
@@ -38,6 +44,8 @@ impl Default for DynamicWeights {
             regime_scales: HashMap::new(),
             kelly_fractions: HashMap::new(),
             ticker_blacklist: Vec::new(),
+            avg_win: 0.03,   // 3% default — realistic for 3x ETP Chandelier captures
+            avg_loss: 0.015, // 1.5% default — ATR stop width on 3x ETP
         }
     }
 }
@@ -87,7 +95,16 @@ struct RawBayesian {
     sharpe_ratio: f64,
     dsr: f64,
     dsr_significant: bool,
+    /// Average winner return. Defaults to 0.03 if absent from TOML.
+    #[serde(default = "default_avg_win")]
+    avg_win: f64,
+    /// Average loser return. Defaults to 0.015 if absent from TOML.
+    #[serde(default = "default_avg_loss")]
+    avg_loss: f64,
 }
+
+fn default_avg_win() -> f64 { 0.03 }
+fn default_avg_loss() -> f64 { 0.015 }
 
 #[derive(Deserialize)]
 struct RawExit {
@@ -159,6 +176,8 @@ fn _load_dw(path: &Path) -> Result<DynamicWeights, String> {
         regime_scales,
         kelly_fractions: raw.kelly_fractions.unwrap_or_default(),
         ticker_blacklist: blacklist,
+        avg_win: raw.bayesian.avg_win,
+        avg_loss: raw.bayesian.avg_loss,
     })
 }
 
