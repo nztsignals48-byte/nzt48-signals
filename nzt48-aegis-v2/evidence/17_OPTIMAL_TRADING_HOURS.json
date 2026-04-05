@@ -1,0 +1,831 @@
+{
+  "meta": {
+    "title": "Optimal Trading Hours for Leveraged ETPs Across Global Exchanges",
+    "version": "1.0.0",
+    "compiled": "2026-04-05",
+    "methodology": "Systematic review of academic literature (2018-2026), institutional research (AQR, Man Group, JPMorgan, NBIM, BIS, NY Fed, ECB), quantitative finance databases (Quantpedia, SSRN), and exchange publications (NYSE, LSE, XETRA, HKEX, TSE, KRX, SGX)",
+    "confidence_scale": "0.0-1.0 where 1.0 = overwhelming multi-study consensus, 0.5 = mixed evidence, 0.0 = speculative",
+    "all_times_utc": true,
+    "applicable_instruments": [
+      "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
+      "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "3SEM.L"
+    ]
+  },
+
+  "section_1_intraday_profiles": {
+    "title": "Intraday Volume/Volatility Profiles by Exchange",
+
+    "exchanges": {
+      "LSE": {
+        "timezone": "Europe/London",
+        "utc_offset_winter": "+00:00",
+        "utc_offset_summer_bst": "+01:00",
+        "session_hours_utc_winter": {"open_auction": "07:50-08:00", "continuous": "08:00-16:30", "close_auction": "16:30-16:35", "trade_reporting": "16:35-17:15"},
+        "session_hours_utc_summer": {"open_auction": "06:50-07:00", "continuous": "07:00-15:30", "close_auction": "15:30-15:35", "trade_reporting": "15:35-16:15"},
+        "intraday_auction_utc_winter": "12:00",
+        "intraday_auction_utc_summer": "11:00",
+        "volume_profile": {
+          "shape": "reverse_J_with_midday_bump",
+          "description": "Only ~2% of daily volume executes in first 30 minutes (vs 14% on NYSE/NASDAQ). Volume concentrates at open, midday auction, and closing auction. Closing auction nearing 30% of FTSE100 daily volume per NBIM research.",
+          "citations": ["Giudici (2026) J. Corporate Accounting & Finance - Intraday Trading Volume Patterns of Market Index ETFs", "NBIM Asset Manager Perspectives - Role of Closing Auctions"]
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "08:05-08:30",
+            "window_bst": "08:05-08:30 UTC / 09:05-09:30 BST",
+            "action": "ENTRY",
+            "rationale": "Post-open price discovery complete. LSE open less volatile than NYSE due to lower opening volume concentration. Wait 5min after uncrossing for spread normalisation.",
+            "confidence": 0.75,
+            "leveraged_etp_note": "LSE-listed leveraged ETPs tracking US underlyings (QQQ3.L etc) have NO live US price feed yet. Spreads wider, iNAV stale. Prefer waiting for US session overlap."
+          },
+          {
+            "window": "12:00-12:05",
+            "window_bst": "12:00-12:05 UTC / 13:00-13:05 BST",
+            "action": "AVOID_OR_EXPLOIT",
+            "rationale": "LSE intra-day auction at midday. Liquidity consolidates momentarily. Spreads bump immediately after auction uncrossing. Can exploit for price improvement via limit orders in the auction call.",
+            "confidence": 0.70,
+            "citation": "ScienceDirect - Do intra-day auctions improve market liquidity?"
+          },
+          {
+            "window": "13:30-16:00",
+            "window_bst": "13:30-16:00 UTC / 14:30-17:00 BST winter",
+            "action": "OPTIMAL_ENTRY_EXIT",
+            "rationale": "London/NY overlap. Highest liquidity for LSE-listed ETPs tracking US underlyings. US cash market open at 14:30 UTC provides live pricing for NAV arbitrage. Volume and volatility peak. This is THE window for leveraged ETP trading on LSE.",
+            "confidence": 0.92,
+            "citations": ["Krohn (2024) Journal of Finance - FX Fixings and Returns Around the Clock", "ScienceDirect - Splitting orders in overlapping markets"]
+          },
+          {
+            "window": "16:25-16:35",
+            "window_bst": "16:25-16:35 UTC",
+            "action": "CLOSING_AUCTION_CAUTION",
+            "rationale": "Closing auction determines settlement price and triggers leveraged ETP daily rebalancing. AVOID entering new positions. Consider exiting if signals weakening. Closing auction = ~30% of daily volume for liquid names.",
+            "confidence": 0.88
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "08:00-08:05",
+            "reason": "Opening auction uncrossing. Wide spreads, thin order book, stale iNAV for US-tracking ETPs.",
+            "confidence": 0.80
+          },
+          {
+            "window": "10:00-12:00",
+            "reason": "Mid-morning lull. US pre-market not yet active. LSE-listed leveraged ETPs tracking US stocks have minimal price discovery. Volume trough.",
+            "confidence": 0.65
+          }
+        ]
+      },
+
+      "NYSE_NASDAQ": {
+        "timezone": "America/New_York",
+        "utc_offset_est": "-05:00",
+        "utc_offset_edt": "-04:00",
+        "session_hours_utc_winter": {"pre_market": "09:00-14:30", "regular": "14:30-21:00", "after_hours": "21:00-01:00"},
+        "session_hours_utc_summer": {"pre_market": "08:00-13:30", "regular": "13:30-20:00", "after_hours": "20:00-00:00"},
+        "volume_profile": {
+          "shape": "U_shape",
+          "description": "Classic U-shape: ~14% of daily volume in first 30 minutes, volume trough 11:30-14:00 ET, power hour ramp from 15:00 ET. Closing auction now ~10.5% of total volume (Q2 2024 record: $55.5bn/day). Over 60% of D-Orders submitted after 15:57:30 ET.",
+          "citations": ["Barardehi & Bernhardt (2025) - Revisiting U-shaped Patterns in Volatility", "NYSE Research (2024) - Closing Auction Timing Shifts and Marketability Trends"]
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "14:35-15:00",
+            "window_et": "09:35-10:00 ET",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Opening volatility subsides ~5 min post-open. Spreads normalise. Price discovery from opening cross complete. Retail order flow (MOO) absorbed. Informed trading concentrated here per academic literature.",
+            "confidence": 0.82,
+            "citation": "NBER - Market Structure and Liquidity"
+          },
+          {
+            "window": "15:30-17:00",
+            "window_et": "10:30-12:00 ET",
+            "action": "MOMENTUM_CONTINUATION",
+            "rationale": "Morning trends establish. Cross-listed ETPs on LSE now have live US feed. London still open providing dual-market liquidity.",
+            "confidence": 0.72
+          },
+          {
+            "window": "19:30-20:45",
+            "window_et": "14:30-15:45 ET",
+            "action": "POWER_HOUR_MOMENTUM",
+            "rationale": "Volume begins ramping. Institutional MOC orders start imbalance signals. 0DTE gamma effects intensify. Good for momentum strategies.",
+            "confidence": 0.78,
+            "citation": "CBOE Research (2024) - 0DTE Index Options and Market Volatility"
+          },
+          {
+            "window": "20:45-21:00",
+            "window_et": "15:45-16:00 ET",
+            "action": "AVOID_NEW_ENTRIES",
+            "rationale": "Final 15 minutes dominated by MOC/LOC orders, leveraged ETF rebalancing flows, and closing auction mechanics. Predictable flow = adverse selection risk for discretionary entries. A 1-sigma leveraged ETF rebalancing flow increases last-30-min returns by 430%.",
+            "confidence": 0.85,
+            "citations": ["ScienceDirect - Do leveraged ETFs really amplify late-day returns and volatility?", "JFM (2021) - Market impact of predictable flows from leveraged VIX products"]
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "14:30-14:35",
+            "reason": "Opening cross. Extreme volatility, wide spreads. Retail MOO orders create adverse selection.",
+            "confidence": 0.85
+          },
+          {
+            "window": "17:00-19:00",
+            "window_et": "12:00-14:00 ET",
+            "reason": "Lunch lull. Volume trough. Lower liquidity means wider effective spreads. Avoid for leveraged products where slippage compounds.",
+            "confidence": 0.75
+          }
+        ]
+      },
+
+      "XETRA": {
+        "timezone": "Europe/Berlin",
+        "utc_offset_cet": "+01:00",
+        "utc_offset_cest": "+02:00",
+        "session_hours_utc_winter": {"open_auction": "08:50-09:00", "continuous": "09:00-17:30", "close_auction": "17:30-17:35"},
+        "session_hours_utc_summer": {"open_auction": "07:50-08:00", "continuous": "08:00-16:30", "close_auction": "16:30-16:35"},
+        "intraday_auction_utc_winter": "12:00",
+        "intraday_auction_utc_summer": "11:00",
+        "volume_profile": {
+          "shape": "reverse_J_shape_individual_stocks_L_shape_DAX_index",
+          "description": "Individual stocks show reverse-J (high open, declining). DAX30 aggregate shows L-shape. Midday auction at 13:00 CET creates liquidity bump. Closing auction approaching 30% of daily volume for DAX constituents. Bid-ask spreads show reverse-J except bump post-midday auction.",
+          "citations": ["Semantic Scholar - Intraday Behaviour of Bid-Ask Spreads on Xetra", "EFMA 2023 - Consequences for Price Discovery and Market Quality"]
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "09:05-09:30",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Post-opening auction. European macro overnight absorbed. Good liquidity. Leveraged products tracking DAX/Euro Stoxx now have fresh iNAV.",
+            "confidence": 0.73
+          },
+          {
+            "window": "13:30-16:00",
+            "action": "OPTIMAL_FOR_US_TRACKING_ETPS",
+            "rationale": "US market overlap. XETRA-listed leveraged ETPs on US underlyings benefit from live US pricing. Highest cross-market liquidity.",
+            "confidence": 0.88
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "12:00-12:10",
+            "reason": "Intraday auction at 13:00 CET. Spreads widen immediately after uncrossing.",
+            "confidence": 0.65
+          },
+          {
+            "window": "11:00-13:00",
+            "reason": "Pre-US quiet period for US-tracking products. Volume trough.",
+            "confidence": 0.60
+          }
+        ]
+      },
+
+      "HKEX": {
+        "timezone": "Asia/Hong_Kong",
+        "utc_offset": "+08:00",
+        "session_hours_utc": {"morning": "01:30-04:00", "lunch_break": "04:00-05:00", "afternoon": "05:00-08:00"},
+        "pre_open_utc": "01:00-01:30",
+        "closing_auction_utc": "08:00-08:10",
+        "volume_profile": {
+          "shape": "double_U_shape",
+          "description": "Two distinct U-shapes due to lunch break. Morning session peaks at open, declines toward lunch. Depth thins approaching break. Afternoon session peaks again at 1:00 PM HKT then at close. HKEX lunch break was 2 hours (longest among top 20 exchanges) before being shortened to 1 hour.",
+          "citation": "SCIRP - Trading Hours and Price Efficiency: The Case of Hong Kong"
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "01:35-02:00",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Post-opening auction. US close news digested overnight. Informed trading concentrated early. Wait 5 min for spread normalisation.",
+            "confidence": 0.72
+          },
+          {
+            "window": "05:00-05:15",
+            "action": "AFTERNOON_OPEN_MOMENTUM",
+            "rationale": "Afternoon session opens. Traders repositioning on lunch-break news. Brief liquidity surge.",
+            "confidence": 0.65
+          },
+          {
+            "window": "07:00-08:00",
+            "action": "CLOSING_MOMENTUM",
+            "rationale": "Power hour equivalent. Volume concentrates. European pre-market starting to provide information.",
+            "confidence": 0.68
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "03:30-04:00",
+            "reason": "Pre-lunch thinning. Market depth deteriorates. Informed traders front-run the break (documented in TSE lunch-break research, applicable to HKEX).",
+            "confidence": 0.70
+          },
+          {
+            "window": "04:00-05:00",
+            "reason": "Lunch break. No on-exchange matching. Position risk without ability to exit.",
+            "confidence": 0.95
+          }
+        ]
+      },
+
+      "TSE": {
+        "timezone": "Asia/Tokyo",
+        "utc_offset": "+09:00",
+        "session_hours_utc": {"morning": "00:00-02:30", "lunch_break": "02:30-03:30", "afternoon": "03:30-06:00"},
+        "volume_profile": {
+          "shape": "double_U_shape",
+          "description": "Doubly U-shaped pattern: volatility peaks at morning open (00:00 UTC), drops toward lunch, peaks again at afternoon open, drops mid-afternoon, then peaks at close. Pre-lunch volatility surge documented (traders with superior information trade before break). Lunch break shortened from 90 to 60 min in Nov 2011.",
+          "citations": ["NY Fed Liberty Street Economics (2014) - Lunch Break Volatility on TSE", "ScienceDirect - Lunch break and intraday volatility of stock returns (Tokyo and New York)", "ScienceDirect - Intraday and interday volatility in the Japanese stock market"]
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "00:05-00:30",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Post-opening. US close and overnight news incorporated. Informed trading concentrated in opening period per KRX/TSE research.",
+            "confidence": 0.73
+          },
+          {
+            "window": "03:30-03:45",
+            "action": "AFTERNOON_REOPEN_MOMENTUM",
+            "rationale": "Fresh price discovery after lunch gap. Brief momentum from accumulated orders during break.",
+            "confidence": 0.65
+          },
+          {
+            "window": "05:30-06:00",
+            "action": "CLOSING_MOMENTUM",
+            "rationale": "Liquidity trading concentrated in closing period. European morning starting.",
+            "confidence": 0.68
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "02:00-02:30",
+            "reason": "Pre-lunch volatility surge. Informed traders aggressively position before break. Adverse selection risk for uninformed.",
+            "confidence": 0.75
+          },
+          {
+            "window": "02:30-03:30",
+            "reason": "Lunch break. No matching. Information accumulates without price adjustment.",
+            "confidence": 0.95
+          }
+        ]
+      },
+
+      "KRX": {
+        "timezone": "Asia/Seoul",
+        "utc_offset": "+09:00",
+        "session_hours_utc": {"pre_trading": "23:00-00:00", "continuous": "00:00-06:30", "post_trading": "06:30-09:00"},
+        "note": "KRX has no lunch break since 2000 for KOSPI, continuous trading",
+        "volume_profile": {
+          "shape": "U_shape_informed_opening_liquidity_closing",
+          "description": "Informed trading concentrated in opening period. Liquidity trading concentrated in closing period. Dynamic volatility interruptions (since Sept 2014) plus static VIs (since June 2015) with +/-30% price limits.",
+          "citation": "KRX Academic Research - Price impact of futures trades and intraday seasonality"
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "00:05-00:30",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Post-opening. Informed trading concentration means price discovery is fastest here. Follow informed flow.",
+            "confidence": 0.70
+          },
+          {
+            "window": "05:30-06:20",
+            "action": "CLOSING_LIQUIDITY",
+            "rationale": "Liquidity trading concentrates near close. Best execution quality for exits. Closing auction provides price improvement.",
+            "confidence": 0.72
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "02:00-04:00",
+            "reason": "Mid-session lull. Lowest volume and widest effective spreads. Asian lunch period effect (regional flow drought).",
+            "confidence": 0.60
+          }
+        ]
+      },
+
+      "SGX": {
+        "timezone": "Asia/Singapore",
+        "utc_offset": "+08:00",
+        "session_hours_utc": {"morning": "01:00-04:00", "lunch_break": "04:00-05:00", "afternoon": "05:00-08:00"},
+        "volume_profile": {
+          "shape": "double_U_shape",
+          "description": "Two U-curves for trading return documented. Pure order-driven system (no designated market makers). Automation associated with increased volume, return volatility and liquidity. Strong positive correlation between volume and volatility.",
+          "citation": "ScienceDirect - Volume, volatility, liquidity and efficiency of the Singapore Stock Exchange before and after automation"
+        },
+        "optimal_windows_utc": [
+          {
+            "window": "01:05-01:30",
+            "action": "ENTRY_POST_OPEN",
+            "rationale": "Post-opening in pure order-driven market. Liquidity best at session boundaries.",
+            "confidence": 0.65
+          },
+          {
+            "window": "07:00-08:00",
+            "action": "CLOSING_MOMENTUM",
+            "rationale": "Closing period. Volume concentrates. European pre-market information flow beginning.",
+            "confidence": 0.65
+          }
+        ],
+        "avoid_windows_utc": [
+          {
+            "window": "03:30-05:00",
+            "reason": "Pre-lunch thinning through lunch break. No market maker cushion in SGX order-driven system amplifies illiquidity.",
+            "confidence": 0.70
+          }
+        ]
+      }
+    },
+
+    "cross_exchange_overlap_windows": [
+      {
+        "name": "Asia_Morning_Cluster",
+        "utc_window": "00:00-02:30",
+        "exchanges_active": ["TSE", "KRX", "HKEX", "SGX"],
+        "description": "All major Asian exchanges open simultaneously. Maximum Asian liquidity. US close news being digested.",
+        "confidence": 0.80
+      },
+      {
+        "name": "Asia_Europe_Transition",
+        "utc_window": "07:00-08:00",
+        "exchanges_active": ["HKEX (closing)", "SGX (closing)", "LSE (opening)", "XETRA (opening)"],
+        "description": "Handover window. Asian closing flows can inform European opening positions. Brief overlap for cross-market momentum.",
+        "confidence": 0.70
+      },
+      {
+        "name": "London_NewYork_Overlap",
+        "utc_window": "13:30-16:30",
+        "utc_window_summer": "12:30-15:30",
+        "exchanges_active": ["LSE", "XETRA", "NYSE", "NASDAQ"],
+        "description": "THE premier window for leveraged ETP trading on LSE. ~60% of daily FX volume occurs here. US cash market open provides live NAV for LSE-listed products. Academic consensus: highest liquidity, tightest spreads, best price discovery.",
+        "confidence": 0.95,
+        "citations": ["Krohn (2024) Journal of Finance", "RBA Bulletin (2007) - Intraday Currency Market Volatility", "Ito & Hashimoto (2006) ScienceDirect - Intraday seasonality in FX"]
+      },
+      {
+        "name": "US_Power_Hour",
+        "utc_window": "19:30-21:00",
+        "utc_window_summer": "18:30-20:00",
+        "exchanges_active": ["NYSE", "NASDAQ"],
+        "description": "US closing period. MOC imbalances published. Leveraged ETF rebalancing flows. 0DTE gamma effects peak. Over 60% of NYSE D-Orders submitted after 15:57:30 ET.",
+        "confidence": 0.85,
+        "citation": "NYSE Research (2024) - Closing Auction Dynamics"
+      }
+    ]
+  },
+
+  "section_2_day_of_week": {
+    "title": "Day-of-Week Effects",
+
+    "meta_analysis": {
+      "source": "Eurasian Economic Review (2024) - Day-of-the-week effect: a meta-analysis of 85 studies",
+      "key_finding": "Mondays and Tuesdays provide lower average daily returns. Wednesdays and Fridays indicate higher returns. Unexpectedly strong Wednesday effect. Effect strongest in 1980s-1990s, weakening but persistent.",
+      "geographic_scope": "Monday effect present in North America, Europe, Asia, South America. Friday effect present in North America, Asia, South Africa.",
+      "confidence": 0.70
+    },
+
+    "day_patterns": {
+      "monday": {
+        "effect": "NEGATIVE_BIAS",
+        "description": "Lower expected returns, higher volatility. Weekend gap risk. However, academic evidence shows weakening over time. Monday effect now conditional on prior week's sentiment.",
+        "aegis_implication": "Reduce position sizes on Monday open. Wait for gap resolution before entering leveraged positions. Weekend gap on 3x/5x products can be 3-5x the underlying gap.",
+        "confidence": 0.65,
+        "citation": "Tandfonline (2025) - Day-of-the-week effect on stock market returns, volatility, and skewness"
+      },
+      "tuesday": {
+        "effect": "NEGATIVE_BIAS",
+        "description": "Continuation of Monday weakness. Often lowest returns of the week in meta-analysis.",
+        "aegis_implication": "Conservative positioning. Good day for mean-reversion entries if Monday gap was excessive.",
+        "confidence": 0.55
+      },
+      "wednesday": {
+        "effect": "POSITIVE_BIAS",
+        "description": "Strongest positive mid-week effect per 2024 meta-analysis. May reflect information processing lag from early-week news.",
+        "aegis_implication": "Higher confidence for momentum entries. Leveraged long positions favoured.",
+        "confidence": 0.60
+      },
+      "thursday": {
+        "effect": "NEUTRAL",
+        "description": "Mixed evidence. Often pre-positioning for Friday effects.",
+        "aegis_implication": "Standard positioning. Watch for FOMC Thursday drift if applicable.",
+        "confidence": 0.45
+      },
+      "friday": {
+        "effect": "POSITIVE_BIAS",
+        "description": "Higher returns documented. Weekend positioning effects. Institutional portfolio rebalancing. BUT: holding leveraged ETPs over weekend introduces 2 days of time decay without return.",
+        "aegis_implication": "Consider taking profits before close on leveraged positions. DO NOT hold 3x/5x products over weekends unless directional conviction is very high.",
+        "confidence": 0.65,
+        "leveraged_etp_warning": "Weekend theta decay on leveraged ETPs: 2/252 = 0.79% of annual financing cost per weekend. On 3x product, this compounds to ~2.4% annualised drag from weekends alone."
+      }
+    },
+
+    "fomc_meeting_days": {
+      "pattern": "PRE_FOMC_DRIFT",
+      "description": "S&P 500 starts rising afternoon before FOMC announcement, continues through morning of announcement. Average +50bps from day-before open to announcement. Drift persists despite being published 10+ years ago (tested through Dec 2024). Post-announcement: equity returns do not reverse. Currency markets: post-FOMC returns cancel ~65% of pre-drift.",
+      "timing": {
+        "pre_drift_start_utc": "18:00 (day before announcement, ~1PM ET)",
+        "announcement_utc": "18:00 (announcement day, 2PM ET)",
+        "post_announcement_window": "18:00-21:00 (announcement day)"
+      },
+      "aegis_implication": "Enter leveraged long positions afternoon before FOMC. Exit within 2 hours post-announcement. DO NOT hold leveraged products through FOMC uncertainty if delta is unclear.",
+      "confidence": 0.80,
+      "citations": ["NY Fed Staff Report 512 - The Pre-FOMC Announcement Drift", "Tandfonline (2024) - The pre-FOMC announcement drift: short-lived or long-lasting?", "QuantSeeker (2024) - Trading the Fed: The Pre-FOMC Drift is Alive"]
+    },
+
+    "ecb_meeting_days": {
+      "pattern": "PRE_ECB_DRIFT",
+      "description": "European equity indices drift upward day before ECB press conference (typically 13:15 CET / 12:15 UTC). Strategies leveraging this drift generate positive returns on European stock indices.",
+      "timing": {
+        "press_conference_utc": "12:15 (winter) / 11:15 (summer)",
+        "pre_drift_period": "Prior trading day afternoon through morning of announcement"
+      },
+      "confidence": 0.65,
+      "citation": "Quantpedia - Uncovering the Pre-ECB Drift and Its Trading Strategy Applications"
+    },
+
+    "options_expiration": {
+      "monthly_opex": {
+        "timing": "Third Friday of each month",
+        "effect": "Volume approximately doubles on triple witching (Mar/Jun/Sep/Dec). Intraday swings amplified. Final hour ('witching hour') sees most abrupt moves.",
+        "recent_magnitude": "June 2024: ~$5.5 trillion in options expired. Call gamma expiration shifted market from stable to volatile.",
+        "aegis_implication": "REDUCE leveraged ETP position sizes on OpEx day. Gamma unwind creates unpredictable reversals. Do not trust intraday trends in final 90 minutes.",
+        "confidence": 0.78,
+        "citation": "CBOE/Optionalpha - Triple Witching research"
+      },
+      "weekly_0dte": {
+        "timing": "Daily (Mon-Fri) for SPX 0DTE options",
+        "effect": "0DTE now >40% of total S&P 500 options volume (~1.5M contracts/day). OMM gamma can increase annualised 30-min volatility by up to 6.4 percentage points. Positive OMM gamma strengthens mean-reversion; negative gamma strengthens momentum.",
+        "aegis_implication": "Monitor gamma exposure (GEX) direction. When GEX is negative (typically after large sell-offs), leveraged momentum strategies have tailwind. When GEX positive, mean-reversion strategies preferred.",
+        "confidence": 0.75,
+        "citations": ["CBOE Working Paper (2024) - 0DTE Index Options and Market Volatility", "SSRN (Dim, Eraker, Vilkov) - 0DTEs: Trading, Gamma Risk and Volatility Propagation"]
+      },
+      "triple_quadruple_witching": {
+        "dates": "Third Friday of March, June, September, December",
+        "effect": "Simultaneous expiry of stock options, index futures, index options (and formerly single-stock futures). Volume 2-4x normal. Recent years somewhat less dramatic due to proliferation of weekly/daily expirations spreading flow across more dates.",
+        "aegis_implication": "HALVE leveraged ETP position sizes. Set tighter stops. Prefer closing positions before 19:00 UTC on witching day. Do not enter new leveraged positions in final 2 hours.",
+        "confidence": 0.80
+      }
+    }
+  },
+
+  "section_3_leveraged_etp_timing": {
+    "title": "Leveraged ETP Specific Timing",
+
+    "daily_rebalancing": {
+      "mechanism": "At end of each trading day, leveraged ETPs must adjust exposure to maintain stated leverage ratio (e.g., 3x). If underlying rose, buy more; if fell, sell. This 'buy high, sell low' pattern is the engine of volatility decay.",
+      "rebalancing_window_utc": {
+        "us_listed": "20:30-21:00 (15:30-16:00 ET). Concentrated in last 30 minutes.",
+        "lse_listed_us_tracking": "16:25-16:35 (LSE closing auction). BUT underlying US rebalancing happens at US close. LSE ETP NAV adjusts next morning.",
+        "xetra_listed": "17:25-17:35 (XETRA closing auction)"
+      },
+      "market_impact": {
+        "description": "A 1-sigma increase in leveraged ETF rebalancing flows increases end-of-day returns by 430% of the average return in the last half hour (ScienceDirect 2018). However, other research finds the impact is economically insignificant after controlling for risk factors. JPMorgan estimated leveraged ETFs sold $15B in equities on Sep 3 2020, contributing to 3% Nasdaq plunge.",
+        "net_assessment": "Impact is real but episodic. Largest on high-vol days when rebalancing flows are largest. During calm markets, flows are efficiently absorbed.",
+        "confidence": 0.75,
+        "citations": ["ScienceDirect (2018) - Do leveraged ETFs really amplify late-day returns and volatility?", "Beckmeyer (2021) - Role of Leveraged ETFs and Option Market Imbalances"]
+      },
+      "aegis_implication": "NEVER enter new leveraged positions in final 30 minutes of any exchange. For exits, can exploit rebalancing flow direction: if market up, leveraged ETFs are buyers = can sell into their bid. If market down, leveraged ETFs are sellers = wait for next day."
+    },
+
+    "volatility_decay_timing": {
+      "daily_drag": "Higher leverage = exponentially worse decay. 3x products lose ~3x the squared daily return. 5x products lose ~5x.",
+      "optimal_holding_period": {
+        "2x": "Up to 1 month produces approximately 2x underlying return. Beyond 1 month, decay becomes material.",
+        "3x": "1-5 trading days optimal. Beyond 2 weeks, decay significant unless strong directional trend.",
+        "5x": "Intraday to 2-3 days maximum. 5x products are essentially intraday instruments.",
+        "citation": "SLCG Research - Leveraged ETFs, Holding Periods and Investment Shortfalls"
+      },
+      "autocorrelation_dependency": {
+        "trending_markets": "Positive autocorrelation HELPS leveraged ETFs. Compounding enhances returns in trends. Academic: LETFs exhibit positive expected compounding effects when returns are independent or trending.",
+        "mean_reverting_markets": "Negative autocorrelation KILLS leveraged ETFs. Each reversal compounds the decay.",
+        "citation": "arXiv (April 2025) - Compounding Effects in Leveraged ETFs: Beyond the Volatility Drag Paradigm"
+      },
+      "aegis_implication": "Use autocorrelation regime detection to size leveraged positions. In trending regime: hold longer, size up. In mean-reverting regime: reduce holding time to intraday, or avoid entirely."
+    },
+
+    "intraday_stop_loss_mechanism": {
+      "description": "European leveraged ETPs (WisdomTree, GraniteShares, Leverage Shares) have built-in intraday stop-loss mechanisms to prevent products reaching zero.",
+      "trigger_levels": {
+        "3x_long": "Underlying falls ~16.67% intraday (16.67% * 3 = 50% ETP loss). Index suspends for 10-minute observation period, then resets at new level.",
+        "3x_short": "Underlying rises ~16.67% intraday.",
+        "5x_long": "Underlying falls ~10% intraday (10% * 5 = 50% ETP loss).",
+        "total_wipeout_threshold": "If underlying moves >33.3% before rebalance completes, ETP redeems at zero."
+      },
+      "historical_events": "During March 2020 volatility, multiple WisdomTree and Leverage Shares short ETPs underwent forced intraday rebalancing. WisdomTree NASDAQ 100 5x Daily Short ETP also triggered.",
+      "aegis_implication": "ALWAYS set hard stops on 5x products at 8% loss (leaving 2% buffer before forced rebalance). On 3x products, hard stop at 14%. Monitor intraday for stop-loss mechanism triggers on counterparty products (can signal extreme moves).",
+      "confidence": 0.90,
+      "citations": ["GraniteShares Education - Stop Loss Mechanism", "WisdomTree Professional Paper - 5 Things to Know About S&L ETPs", "ETF Stream (2025) - Market volatility strains short and leveraged ETPs in Europe"]
+    },
+
+    "nav_premium_discount": {
+      "pattern": "LSE-listed ETPs tracking US underlyings trade at stale NAV during London-only hours (08:00-14:30 UTC). Premium/discount can exceed 1% before US market opens. Once US opens, AP arbitrage compresses spread.",
+      "key_insight": "Common mistake: comparing LSE close price to US-close NAV despite separate time zones. True iNAV only accurate during US trading hours.",
+      "optimal_arb_window_utc": "14:30-16:30 (US market open + LSE still open). Tightest NAV tracking. Best execution for entries and exits.",
+      "confidence": 0.85,
+      "citations": ["Invesco - Understanding ETF trading and liquidity", "ScienceDirect (2021) - Intraday arbitrage between ETFs and their underlying portfolios", "VanEck - Navigate ETF Premiums and Discounts Accurately"]
+    },
+
+    "creation_redemption_timing": {
+      "description": "Authorised Participants (APs) create/redeem ETF shares at closing NAV. Create when premium, redeem when discount. This activity peaks at exchange close.",
+      "timing_utc": "20:30-21:00 for US-listed. 16:30-16:35 for LSE-listed (but settlement uses US close NAV next day).",
+      "aegis_implication": "Large creation/redemption activity visible in next-day flows data. Persistent premium = demand > supply = bullish flow signal. Persistent discount = redemption pressure = bearish.",
+      "confidence": 0.72
+    }
+  },
+
+  "section_4_seasonal_calendar": {
+    "title": "Seasonal and Calendar Effects",
+
+    "turn_of_month": {
+      "effect": "POSITIVE_BIAS",
+      "window": "Last 1-3 trading days of month + first 1-3 trading days of next month",
+      "description": "Equity returns over the last trading day of month through first 3 days of next month are significantly higher than other days. Persists across 1987-2005 and more recent data. Positive abnormal returns + volatility anomalies documented.",
+      "mechanism": "Institutional fund flows (pension contributions, systematic rebalancing), payroll-driven retail buying.",
+      "aegis_implication": "Bias leveraged LONG positions during turn-of-month window. Reduce short leveraged exposure. Effect size: approximately 0.10-0.15% per day above average.",
+      "confidence": 0.75,
+      "citations": ["Quantpedia - Turn of the Month in Equity Indexes", "SSRN (Vidal & Vidal-Garcia) - Turn of the Month Effect"]
+    },
+
+    "january_effect": {
+      "effect": "WEAKENED_BUT_CONDITIONAL",
+      "description": "Small-cap outperformance in January weakened sharply post-2000. Recent evidence (through Dec 2024): effect attributed to individual investors' reluctance to buy before New Year + liquidity preference after holidays. In Jan 2024, small caps fell -3.89%, lagging large caps. In Jan 2025, both gained ~2.5%.",
+      "aegis_implication": "DO NOT rely on January effect for leveraged positioning. Too inconsistent post-2000. Focus on individual signals.",
+      "confidence": 0.35,
+      "citation": "ScienceDirect (2025) - January effect, Lunar New Year effect, and liquidity preference"
+    },
+
+    "sell_in_may": {
+      "effect": "CONDITIONAL_ON_ELECTION_YEAR",
+      "window": "May-October (underperformance) vs November-April (outperformance)",
+      "description": "1950-2024: S&P 500 averaged ~7.2% Nov-Apr vs lower May-Oct. SEC filing volumes 17% higher in winter (Nov-Apr) suggesting informational driver. BUT: research finds anomaly NOT present in non-election years.",
+      "aegis_implication": "In election years (2024, 2028): reduce leveraged long exposure May-October. In non-election years: ignore. Key nuance for AEGIS: this is a US-centric effect; less documented for LSE-listed products on non-US underlyings.",
+      "confidence": 0.55,
+      "citations": ["ScienceDirect (2017) - The Sell in May effect: A review and new empirical evidence", "MDPI (2025) - A New Puzzle Piece: Regulatory Disclosures", "Emerald - Is the sell in May adage the result of an election-year effect?"]
+    },
+
+    "pre_holiday_effect": {
+      "effect": "POSITIVE_BIAS",
+      "description": "Pre-holiday returns are 10x larger than average daily returns. Asian markets: pre-holiday returns ~7x normal. Post-holiday: 3x normal in Europe and North America. Effect inversely related to firm size (strongest in small caps, absent in large caps for some studies).",
+      "major_holidays_utc": {
+        "us": ["New Year (Jan 1)", "MLK Day (Jan third Mon)", "Presidents Day (Feb third Mon)", "Good Friday", "Memorial Day (May last Mon)", "Independence Day (Jul 4)", "Labor Day (Sep first Mon)", "Thanksgiving (Nov fourth Thu)", "Christmas (Dec 25)"],
+        "uk": ["New Year", "Good Friday", "Easter Monday", "Early May Bank Holiday", "Spring Bank Holiday", "Summer Bank Holiday", "Christmas", "Boxing Day"],
+        "note": "Each holiday creates a pre-holiday effect on local exchange"
+      },
+      "aegis_implication": "Consider entering leveraged long positions 1 day before major holidays. Close after holiday (especially in Asia where effect is strongest). Size effect means this is more relevant for small-cap leveraged ETPs.",
+      "confidence": 0.70,
+      "citations": ["Quantpedia - Pre-Holiday Effect", "SSRN (2024) - The Holiday Effect in Stock Markets", "Russell Investments (2025) - Holiday trading effect"]
+    },
+
+    "earnings_season": {
+      "timing": "Peaks in January, April, July, October (weeks 2-5 of each month)",
+      "effect": "Individual stock moves +/- 3% within 24 hours. Post-earnings announcement drift: winners drift up 60+ days, losers drift down 60+ days. Hedge portfolio (long top SUE decile, short bottom) generates 5.1% over 3 months.",
+      "aegis_implication": "During earnings season: leveraged single-stock ETPs (NVD3.L, TSL3.L, GPT3.L, TSM3.L, MU2.L) require EXTRA caution. A 3% underlying move = 9% on 3x = 15% on 5x. Either reduce size pre-earnings or time entries for post-announcement drift (enter after report, ride drift).",
+      "confidence": 0.80,
+      "citations": ["RFS Oxford Academic (2025) - Earnings Extrapolation and Predictable Stock Market Returns", "Wikipedia - Post-earnings-announcement drift"]
+    },
+
+    "uk_isa_tax_year": {
+      "deadline": "April 5 (end of tax year). New year starts April 6.",
+      "flow_pattern": "~28% of annual ISA subscriptions from sophisticated investors added between April 6-30. End-of-March sees last-minute ISA contributions creating flow pressure into UK equity funds/ETFs.",
+      "aegis_implication": "Slight positive flow into UK-listed ETPs late March/early April from ISA deadline buying. Minor effect but directionally supportive for LSE-listed products. AEGIS already trades through April boundary.",
+      "confidence": 0.45,
+      "citation": "Interactive Investor data on ISA millionaires subscription timing"
+    },
+
+    "overnight_vs_intraday_returns": {
+      "key_finding": "Nearly all US stock market gains over past 30 years earned OVERNIGHT (close-to-open). Average intraday returns negative or flat.",
+      "driver": "Retail investors net buy at open, net sell at close. Also: overnight information shocks and risk premium.",
+      "aegis_implication": "For leveraged ETPs: the overnight gap IS the return. Intraday is noise/decay. This implies HOLDING overnight is where returns accumulate, but weekend gaps on leveraged products are the main risk. Optimal: enter near close, exit after next open.",
+      "confidence": 0.80,
+      "citations": ["SSRN (Ahn et al. 2024) - Retail Ebb and Flow and the Overnight-Intraday Return Gap", "ScienceDirect (2025) - Day and night expected returns under overnight information shocks", "SSRN (Perreten & Wallmeier 2025) - Overnight Returns and the Timing of Trading Volume"]
+    }
+  },
+
+  "section_5_cross_market_lead_lag": {
+    "title": "Cross-Market Lead-Lag Relationships",
+
+    "information_flow_hierarchy": {
+      "description": "US markets are the dominant volatility transmitter globally. North American and developed European markets are major shock transmitters. Emerging European and Asia-Pacific economies are primary receivers. Hong Kong serves as pivotal intermediary for US→China transmission.",
+      "direction": "US → Europe → Asia (for equity shocks). US monetary policy uncertainty Granger-causes changes in Asian stock prices. Negative shocks have asymmetrically larger impact than positive.",
+      "citations": ["ScienceDirect (2025) - Stock market volatility spillovers from US to China via Hong Kong", "PMC (2023) - Market return spillover from US to Asia-Pacific", "Federal Reserve IFDP 1321 - Cross-market lead-lag"]
+    },
+
+    "session_chain": {
+      "description": "Global 24-hour equity futures chain: US close (21:00 UTC) → Asia open (00:00-01:30 UTC) → Asia close (06:00-08:00 UTC) → Europe open (07:00-09:00 UTC) → US open (13:30-14:30 UTC) → London/NY overlap (13:30-16:30 UTC) → Europe close (16:30-17:30 UTC) → US close (21:00 UTC).",
+      "key_transition_windows": [
+        {
+          "name": "US_Close_to_Asia_Open",
+          "utc_window": "21:00-01:00",
+          "lag": "2-4 hours",
+          "signal_quality": "US S&P 500 futures overnight move predicts Asian equity direction with ~60-65% accuracy for first 30 minutes of Asian session.",
+          "aegis_implication": "If US closed strongly (up or down), Asian leveraged products will gap in same direction. Can front-run with overnight US futures position sizing.",
+          "confidence": 0.72
+        },
+        {
+          "name": "Asia_Close_to_Europe_Open",
+          "utc_window": "06:00-09:00",
+          "lag": "1-2 hours",
+          "signal_quality": "Asian session sentiment feeds into European opening. Nikkei/Hang Seng direction influences DAX/FTSE opening gap.",
+          "aegis_implication": "Use Asian close (06:00-08:00 UTC) as leading indicator for LSE/XETRA opening positioning. Particularly relevant for TSM3.L (TSMC) and 3SEM.L (semiconductors) which have Asian fundamental exposure.",
+          "confidence": 0.68
+        },
+        {
+          "name": "Europe_Morning_to_US_Open",
+          "utc_window": "09:00-14:30",
+          "lag": "0-5 hours",
+          "signal_quality": "European morning trading establishes sentiment for US open. FTSE 100 and DAX movements in first 2 hours predict US opening gap direction with moderate accuracy.",
+          "aegis_implication": "LSE-listed leveraged ETPs on US underlyings move during London morning based on US futures. Monitor ES/NQ futures during 09:00-14:30 UTC for true directional signal.",
+          "confidence": 0.65
+        },
+        {
+          "name": "London_NY_Overlap",
+          "utc_window": "13:30-16:30",
+          "lag": "0 (simultaneous)",
+          "signal_quality": "HIGHEST quality signal environment. Both markets open. Full price discovery. FX fixings (particularly WMR 16:00 London = highest FX volume). Cross-listed stocks show increased volatility, increased volume, and positive correlation in order imbalance.",
+          "aegis_implication": "THIS IS THE PRIMARY TRADING WINDOW FOR AEGIS LSE LEVERAGED ETPS. All entries and exits should be biased toward this window when possible.",
+          "confidence": 0.95,
+          "citation": "ScienceDirect - Splitting orders in overlapping markets"
+        }
+      ]
+    },
+
+    "fx_hedging_windows": {
+      "description": "GBP/USD and EUR/USD hedging is most efficient during London/NY overlap. WMR fix at 16:00 London time generates largest FX flows. Bank of England research shows optimal GBP hedge ratio is regime-dependent.",
+      "optimal_hedge_timing_utc": {
+        "primary": "14:30-16:00 (London open, NY open, deepest FX liquidity)",
+        "secondary": "08:00-10:00 (London morning, good EUR/GBP liquidity before US)"
+      },
+      "aegis_implication": "For LSE-listed products denominated in GBP but tracking USD underlyings: FX exposure is implicit. GBP strengthening hurts GBP-denominated leveraged long USD positions. Monitor GBP/USD during overlap window. Consider timing entries/exits around WMR fix (16:00 London) when FX moves can create temporary mispricing.",
+      "confidence": 0.70,
+      "citations": ["Bank of England Staff WP 1042 (2023) - Foreign exchange hedging using regime-switching models", "BIS Quarterly Review (2025) - Global FX markets when hedging takes centre stage"]
+    },
+
+    "overnight_futures_as_leading_indicator": {
+      "description": "US equity futures (ES, NQ) trade nearly 24 hours and serve as the global equity sentiment barometer. Price discovery in non-US hours increasingly driven by futures, especially during macro events.",
+      "academic_evidence": "Post-2013, US market leads in price discovery during Asian night sessions. Extended trading hours decrease market segmentation.",
+      "aegis_implication": "ALWAYS monitor ES/NQ futures before Asian/European sessions. For LSE-listed leveraged ETPs: US futures overnight move IS the primary driver of opening gap and morning direction.",
+      "confidence": 0.82,
+      "citations": ["Wiley (2025) - Futures Turnover Waves", "ScienceDirect - Night effect of intraday trading"]
+    }
+  },
+
+  "section_6_aegis_specific_recommendations": {
+    "title": "AEGIS V2 Integrated Trading Schedule (UTC)",
+    "description": "Synthesised optimal schedule for AEGIS V2 leveraged ETP trading across all exchanges, incorporating all evidence above.",
+
+    "primary_instruments_schedule": {
+      "lse_leveraged_etps_us_underlying": {
+        "instruments": ["QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "3SEM.L"],
+        "golden_window_utc": "13:30-16:00",
+        "golden_window_description": "London/NY overlap. Live US pricing. Tightest NAV tracking. Best liquidity. THIS IS THE PRIMARY EXECUTION WINDOW.",
+        "secondary_window_utc": "08:05-10:00",
+        "secondary_window_description": "Post-LSE open. Use only for time-sensitive signals. Higher spread risk. iNAV based on stale US close.",
+        "avoid_windows_utc": ["07:50-08:05 (opening auction)", "10:00-13:00 (dead zone, no US cash)", "16:25-16:35 (closing auction/rebalancing)"],
+        "weekend_rule": "EXIT all 5x positions before Friday 16:00 UTC. Consider exiting 3x positions unless strong directional conviction.",
+        "confidence": 0.90
+      }
+    },
+
+    "weekly_schedule_utc": {
+      "monday": {
+        "bias": "CAUTIOUS",
+        "open_strategy": "Wait for gap resolution. Do not chase opening gap on leveraged products. Enter after 14:00 UTC (US pre-market) at earliest.",
+        "position_size_modifier": 0.75
+      },
+      "tuesday": {
+        "bias": "CAUTIOUS_TO_NEUTRAL",
+        "open_strategy": "Normal signals but conservative sizing.",
+        "position_size_modifier": 0.85
+      },
+      "wednesday": {
+        "bias": "CONSTRUCTIVE",
+        "open_strategy": "Strongest mid-week returns documented. Lean into momentum signals.",
+        "position_size_modifier": 1.0
+      },
+      "thursday": {
+        "bias": "NEUTRAL",
+        "open_strategy": "Standard. Check FOMC calendar.",
+        "position_size_modifier": 1.0,
+        "fomc_override": "If FOMC day: pre-announcement drift strategy applies"
+      },
+      "friday": {
+        "bias": "TAKE_PROFITS",
+        "open_strategy": "Positive return bias but EXIT leveraged positions before close. Do not hold 5x over weekend. Reduce 3x to minimum.",
+        "position_size_modifier": 0.90,
+        "opex_override": "If monthly OpEx: reduce position_size_modifier to 0.60"
+      }
+    },
+
+    "monthly_calendar_overlay": {
+      "turn_of_month": {
+        "window": "Last 3 trading days + First 3 trading days",
+        "bias": "BULLISH",
+        "position_size_modifier": 1.10
+      },
+      "mid_month": {
+        "window": "Trading days 8-18",
+        "bias": "NEUTRAL",
+        "position_size_modifier": 1.0
+      },
+      "opex_week": {
+        "window": "Week of third Friday",
+        "bias": "ELEVATED_VOL",
+        "position_size_modifier": 0.80,
+        "triple_witching_months": ["March", "June", "September", "December"],
+        "triple_witching_modifier": 0.60
+      }
+    },
+
+    "annual_calendar_overlay": {
+      "best_months": {
+        "months": ["November", "December", "January", "February", "March", "April"],
+        "description": "Nov-Apr historically stronger. Conditional on election years for Sell-in-May signal.",
+        "position_size_modifier": 1.0
+      },
+      "weaker_months": {
+        "months": ["May", "June", "July", "August", "September", "October"],
+        "description": "May-Oct historically weaker, but only statistically significant in election years.",
+        "position_size_modifier": 0.90,
+        "election_year_modifier": 0.80
+      },
+      "earnings_season_weeks": {
+        "months": ["mid-January to mid-February", "mid-April to mid-May", "mid-July to mid-August", "mid-October to mid-November"],
+        "single_stock_leveraged_etp_modifier": 0.70,
+        "index_leveraged_etp_modifier": 1.0,
+        "description": "Reduce single-stock leveraged ETP sizes during earnings for that stock. Index ETPs unaffected."
+      },
+      "uk_isa_deadline": {
+        "window": "March 20 - April 10",
+        "bias": "MILD_POSITIVE_FLOW",
+        "description": "ISA deadline buying creates mild positive flow into LSE-listed ETFs/ETPs.",
+        "confidence": 0.45
+      }
+    },
+
+    "stop_loss_framework_for_leveraged_etps": {
+      "5x_products": {
+        "instruments": ["QQQ5.L", "5SPY.L"],
+        "hard_stop_percent": 8.0,
+        "trailing_stop_percent": 5.0,
+        "max_holding_period_days": 3,
+        "forced_rebalance_trigger": "Underlying moves 10% intraday (50% ETP loss → stop-loss mechanism triggers)",
+        "weekend_rule": "ALWAYS exit before Friday close"
+      },
+      "3x_products": {
+        "instruments": ["QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L", "3SEM.L"],
+        "hard_stop_percent": 14.0,
+        "trailing_stop_percent": 8.0,
+        "max_holding_period_days": 10,
+        "forced_rebalance_trigger": "Underlying moves 16.67% intraday (50% ETP loss → stop-loss mechanism triggers)",
+        "weekend_rule": "Reduce to 50% size or exit if no strong directional signal"
+      }
+    }
+  },
+
+  "section_7_citations": {
+    "title": "Full Citation List",
+    "academic_papers": [
+      {"id": "barardehi_2025", "title": "Revisiting the U-Shaped Patterns in Volatility and Price Impacts: Novel Results Using Trade-Time Estimates", "authors": "Barardehi, Bernhardt", "year": 2025, "journal": "Journal of Financial Markets", "url": "https://www.sciencedirect.com/science/article/pii/S1386418125000114"},
+      {"id": "giudici_2026", "title": "Intraday Trading Volume Patterns of Market Index ETFs", "authors": "Giudici et al.", "year": 2026, "journal": "Journal of Corporate Accounting & Finance", "url": "https://onlinelibrary.wiley.com/doi/10.1002/jcaf.70005"},
+      {"id": "krohn_2024", "title": "Foreign Exchange Fixings and Returns around the Clock", "authors": "Krohn", "year": 2024, "journal": "The Journal of Finance", "url": "https://onlinelibrary.wiley.com/doi/10.1111/jofi.13306"},
+      {"id": "dow_meta_2024", "title": "Day-of-the-week effect: a meta-analysis", "authors": "Various", "year": 2024, "journal": "Eurasian Economic Review", "url": "https://link.springer.com/article/10.1007/s40822-024-00293-9"},
+      {"id": "dow_2025", "title": "Day-of-the-week effect on stock market returns, volatility, and skewness", "authors": "Various", "year": 2025, "journal": "Revista de Contabilidad / Spanish Accounting Review", "url": "https://www.tandfonline.com/doi/full/10.1080/02102412.2025.2522525"},
+      {"id": "pre_fomc_2024", "title": "The pre-FOMC announcement drift: short-lived or long-lasting?", "authors": "Various", "year": 2024, "journal": "Applied Economics", "url": "https://www.tandfonline.com/doi/full/10.1080/00036846.2024.2322573"},
+      {"id": "nyfed_fomc", "title": "The Pre-FOMC Announcement Drift", "authors": "Lucca, Moench", "year": 2015, "journal": "NY Fed Staff Reports", "url": "https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr512.pdf"},
+      {"id": "leveraged_etf_late_day", "title": "Do leveraged ETFs really amplify late-day returns and volatility?", "authors": "Various", "year": 2018, "journal": "Journal of Financial Markets", "url": "https://www.sciencedirect.com/science/article/abs/pii/S1386418117302604"},
+      {"id": "predictable_flows", "title": "The market impact of predictable flows: Evidence from leveraged VIX products", "authors": "Various", "year": 2021, "journal": "Journal of Banking & Finance", "url": "https://www.sciencedirect.com/science/article/abs/pii/S0378426621002363"},
+      {"id": "compounding_2025", "title": "Compounding Effects in Leveraged ETFs: Beyond the Volatility Drag Paradigm", "authors": "Various", "year": 2025, "journal": "arXiv preprint", "url": "https://arxiv.org/abs/2504.20116"},
+      {"id": "slcg_holding", "title": "Leveraged ETFs, Holding Periods and Investment Shortfalls", "authors": "SLCG", "year": 2020, "journal": "SLCG Research", "url": "https://www.slcg.com/files/research-papers/Leveraged%20ETFs,%20Holding%20Periods%20and%20Investment%20Shortfalls.pdf"},
+      {"id": "path_dependence", "title": "Path-Dependence of Leveraged ETF Returns", "authors": "Various", "year": 2010, "journal": "SIAM Journal on Financial Mathematics", "url": "https://epubs.siam.org/doi/10.1137/090760805"},
+      {"id": "intraday_arb", "title": "Intraday arbitrage between ETFs and their underlying portfolios", "authors": "Various", "year": 2021, "journal": "Journal of Financial Economics", "url": "https://www.sciencedirect.com/science/article/abs/pii/S0304405X21001537"},
+      {"id": "0dte_cboe", "title": "0DTE Index Options and Market Volatility: How Large is Their Impact?", "authors": "CBOE", "year": 2024, "journal": "CBOE Research", "url": "https://cdn.cboe.com/resources/education/research_publications/gammasqueezes.pdf"},
+      {"id": "0dte_ssrn", "title": "0DTEs: Trading, Gamma Risk and Volatility Propagation", "authors": "Dim, Eraker, Vilkov", "year": 2024, "journal": "SSRN Working Paper", "url": "https://papers.ssrn.com/sol3/Delivery.cfm/4692190.pdf?abstractid=4692190"},
+      {"id": "overnight_gap", "title": "Retail Ebb and Flow and the Overnight-Intraday Return Gap", "authors": "Ahn, Fan, Noh, Park", "year": 2024, "journal": "SSRN Working Paper", "url": "https://papers.ssrn.com/sol3/Delivery.cfm/4752520.pdf?abstractid=4752520"},
+      {"id": "overnight_news", "title": "Does Overnight News Explain Overnight Returns?", "authors": "Glasserman, Krstovski, Laliberte, Mamaysky", "year": 2025, "journal": "arXiv preprint", "url": "https://arxiv.org/html/2507.04481v1"},
+      {"id": "hk_trading_hours", "title": "Trading Hours and Price Efficiency: The Case of Hong Kong", "authors": "Various", "year": 2018, "journal": "SCIRP", "url": "https://www.scirp.org/journal/paperinformation?paperid=89032"},
+      {"id": "tse_lunch", "title": "Lunch break and intraday volatility of stock returns: Tokyo and New York", "authors": "Various", "year": 1992, "journal": "Economics Letters", "url": "https://www.sciencedirect.com/science/article/abs/pii/0165176592901069"},
+      {"id": "tse_nyfed", "title": "Lunch Anyone? Volatility on the Tokyo Stock Exchange around the Lunch Break", "authors": "NY Fed", "year": 2014, "journal": "Liberty Street Economics", "url": "https://libertystreeteconomics.newyorkfed.org/2014/04/lunch-anyone-volatility-on-the-tokyo-stock-exchange-around-the-lunch-break-on-may-23-2013-and-stock-marke/"},
+      {"id": "sgx_automation", "title": "Volume, volatility, liquidity and efficiency of the Singapore Stock Exchange", "authors": "Various", "year": 1994, "journal": "Pacific-Basin Finance Journal", "url": "https://www.sciencedirect.com/science/article/abs/pii/0927538X94900272"},
+      {"id": "us_spillover", "title": "Stock market volatility spillovers from U.S. to China: The pivotal role of Hong Kong", "authors": "Various", "year": 2025, "journal": "Pacific-Basin Finance Journal", "url": "https://www.sciencedirect.com/science/article/abs/pii/S0927538X25000071"},
+      {"id": "sell_in_may_review", "title": "The Sell in May effect: A review and new empirical evidence", "authors": "Various", "year": 2017, "journal": "North American Journal of Economics and Finance", "url": "https://www.sciencedirect.com/science/article/abs/pii/S106294081730089X"},
+      {"id": "sell_in_may_regulatory", "title": "A New Puzzle Piece for the Sell in May Anomaly: Regulatory Disclosures", "authors": "Various", "year": 2025, "journal": "MDPI Journal of Risk and Financial Management", "url": "https://www.mdpi.com/2227-7072/13/4/208"},
+      {"id": "turn_of_month", "title": "Turn of the Month Effect", "authors": "Vidal, Vidal-Garcia", "year": 2022, "journal": "SSRN Working Paper", "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4106003"},
+      {"id": "pre_holiday", "title": "The Holiday Effect in Stock Markets", "authors": "Various", "year": 2024, "journal": "SSRN Working Paper", "url": "https://papers.ssrn.com/sol3/Delivery.cfm/5073776.pdf?abstractid=5073776"},
+      {"id": "futures_waves", "title": "Futures Turnover Waves", "authors": "Emm", "year": 2025, "journal": "Journal of Futures Markets", "url": "https://onlinelibrary.wiley.com/doi/10.1002/fut.70021"},
+      {"id": "nbim_closing", "title": "The Role of Closing Auctions in Well-Functioning Markets", "authors": "NBIM", "year": 2020, "journal": "NBIM Asset Manager Perspectives", "url": "https://www.nbim.no/contentassets/5aade78cfd22419bb504f9ace119f396/asset-manager-perspectives-the-role-of-closing-auctions-in-well-functioning-markets.pdf"},
+      {"id": "bis_fx", "title": "Global FX markets when hedging takes centre stage", "authors": "BIS", "year": 2025, "journal": "BIS Quarterly Review", "url": "https://www.bis.org/publ/qtrpdf/r_qt2512b.htm"},
+      {"id": "boe_fx_hedging", "title": "Foreign exchange hedging using regime-switching models: the case of the pound", "authors": "Bank of England", "year": 2023, "journal": "Bank of England Staff Working Paper", "url": "https://www.bankofengland.co.uk/-/media/boe/files/working-paper/2023/foreign-exchange-hedging-using-regime-switching-models-the-case-of-pound.pdf"},
+      {"id": "fomc_inattention", "title": "The causal effect of limited attention to FOMC announcements", "authors": "Various", "year": 2025, "journal": "Journal of Economic Behavior & Organization", "url": "https://www.sciencedirect.com/science/article/abs/pii/S0167268125001192"},
+      {"id": "bis_fomc_volume", "title": "Volume dynamics around FOMC announcements", "authors": "BIS", "year": 2023, "journal": "BIS Working Papers No 1079", "url": "https://www.bis.org/publ/work1079.pdf"},
+      {"id": "nyse_closing_2024", "title": "NYSE Closing Auction: Timing Shifts and Marketability Trends", "authors": "NYSE Research", "year": 2024, "journal": "NYSE Data Insights", "url": "https://www.nyse.com/research/insights/nyse-closing-auction-timing-shifts-and-marketability-trends"},
+      {"id": "ecb_drift", "title": "Uncovering the Pre-ECB Drift and Its Trading Strategy Applications", "authors": "Various", "year": 2024, "journal": "Quantpedia", "url": "https://quantpedia.com/uncovering-the-pre-ecb-drift-and-its-trading-strategy-applications/"},
+      {"id": "fca_complex_etps", "title": "Complex exchange traded products - good practice and areas for improvement", "authors": "FCA", "year": 2025, "journal": "FCA Publications", "url": "https://www.fca.org.uk/publications/good-and-poor-practice/complex-exchange-traded-products"}
+    ],
+
+    "institutional_research": [
+      "NBIM (Norges Bank Investment Management) - Closing Auction Market Share",
+      "NYSE Research - Closing Auction Dynamics and D-Order Timing",
+      "CBOE - 0DTE Options and Gamma Squeeze Research",
+      "BIS (Bank for International Settlements) - FOMC Volume Dynamics, FX Markets",
+      "NY Federal Reserve - Pre-FOMC Announcement Drift",
+      "Bank of England - GBP FX Hedging Regime-Switching Models",
+      "ECB Working Papers - Price Drift Before Macro News",
+      "FCA - Complex ETP Review (July 2025)",
+      "JPMorgan - Leveraged ETF Rebalancing Flow Estimates",
+      "Russell Investments - Holiday Trading Effect",
+      "GraniteShares / WisdomTree / Leverage Shares - ETP Product Documentation"
+    ]
+  }
+}
