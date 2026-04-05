@@ -335,6 +335,8 @@ def macro_nowcast_signal(
             "kelly_fraction": kelly_fraction,
             "shares": 0,  # Rust engine will size
             "max_hold_hours": 0.05,  # 3 minutes = 0.05 hours (sharp exit)
+            "suggested_max_hold_hours": 4,
+            "exit_urgency_ramp_hours": 2,
             "urgency": "immediate",
             # Metadata (Session 19 additions)
             "_macro_event": event_type,

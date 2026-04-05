@@ -229,6 +229,8 @@ def pairs_trading_signal(
             "confidence": confidence_base,
             "kelly_fraction": kelly_fn("PAIRS", {"edge_bps": 25}),
             "max_hold_hours": 4,
+            "suggested_max_hold_hours": 48,
+            "exit_urgency_ramp_hours": 24,
             "shares": 0,  # Rust engine will size
             # Metadata (Session 19)
             "_pairs_pair": paired_ticker,

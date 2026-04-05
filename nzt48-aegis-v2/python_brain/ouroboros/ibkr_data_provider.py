@@ -67,6 +67,11 @@ _IDLE_DISCONNECT_SEC = 300  # 5 minutes
 _RATE_LIMIT_RPS = 15  # Safe limit (IBKR allows 50, but engine uses some)
 _RATE_LIMIT_INTERVAL = 1.0 / _RATE_LIMIT_RPS  # ~67ms between requests
 
+# Contract metadata cache (persisted to disk with 24h TTL)
+_DATA_DIR = Path(os.environ.get("AEGIS_DATA_DIR", "/app/data"))
+_CONTRACT_METADATA_FILE = _DATA_DIR / "contract_metadata.json"
+_CONTRACT_METADATA_TTL_SEC = 86400  # 24 hours
+
 # yfinance suffix <-> IBKR exchange mapping (mirrors symbology_mapper.py)
 _YF_SUFFIX_TO_IBKR_EXCHANGE = {
     ".L": "LSEETF",
@@ -686,11 +691,17 @@ class IBKRDataProvider:
         Tries IBKR reqContractDetails first, falls back to contracts.toml cache.
         Returns None if symbol is unknown in both sources.
 
+        Expanded fields (Session 35): minTick, tradingHours, liquidHours,
+        timeZoneId, validExchanges, underConId — used by cost model and
+        CrossVenueArb.
+
         Args:
             symbol: Ticker in yfinance format (e.g. "QQQ3.L", "AAPL").
 
         Returns:
-            Dict with keys: con_id, exchange, currency, sec_type, primary_exchange.
+            Dict with keys: con_id, exchange, currency, sec_type, primary_exchange,
+            long_name, category, subcategory, min_tick, trading_hours,
+            liquid_hours, time_zone_id, valid_exchanges, under_con_id.
             None if not found.
         """
         try:
@@ -707,6 +718,9 @@ class IBKRDataProvider:
                         details_list = ib.reqContractDetails(contract)
                         if details_list:
                             cd = details_list[0]
+                            # Parse validExchanges CSV string into list
+                            _valid_exch_str = getattr(cd, "validExchanges", "") or ""
+                            _valid_exch_list = [e.strip() for e in _valid_exch_str.split(",") if e.strip()]
                             result = {
                                 "con_id": cd.contract.conId,
                                 "exchange": cd.contract.exchange,
@@ -716,9 +730,17 @@ class IBKRDataProvider:
                                 "long_name": cd.longName or "",
                                 "category": getattr(cd, "category", ""),
                                 "subcategory": getattr(cd, "subcategory", ""),
+                                # Session 35: expanded contract metadata
+                                "min_tick": getattr(cd, "minTick", 0.01) or 0.01,
+                                "trading_hours": getattr(cd, "tradingHours", "") or "",
+                                "liquid_hours": getattr(cd, "liquidHours", "") or "",
+                                "time_zone_id": getattr(cd, "timeZoneId", "") or "",
+                                "valid_exchanges": _valid_exch_list,
+                                "under_con_id": getattr(cd, "underConId", 0) or 0,
                             }
-                            log.debug("IBKR contract details for %s: conId=%d exchange=%s",
-                                      symbol, result["con_id"], result["exchange"])
+                            log.debug("IBKR contract details for %s: conId=%d exchange=%s minTick=%s",
+                                      symbol, result["con_id"], result["exchange"],
+                                      result["min_tick"])
                             return result
                     except Exception as e:
                         log.debug("IBKR reqContractDetails failed for %s: %s", symbol, e)
@@ -736,6 +758,13 @@ class IBKRDataProvider:
                     "long_name": "",
                     "category": c.get("sector", ""),
                     "subcategory": "",
+                    # Defaults when IBKR unavailable
+                    "min_tick": 0.01,
+                    "trading_hours": "",
+                    "liquid_hours": "",
+                    "time_zone_id": "",
+                    "valid_exchanges": [],
+                    "under_con_id": 0,
                 }
                 log.debug("contracts.toml fallback for %s: conId=%d exchange=%s",
                           symbol, result["con_id"], result["exchange"])
@@ -930,6 +959,235 @@ class IBKRDataProvider:
             return self._ensure_connected()
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # reqAccountSummary — buying power validation
+    # ------------------------------------------------------------------
+
+    def get_account_summary(self) -> Optional[Dict[str, Any]]:
+        """Poll IBKR for account summary fields needed for buying power validation.
+
+        Returns dict with keys: NetLiquidation, BuyingPower, ExcessLiquidity,
+        GrossPositionValue, MaintMarginReq (all as floats), plus currency and
+        timestamp_utc. Cached for 5 minutes. Returns None on failure.
+
+        Writes results to /app/data/account_summary.json (atomic write).
+        """
+        try:
+            # Check cache (5-minute TTL)
+            now = time.monotonic()
+            if (hasattr(self, "_acct_summary_cache")
+                    and self._acct_summary_cache is not None
+                    and (now - self._acct_summary_cache_time) < 300):
+                return self._acct_summary_cache
+
+            if not self._ensure_connected():
+                return None
+
+            self._rate_limit()
+
+            with self._lock:
+                ib = self._ib
+
+            if ib is None:
+                return None
+
+            # reqAccountSummary returns a list of AccountValue objects
+            # Tags: NetLiquidation, BuyingPower, ExcessLiquidity,
+            #        GrossPositionValue, MaintMarginReq
+            tags = "NetLiquidation,BuyingPower,ExcessLiquidity,GrossPositionValue,MaintMarginReq"
+            acct_values = ib.reqAccountSummary(group="All", tags=tags)
+
+            if not acct_values:
+                log.debug("reqAccountSummary returned empty")
+                return None
+
+            result: Dict[str, Any] = {
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            }
+
+            for av in acct_values:
+                tag = av.tag
+                if tag in ("NetLiquidation", "BuyingPower", "ExcessLiquidity",
+                           "GrossPositionValue", "MaintMarginReq"):
+                    try:
+                        result[tag] = float(av.value)
+                    except (ValueError, TypeError):
+                        result[tag] = 0.0
+                    # Capture currency from any field (all same account)
+                    if "currency" not in result and av.currency:
+                        result["currency"] = av.currency
+
+            # Cancel subscription to avoid ongoing updates
+            try:
+                ib.cancelAccountSummary()
+            except Exception:
+                pass
+
+            # Validate we got the critical fields
+            if "BuyingPower" not in result:
+                log.debug("reqAccountSummary missing BuyingPower field")
+                return None
+
+            # Cache the result
+            self._acct_summary_cache = result
+            self._acct_summary_cache_time = now
+
+            # Write to disk (atomic)
+            self._write_json("/app/data/account_summary.json", result)
+
+            log.info("AccountSummary: NetLiq=%.2f BuyPow=%.2f ExLiq=%.2f currency=%s",
+                      result.get("NetLiquidation", 0),
+                      result.get("BuyingPower", 0),
+                      result.get("ExcessLiquidity", 0),
+                      result.get("currency", "?"))
+            return result
+
+        except Exception as e:
+            log.debug("reqAccountSummary failed: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
+    # reqPositions — position reconciliation
+    # ------------------------------------------------------------------
+
+    def get_positions(self) -> Optional[List[Dict[str, Any]]]:
+        """Get all current positions from IBKR via reqPositions.
+
+        Returns list of dicts with keys: symbol, exchange, currency,
+        sec_type, position (signed shares), avg_cost, con_id.
+        Returns None on failure (fail-open).
+        """
+        try:
+            if not self._ensure_connected():
+                return None
+
+            self._rate_limit()
+
+            with self._lock:
+                ib = self._ib
+
+            if ib is None:
+                return None
+
+            positions = ib.reqPositions()
+
+            if positions is None:
+                log.debug("reqPositions returned None")
+                return None
+
+            result: List[Dict[str, Any]] = []
+            for pos in positions:
+                contract = pos.contract
+                result.append({
+                    "symbol": contract.symbol or "",
+                    "local_symbol": contract.localSymbol or "",
+                    "exchange": contract.exchange or "",
+                    "currency": contract.currency or "",
+                    "sec_type": contract.secType or "",
+                    "con_id": contract.conId or 0,
+                    "position": float(pos.position),
+                    "avg_cost": float(pos.avgCost),
+                })
+
+            log.info("reqPositions: %d positions returned", len(result))
+            return result
+
+        except Exception as e:
+            log.debug("reqPositions failed: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
+    # reqPnL — real-time P&L tracking
+    # ------------------------------------------------------------------
+
+    def get_pnl(self) -> Optional[Dict[str, Any]]:
+        """Get account-level P&L from IBKR via reqPnL.
+
+        Returns dict with keys: unrealized_pnl, realized_pnl, daily_pnl,
+        timestamp_utc. Cached for 5 minutes. Returns None on failure.
+
+        Writes results to /app/data/realtime_pnl.json (atomic write).
+        """
+        try:
+            # Check cache (5-minute TTL)
+            now = time.monotonic()
+            if (hasattr(self, "_pnl_cache")
+                    and self._pnl_cache is not None
+                    and (now - self._pnl_cache_time) < 300):
+                return self._pnl_cache
+
+            if not self._ensure_connected():
+                return None
+
+            self._rate_limit()
+
+            with self._lock:
+                ib = self._ib
+
+            if ib is None:
+                return None
+
+            # reqPnL subscribes to account P&L updates
+            # We need the account ID — get it from managed accounts
+            accounts = ib.managedAccounts()
+            if not accounts:
+                log.debug("No managed accounts available for reqPnL")
+                return None
+
+            account_id = accounts[0]
+            pnl_obj = ib.reqPnL(account_id)
+
+            # Give IBKR a moment to populate the PnL object
+            ib.sleep(1)
+
+            result: Dict[str, Any] = {
+                "account": account_id,
+                "unrealized_pnl": float(pnl_obj.unrealizedPnL or 0),
+                "realized_pnl": float(pnl_obj.realizedPnL or 0),
+                "daily_pnl": float(pnl_obj.dailyPnL or 0),
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Cancel subscription to avoid ongoing updates
+            try:
+                ib.cancelPnL(pnl_obj)
+            except Exception:
+                pass
+
+            # Cache the result
+            self._pnl_cache = result
+            self._pnl_cache_time = now
+
+            # Write to disk (atomic)
+            self._write_json("/app/data/realtime_pnl.json", result)
+
+            log.info("PnL: unrealized=%.2f realized=%.2f daily=%.2f",
+                      result["unrealized_pnl"],
+                      result["realized_pnl"],
+                      result["daily_pnl"])
+            return result
+
+        except Exception as e:
+            log.debug("reqPnL failed: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
+    # Utility: atomic JSON write
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_json(path: str, data: Dict[str, Any]) -> None:
+        """Atomic write of dict to JSON file. Fail-silent."""
+        try:
+            import json as _json
+            tmp_path = path + ".tmp"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp_path, "w") as f:
+                _json.dump(data, f, indent=2, default=str)
+            os.replace(tmp_path, path)
+        except Exception as e:
+            log.debug("Failed to write %s: %s", path, e)
 
 
 # ---------------------------------------------------------------------------

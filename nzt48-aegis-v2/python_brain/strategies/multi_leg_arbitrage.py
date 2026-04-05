@@ -189,6 +189,8 @@ def multi_leg_arb_signal(
             "confidence": confidence,
             "kelly_fraction": kelly_fn("MULTILEG", {"edge_bps": 40}),
             "max_hold_hours": 2,
+            "suggested_max_hold_hours": 4,
+            "exit_urgency_ramp_hours": 2,
             "shares": 0,  # Rust engine will size
             # Metadata (Session 19)
             "_spread_pair": f"{ticker_id}/{underlying}",

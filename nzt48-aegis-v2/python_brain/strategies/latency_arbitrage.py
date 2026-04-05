@@ -229,6 +229,8 @@ def latency_arb_signal(
             "profit_target_price": nav_data.etp_bid + (nav_data.discount_bps / 10000) * nav_data.etp_bid,
             "stop_loss_price": nav_data.etp_bid - 0.02 * nav_data.etp_bid,
             "max_hold_hours": 4,
+            "suggested_max_hold_hours": 4,
+            "exit_urgency_ramp_hours": 2,
             "urgency": "normal",
             # Metadata
             "_nav_discount_bps": nav_data.discount_bps,

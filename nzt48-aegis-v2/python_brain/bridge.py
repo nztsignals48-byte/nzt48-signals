@@ -233,6 +233,17 @@ _cost_tracking = {
     "cost_by_component": defaultdict(float),  # component -> cumulative bps
 }
 
+# ── IBKR ACCOUNT MONITORING (reqAccountSummary, reqPositions, reqPnL) ──
+# Timestamp guards: poll every 5 minutes (300s), not on every tick.
+_ibkr_acct_last_poll: float = 0.0
+_ibkr_positions_last_poll: float = 0.0
+_ibkr_pnl_last_poll: float = 0.0
+_IBKR_POLL_INTERVAL: float = 300.0  # 5 minutes
+# Cached account summary for buying power gate
+_ibkr_acct_summary_cache: dict = {}
+# Cached P&L for drawdown overlay
+_ibkr_pnl_cache: dict = {}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # THE COMPOUNDING MACHINE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1449,6 +1460,8 @@ def _apply_conditional_hedge(msg, all_signals):
             "hedge_pct_allocation": round(inverse_pct, 2),
             "bayesian_posterior": round(posterior, 4),
             "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
+            "suggested_max_hold_hours": 72,
+            "exit_urgency_ramp_hours": 48,
         })
 
     if vix_pct > 0:
@@ -1465,6 +1478,8 @@ def _apply_conditional_hedge(msg, all_signals):
             "hedge_pct_allocation": round(vix_pct, 2),
             "bayesian_posterior": round(posterior, 4),
             "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
+            "suggested_max_hold_hours": 72,
+            "exit_urgency_ramp_hours": 48,
         })
 
     if cash_pct > 0:
@@ -1481,6 +1496,8 @@ def _apply_conditional_hedge(msg, all_signals):
             "hedge_pct_allocation": round(cash_pct, 2),
             "bayesian_posterior": round(posterior, 4),
             "reason": f"VIX_BW={vix_bw} CREDIT={credit_warn} BREADTH={breadth_dec} P={posterior:.3f}",
+            "suggested_max_hold_hours": 72,
+            "exit_urgency_ramp_hours": 48,
         })
 
     # Update persisted state
@@ -3492,6 +3509,8 @@ def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, co
         "s1_spread_compressed": spread_compressed, "s1_tick_ratio": round(tick_ratio, 3),
         "s1_bullish_count": bullish_count, "s1_vwap_slope": round(vwap_slope, 6),
         "s1_live_sharpe": stats["sharpe"],
+        "suggested_max_hold_hours": 2,
+        "exit_urgency_ramp_hours": 1,
         **common_fields,
     }
 
@@ -3579,6 +3598,8 @@ def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, commo
         "s2_ibs": round(ibs_val, 4), "s2_score": score,
         "s2_vol_capitulation": vol_capitulation, "s2_dev_speed": round(dev_speed, 3),
         "s2_live_sharpe": stats["sharpe"],
+        "suggested_max_hold_hours": 8,
+        "exit_urgency_ramp_hours": 4,
         **common_fields,
     }
 
@@ -3663,6 +3684,8 @@ def _system3_macro_trend(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, com
         "s3_sma5": round(sma5, 4), "s3_sma20": round(sma20, 4),
         "s3_crossover_pct": round(crossover_pct, 3), "s3_mom12": round(mom_12, 5),
         "s3_score": score, "s3_live_sharpe": stats["sharpe"],
+        "suggested_max_hold_hours": 24,
+        "exit_urgency_ramp_hours": 12,
         **common_fields,
     }
 
@@ -3700,6 +3723,8 @@ def _system4_volatility(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
             "confidence": conf,
             "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
             "strategy": "S4_VolPremium", "s4_vix": round(vix, 1), "s4_mode": "short_vol",
+            "suggested_max_hold_hours": 8,
+            "exit_urgency_ramp_hours": 4,
             **common_fields,
         }
 
@@ -3717,6 +3742,8 @@ def _system4_volatility(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
             "confidence": conf,
             "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
             "strategy": "S4_VolPremium", "s4_vix": round(vix, 1), "s4_mode": "long_rebound",
+            "suggested_max_hold_hours": 8,
+            "exit_urgency_ramp_hours": 4,
             **common_fields,
         }
 
@@ -3811,8 +3838,8 @@ def _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, kelly_fn, commo
             "fomc_phase": "pre_event",
             "days_to_fomc": 1,
             "expected_drift_pct": 0.4,
-            "max_hold_hours": 144,  # 6 days
-            "suggested_exit_urgency_hours": 120,  # Tighten stops after T+5
+            "suggested_max_hold_hours": 144,  # 6 days
+            "exit_urgency_ramp_hours": 120,  # Tighten stops after T+5
             **common_fields,
         }
 
@@ -3874,7 +3901,8 @@ def _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, kelly_fn, commo
                 "fomc_phase": "post_event_dovish",
                 "days_since_fomc": days_to_fomc,
                 "expected_drift_pct": 0.4,
-                "max_hold_hours": 144,
+                "suggested_max_hold_hours": 144,
+                "exit_urgency_ramp_hours": 120,
                 **common_fields,
             }
 
@@ -3901,7 +3929,8 @@ def _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, kelly_fn, commo
                 "fomc_phase": "post_event_hawkish",
                 "days_since_fomc": days_to_fomc,
                 "expected_drift_pct": 0.15,  # Lower drift in hawkish
-                "max_hold_hours": 96,  # Tighten to 4 days
+                "suggested_max_hold_hours": 96,  # Tighten to 4 days
+                "exit_urgency_ramp_hours": 72,
                 "note": "hawkish_outcome_reduced_conviction",
                 **common_fields,
             }
@@ -3983,6 +4012,8 @@ def _system5_overnight(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields)
         "strategy": "S5_OvernightCarry",
         "s5_window": "lse_close" if in_lse_close else "us_close",
         "s5_up_bars": up_count,
+        "suggested_max_hold_hours": 16,
+        "exit_urgency_ramp_hours": 12,
         **common_fields,
     }
 
@@ -4130,6 +4161,8 @@ def _system7_tail_hedge(ticker_id, msg, ind, conf_floor, kelly_fn, common_fields
         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
         "strategy": "S7_TailHedge", "s7_vix": round(vix, 1),
         "s7_inverse_momentum": recent_up,
+        "suggested_max_hold_hours": 72,
+        "exit_urgency_ramp_hours": 48,
         **common_fields,
     }
 
@@ -4380,6 +4413,241 @@ def _nightly_recalibrate_lead_lag_optimal_lags():
             sys.stderr.flush()
 
     _lead_lag_nightly_last_load = _now
+
+
+
+# ── IBKR ACCOUNT MONITORING FUNCTIONS ──────────────────────────────────────
+
+
+def _check_buying_power() -> bool:
+    """Poll IBKR account summary (5-min interval). Return False to block entries.
+
+    If BuyingPower < 500 GBP, returns False (block new entries).
+    Fail-open: if IBKR unavailable, returns True (don't block).
+    """
+    global _ibkr_acct_last_poll, _ibkr_acct_summary_cache
+
+    if _SIM_MODE:
+        return True  # Never block in sim mode
+
+    now = time.monotonic()
+    if (now - _ibkr_acct_last_poll) < _IBKR_POLL_INTERVAL:
+        # Use cached result
+        if _ibkr_acct_summary_cache:
+            buying_power = _ibkr_acct_summary_cache.get("BuyingPower", float("inf"))
+            return buying_power >= 500.0
+        return True  # No cache yet — fail-open
+
+    _ibkr_acct_last_poll = now
+
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        summary = provider.get_account_summary()
+
+        if summary is None:
+            sys.stderr.write("IBKR_ACCT_SUMMARY: unavailable (fail-open)\n")
+            sys.stderr.flush()
+            return True  # Fail-open
+
+        _ibkr_acct_summary_cache = summary
+
+        buying_power = summary.get("BuyingPower", float("inf"))
+        net_liq = summary.get("NetLiquidation", 0)
+        currency = summary.get("currency", "?")
+
+        sys.stderr.write(
+            f"IBKR_ACCT_SUMMARY: NetLiq={net_liq:.2f} BuyPow={buying_power:.2f} "
+            f"ExLiq={summary.get('ExcessLiquidity', 0):.2f} currency={currency}\n"
+        )
+        sys.stderr.flush()
+
+        if buying_power < 500.0:
+            sys.stderr.write(
+                f"IBKR_BUYING_POWER_GATE: BLOCKED — BuyingPower={buying_power:.2f} < 500 {currency}\n"
+            )
+            sys.stderr.flush()
+            return False
+
+        return True
+
+    except ImportError:
+        return True  # ib_insync not installed — fail-open
+    except Exception as e:
+        sys.stderr.write(f"IBKR_ACCT_SUMMARY_ERR: {e} (fail-open)\n")
+        sys.stderr.flush()
+        return True  # Fail-open
+
+
+def _run_position_reconciliation(msg: dict) -> None:
+    """Compare IBKR positions vs engine positions. Runs every 5 minutes.
+
+    Logs mismatches to stderr with POSITION_MISMATCH prefix.
+    Writes /app/data/position_reconciliation.json with discrepancies.
+    Fail-open: if IBKR unavailable, skip silently.
+    """
+    global _ibkr_positions_last_poll
+
+    if _SIM_MODE:
+        return
+
+    now = time.monotonic()
+    if (now - _ibkr_positions_last_poll) < _IBKR_POLL_INTERVAL:
+        return  # Not time yet
+
+    _ibkr_positions_last_poll = now
+
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        ibkr_positions = provider.get_positions()
+
+        if ibkr_positions is None:
+            return  # IBKR unavailable — fail-open
+
+        # Build IBKR position map: symbol -> shares (signed)
+        ibkr_map = {}
+        for pos in ibkr_positions:
+            sym = pos.get("local_symbol") or pos.get("symbol", "")
+            if sym and pos.get("position", 0) != 0:
+                ibkr_map[sym] = pos["position"]
+
+        # Get engine's view of open positions
+        engine_positions = msg.get("open_positions", [])
+        engine_map = {}
+        if isinstance(engine_positions, list):
+            for ep in engine_positions:
+                if isinstance(ep, dict):
+                    sym = ep.get("symbol", "")
+                    shares = ep.get("shares", ep.get("position", 0))
+                    if sym and shares != 0:
+                        engine_map[sym] = shares
+        elif isinstance(engine_positions, int):
+            # Some messages pass count, not list — skip reconciliation
+            return
+
+        # Compare
+        all_symbols = set(ibkr_map.keys()) | set(engine_map.keys())
+        mismatches = []
+        from datetime import datetime, timezone as _tz
+
+        for sym in sorted(all_symbols):
+            ibkr_qty = ibkr_map.get(sym, 0)
+            engine_qty = engine_map.get(sym, 0)
+            if abs(ibkr_qty - engine_qty) > 0.01:  # Float tolerance
+                mismatch = {
+                    "symbol": sym,
+                    "ibkr_position": ibkr_qty,
+                    "engine_position": engine_qty,
+                    "delta": ibkr_qty - engine_qty,
+                }
+                mismatches.append(mismatch)
+                sys.stderr.write(
+                    f"POSITION_MISMATCH: {sym} IBKR={ibkr_qty} engine={engine_qty} "
+                    f"delta={ibkr_qty - engine_qty}\n"
+                )
+                sys.stderr.flush()
+
+        # Write reconciliation report
+        report = {
+            "timestamp_utc": datetime.now(_tz.utc).isoformat(),
+            "ibkr_position_count": len(ibkr_map),
+            "engine_position_count": len(engine_map),
+            "mismatch_count": len(mismatches),
+            "mismatches": mismatches,
+            "status": "CLEAN" if not mismatches else "MISMATCH",
+        }
+
+        try:
+            _recon_path = "/app/data/position_reconciliation.json"
+            _tmp = _recon_path + ".tmp"
+            os.makedirs(os.path.dirname(_recon_path), exist_ok=True)
+            with open(_tmp, "w") as f:
+                json.dump(report, f, indent=2, default=str)
+            os.replace(_tmp, _recon_path)
+        except Exception as e:
+            sys.stderr.write(f"POSITION_RECON_WRITE_ERR: {e}\n")
+            sys.stderr.flush()
+
+        if not mismatches:
+            sys.stderr.write(
+                f"POSITION_RECON: CLEAN — IBKR={len(ibkr_map)} engine={len(engine_map)}\n"
+            )
+            sys.stderr.flush()
+
+    except ImportError:
+        pass  # ib_insync not installed — fail-open
+    except Exception as e:
+        sys.stderr.write(f"POSITION_RECON_ERR: {e} (fail-open)\n")
+        sys.stderr.flush()
+
+
+def _check_ibkr_pnl(msg: dict) -> int:
+    """Poll IBKR P&L (5-min interval). Returns confidence floor adjustment.
+
+    If unrealized P&L < -5% of equity, returns +10 (raise confidence floor).
+    Fail-open: returns 0 if IBKR unavailable.
+    """
+    global _ibkr_pnl_last_poll, _ibkr_pnl_cache
+
+    if _SIM_MODE:
+        return 0
+
+    now = time.monotonic()
+    if (now - _ibkr_pnl_last_poll) < _IBKR_POLL_INTERVAL:
+        # Use cached result
+        if _ibkr_pnl_cache:
+            return _ibkr_pnl_cache.get("_conf_floor_adj", 0)
+        return 0
+
+    _ibkr_pnl_last_poll = now
+
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        pnl = provider.get_pnl()
+
+        if pnl is None:
+            return 0  # Fail-open
+
+        unrealized = pnl.get("unrealized_pnl", 0)
+        realized = pnl.get("realized_pnl", 0)
+        daily = pnl.get("daily_pnl", 0)
+
+        # Get equity from msg or cached account summary
+        equity = msg.get("equity", 0)
+        if equity <= 0 and _ibkr_acct_summary_cache:
+            equity = _ibkr_acct_summary_cache.get("NetLiquidation", 0)
+
+        conf_adj = 0
+        if equity > 0 and unrealized < 0:
+            unrealized_pct = abs(unrealized) / equity
+            if unrealized_pct > 0.05:
+                conf_adj = 10
+                sys.stderr.write(
+                    f"IBKR_PNL_DRAWDOWN: unrealized={unrealized:.2f} "
+                    f"({unrealized_pct:.1%} of equity={equity:.2f}) "
+                    f"— raising confidence floor by {conf_adj}\n"
+                )
+                sys.stderr.flush()
+
+        pnl["_conf_floor_adj"] = conf_adj
+        _ibkr_pnl_cache = pnl
+
+        sys.stderr.write(
+            f"IBKR_PNL: unrealized={unrealized:.2f} realized={realized:.2f} "
+            f"daily={daily:.2f}\n"
+        )
+        sys.stderr.flush()
+
+        return conf_adj
+
+    except ImportError:
+        return 0  # ib_insync not installed — fail-open
+    except Exception as e:
+        sys.stderr.write(f"IBKR_PNL_ERR: {e} (fail-open)\n")
+        sys.stderr.flush()
+        return 0
 
 
 def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
@@ -4700,7 +4968,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                 "confidence": result["confidence"],
                 "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                "strategy": "Momentum", **common_fields,
+                "strategy": "Momentum",
+                "suggested_max_hold_hours": 24,
+                "exit_urgency_ramp_hours": 12,
+                **common_fields,
             }
 
     # Orchestrator (all regimes)
@@ -4719,7 +4990,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     "type": "signal", "ticker_id": ticker_id, "direction": direction,
                     "confidence": intent.confidence,
                     "kelly_fraction": ok, "shares": max(int(ok * eq / pr), 1) if ok > 0 else 0,
-                    "strategy": f"Orchestrator_{intent.strategy_name}", **common_fields,
+                    "strategy": f"Orchestrator_{intent.strategy_name}",
+                    "suggested_max_hold_hours": 24,
+                    "exit_urgency_ramp_hours": 12,
+                    **common_fields,
                 }
         except Exception as e:
             sys.stderr.write(f"Bridge: orchestrator error (non-fatal): {e}\n")
@@ -4753,7 +5027,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     "confidence": ibs_conf,
                     "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                     "strategy": "IBS_MeanReversion", "ibs_entry": round(ibs_val, 4),
-                    "rsi2_entry": round(rsi2, 2), **common_fields,
+                    "rsi2_entry": round(rsi2, 2),
+                    "suggested_max_hold_hours": 8,
+                    "exit_urgency_ramp_hours": 4,
+                    **common_fields,
                 }
 
     # Strategy: Volume Expansion Continuation
@@ -4783,7 +5060,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                     "confidence": ve_conf,
                     "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "VolExpansion", **common_fields,
+                    "strategy": "VolExpansion",
+                    "suggested_max_hold_hours": 24,
+                    "exit_urgency_ramp_hours": 12,
+                    **common_fields,
                 }
 
     # Strategy: Opening Range Breakout (ORB) — US session only
@@ -4823,7 +5103,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             "confidence": orb_conf,
                             "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                             "strategy": "ORB_Breakout", "orb_high": round(orb_high, 4),
-                            "orb_low": round(orb_low, 4), **common_fields,
+                            "orb_low": round(orb_low, 4),
+                            "suggested_max_hold_hours": 24,
+                            "exit_urgency_ramp_hours": 12,
+                            **common_fields,
                         }
 
     # Strategy: Gap Fade — liquidity gaps tend to fill
@@ -4852,7 +5135,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "confidence": gf_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                         "strategy": "GapFade", "gap_pct": round(gap_pct, 3),
-                        "gap_type": gap_type, **common_fields,
+                        "gap_type": gap_type,
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
+                        **common_fields,
                     }
 
     # ── SYSTEM 1: Microstructure Momentum (Phase 4) ──
@@ -4892,24 +5178,19 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     try:
         from python_brain.strategies.vol_compression import detect_squeeze
         import numpy as _np
-        closes = ind.get("closes_arr")
-        highs = ind.get("highs_arr")
-        lows = ind.get("lows_arr")
-        vols = ind.get("volumes_arr")
-        if closes is not None and len(closes) > 100:
-            # Ensure all arrays are valid
-            if highs is None or len(highs) == 0:
-                highs = closes
-            if lows is None or len(lows) == 0:
-                lows = closes
-            if vols is None or len(vols) == 0:
-                vols = [1] * len(closes)
-            sq = detect_squeeze(_np.array(closes), _np.array(highs), _np.array(lows), _np.array(vols),
+        # BUG FIX: ind never contained closes_arr/highs_arr/lows_arr/volumes_arr.
+        # Extract OHLCV arrays from bars_5m which is the canonical price history.
+        if bars_5m and len(bars_5m) > 100:
+            closes = _np.array([b["close"] for b in bars_5m], dtype=_np.float64)
+            highs = _np.array([b["high"] for b in bars_5m], dtype=_np.float64)
+            lows = _np.array([b["low"] for b in bars_5m], dtype=_np.float64)
+            vols = _np.array([b.get("volume", 1) for b in bars_5m], dtype=_np.float64)
+            sq = detect_squeeze(closes, highs, lows, vols,
                                 ticker=msg.get("symbol", ""))
-            # detect_squeeze should return object with confidence, breakout_direction, squeeze_score or None
+            # detect_squeeze returns SqueezeSignal with confidence, breakout_direction, squeeze_score or None
             if sq and hasattr(sq, 'confidence'):
-                conf_val = int(sq.confidence) if isinstance(sq.confidence, (int, float)) else 60
-                if conf_val >= conf_floor and getattr(sq, 'breakout_direction', None) == "up":
+                conf_val = int(sq.confidence)
+                if conf_val >= effective_floor and getattr(sq, 'breakout_direction', None) == "up":
                     kelly = _kelly_for(conf_val)
                     vol_comp_signal = {
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
@@ -4918,6 +5199,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "shares": kelly["shares"],
                         "strategy": "VolCompression",
                         "squeeze_score": getattr(sq, 'squeeze_score', 0),
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
                         **common_fields,
                     }
     except ImportError:
@@ -4948,6 +5231,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "shares": kelly["shares"],
                         "strategy": "RebalancingFlow",
                         "rebal_notional_mm": getattr(rb, 'estimated_rebalancing_notional_mm', 0),
+                        "suggested_max_hold_hours": 24,
+                        "exit_urgency_ramp_hours": 12,
                         **common_fields,
                     }
     except ImportError:
@@ -4988,6 +5273,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "nav_z_score": getattr(sig, 'z_score', 0),
                         "nav_premium_pct": getattr(sig, 'premium_pct', 0),
                         "nav_source": "ibkr" if msg.get("etf_nav_last", 0) > 0 else "estimated",
+                        "suggested_max_hold_hours": 4,
+                        "exit_urgency_ramp_hours": 2,
                         **common_fields,
                     }
     except ImportError:
@@ -5033,6 +5320,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "arb_best_spread_venue": _xva_arb.best_spread_venue,
                         "arb_best_spread_bps": _xva_arb.best_spread_bps,
                         "preferred_venue": _xva_arb.buy_venue,
+                        "suggested_max_hold_hours": 4,
+                        "exit_urgency_ramp_hours": 2,
                         **common_fields,
                     }
     except ImportError:
@@ -5071,6 +5360,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                                 "strategy": "AlphaFactory",
                                 "ensemble_value": round(ensemble_val, 4),
                                 "n_alphas": len(results) if isinstance(results, (dict, list)) else 0,
+                                "suggested_max_hold_hours": 8,
+                                "exit_urgency_ramp_hours": 4,
                                 **common_fields,
                             }
     except ImportError:
@@ -5143,6 +5434,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                                     "expected_catchup_pct": getattr(sig, 'estimated_catch_up_pct', 0),
                                     "lead_lag_r2": r_squared,
                                     "lead_lag_r2_status": pair_r2_info.get("status", "active"),
+                                    "suggested_max_hold_hours": 2,
+                                    "exit_urgency_ramp_hours": 1,
                                     **common_fields,
                                 }
                                 break  # Take the first valid lead-lag signal
@@ -5195,7 +5488,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                         "confidence": emat_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "EMAT_Attention", **common_fields,
+                        "strategy": "EMAT_Attention",
+                        "suggested_max_hold_hours": 24,
+                        "exit_urgency_ramp_hours": 12,
+                        **common_fields,
                     }
     except ImportError:
         pass
@@ -5225,7 +5521,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                         "confidence": attn_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "TemporalAttention", **common_fields,
+                        "strategy": "TemporalAttention",
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
+                        **common_fields,
                     }
     except ImportError:
         pass
@@ -5253,7 +5552,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                         "confidence": sw_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "SwarmPredictor", **common_fields,
+                        "strategy": "SwarmPredictor",
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
+                        **common_fields,
                     }
     except ImportError:
         pass
@@ -5315,12 +5617,74 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                         "confidence": hft_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "HFT_Probability", **common_fields,
+                        "strategy": "HFT_Probability",
+                        "suggested_max_hold_hours": 2,
+                        "exit_urgency_ramp_hours": 1,
+                        **common_fields,
                     }
     except ImportError:
         pass
     except Exception as e:
         sys.stderr.write(f"HFT_Probability error (non-fatal): {e}\n")
+        sys.stderr.flush()
+
+
+    # ── BOOK 130: IVSURF_Skew — IV Skew Directional (SIGNAL GENERATOR) ──
+    # Uses per-tick IBKR options IV (opt_impl_vol) + scanner HIGH_OPT_IMP_VOLAT hits.
+    # When IV is elevated vs historical and scanner confirms, generate shadow signal.
+    # Shadow status in registry: logged to shadow_signals.ndjson, not emitted to Rust.
+    ivsurf_skew_signal = None
+    try:
+        _iv_impl = msg.get("opt_impl_vol", 0.0)
+        _iv_hist = msg.get("opt_hist_vol", 0.0)
+        # Need valid IV data from IBKR options feed
+        if _iv_impl > 0.01 and _iv_hist > 0.01:
+            # IV skew ratio: how far implied exceeds historical
+            _iv_ratio = _iv_impl / _iv_hist
+            # Check scanner results for HIGH_OPT_IMP_VOLAT confirmation
+            _scanner_iv_hit = False
+            try:
+                _scan_path_iv = "/app/data/scanner_results.json"
+                if os.path.exists(_scan_path_iv):
+                    with open(_scan_path_iv) as _sf:
+                        _sd = json.load(_sf)
+                    _scanners_iv = _sd.get("scanners", {})
+                    _sym = msg.get("symbol", "")
+                    for _sn, _sv in _scanners_iv.items():
+                        if _sv.get("scan_code") in ("HIGH_OPT_IMP_VOLAT", "HIGH_OPT_IMP_VOLAT_OVER_HIST"):
+                            for _sr in _sv.get("results", []):
+                                if _sr.get("symbol", "").upper() == _sym.upper():
+                                    _scanner_iv_hit = True
+                                    break
+                        if _scanner_iv_hit:
+                            break
+            except Exception:
+                pass  # Fail-open on scanner read
+            # Signal when IV ratio > 1.3 (30% premium over historical)
+            # Scanner hit adds +5 confidence bonus
+            if _iv_ratio > 1.3:
+                _skew_conf = min(75, 55 + int((_iv_ratio - 1.3) * 30))
+                if _scanner_iv_hit:
+                    _skew_conf = min(80, _skew_conf + 5)
+                if _skew_conf >= effective_floor:
+                    kelly = _kelly_for(_skew_conf)
+                    ivsurf_skew_signal = {
+                        "type": "signal", "ticker_id": ticker_id,
+                        "direction": "Long",  # Long underlying when IV overpriced (mean reversion)
+                        "confidence": _skew_conf,
+                        "kelly_fraction": kelly["kelly_fraction"],
+                        "shares": kelly["shares"],
+                        "strategy": "IVSURF_Skew",
+                        "iv_ratio": round(_iv_ratio, 3),
+                        "impl_vol": round(_iv_impl, 4),
+                        "hist_vol": round(_iv_hist, 4),
+                        "scanner_confirmed": _scanner_iv_hit,
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
+                        **common_fields,
+                    }
+    except Exception as e:
+        sys.stderr.write(f"IVSURF_Skew error (non-fatal): {e}\n")
         sys.stderr.flush()
 
     # ── BOOK 206: NEGRISK ARBITRAGE (SIGNAL GENERATOR) ──
@@ -5353,6 +5717,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "confidence": conf_val,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                         "strategy": "NegRiskArb", "tracking_error": _arb.get("tracking_error", 0),
+                        "suggested_max_hold_hours": 4,
+                        "exit_urgency_ramp_hours": 2,
                         **common_fields,
                     }
     except ImportError:
@@ -5395,6 +5761,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "confidence": _hf_conf,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                         "strategy": "HighFlyer", "retail_flow": _hf_result.get("retail_ratio", 0),
+                        "suggested_max_hold_hours": 24,
+                        "exit_urgency_ramp_hours": 12,
                         **common_fields,
                     }
     except ImportError:
@@ -5456,6 +5824,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "confidence": _pc,
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                         "strategy": "PairsReversion", "z_score": _pair_sig.get("z_score", 0),
+                        "suggested_max_hold_hours": 48,
+                        "exit_urgency_ramp_hours": 24,
                         **common_fields,
                     }
                     if _kalman_info:
@@ -5476,6 +5846,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             "strategy": "PairsReversion", "z_score": round(_kz, 3),
                             "kalman_hedge_ratio": _kalman_info.get("hedge_ratio", 1.0),
                             "kalman_half_life": _khl,
+                            "suggested_max_hold_hours": 48,
+                            "exit_urgency_ramp_hours": 24,
                             **common_fields,
                         }
     except ImportError:
@@ -5528,6 +5900,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "strategy": "CopyTrading",
                         "copy_leader": _best_leader.get("strategy", "unknown"),
                         "copy_leader_sharpe": round(_best_sharpe, 3),
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
                         **common_fields,
                     }
     except Exception as e:
@@ -5670,6 +6044,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "strategy": "EventDrift", "event": getattr(_evt_ctx, 'event_name', ''),
                         "drift_mins_since": getattr(_drift, 'minutes_since', 0),
                         "drift_expected_duration": getattr(_drift, 'expected_duration_mins', 0),
+                        "suggested_max_hold_hours": 4,
+                        "exit_urgency_ramp_hours": 2,
                         **common_fields,
                     }
     except ImportError:
@@ -5706,7 +6082,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
                         "strategy": "CointPairs", "z_score": round(getattr(_cs, 'z_score', 0), 3),
                         "half_life": round(getattr(_cs, 'half_life', 0), 1), "pair": getattr(_cs, 'pair_name', ''),
-                        "long_leg": getattr(_cs, 'long_leg', ''), **common_fields,
+                        "long_leg": getattr(_cs, 'long_leg', ''),
+                        "suggested_max_hold_hours": 48,
+                        "exit_urgency_ramp_hours": 24,
+                        **common_fields,
                     }
     except ImportError:
         pass
@@ -5824,16 +6203,151 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.write(f"Book 168 PAIRS error (non-fatal): {e}\n")
         sys.stderr.flush()
 
+    # ── QUEUE IMBALANCE DETECTION (bid/ask size dynamics) ──
+    # Academic basis: Glosten & Milgrom (1985), Ivanov (2015). When bid_size jumps
+    # 3-5x with no price change = informed buyer accumulating. 60% WR within 5 ticks.
+    qi_signal = None
+    if msg.get("bid_size", 0) > 0 and msg.get("ask_size", 0) > 0:
+        _bs = msg.get("bid_size", 0)
+        _as = msg.get("ask_size", 0)
+        _ratio = _bs / max(_as, 1)
+        _inv_ratio = _as / max(_bs, 1)
+
+        # Strong buy imbalance: bid_size > 3x ask_size
+        if _ratio > 3.0 and ind.get("spread_pct", 1.0) < 0.5:
+            _qi_conf = min(80, 55 + int((_ratio - 3.0) * 5))
+            if _qi_conf >= effective_floor:
+                kelly = _kelly_for(_qi_conf)
+                qi_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": _qi_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "QueueImbalance",
+                    "bid_ask_ratio": round(_ratio, 2),
+                    "suggested_max_hold_hours": 2,
+                    "exit_urgency_ramp_hours": 1,
+                    **common_fields,
+                }
+
+    # ── PRE-MARKET VOLUME ANOMALY (extended hours informed flow) ──
+    # Academic basis: Extended hours informed trading predicts RTH direction.
+    # RVOL > 3.0 during pre-market = informed flow. Direction follows pre-market trend.
+    premarket_signal = None
+    try:
+        from datetime import datetime, timezone
+        _ts_pm = msg.get("timestamp_ns", 0)
+        if _ts_pm > 0 and ind.get("rvol", 1.0) > 3.0:
+            _utc_pm = datetime.fromtimestamp(_ts_pm / 1_000_000_000, tz=timezone.utc)
+            _h_pm = _utc_pm.hour
+            # Pre-market window: 11:00-14:30 UTC (US pre-market) or 05:00-08:00 UTC (LSE pre-market)
+            _is_premarket = (11 <= _h_pm <= 14) or (5 <= _h_pm <= 7)
+            if _is_premarket and bars_5m and len(bars_5m) >= 3:
+                # RVOL > 3.0 during pre-market = informed flow
+                _pm_conf = min(75, 55 + int((ind["rvol"] - 3.0) * 5))
+                # Direction: follow the pre-market trend
+                _recent_up = sum(1 for b in bars_5m[-3:] if b["close"] > b["open"])
+                if _recent_up >= 2 and _pm_conf >= effective_floor:
+                    kelly = _kelly_for(_pm_conf)
+                    premarket_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _pm_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "PreMarketAnomaly",
+                        "premarket_rvol": round(ind["rvol"], 2),
+                        "premarket_hour": _h_pm,
+                        "suggested_max_hold_hours": 24,
+                        "exit_urgency_ramp_hours": 12,
+                        **common_fields,
+                    }
+    except Exception:
+        pass
+
+    # ── VOL TERM STRUCTURE (IV inversion = mean reversion setup) ──
+    # Academic basis: Demeterfi et al. (1999), Gatheral (2006). When near-term IV
+    # > far-term IV (inverted term structure), mean reversion within 1-3 days.
+    volterm_signal = None
+    try:
+        _impl_vol = msg.get("opt_impl_vol", 0.0)  # Near-term IV from IBKR
+        _hist_vol = msg.get("opt_hist_vol", 0.0)   # 30-day historical vol
+        _rt_hv = msg.get("rt_hist_vol", 0.0)       # Real-time historical vol
+
+        if _impl_vol > 0.01 and _hist_vol > 0.01:
+            # IV premium = implied - historical (positive = IV overpriced)
+            _iv_premium = _impl_vol - _hist_vol
+            _iv_premium_pct = (_iv_premium / _hist_vol) * 100 if _hist_vol > 0 else 0
+
+            # When IV > HV by >20%: vol is overpriced → mean reversion likely
+            # Buy the underlying (short vol via delta hedging is ISA-unfriendly)
+            if _iv_premium_pct > 20.0 and hurst_regime == "mean_reverting":
+                _vt_conf = min(75, 55 + int((_iv_premium_pct - 20.0) * 0.5))
+                if _vt_conf >= effective_floor:
+                    kelly = _kelly_for(_vt_conf)
+                    volterm_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _vt_conf,
+                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                        "strategy": "VolTermStructure",
+                        "iv_premium_pct": round(_iv_premium_pct, 2),
+                        "impl_vol": round(_impl_vol, 4),
+                        "hist_vol": round(_hist_vol, 4),
+                        "suggested_max_hold_hours": 8,
+                        "exit_urgency_ramp_hours": 4,
+                        **common_fields,
+                    }
+    except Exception:
+        pass
+
+    # ── IEX AUCTION FADE (discretionary auction mean-reversion) ──
+    # IEX runs 350+ discretionary auctions per day. When auction price diverges
+    # from NBBO mid, mean-reversion within 2-5 bps is reliable.
+    iex_auction_signal = None
+    try:
+        _auction_price = msg.get("auction_price", 0.0)
+        _auction_vol = msg.get("auction_volume", 0)
+        _auction_imb = msg.get("auction_imbalance", 0.0)
+        _mid = (msg.get("bid", 0) + msg.get("ask", 0)) / 2.0 if msg.get("bid", 0) > 0 else 0
+
+        if _auction_price > 0 and _mid > 0 and _auction_vol > 0:
+            # Deviation of auction price from current mid
+            _auction_dev_bps = ((_auction_price - _mid) / _mid) * 10000.0
+
+            # Fade the auction if deviation > 3 bps (covers transaction costs)
+            if abs(_auction_dev_bps) > 3.0:
+                # Positive dev = auction price above mid -> sell pressure -> fade by going long
+                # Negative dev = auction price below mid -> buy pressure -> ISA can't short, skip
+                if _auction_dev_bps < -3.0:  # Auction below mid = cheap -> buy
+                    _iex_conf = min(75, 55 + int(abs(_auction_dev_bps) * 2))
+                    # Boost if strong imbalance confirms direction
+                    if _auction_imb > 0:  # Positive imbalance = buy side
+                        _iex_conf = min(80, _iex_conf + 5)
+                    if _iex_conf >= effective_floor:
+                        kelly = _kelly_for(_iex_conf)
+                        iex_auction_signal = {
+                            "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                            "confidence": _iex_conf,
+                            "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                            "strategy": "IEXAuctionFade",
+                            "auction_dev_bps": round(_auction_dev_bps, 2),
+                            "auction_price": round(_auction_price, 4),
+                            "auction_volume": _auction_vol,
+                            "auction_imbalance": round(_auction_imb, 2),
+                            "suggested_max_hold_hours": 2,
+                            "exit_urgency_ramp_hours": 1,
+                            **common_fields,
+                        }
+    except Exception:
+        pass
+
     # Return ALL signals sorted by confidence — no artificial bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
         vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal, gap_signal,
         s1_signal, s2_signal, s3_signal, s4_signal, s5_signal, fomc_signal, s6_signal, s7_signal,
         vol_comp_signal, rebal_signal, nav_signal, alpha_signal, lead_lag_signal,
-        emat_signal, attn_signal, swarm_signal, hft_signal, negrisk_signal,
+        emat_signal, attn_signal, swarm_signal, hft_signal, ivsurf_skew_signal, negrisk_signal,
         highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
         drift_signal, coint_signal, latarb_signal, nowcast_signal, multileg_signal, pairs_stat_arb_signal,
-        cross_venue_signal,
+        cross_venue_signal, qi_signal, premarket_signal, volterm_signal, iex_auction_signal,
     ] if s]
 
     # ── BOOK 179: CAPITAL-PHASE STRATEGY FILTERING (CONSUME _phase1_strategies) ──
@@ -7464,6 +7978,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                     "kelly_fraction": _kelly["kelly_fraction"],
                     "shares": _kelly["shares"],
                     "strategy": "IVSURF_SkewDirectional",
+                    "suggested_max_hold_hours": 8,
+                    "exit_urgency_ramp_hours": 4,
                     **common_fields,
                 }
                 all_signals.append(_iv_skew_signal)
@@ -8798,8 +9314,23 @@ def process_tick(msg):
         _log_gate_veto(ticker_id, gate_name, msg["last"], _ind, gate_detail)
         return no_signal
 
+    # ── IBKR POSITION RECONCILIATION (runs every 5 min via timestamp guard) ──
+    _run_position_reconciliation(msg)
+
     # Stage 3: Generate signals (returns ALL signals, no bottleneck)
     conf_floor = _compute_confidence_floor(msg, ind)
+
+    # ── IBKR P&L DRAWDOWN OVERLAY (runs every 5 min via timestamp guard) ──
+    # If unrealized P&L < -5% of equity, raise confidence floor by 10
+    _pnl_conf_adj = _check_ibkr_pnl(msg)
+    if _pnl_conf_adj > 0:
+        conf_floor += _pnl_conf_adj
+
+    # ── IBKR BUYING POWER PRE-GATE (runs every 5 min via timestamp guard) ──
+    # If BuyingPower < 500 GBP, block all new entries
+    if not _check_buying_power():
+        return no_signal
+
     all_signals = _generate_signals(ticker_id, msg, ticks, ind, conf_floor)
 
     # Stage 4: Adjust ALL signals, select best, classify, size
@@ -8853,26 +9384,15 @@ def process_tick(msg):
         # ── EXIT TIMING HINTS FOR RUST ENGINE ──
         # Provide context to the Rust exit engine for adaptive Chandelier parameters.
         # The Rust side can use these to widen/tighten stops dynamically.
+        # NOTE: Use setdefault() to preserve per-signal values set in _generate_signals.
+        # Each signal dict now carries family-appropriate exit fields. This is a FALLBACK
+        # for any signal that arrives without exit fields (e.g., from external strategy modules).
         _strat = best.get("strategy", "")
         _leverage_exit = msg.get("leverage", 1)
 
-        # Time-based exit decay: positions held past optimal holding period lose edge.
-        # Momentum: 2-8 hours optimal. Mean-reversion: 0.5-4 hours. Overnight carry: 12-16 hours.
-        if _strat in ("Momentum", "VolExpansion", "S3_MacroTrend", "S1_Microstructure"):
-            best["suggested_max_hold_hours"] = 8
-            best["exit_urgency_ramp_hours"] = 6  # Start tightening stops after 6h
-        elif _strat in ("IBS_MeanReversion", "S2_Reversion", "PairsReversion"):
-            best["suggested_max_hold_hours"] = 4
-            best["exit_urgency_ramp_hours"] = 2  # MR should mean-revert quickly
-        elif _strat == "S5_OvernightCarry":
-            best["suggested_max_hold_hours"] = 16
-            best["exit_urgency_ramp_hours"] = 14
-        elif _strat == "S7_TailHedge":
-            best["suggested_max_hold_hours"] = 48
-            best["exit_urgency_ramp_hours"] = 24  # Tail events play out over days
-        else:
-            best["suggested_max_hold_hours"] = 12
-            best["exit_urgency_ramp_hours"] = 8
+        # Fallback exit timing: only applies if signal dict doesn't already have these fields.
+        best.setdefault("suggested_max_hold_hours", 12)
+        best.setdefault("exit_urgency_ramp_hours", 8)
 
         # ── BOOK 180/186: REGIME-CONDITIONAL OVERNIGHT HOLDING ──
         # HIGH vol (VIX > 30): flatten 3x positions before close — no overnight holds.
@@ -8976,6 +9496,8 @@ def process_apex_snapshot(msg):
         "kelly_fraction": result["kelly_fraction"],
         "shares": 0,  # Apex sizing done by Rust side based on kelly_fraction
         "strategy": "ApexScout",
+        "suggested_max_hold_hours": 24,
+        "exit_urgency_ramp_hours": 12,
     }
 
 

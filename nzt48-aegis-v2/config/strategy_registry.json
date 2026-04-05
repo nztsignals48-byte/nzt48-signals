@@ -1,7 +1,7 @@
 {
   "_meta": {
     "version": 2,
-    "description": "CANONICAL strategy registry — single source of truth for all 51 strategies. Session 30: mass activation.",
+    "description": "CANONICAL strategy registry — single source of truth for all 60 strategies. Session 35: IEXAuctionFade.",
     "created": "2026-03-24",
     "updated": "2026-04-04",
     "authority": "This file governs live/shadow/disabled status. Code MUST read this.",
@@ -155,7 +155,7 @@
     },
     "IVSURF_SkewDirectional": {
       "id": "IVSURF_Skew", "name": "IV Surface Skew", "family": "options",
-      "status": "shadow", "description": "Implied volatility surface skew directional signal."
+      "status": "shadow", "description": "IV skew directional signal. Uses IBKR opt_impl_vol vs opt_hist_vol ratio + scanner HIGH_OPT_IMP_VOLAT confirmation. Shadow: collecting data for promotion."
     },
     "ApexScout": {
       "id": "ApexScout", "name": "Apex Scout", "family": "institutional_flow",
@@ -236,6 +236,22 @@
     "CrossVenueArb": {
       "id": "CrossVenueArb", "name": "Cross-Venue Arbitrage", "family": "arbitrage",
       "status": "live", "description": "Cross-venue price discrepancy detection across BATS/Chi-X/IEX/Aquis/LSE. Best execution routing. Session 33."
+    },
+    "QueueImbalance": {
+      "id": "QueueImbalance", "name": "Queue Imbalance", "family": "microstructure",
+      "status": "live", "description": "L1 bid/ask size imbalance detection. Bid_size > 3x ask_size with tight spread = informed accumulation. Glosten & Milgrom (1985). 60% WR within 5 ticks. Session 34."
+    },
+    "PreMarketAnomaly": {
+      "id": "PreMarketAnomaly", "name": "Pre-Market Volume Anomaly", "family": "institutional_flow",
+      "status": "live", "description": "Extended hours RVOL > 3.0 informed flow detection. Pre-market volume spikes predict RTH direction. US 11:00-14:30 UTC / LSE 05:00-08:00 UTC. Session 34."
+    },
+    "VolTermStructure": {
+      "id": "VolTermStructure", "name": "Vol Term Structure", "family": "volatility",
+      "status": "live", "description": "IV vs HV premium detection. When IV > HV by >20% in mean-reverting regime = vol overpriced, buy underlying for mean reversion. Demeterfi et al. (1999), Gatheral (2006). Session 34."
+    },
+    "IEXAuctionFade": {
+      "id": "IEXAuctionFade", "name": "IEX Auction Fade", "family": "microstructure",
+      "status": "live", "description": "IEX discretionary auction mean-reversion. Fades auction price vs NBBO mid when deviation > 3 bps. 350+ auctions/day. Session 35."
     }
   },
   "regime_definitions": {
@@ -255,7 +271,7 @@
     "us_power_hour": "19:00-20:00 UTC (closing volume)",
     "dark": "20:00-22:00 UTC (maintenance + Ouroboros nightly)"
   },
-  "strategy_count": 56,
+  "strategy_count": 60,
   "families": [
     "momentum", "mean_reversion", "microstructure", "volatility", "carry",
     "event_driven", "hedging", "arbitrage", "statistical_arbitrage", "meta_strategy",
