@@ -67,11 +67,11 @@ class Trade:
 @dataclass
 class DashboardState:
     # Equity
-    starting_equity: float = 10000.0
-    current_equity: float = 10000.0
+    starting_equity: float = 100_000.0
+    current_equity: float = 100_000.0
     daily_pnl: float = 0.0
     total_pnl: float = 0.0
-    high_water: float = 10000.0
+    high_water: float = 100_000.0
 
     # Stats
     total_trades: int = 0

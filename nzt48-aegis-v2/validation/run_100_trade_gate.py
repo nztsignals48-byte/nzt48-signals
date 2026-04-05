@@ -135,7 +135,7 @@ class MarketSimulator:
 class GateValidator:
     """Validates 4 gates for trading performance"""
 
-    def __init__(self, starting_equity: float = 10_000.0):
+    def __init__(self, starting_equity: float = 100_000.0):
         self.starting_equity = starting_equity
         self.current_equity = starting_equity
 

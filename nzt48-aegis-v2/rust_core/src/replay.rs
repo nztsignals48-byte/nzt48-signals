@@ -62,7 +62,7 @@ impl ReplayEngine {
         let arbiter = RiskArbiter::new(RiskConfig::default());
         let broker = PaperBroker::new(PaperBrokerConfig::default());
         let exit_engine = ExitEngine::with_default_chandelier();
-        let portfolio = PortfolioState::new(10_000.0);
+        let portfolio = PortfolioState::new(100_000.0);
         let wal = wal_path.and_then(|p| {
             let dead_letter = p.parent().unwrap_or(Path::new(".")).join("dead_letter");
             WalWriter::open_file(p, &dead_letter).ok()

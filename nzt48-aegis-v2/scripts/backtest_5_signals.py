@@ -51,8 +51,8 @@ class BacktestEnvironment:
         self.trades_executed = 0
         self.total_pnl = 0.0
         self.max_drawdown = 0.0
-        self.peak_equity = 10000.0
-        self.current_equity = 10000.0
+        self.peak_equity = 100_000.0
+        self.current_equity = 100_000.0
 
     def generate_synthetic_tick(self, ticker, date):
         """Generate synthetic OHLCV data for backtesting."""

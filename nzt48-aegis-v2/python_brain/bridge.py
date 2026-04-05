@@ -3140,7 +3140,7 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
     if not _SIM_MODE:
         _leverage_cap = msg.get("leverage", 1)
         if _leverage_cap >= 3:
-            _eq_cap = msg.get("equity", 10000)
+            _eq_cap = msg.get("equity", 100000)
             _existing_pos_value = 0
             _sym_cap = ticker_symbols.get(ticker_id, "")
             _open_pos = msg.get("open_positions", [])
@@ -3174,7 +3174,7 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
     # ── CAPITAL-PHASE STRATEGY FILTER ──
     # At £10K only run highest-edge strategies. Diversifying fragments capital.
     if not _SIM_MODE:
-        _eq_phase = msg.get("equity", 10000)
+        _eq_phase = msg.get("equity", 100000)
         if _eq_phase < 25000:
             # Phase 1: Only momentum + regime-switch strategies (highest edge-to-cost)
             _PHASE1_ALLOWED = {
@@ -3240,7 +3240,7 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
         try:
             from python_brain.execution.adv_participation import check_participation
             _adv_check = msg.get("adv_gbp", 0)
-            _eq_adv = msg.get("equity", 10000)
+            _eq_adv = msg.get("equity", 100000)
             if _adv_check > 0:
                 _order_est = _eq_adv * 0.05  # rough Kelly * equity
                 _adv_ok, _adv_scale = check_participation(
@@ -3305,7 +3305,7 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
         if _spread_viab > 0.80:
             return False, "spread_unviable", \
                 f"spread {_spread_viab:.2f}% > 80bp — cost exceeds any reasonable alpha"
-        _eq_viab = msg.get("equity", 10000)
+        _eq_viab = msg.get("equity", 100000)
         _pos_size_est = max(_eq_viab * 0.02, 100)
         _commission_drag = 3.40 / _pos_size_est  # £3.40 RT on estimated position
         if _commission_drag > 0.005 and _spread_viab > 0.30:
@@ -4913,8 +4913,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             _generate_signals._safety = SafetyBoundaryChecker()
         _safety = _generate_signals._safety
         violation = _safety.check_all(
-            equity=msg.get("equity", 10000),
-            hwm=msg.get("hwm", 10000),
+            equity=msg.get("equity", 100000),
+            hwm=msg.get("hwm", 100000),
             daily_pnl=msg.get("daily_pnl", 0),
             consecutive_losses=msg.get("consecutive_losses", 0),
         )
@@ -4926,7 +4926,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # ── BOOK 179: CAPITAL PHASE STRATEGY FILTER ──
     try:
         from python_brain.sizing.capital_phasing import get_capital_phase
-        phase = get_capital_phase(msg.get("equity", 10000))
+        phase = get_capital_phase(msg.get("equity", 100000))
     except Exception:
         phase = None
 
@@ -5011,13 +5011,13 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             regime=hurst_regime if hurst_regime != "random" else msg.get("regime", "normal"),
             spread_pct=msg.get("spread_pct", 0.1), time_of_day_fraction=msg.get("time_fraction", 0.5),
             confidence=confidence, portfolio_heat_pct=msg.get("heat_pct", 0.0),
-            equity=msg.get("equity", 10000.0), price=msg["last"],
+            equity=msg.get("equity", 100000.0), price=msg["last"],
         )
         # Early ramp: use preliminary Kelly if we have few trades
         if total_trades < 50:
             pk = min(confidence / 1000.0, 0.05)
             if k["kelly_fraction"] < pk:
-                eq = msg.get("equity", 10000.0)
+                eq = msg.get("equity", 100000.0)
                 k["kelly_fraction"] = pk
                 k["shares"] = max(int(pk * eq / max(msg["last"], 1e-9)), 1)
 
@@ -5076,7 +5076,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             if intent is not None:
                 direction = "Long" if intent.direction == "long" else "Short"
                 ok = min(intent.confidence * intent.sizing_mult / 1000.0, 0.05)
-                eq = msg.get("equity", 10000.0)
+                eq = msg.get("equity", 100000.0)
                 pr = max(msg["last"], 1e-9)
                 orchestrator_signal = {
                     "type": "signal", "ticker_id": ticker_id, "direction": direction,
@@ -7470,7 +7470,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # IBKR tiered: £1.70 entry + £1.70 exit = £3.40 per round trip.
     # Slippage: 0.5% of position value (config.toml [risk] slippage_assumption_pct).
     for sig in all_signals:
-        eq = msg.get("equity", 10000.0)
+        eq = msg.get("equity", 100000.0)
         notional = sig["kelly_fraction"] * eq
         sim_commission = 3.40  # £1.70 × 2 (IBKR tiered minimum)
         sim_slippage = notional * 0.005  # 0.5% slippage assumption
@@ -7493,7 +7493,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     all_signals = [
         sig for sig in all_signals
         if sig["sim_total_cost_gbp"] <= 0 or edge_proxy <= 0 or
-        sig["sim_total_cost_gbp"] < (sig["kelly_fraction"] * msg.get("equity", 10000) * edge_proxy * 0.5)
+        sig["sim_total_cost_gbp"] < (sig["kelly_fraction"] * msg.get("equity", 100000) * edge_proxy * 0.5)
     ]
     if not all_signals:
         return None
@@ -7822,7 +7822,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             _apply_adjustments._cap_mon = CapacityMonitor()
         cap_mon = _apply_adjustments._cap_mon
         for sig in all_signals:
-            notional = sig.get("kelly_fraction", 0) * msg.get("equity", 10000)
+            notional = sig.get("kelly_fraction", 0) * msg.get("equity", 100000)
             ticker = sig.get("ticker", msg.get("symbol", ""))
             cap = cap_mon.check(ticker, notional)
             if not cap.within_capacity:
@@ -7895,7 +7895,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     try:
         from python_brain.risk.drawdown_recovery import DrawdownMonitor
         dd_monitor = DrawdownMonitor(initial_equity=msg.get("initial_equity", 10000.0))
-        dd_monitor.update(msg.get("equity", 10000.0))
+        dd_monitor.update(msg.get("equity", 100000.0))
         dd_scale = dd_monitor.kelly_scale()
         dd_min_conf = dd_monitor.min_confidence()
         if dd_scale < 1.0:
@@ -7942,7 +7942,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["kelly_fraction"] = student_t_correction(
                 sig["kelly_fraction"], nu=5.0, leverage=lev,
             )
-            sig["shares"] = max(1, int(sig["kelly_fraction"] * msg.get("equity", 10000) / max(sig.get("price", 1), 0.01)))
+            sig["shares"] = max(1, int(sig["kelly_fraction"] * msg.get("equity", 100000) / max(sig.get("price", 1), 0.01)))
     except Exception:
         pass
 
@@ -7951,7 +7951,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     try:
         from python_brain.sizing.rolling_kelly import get_drawdown_stager
         dd_stager = get_drawdown_stager()
-        dd_stager.update(msg.get("equity", 10000.0))
+        dd_stager.update(msg.get("equity", 100000.0))
         dd_kelly_scale = dd_stager.kelly_scale()
         dd_conf_add = dd_stager.confidence_floor_add()
         if dd_stager.should_block_new_entries():
@@ -7977,7 +7977,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         if ts_ns_slip > 0:
             utc_hour_slip = _dt_slip.fromtimestamp(ts_ns_slip / 1e9, tz=_tz_slip.utc).hour
         for sig in all_signals:
-            eq = msg.get("equity", 10000.0)
+            eq = msg.get("equity", 100000.0)
             notional = sig["kelly_fraction"] * eq
             sym = sig.get("ticker", msg.get("symbol", ""))
             exch = msg.get("exchange", "LSE")
@@ -8041,7 +8041,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     for sig in all_signals:
         _alpha_est = sig.get("kelly_fraction", 0) * max(sig.get("confidence", 50) - 45, 0) / 100
         _cost_gbp = sig.get("sim_total_cost_gbp", 0)
-        _eq = msg.get("equity", 10000)
+        _eq = msg.get("equity", 100000)
         _alpha_gbp = _alpha_est * _eq
         if _cost_gbp > 0 and _alpha_gbp > 0 and _cost_gbp > _alpha_gbp:
             sig["cost_exceeds_alpha"] = True
@@ -8304,7 +8304,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if not hasattr(_apply_adjustments, "_pie"):
                 _apply_adjustments._pie = PreTradeImpactEstimator()
             _pie = _apply_adjustments._pie
-            _notional = sig.get("kelly_fraction", 0) * msg.get("equity", 10000)
+            _notional = sig.get("kelly_fraction", 0) * msg.get("equity", 100000)
             _impact = _pie.estimate(
                 order_size_gbp=_notional,
                 symbol=msg.get("symbol", ""),
@@ -8432,7 +8432,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             ind.get("rvol", 1.0), ind.get("hurst", 0.5),
             ind.get("vpin", 0.5), ind.get("spread_pct", 0.1),
             msg.get("drawdown_pct", 0) / 8.0,  # Normalized to sacred limit
-            msg.get("equity", 10000) / 10000,
+            msg.get("equity", 100000) / 10000,
         ])
         _ppo_action, _ppo_logp = _apply_adjustments._ppo.select_action(_ppo_state)
         if _ppo_action == 0:  # SKIP
@@ -8452,7 +8452,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     try:
         from python_brain.sizing.meta_allocator import MetaAllocator
         if not hasattr(_apply_adjustments, "_meta_alloc"):
-            _apply_adjustments._meta_alloc = MetaAllocator(total_equity=msg.get("equity", 10000))
+            _apply_adjustments._meta_alloc = MetaAllocator(total_equity=msg.get("equity", 100000))
         for sig in all_signals:
             strat = sig.get("strategy", "")
             if strat:
@@ -8656,7 +8656,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     _open_pos_raw = msg.get("open_positions", [])
     _open_pos_list = _open_pos_raw if isinstance(_open_pos_raw, list) else []
     _open_pos_count = len(_open_pos_list) if isinstance(_open_pos_raw, list) else int(_open_pos_raw) if isinstance(_open_pos_raw, (int, float)) else 0
-    _equity = msg.get("equity", 10000)
+    _equity = msg.get("equity", 100000)
     _max_positions = max(3, int(_equity / 3000))  # Scale: £10K=3, £25K=8, £50K=16
     if _open_pos_count >= _max_positions:
         # At capacity — only allow signals with confidence > 75 (exceptional setups)
@@ -9073,7 +9073,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     if _adaptive_kelly_cap is not None and _adaptive_kelly_cap < 0.05:
         if best["kelly_fraction"] > _adaptive_kelly_cap:
             best["kelly_fraction"] = _adaptive_kelly_cap
-            eq = msg.get("equity", 10000.0)
+            eq = msg.get("equity", 100000.0)
             pr = max(msg["last"], 1e-9)
             best["shares"] = max(1, int(_adaptive_kelly_cap * eq / pr))
         best["adaptive_kelly_cap"] = _adaptive_kelly_cap
@@ -9187,7 +9187,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 signal_dict=best,
                 market_context={
                     "regime": hurst_regime, "drawdown_pct": msg.get("drawdown_pct", 0),
-                    "vix": msg.get("vix", 20), "equity": msg.get("equity", 10000),
+                    "vix": msg.get("vix", 20), "equity": msg.get("equity", 100000),
                     "exchange": msg.get("exchange", ""), "open_positions": msg.get("open_positions", 0),
                     "trades_today": msg.get("trades_today", 0),
                     "consecutive_losses": msg.get("consecutive_losses", 0),

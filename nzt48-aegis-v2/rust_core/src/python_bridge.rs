@@ -193,7 +193,7 @@ pub struct TickContext {
 impl TickContext {
     #[new]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (win_rate=0.5, total_trades=0, avg_win=0.02, avg_loss=0.02, leverage=3, realized_vol=0.30, correlation=0.0, drawdown_pct=0.0, amihud=0.0, regime=RiskRegime::Normal, spread_pct=0.1, time_fraction=0.5, heat_pct=0.0, equity=10_000.0))]
+    #[pyo3(signature = (win_rate=0.5, total_trades=0, avg_win=0.02, avg_loss=0.02, leverage=3, realized_vol=0.30, correlation=0.0, drawdown_pct=0.0, amihud=0.0, regime=RiskRegime::Normal, spread_pct=0.1, time_fraction=0.5, heat_pct=0.0, equity=100_000.0))]
     fn new(
         win_rate: f64,
         total_trades: u32,
@@ -253,7 +253,7 @@ impl Default for TickContext {
             spread_pct: 0.1,
             time_fraction: 0.5,
             heat_pct: 0.0,
-            equity: 10_000.0,
+            equity: 100_000.0,
             vix: 0.0,
             london_time_secs: 0,
             gap_pct: 0.0,

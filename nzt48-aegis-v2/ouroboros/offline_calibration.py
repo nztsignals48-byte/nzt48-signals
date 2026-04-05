@@ -58,7 +58,7 @@ def run_offline_calibration(
     the full analytics pipeline at the end.
     """
     all_trades: List[ClosedTrade] = []
-    equity = 10000.0
+    equity = 100_000.0
     equity_curve = [equity]
     daily_returns: List[float] = []
 

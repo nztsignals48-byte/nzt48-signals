@@ -41,7 +41,7 @@ SSH_OPTS = [
     "-o", "ConnectTimeout=15",
     "-o", "ServerAliveInterval=5",
 ]
-STARTING_EQUITY = 10_000.0
+STARTING_EQUITY = 100_000.0
 
 # ---------------------------------------------------------------------------
 # Data Classes

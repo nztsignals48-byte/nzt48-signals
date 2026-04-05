@@ -662,9 +662,9 @@ aggressive_trail_atr = 0.3
 # Crucible phase overrides (Days 1-30)
 # AUDIT-FIX: Was 20, which allows unrealistic over-deployment at £10k equity.
 # Risk officer: "20 positions at 10k is insane overexposure even in simulation."
-max_positions_override = 3           # LIVE: 3 concurrent positions max. £10K / 3 = £3.3K per position.
+max_positions_override = 5           # Paper: 5 concurrent positions for data collection. Live mode uses risk.max_positions.
 paper_mode = true                    # PAPER: Simulated orders. IS_LIVE=false. April 7+ go live.
-starting_equity_gbp = 10000
+starting_equity_gbp = 100000         # Simulation starting equity. Live mode overrides via IBKR reqAccountSummary.
 # P2-B0.6: Enable live risk gates in paper mode. Paper results now match live behavior.
 # The 9 previously-bypassed checks (positions, heat, drawdown, equity floor) are now enforced.
 paper_uses_live_gates = true

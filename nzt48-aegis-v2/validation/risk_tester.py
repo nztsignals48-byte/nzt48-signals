@@ -64,7 +64,7 @@ class RiskTester:
 
     SECTOR_MAP = _load_sector_map()
 
-    def __init__(self, starting_equity: float = 10_000.0):
+    def __init__(self, starting_equity: float = 100_000.0):
         self.starting_equity = starting_equity
         self.positions: Dict[str, Position] = {}
         self.trades_executed = 0
@@ -86,7 +86,7 @@ class RiskTester:
     def test_gate_2_leverage_hard_cap(self) -> Tuple[bool, str]:
         """Gate 2: Leverage capped at 3.0x"""
         positions = {}
-        equity = 10_000.0
+        equity = 100_000.0
 
         # Build up positions
         for i, symbol in enumerate(list(self.ISA_WHITELIST)[:5]):
