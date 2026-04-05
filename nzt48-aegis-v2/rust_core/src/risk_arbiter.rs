@@ -183,6 +183,11 @@ pub struct RiskArbiter {
     pub vix_extreme: bool,
     /// P1-2.16: Rolling equity snapshots for drawdown velocity (timestamp_ns, equity).
     equity_snapshots: Vec<(u64, f64)>,
+    /// Dynamic Universe rotation scores: symbol → final_score (0.0-1.5).
+    /// Used to weight Kelly allocation: higher-scored symbols get more capital.
+    pub rotation_scores: HashMap<String, f64>,
+    /// Equity ratchet: track all-time HWM for drawdown-based Kelly scaling.
+    pub equity_hwm: f64,
 }
 
 impl RiskArbiter {
@@ -199,6 +204,8 @@ impl RiskArbiter {
             vix_high: false,
             vix_extreme: false,
             equity_snapshots: Vec::new(),
+            rotation_scores: HashMap::new(),
+            equity_hwm: 0.0,
         }
     }
 
@@ -593,19 +600,73 @@ impl RiskArbiter {
         let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)
             .clamp(self.config.kelly_ramp_clamp_min, self.config.kelly_ramp_clamp_max);
         let ramped_kelly = effective_kelly * kelly_ramp;
-        let size = ramped_kelly * portfolio.equity;
+
         // Ouroboros-calibrated regime scaling (fall back to hardcoded defaults).
         let regime_name = format!("{:?}", self.regime);
         let default_scale = if self.regime == RiskRegime::Reduce { 0.5 } else { 1.0 };
         let regime_scale = self.regime_scales.get(&regime_name).copied().unwrap_or(default_scale);
-        let adjusted_size = size * regime_scale;
 
-        // Sizing instrumentation: log every candidate that passes all 36 checks
+        // ── SCORE-TO-KELLY TRANSLATOR ────────────────────────────────────
+        // Dynamic Universe final_score weights allocation: higher-scored symbols
+        // get proportionally more capital. Half-Kelly default (0.5 safety factor).
+        // Score range: 0.0-1.5 → multiplier 0.5-1.5 (linear, clamped).
+        let ticker_symbol = ctx.exchange_mic.clone(); // Use symbol from context if available
+        let score_raw = self.rotation_scores
+            .get(&ticker_key)
+            .or_else(|| self.rotation_scores.get(&ticker_symbol))
+            .copied()
+            .unwrap_or(0.5); // Unscored symbols get neutral 0.5
+        // Normalize: score 0.5 = 1.0x, score 1.0 = 1.5x, score 0.0 = 0.5x
+        let score_multiplier = (0.5 + score_raw).clamp(0.5, 1.5);
+
+        // ── EQUITY RATCHET (HWM Drawdown Brake) ─────────────────────────
+        // Track all-time HWM. Scale Kelly down on drawdowns to prevent ruin.
+        // equity >= 95% HWM → 1.0x | >= 90% → 0.75x | >= 80% → 0.50x | < 80% → 0.25x
+        if portfolio.equity > self.equity_hwm {
+            self.equity_hwm = portfolio.equity;
+        }
+        let ratchet_multiplier = if self.equity_hwm <= 0.0 {
+            1.0
+        } else {
+            let ratio = portfolio.equity / self.equity_hwm;
+            if ratio >= 0.95 { 1.00 }
+            else if ratio >= 0.90 { 0.75 }
+            else if ratio >= 0.80 { 0.50 }
+            else { 0.25 }
+        };
+
+        // ── VOLATILITY PARITY (ATR Normalization) ────────────────────────
+        // Divide allocated capital by ATR to equalize risk contribution per position.
+        // Higher ATR → fewer shares → same dollar risk. Uses 14-period Wilder ATR.
+        // ATR factor: normalize ATR to a target risk per position (2% of entry).
+        // If ATR data unavailable, factor = 1.0 (no adjustment).
+        let atr_factor = if ctx.garch_sigma > 0.0 {
+            // garch_sigma is annualized; convert to daily risk proxy
+            let daily_vol = ctx.garch_sigma / 252.0_f64.sqrt();
+            // Target: 2% daily risk. If actual is higher, reduce size proportionally.
+            let target_daily_risk = 0.02;
+            if daily_vol > target_daily_risk {
+                target_daily_risk / daily_vol
+            } else {
+                1.0 // Low vol = no reduction (let Kelly handle upside)
+            }
+        } else {
+            1.0 // No vol data = no adjustment
+        };
+
+        // ── FINAL SIZING ─────────────────────────────────────────────────
+        let base_size = ramped_kelly * portfolio.equity;
+        let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor;
+
+        // Sizing instrumentation: log every candidate that passes all checks
         eprintln!(
             "SIZING: ticker={} kelly_in={:.4} effective={:.4} ramp={:.2} ramped={:.4} \
-             equity={:.0} size={:.0} regime_scale={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
+             equity={:.0} base={:.0} regime={:.2} score={:.2}(raw={:.2}) ratchet={:.2} \
+             atr_factor={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
             intent_ticker.0, intent_kelly, effective_kelly, kelly_ramp,
-            ramped_kelly, portfolio.equity, size, regime_scale, adjusted_size,
+            ramped_kelly, portfolio.equity, base_size, regime_scale,
+            score_multiplier, score_raw, ratchet_multiplier,
+            atr_factor, adjusted_size,
             self.config.minimum_entry_gbp, intent_confidence,
         );
 

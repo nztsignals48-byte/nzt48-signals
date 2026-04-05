@@ -423,6 +423,16 @@ fn main() {
     if !dw.ticker_blacklist.is_empty() {
         eprintln!("OUROBOROS: {} tickers blacklisted: {:?}", dw.ticker_blacklist.len(), dw.ticker_blacklist);
     }
+
+    // Load Dynamic Universe rotation plan (score-to-Kelly translator)
+    let rotation_plan = ouroboros_loader::load_rotation_plan(&config_dir);
+    engine.arbiter.rotation_scores = rotation_plan.scores.clone();
+    engine.arbiter.equity_hwm = engine.portfolio.equity; // Initialize HWM to starting equity
+    eprintln!(
+        "ROTATION PLAN: {} symbols loaded, generated={}",
+        rotation_plan.scores.len(), rotation_plan.generated,
+    );
+
     // Apply live FX rates from fx_rates.toml (Ouroboros 6-hour refresh)
     engine.fx_table.apply_live_rates(&fx_live.rates, now_ns());
 
@@ -430,10 +440,11 @@ fn main() {
     engine.economic_calendar = rust_core::config_loader::load_economic_calendar(&config_dir);
 
     eprintln!(
-        "DynamicWeights APPLIED: chandelier_atr_mult={:.2}, regime_scales={}, kelly_fractions={}",
+        "DynamicWeights APPLIED: chandelier_atr_mult={:.2}, regime_scales={}, kelly_fractions={}, rotation_scores={}",
         dw.chandelier_atr_mult,
         dw.regime_scales.len(),
         dw.kelly_fractions.len(),
+        engine.arbiter.rotation_scores.len(),
     );
 
     // Register tickers in engine's universe
@@ -710,6 +721,16 @@ fn main() {
                 dw = new_dw;
             } else {
                 eprintln!("HOT-RELOAD: dynamic_weights unchanged (no update needed)");
+            }
+
+            // HOT-RELOAD: Rotation plan (score-to-Kelly translator)
+            let new_rotation = ouroboros_loader::load_rotation_plan(&config_dir);
+            if !new_rotation.scores.is_empty() {
+                engine.arbiter.rotation_scores = new_rotation.scores.clone();
+                eprintln!(
+                    "HOT-RELOAD: rotation plan updated — {} symbols, generated={}",
+                    new_rotation.scores.len(), new_rotation.generated,
+                );
             }
 
             // P1-2.1: Hot-reload FX rates from fx_rates.toml (Python cron updates every 6h + sends SIGHUP)

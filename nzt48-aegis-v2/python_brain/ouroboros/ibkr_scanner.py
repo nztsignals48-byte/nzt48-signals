@@ -390,11 +390,27 @@ def run_ibkr_scan() -> int:
     log.info("IBKR Universe Scanner — Weekly Scan")
     log.info("=" * 60)
 
-    # Step 1: Load master file
+    # Step 1: Load master file (bootstrap-safe: create empty if missing)
     master = load_master()
     if master is None:
-        log.error("Master file not found. Run isa_universe_discovery.py first.")
-        return 1
+        log.warning("Master file not found — creating empty master for bootstrap")
+        master = {
+            "tickers": [],
+            "total_tickers": 0,
+            "discovery_methods": [],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "bootstrap": True,
+        }
+        # Save the empty master so subsequent modules can find it
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(MASTER_FILE, "w") as f:
+                json.dump(master, f, indent=2)
+            log.info("Created empty master file at %s", MASTER_FILE)
+        except Exception as e:
+            log.error("Failed to create empty master: %s", e)
+            return 1
 
     existing_count = master.get("total_tickers", 0)
     log.info("Step 1: Loaded master file (%d tickers)", existing_count)

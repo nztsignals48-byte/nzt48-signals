@@ -269,6 +269,72 @@ fn _load_fx(path: &Path) -> Result<FxRates, String> {
     Ok(FxRates { rates })
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Rotation Plan — live_rotation_plan.json loader
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Per-symbol score from dynamic universe rotation plan.
+#[derive(Debug, Clone)]
+pub struct RotationEntry {
+    pub symbol: String,
+    pub final_score: f64,
+    pub base_score: f64,
+    pub capped_boost: f64,
+    pub exchange: String,
+    pub sector: String,
+}
+
+/// Loaded rotation plan from dynamic_universe.py.
+#[derive(Debug, Clone, Default)]
+pub struct RotationPlan {
+    /// Symbol → final_score for Kelly weighting.
+    pub scores: HashMap<String, f64>,
+    /// Full entries for debugging/logging.
+    pub entries: Vec<RotationEntry>,
+    /// Timestamp of plan generation.
+    pub generated: String,
+}
+
+/// Load live_rotation_plan.json with safe fallback.
+/// Returns empty plan if file missing or malformed (sizing unaffected).
+pub fn load_rotation_plan(config_dir: &Path) -> RotationPlan {
+    let path = config_dir.join("live_rotation_plan.json");
+    _load_rotation(&path).unwrap_or_default()
+}
+
+fn _load_rotation(path: &Path) -> Result<RotationPlan, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let raw: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let generated = raw.get("generated")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut scores = HashMap::new();
+    let mut entries = Vec::new();
+
+    if let Some(live_100) = raw.get("live_100").and_then(|v| v.as_array()) {
+        for item in live_100 {
+            let symbol = item.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let final_score = item.get("final_score").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let base_score = item.get("base_score").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let capped_boost = item.get("capped_boost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let exchange = item.get("exchange").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let sector = item.get("sector").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            if !symbol.is_empty() {
+                scores.insert(symbol.clone(), final_score);
+                entries.push(RotationEntry {
+                    symbol, final_score, base_score, capped_boost, exchange, sector,
+                });
+            }
+        }
+    }
+
+    Ok(RotationPlan { scores, entries, generated })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

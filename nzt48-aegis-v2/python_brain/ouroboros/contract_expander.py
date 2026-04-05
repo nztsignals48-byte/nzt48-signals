@@ -367,6 +367,76 @@ def validate_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# Validate candidates via IBKR reqContractDetails
+# ---------------------------------------------------------------------------
+
+def validate_candidates_ibkr(
+    candidates: List[Dict[str, Any]],
+    provider: Any = None,
+    max_batch: int = 50,
+) -> List[Dict[str, Any]]:
+    """Validate candidates via IBKR reqContractDetails. Returns enriched dicts with real con_id.
+
+    Uses ibkr_data_provider.get_contract_details() for each candidate.
+    Rate-limited to avoid IBKR Error 321 pacing violations.
+    On failure per symbol: logs warning, sets con_id=0, continues.
+
+    Args:
+        candidates: list of candidate dicts (must have "symbol" or "contract_symbol")
+        provider: ibkr_data_provider instance (must have get_contract_details method)
+        max_batch: max candidates to resolve per call (IBKR pacing safety)
+
+    Returns:
+        Same candidates list with enriched IBKR metadata (con_id, sec_type, etc.)
+    """
+    if not candidates or provider is None:
+        return candidates
+
+    enriched = []
+    batch = candidates[:max_batch]
+    resolved = 0
+    failed = 0
+
+    for c in batch:
+        sym = c.get("contract_symbol") or c.get("symbol", "")
+        exch = c.get("exchange", "")
+        if not sym:
+            enriched.append(c)
+            continue
+
+        try:
+            details = provider.get_contract_details(sym, exch)
+            if details and details.get("con_id"):
+                c["con_id"] = details["con_id"]
+                c["sec_type"] = details.get("sec_type", "STK")
+                c["primary_exchange"] = details.get("primary_exchange", exch)
+                c["currency"] = details.get("currency", c.get("currency", "USD"))
+                c["category"] = details.get("category", "")
+                c["subcategory"] = details.get("subcategory", "")
+                c["long_name"] = details.get("long_name", "")
+                resolved += 1
+            else:
+                c["con_id"] = 0
+                failed += 1
+        except Exception as e:
+            log.warning("IBKR validation failed for %s: %s", sym, e)
+            c["con_id"] = 0
+            failed += 1
+
+        enriched.append(c)
+        time.sleep(0.1)  # IBKR API pacing — mandatory
+
+    # Append any remaining candidates beyond batch limit (unresolved)
+    for c in candidates[max_batch:]:
+        c.setdefault("con_id", 0)
+        enriched.append(c)
+
+    log.info("IBKR validation: %d resolved, %d failed, %d skipped (over batch limit)",
+             resolved, failed, max(0, len(candidates) - max_batch))
+    return enriched
+
+
+# ---------------------------------------------------------------------------
 # Append new contracts to contracts.toml
 # ---------------------------------------------------------------------------
 
@@ -394,14 +464,18 @@ def append_contracts(new_contracts: List[Dict[str, Any]]) -> int:
         lev = _detect_leverage(c)
         sector = c.get("sector", "Unknown")
 
+        # Sanitize strings to prevent TOML injection
+        def _esc(v: str) -> str:
+            return v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "").replace("\r", "")
+
         lines.append("[[contracts]]")
-        lines.append(f'symbol = "{sym}"')
-        lines.append("con_id = 0")
-        lines.append(f'exchange = "{exch}"')
+        lines.append(f'symbol = "{_esc(sym)}"')
+        lines.append(f'con_id = {int(c.get("con_id", 0))}')
+        lines.append(f'exchange = "{_esc(exch)}"')
         lines.append('sec_type = "STK"')
-        lines.append(f'currency = "{cur}"')
-        lines.append(f"leverage = {lev}")
-        lines.append(f'sector = "{sector}"')
+        lines.append(f'currency = "{_esc(cur)}"')
+        lines.append(f"leverage = {int(lev)}")
+        lines.append(f'sector = "{_esc(sector)}"')
         lines.append('inverse_of = ""')
         lines.append("")
 
