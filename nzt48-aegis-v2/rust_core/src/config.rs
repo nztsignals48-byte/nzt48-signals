@@ -101,6 +101,30 @@ pub struct RiskConfig {
     /// Max entry size as fraction of equity (e.g. 0.25 = 25%).
     pub max_entry_pct_of_equity: f64,
 
+    // ── Book 7: Session Exposure Limits (was hardcoded in risk_arbiter.rs) ──
+
+    /// Max NAV during Asia session (% of equity).
+    pub session_asia_limit_pct: f64,
+    /// Max NAV during Europe session (% of equity).
+    pub session_europe_limit_pct: f64,
+    /// Max NAV during US session (% of equity).
+    pub session_us_limit_pct: f64,
+    /// Max NAV during EU+US overlap (% of equity).
+    pub session_overlap_limit_pct: f64,
+
+    // ── Sprint 2: CVaR / Kalman / Spread Quality thresholds ──
+
+    /// EVT CVaR tail risk base threshold (scaled by 1/leverage).
+    pub cvar_threshold_base: f64,
+    /// Kalman divergence absolute threshold for gap detection.
+    pub kalman_divergence_threshold: f64,
+    /// Native spread quality: thin market threshold (bps).
+    pub spread_quality_thin_bps: f64,
+    /// Native spread quality: wide market threshold (bps).
+    pub spread_quality_wide_bps: f64,
+    /// Native spread quality: extreme spread threshold (bps).
+    pub spread_quality_extreme_bps: f64,
+
     // ── R6: Dividend withholding ──
 
     /// WP-6: Dividend withholding tax factor (UK ISA: 0.85 = 15% withholding).
@@ -163,6 +187,17 @@ impl Default for RiskConfig {
             max_correlated_positions: 3,
             max_risk_per_trade_pct: 0.75,
             max_entry_pct_of_equity: 0.25,
+            // Book 7: Session exposure limits
+            session_asia_limit_pct: 30.0,
+            session_europe_limit_pct: 50.0,
+            session_us_limit_pct: 60.0,
+            session_overlap_limit_pct: 80.0,
+            // Sprint 2: CVaR / Kalman / Spread Quality thresholds
+            cvar_threshold_base: 0.15,
+            kalman_divergence_threshold: 0.03,
+            spread_quality_thin_bps: 50.0,
+            spread_quality_wide_bps: 100.0,
+            spread_quality_extreme_bps: 200.0,
             // R6: UK ISA dividend withholding (net = gross * 0.85)
             dividend_withholding_factor: 0.85,
         }

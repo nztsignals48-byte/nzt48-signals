@@ -16,7 +16,7 @@ use crate::garch_evt::EvtRegistry;
 use crate::garch_inference::GarchRegistry;
 use crate::hayashi_yoshida::HayashiYoshidaEngine;
 use crate::portfolio::PortfolioState;
-use crate::isa_gate::IsaGate;
+use crate::isa_gate::{IsaGate, current_isa_tax_year};
 use crate::overnight_carry::CarryManager;
 use crate::scanner::{MomentumScanner, SectorRotationScanner};
 use crate::smart_router::SmartRouter;
@@ -619,7 +619,7 @@ impl<B: BrokerAdapter> Engine<B> {
             scanner_scores: HashMap::new(),
             last_sector_recompute_ns: 0,
             executioner: Executioner::new(),
-            smart_router: SmartRouter::with_costs(IsaGate::new("2026-04-06"), ibkr_commission),
+            smart_router: SmartRouter::with_costs(IsaGate::new(&current_isa_tax_year()), ibkr_commission),
             subscription_manager: SubscriptionManager::new(500), // Track up to 500 registered entries (active subset rotated per mode)
             telemetry: Telemetry::new(),
             panic_guard: PanicGuard::new(),
@@ -631,7 +631,7 @@ impl<B: BrokerAdapter> Engine<B> {
             hy_engine: HayashiYoshidaEngine::default(),
             fx_table: FxRateTable::default(),
             exchange_registry: ExchangeRegistry::default(),
-            isa_gate: IsaGate::new("2026-04-06"),
+            isa_gate: IsaGate::new(&current_isa_tax_year()),
             asian_session: AsianSession::default(),
             european_session: EuropeanSession::default(),
             cross_timezone: CrossTimezoneEngine::default(),

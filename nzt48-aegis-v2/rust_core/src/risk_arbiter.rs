@@ -12,12 +12,7 @@ use std::collections::{HashMap, VecDeque};
 // Accessed via self.config.* in RiskArbiter methods.
 const VELOCITY_WINDOW_5MIN_NS: u64 = 300_000_000_000;
 
-// ── Book 7: Session Exposure Limits ──
-// Max NAV by session (% of current equity)
-const SESSION_ASIA_LIMIT_PCT: f64 = 30.0;
-const SESSION_EUROPE_LIMIT_PCT: f64 = 50.0;
-const SESSION_US_LIMIT_PCT: f64 = 60.0;
-const SESSION_OVERLAP_EU_US_LIMIT_PCT: f64 = 80.0;
+// ── Book 7: Session Exposure Limits — now in config.toml [risk] section ──
 
 /// Session classification based on London local time (seconds from midnight).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -584,7 +579,7 @@ impl RiskArbiter {
         // > 0.15 (15% expected loss in tail) on a 3x ETP means potential -45% drawdown.
         // Scale threshold by leverage: 0.15 for 1x, 0.05 for 3x, 0.03 for 5x.
         if ctx.evt_cvar > 0.0 {
-            let cvar_threshold = 0.15 / (ctx.leverage_factor.max(1) as f64);
+            let cvar_threshold = self.config.cvar_threshold_base / (ctx.leverage_factor.max(1) as f64);
             if ctx.evt_cvar > cvar_threshold {
                 return self.reject(VetoReason::CvarHeatExceeded {
                     cvar_pct: (ctx.evt_cvar * 100.0) as u32,
@@ -596,7 +591,7 @@ impl RiskArbiter {
         // Positive divergence = raw price leads (potential overextension/reversal risk).
         // Negative divergence = raw price lags (potential gap-fill risk).
         // Only veto extreme divergence that signals unreliable pricing.
-        if ctx.kalman_divergence.abs() > 0.03 {
+        if ctx.kalman_divergence.abs() > self.config.kalman_divergence_threshold {
             return self.reject(VetoReason::GapDetected {
                 gap_bps: (ctx.kalman_divergence.abs() * 10_000.0) as u32,
             }, ts);
@@ -697,11 +692,11 @@ impl RiskArbiter {
         // ── NATIVE SPREAD QUALITY SCALING (CHECK 42) ─────────────────────
         // Wide native spreads = thin market = reduce size to limit slippage.
         // > 50bps → 0.75x, > 100bps → 0.50x, > 200bps → 0.25x
-        let spread_quality_factor = if ctx.native_spread_bps > 200.0 {
+        let spread_quality_factor = if ctx.native_spread_bps > self.config.spread_quality_extreme_bps {
             0.25
-        } else if ctx.native_spread_bps > 100.0 {
+        } else if ctx.native_spread_bps > self.config.spread_quality_wide_bps {
             0.50
-        } else if ctx.native_spread_bps > 50.0 {
+        } else if ctx.native_spread_bps > self.config.spread_quality_thin_bps {
             0.75
         } else {
             1.0
@@ -838,20 +833,20 @@ impl RiskArbiter {
             TradingSession::Asia => {
                 // 00:00-08:00: Only Asia sessions are open
                 match intent_exchange_session {
-                    TradingSession::Asia => ("Asia", SESSION_ASIA_LIMIT_PCT),
+                    TradingSession::Asia => ("Asia", self.config.session_asia_limit_pct),
                     _ => {
                         // Attempting to trade non-Asia exchange during Asia hours
                         // Use the more restrictive limit for the intent exchange
-                        (intent_exchange_session.name(), SESSION_ASIA_LIMIT_PCT)
+                        (intent_exchange_session.name(), self.config.session_asia_limit_pct)
                     }
                 }
             }
             TradingSession::Europe => {
                 // 08:00-14:30: Europe session (US not yet open)
                 match intent_exchange_session {
-                    TradingSession::Europe => ("Europe", SESSION_EUROPE_LIMIT_PCT),
-                    TradingSession::Asia => ("Europe", SESSION_EUROPE_LIMIT_PCT),
-                    _ => ("Europe", SESSION_EUROPE_LIMIT_PCT),
+                    TradingSession::Europe => ("Europe", self.config.session_europe_limit_pct),
+                    TradingSession::Asia => ("Europe", self.config.session_europe_limit_pct),
+                    _ => ("Europe", self.config.session_europe_limit_pct),
                 }
             }
             TradingSession::Us => {
@@ -860,14 +855,14 @@ impl RiskArbiter {
                 // 15:30-21:00 (56400-75600): US core hours → 60% limit
                 let is_eu_us_overlap = ctx.time_secs >= 52200 && ctx.time_secs < 56400; // 14:30-15:30
                 if is_eu_us_overlap {
-                    ("US+EU_Overlap", SESSION_OVERLAP_EU_US_LIMIT_PCT)
+                    ("US+EU_Overlap", self.config.session_overlap_limit_pct)
                 } else {
-                    ("US", SESSION_US_LIMIT_PCT)
+                    ("US", self.config.session_us_limit_pct)
                 }
             }
             TradingSession::Overlap => {
                 // This variant shouldn't be reached (handled by Us), but for completeness:
-                ("US+EU_Overlap", SESSION_OVERLAP_EU_US_LIMIT_PCT)
+                ("US+EU_Overlap", self.config.session_overlap_limit_pct)
             }
         };
 

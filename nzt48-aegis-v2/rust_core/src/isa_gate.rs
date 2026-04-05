@@ -3,6 +3,37 @@
 
 use std::collections::HashSet;
 
+/// Compute the current UK ISA tax year start date as "YYYY-04-06".
+/// Tax year runs April 6 to April 5 of the following year.
+/// If today is before April 6, the current tax year started the previous calendar year.
+pub fn current_isa_tax_year() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = secs / 86400;
+    let (y, m, d) = days_to_ymd(days as i64);
+    let tax_year = if m < 4 || (m == 4 && d < 6) { y - 1 } else { y };
+    format!("{}-04-06", tax_year)
+}
+
+/// Civil days since Unix epoch to (year, month, day).
+/// Algorithm from Howard Hinnant (public domain).
+fn days_to_ymd(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m, d)
+}
+
 /// ISA Gate: enforces HMRC rules for Stocks & Shares ISA eligibility.
 pub struct IsaGate {
     /// Hard-blocked exchange MICs (not ISA-eligible).

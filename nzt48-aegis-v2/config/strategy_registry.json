@@ -123,15 +123,15 @@
     },
     "EMAT_Attention": {
       "id": "EMAT_Attention", "name": "EMA Temporal Attention", "family": "momentum",
-      "status": "live", "description": "EMA temporal attention scoring. Random-init weights, calibrates via paper trading. Activated Session 30."
+      "status": "shadow", "description": "EMA temporal attention scoring. Random-init weights, calibrates via paper trading. Activated Session 30."
     },
     "TemporalAttention": {
       "id": "TemporalAttention", "name": "Temporal Attention", "family": "ml_signals",
-      "status": "live", "description": "Temporal attention for regime-aware signals. Random-init weights, calibrates via paper trading. Activated Session 30."
+      "status": "shadow", "description": "Temporal attention for regime-aware signals. Random-init weights, calibrates via paper trading. Activated Session 30."
     },
     "SwarmPredictor": {
       "id": "SwarmPredictor", "name": "Swarm Predictor", "family": "ensemble",
-      "status": "live", "description": "50-agent deterministic swarm consensus. Self-calibrating via wealth accumulation (~1000 tick warm-up). Activated Session 30."
+      "status": "shadow", "description": "50-agent deterministic swarm consensus. Self-calibrating via wealth accumulation (~1000 tick warm-up). Activated Session 30."
     },
     "HFT_Probability": {
       "id": "HFT_Probability", "name": "HFT Probability", "family": "microstructure",
@@ -139,7 +139,7 @@
     },
     "HighFlyer": {
       "id": "HighFlyer", "name": "High Flyer", "family": "momentum",
-      "status": "live", "description": "Retail flow-driven momentum detection (unusual volume + social). Activated Session 30."
+      "status": "shadow", "description": "Retail flow-driven momentum detection (unusual volume + social). Activated Session 30."
     },
     "NightRider": {
       "id": "NightRider", "name": "Night Rider", "family": "carry",
@@ -219,19 +219,19 @@
     },
     "LatencyArbitrage": {
       "id": "LatencyArbitrage", "name": "Latency Arbitrage (NAV vs Market)", "family": "arbitrage",
-      "status": "live", "description": "Book 195: NAV-vs-market-price latency arb. Detects temporary mispricing between iNAV and traded price. Session 33."
+      "status": "shadow", "description": "Book 195: NAV-vs-market-price latency arb. Detects temporary mispricing between iNAV and traded price. Session 33."
     },
     "MacroNowcast": {
       "id": "MacroNowcast", "name": "Macro Nowcasting", "family": "event_driven",
-      "status": "live", "description": "Book 84: Real-time economic data interpretation. 30-60s post-release drift capture. Gemini 2.5 Flash. Expected Sharpe +3.2. Session 33."
+      "status": "shadow", "description": "Book 84: Real-time economic data interpretation. 30-60s post-release drift capture. Gemini 2.5 Flash. Expected Sharpe +3.2. Session 33."
     },
     "MultiLegArbitrage": {
       "id": "MultiLegArbitrage", "name": "Multi-Leg Vol Rank Arbitrage", "family": "arbitrage",
-      "status": "live", "description": "Book 206: Cross-ETP vol rank extremes. Multi-leg arb across paired ETFs. Session 33."
+      "status": "shadow", "description": "Book 206: Cross-ETP vol rank extremes. Multi-leg arb across paired ETFs. Session 33."
     },
     "StatisticalArbitrage": {
       "id": "StatisticalArbitrage", "name": "Pairs Statistical Arbitrage", "family": "statistical_arbitrage",
-      "status": "live", "description": "Book 168: Cointegrated pairs trading signal generator. Separate from PairsReversion (OLS-based). Session 33."
+      "status": "shadow", "description": "Book 168: Cointegrated pairs trading signal generator. Separate from PairsReversion (OLS-based). Session 33."
     },
     "CrossVenueArb": {
       "id": "CrossVenueArb", "name": "Cross-Venue Arbitrage", "family": "arbitrage",
@@ -239,19 +239,19 @@
     },
     "QueueImbalance": {
       "id": "QueueImbalance", "name": "Queue Imbalance", "family": "microstructure",
-      "status": "live", "description": "L1 bid/ask size imbalance detection. Bid_size > 3x ask_size with tight spread = informed accumulation. Glosten & Milgrom (1985). 60% WR within 5 ticks. Session 34."
+      "status": "shadow", "description": "L1 bid/ask size imbalance detection. Bid_size > 3x ask_size with tight spread = informed accumulation. Glosten & Milgrom (1985). 60% WR within 5 ticks. Session 34."
     },
     "PreMarketAnomaly": {
       "id": "PreMarketAnomaly", "name": "Pre-Market Volume Anomaly", "family": "institutional_flow",
-      "status": "live", "description": "Extended hours RVOL > 3.0 informed flow detection. Pre-market volume spikes predict RTH direction. US 11:00-14:30 UTC / LSE 05:00-08:00 UTC. Session 34."
+      "status": "shadow", "description": "Extended hours RVOL > 3.0 informed flow detection. Pre-market volume spikes predict RTH direction. US 11:00-14:30 UTC / LSE 05:00-08:00 UTC. Session 34."
     },
     "VolTermStructure": {
       "id": "VolTermStructure", "name": "Vol Term Structure", "family": "volatility",
-      "status": "live", "description": "IV vs HV premium detection. When IV > HV by >20% in mean-reverting regime = vol overpriced, buy underlying for mean reversion. Demeterfi et al. (1999), Gatheral (2006). Session 34."
+      "status": "shadow", "description": "IV vs HV premium detection. When IV > HV by >20% in mean-reverting regime = vol overpriced, buy underlying for mean reversion. Demeterfi et al. (1999), Gatheral (2006). Session 34."
     },
     "IEXAuctionFade": {
       "id": "IEXAuctionFade", "name": "IEX Auction Fade", "family": "microstructure",
-      "status": "live", "description": "IEX discretionary auction mean-reversion. Fades auction price vs NBBO mid when deviation > 3 bps. 350+ auctions/day. Session 35."
+      "status": "shadow", "description": "IEX discretionary auction mean-reversion. Fades auction price vs NBBO mid when deviation > 3 bps. 350+ auctions/day. Session 35."
     }
   },
   "regime_definitions": {

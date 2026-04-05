@@ -200,6 +200,26 @@ struct RawRisk {
     max_risk_per_trade_pct: f64,
     #[serde(default = "default_max_entry_pct")]
     max_entry_pct_of_equity: f64,
+    // Book 7: Session exposure limits (was hardcoded in risk_arbiter.rs)
+    #[serde(default = "default_session_asia_limit")]
+    session_asia_limit_pct: f64,
+    #[serde(default = "default_session_europe_limit")]
+    session_europe_limit_pct: f64,
+    #[serde(default = "default_session_us_limit")]
+    session_us_limit_pct: f64,
+    #[serde(default = "default_session_overlap_limit")]
+    session_overlap_limit_pct: f64,
+    // Sprint 2: CVaR / Kalman / Spread Quality thresholds
+    #[serde(default = "default_cvar_threshold_base")]
+    cvar_threshold_base: f64,
+    #[serde(default = "default_kalman_divergence_threshold")]
+    kalman_divergence_threshold: f64,
+    #[serde(default = "default_spread_quality_thin")]
+    spread_quality_thin_bps: f64,
+    #[serde(default = "default_spread_quality_wide")]
+    spread_quality_wide_bps: f64,
+    #[serde(default = "default_spread_quality_extreme")]
+    spread_quality_extreme_bps: f64,
 }
 
 fn default_weekly_dd() -> f64 { 7.0 }
@@ -209,6 +229,18 @@ fn default_overnight() -> f64 { 50.0 }
 fn default_max_corr() -> u32 { 3 }
 fn default_risk_per_trade() -> f64 { 0.75 }
 fn default_max_entry_pct() -> f64 { 0.25 }
+
+// Book 7: Session exposure limit defaults
+fn default_session_asia_limit() -> f64 { 30.0 }
+fn default_session_europe_limit() -> f64 { 50.0 }
+fn default_session_us_limit() -> f64 { 60.0 }
+fn default_session_overlap_limit() -> f64 { 80.0 }
+// Sprint 2: CVaR / Kalman / Spread Quality threshold defaults
+fn default_cvar_threshold_base() -> f64 { 0.15 }
+fn default_kalman_divergence_threshold() -> f64 { 0.03 }
+fn default_spread_quality_thin() -> f64 { 50.0 }
+fn default_spread_quality_wide() -> f64 { 100.0 }
+fn default_spread_quality_extreme() -> f64 { 200.0 }
 
 fn default_global_cutoff() -> String { "20:55".to_string() }
 fn default_daily_trade_limit() -> u32 { 3 }
@@ -1201,6 +1233,17 @@ impl EngineConfig {
             max_correlated_positions: raw.risk.max_correlated_positions,
             max_risk_per_trade_pct: raw.risk.max_risk_per_trade_pct,
             max_entry_pct_of_equity: raw.risk.max_entry_pct_of_equity,
+            // Book 7: Session exposure limits (was hardcoded in risk_arbiter.rs)
+            session_asia_limit_pct: raw.risk.session_asia_limit_pct,
+            session_europe_limit_pct: raw.risk.session_europe_limit_pct,
+            session_us_limit_pct: raw.risk.session_us_limit_pct,
+            session_overlap_limit_pct: raw.risk.session_overlap_limit_pct,
+            // Sprint 2: CVaR / Kalman / Spread Quality thresholds
+            cvar_threshold_base: raw.risk.cvar_threshold_base,
+            kalman_divergence_threshold: raw.risk.kalman_divergence_threshold,
+            spread_quality_thin_bps: raw.risk.spread_quality_thin_bps,
+            spread_quality_wide_bps: raw.risk.spread_quality_wide_bps,
+            spread_quality_extreme_bps: raw.risk.spread_quality_extreme_bps,
             // R6: Dividend withholding from config (was hardcoded 0.85 in PortfolioState)
             dividend_withholding_factor: raw.position.dividend_withholding_factor,
         };

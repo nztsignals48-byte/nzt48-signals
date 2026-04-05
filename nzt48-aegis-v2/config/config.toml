@@ -177,6 +177,19 @@ max_trades_per_symbol_per_day = 1    # Slot governance: max 1 entry per symbol p
 min_gross_edge_pct = 0.15          # LIVE: 15bps minimum edge. Below this, commission drag kills P&L.
 reject_to_halt_count = 3
 reject_to_halt_window_secs = 60
+# Book 7: Session exposure limits (% of equity per session). Was hardcoded in risk_arbiter.rs.
+session_asia_limit_pct = 30.0
+session_europe_limit_pct = 50.0
+session_us_limit_pct = 60.0
+session_overlap_limit_pct = 80.0
+# Sprint 2: EVT CVaR tail risk base threshold (scaled by 1/leverage). Was hardcoded 0.15.
+cvar_threshold_base = 0.15
+# Sprint 2: Kalman divergence threshold. Reject when |divergence| > this. Was hardcoded 0.03.
+kalman_divergence_threshold = 0.03
+# Sprint 2: Native spread quality thresholds (bps). Was hardcoded 50/100/200 in risk_arbiter.rs.
+spread_quality_thin_bps = 50.0
+spread_quality_wide_bps = 100.0
+spread_quality_extreme_bps = 200.0
 
 # P2-#31/#32/#33: LiquidationDefense thresholds (were hardcoded, diverged from [risk] values).
 [risk.liquidation_defense]

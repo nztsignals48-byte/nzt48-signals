@@ -383,10 +383,25 @@ W_STATIC_EXCHANGE = 0.15
 
 # Core LSE ETPs — guaranteed observation residency regardless of score.
 # These are the primary ISA trading instruments with zero FX cost.
-CORE_LSE_ETPS = {
-    "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
-    "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
-}
+# Derived dynamically from contracts.toml (leveraged ETPs on LSEETF exchange).
+CORE_LSE_ETPS = set()
+try:
+    _contracts_path = CONTRACTS_FILE
+    if not _contracts_path.exists():
+        _contracts_path = Path("/app/config/contracts.toml")
+    if _contracts_path.exists():
+        with open(_contracts_path, "rb") as _cf:
+            _cdata = tomllib.load(_cf)
+        for _c in _cdata.get("contracts", []):
+            if _c.get("exchange") == "LSEETF" and _c.get("leverage", 1) >= 3:
+                CORE_LSE_ETPS.add(_c["symbol"])
+except Exception:
+    # Fallback if contracts.toml unavailable
+    CORE_LSE_ETPS = {"QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
+                      "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L"}
+
+if CORE_LSE_ETPS:
+    log.info("Core LSE ETPs: %d derived from contracts.toml", len(CORE_LSE_ETPS))
 
 # Minimum thresholds
 MIN_AVG_VOLUME = 100000       # 100K shares/day minimum (was 10K — too low, allowed penny stocks)

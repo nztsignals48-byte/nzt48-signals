@@ -270,6 +270,26 @@ _ibkr_pnl_cache: dict = {}
 
 _auto_killed_strategies = set()  # S6_Catalyst redesigned Session 30 (event gap fade). Dynamic kill re-applies if Sharpe < -1.0
 _strategy_pnl_history = defaultdict(list)
+
+# Load shadow strategies from strategy_registry.json at module init time.
+# Replaces hardcoded _SHADOW_TYPES set (Session 35 fix).
+_SHADOW_TYPES = set()
+try:
+    import json as _json_reg
+    _reg_path = "/app/config/strategy_registry.json"
+    if not os.path.exists(_reg_path):
+        _reg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "strategy_registry.json")
+    if os.path.exists(_reg_path):
+        with open(_reg_path) as _rf:
+            _reg_data = _json_reg.load(_rf)
+        for _sname, _sinfo in _reg_data.get("strategies", {}).items():
+            if _sinfo.get("status") == "shadow":
+                _SHADOW_TYPES.add(_sname)
+        if _SHADOW_TYPES:
+            sys.stderr.write(f"REGISTRY: {len(_SHADOW_TYPES)} shadow strategies loaded: {sorted(_SHADOW_TYPES)}\n")
+            sys.stderr.flush()
+except Exception:
+    pass  # Fail-open: if registry unreadable, no shadows
 _strategy_entry_prices = {}
 # Book 1: Track entry confidence per position for IC computation on exit
 _entry_confidences = {}  # (ticker_id, strategy) → confidence at entry
@@ -9009,11 +9029,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         # Focus: VanguardSniper + ApexScout + System S1-S7 only.
         # When account grows to £25K+, re-enable TypeB/F first (highest edge).
         _DISABLED_TYPES = set()
-        _SHADOW_TYPES = {
-            "QueueImbalance", "PreMarketAnomaly", "VolTermStructure", "IEXAuctionFade",
-            "LatencyArbitrage", "MacroNowcast", "MultiLegArbitrage", "StatisticalArbitrage",
-            "SwarmPredictor", "TemporalAttention", "EMAT_Attention", "HighFlyer",
-        }
+        # _SHADOW_TYPES loaded from strategy_registry.json at module init (see top of file)
         if entry_type in _DISABLED_TYPES:
             return None
         if entry_type in _SHADOW_TYPES:
