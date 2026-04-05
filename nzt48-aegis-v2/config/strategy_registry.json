@@ -183,11 +183,11 @@
     },
     "InsiderFlow": {
       "id": "InsiderFlow", "name": "SEC Insider Trading", "family": "alternative_data",
-      "status": "live", "description": "SEC Form 4 cluster buy detection (edgartools, free API). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "SEC Form 4 cluster buy detection (edgartools, free API). Activated Session 30."
     },
     "SentimentOverlay": {
       "id": "SentimentOverlay", "name": "FinBERT Sentiment", "family": "alternative_data",
-      "status": "live", "description": "FinBERT NLP sentiment overlay from 11 news APIs. Session 25-26."
+      "status": "live", "type": "overlay", "description": "FinBERT NLP sentiment overlay from 11 news APIs. Session 25-26."
     },
     "CongressionalTrading": {
       "id": "CongressTrading", "name": "Congressional Trading", "family": "alternative_data",
@@ -199,23 +199,23 @@
     },
     "CryptoFearGreed": {
       "id": "CryptoFearGreed", "name": "Crypto Fear/Greed Index", "family": "macro_overlay",
-      "status": "live", "description": "Crypto market sentiment as risk-on/risk-off macro signal (free API). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Crypto market sentiment as risk-on/risk-off macro signal (free API). Activated Session 30."
     },
     "OrderFlowImbalance": {
       "id": "OrderFlowImbalance", "name": "Order Flow Imbalance", "family": "microstructure",
-      "status": "live", "description": "LOB order flow imbalance detection (bid/ask L1 from IBKR). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "LOB order flow imbalance detection (bid/ask L1 from IBKR). Activated Session 30."
     },
     "SocialSentiment": {
       "id": "SocialSentiment", "name": "StockTwits Social Sentiment", "family": "alternative_data",
-      "status": "live", "description": "StockTwits social sentiment aggregation (free API, 200 req/hr). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "StockTwits social sentiment aggregation (free API, 200 req/hr). Activated Session 30."
     },
     "KalmanHedge": {
       "id": "KalmanHedge", "name": "Kalman Filter Dynamic Hedge", "family": "statistical_arbitrage",
-      "status": "live", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Activated Session 30."
     },
     "SectorRotation": {
       "id": "SectorRotation", "name": "Sector Rotation", "family": "macro_rotation",
-      "status": "live", "description": "Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
+      "status": "live", "type": "overlay", "description": "Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
     },
     "LatencyArbitrage": {
       "id": "LatencyArbitrage", "name": "Latency Arbitrage (NAV vs Market)", "family": "arbitrage",

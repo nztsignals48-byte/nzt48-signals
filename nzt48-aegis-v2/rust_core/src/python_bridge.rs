@@ -79,6 +79,8 @@ pub struct BrainSignal {
     #[pyo3(get)]
     pub min_profit_target_pct: Option<f64>,
     /// Execution algorithm hint: "TWAP" for high-impact orders.
+    /// KEPT (not dead code): forward-looking infrastructure for IS_LIVE mode.
+    /// Used when live trading routes through TWAP/VWAP execution algos.
     #[pyo3(get)]
     pub execution_algo: Option<String>,
 }

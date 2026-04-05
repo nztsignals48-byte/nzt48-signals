@@ -9,9 +9,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
 use ibapi::contracts::tick_types::TickType;
-use ibapi::market_data::realtime::{BarSize, BidAsk, MarketDepths, TickTypes, WhatToShow};
+use ibapi::market_data::realtime::{BidAsk, MarketDepths, TickTypes};
 use ibapi::orders::OrderUpdate;
-use ibapi::prelude::TradingHours;
 use ibapi::subscriptions::sync::Subscription;
 
 use crate::order_book::{DepthMetrics, OrderBookStore};
@@ -226,8 +225,6 @@ pub struct IbkrBroker {
     cached_orders: Vec<BrokerOpenOrder>,
     /// Bar high/low data per ticker from last poll (for ATR calculation).
     pub bar_high_low: HashMap<TickerId, Vec<(f64, f64)>>,
-    /// SC-19: Reconnection count for client_id rotation on Error 326.
-    reconnect_count: u32,
     /// Diagnostic: total polls with zero data (for detecting silent subscription failures).
     zero_data_polls: u32,
     /// Diagnostic: total bars ever received (lifetime counter).
@@ -275,7 +272,6 @@ impl IbkrBroker {
             cached_positions: Vec::new(),
             cached_orders: Vec::new(),
             bar_high_low: HashMap::new(),
-            reconnect_count: 0,
             zero_data_polls: 0,
             total_bars_received: 0,
             total_l1_received: 0,
@@ -358,24 +354,6 @@ impl IbkrBroker {
         self.client = None;
         self.connected = false;
         self.events.push_back(BrokerEvent::Disconnected);
-    }
-
-    /// SC-19: Rotate client_id on Error 326 ("Cannot connect to TWS").
-    /// Uses pattern: base_id + (reconnect_count % 5) to cycle through 101-105.
-    pub fn rotate_client_id(&mut self) {
-        self.reconnect_count += 1;
-        let base_id = self.config.client_id;
-        let rotated = base_id + (self.reconnect_count % 5);
-        eprintln!(
-            "IBKR: client_id rotation {} → {} (reconnect #{})",
-            self.config.client_id, rotated, self.reconnect_count
-        );
-        self.config.client_id = rotated;
-    }
-
-    /// SC-19: Get current reconnect count.
-    pub fn reconnect_count(&self) -> u32 {
-        self.reconnect_count
     }
 
     /// Register a contract mapping (symbol → TickerId).
@@ -529,48 +507,6 @@ impl IbkrBroker {
             .build()
     }
 
-    /// Subscribe to 5-second realtime bars for a contract.
-    pub fn subscribe_bars(&mut self, ticker_id: TickerId) -> Result<(), BrokerError> {
-        let client = self.client.as_ref().ok_or(BrokerError::NotConnected)?;
-        let mapping = self
-            .contract_map
-            .get(&ticker_id)
-            .ok_or_else(|| {
-                BrokerError::InvalidOrder(format!("No contract for ticker {}", ticker_id.0))
-            })?
-            .clone();
-
-        let ibkr_exchange = Self::ibkr_exchange(&mapping.exchange);
-        let contract = Self::build_contract(&mapping);
-        eprintln!(
-            "IBKR: Subscribing bars for {} → ibkr_sym={} exchange={} currency={}",
-            mapping.symbol, mapping.ibkr_symbol, ibkr_exchange, mapping.currency
-        );
-        match client.realtime_bars(
-            &contract,
-            BarSize::Sec5,
-            WhatToShow::Trades,
-            TradingHours::Extended,
-        ) {
-            Ok(sub) => {
-                eprintln!(
-                    "IBKR: Subscribed to bars for {} (ticker_id={})",
-                    mapping.symbol, ticker_id.0
-                );
-                self.bar_subs.push(BarSubscription {
-                    ticker_id,
-                    symbol: mapping.symbol,
-                    sub,
-                });
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("IBKR: Bar subscription failed for {}: {e}", mapping.symbol);
-                Err(BrokerError::InvalidOrder(format!("subscribe: {e}")))
-            }
-        }
-    }
-
     /// Subscribe to bars for all registered contracts.
     /// Dual-track: reqRealTimeBars (primary, needs paid subs) + reqMktData (fallback, delayed OK).
     /// reqMktData emission is throttled to 5-second cadence in poll_ticks() to prevent
@@ -717,18 +653,6 @@ impl IbkrBroker {
         }
     }
 
-    /// Subscribe to reqMktData for all registered contracts (no bars, pure tick stream).
-    pub fn subscribe_all_mktdata(&mut self) -> u32 {
-        let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
-        let mut count = 0u32;
-        for tid in ticker_ids {
-            if self.subscribe_mktdata(tid).is_ok() {
-                count += 1;
-            }
-        }
-        count
-    }
-
     /// Subscribe to L1 tick-by-tick bid/ask for a contract (P0-01).
     /// Provides real bid/ask quotes instead of synthetic spread estimation.
     pub fn subscribe_l1(&mut self, ticker_id: TickerId) -> Result<(), BrokerError> {
@@ -761,18 +685,6 @@ impl IbkrBroker {
                 Err(BrokerError::InvalidOrder(format!("L1 subscribe: {e}")))
             }
         }
-    }
-
-    /// Subscribe to L1 bid/ask for all registered contracts.
-    pub fn subscribe_all_l1(&mut self) -> u32 {
-        let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
-        let mut count = 0u32;
-        for tid in ticker_ids {
-            if self.subscribe_l1(tid).is_ok() {
-                count += 1;
-            }
-        }
-        count
     }
 
     /// Subscribe to reqMktDepth (L2 order book) for a contract.
@@ -910,19 +822,6 @@ impl IbkrBroker {
     /// Get current count of active L1 subscriptions (P21: telemetry).
     pub fn l1_subscription_count(&self) -> u32 {
         self.l1_subs.len() as u32
-    }
-
-    /// Return the current data drought severity level.
-    /// 0 = no drought, 1 = severe (recommend reconnect), 2 = critical (recommend HALT).
-    /// Caller (main loop) should check this and escalate risk regime accordingly.
-    pub fn data_drought_level(&self) -> u8 {
-        if self.zero_data_polls >= 3500 {
-            2 // Critical — halt trading
-        } else if self.zero_data_polls >= 1500 {
-            1 // Severe — recommend reconnect
-        } else {
-            0 // Normal
-        }
     }
 
     /// Return all registered TickerIds from the contract map.
@@ -1508,20 +1407,6 @@ impl IbkrBroker {
                 }
             }
         }
-    }
-
-    /// Inject a fill event (for testing).
-    pub fn inject_fill(&mut self, order_id: &str, ticker_id: TickerId, qty: u32, price: f64) {
-        let exec_id = uuid::Uuid::now_v7().to_string();
-        self.events.push_back(BrokerEvent::Fill {
-            order_id: order_id.to_string(),
-            ticker_id,
-            filled_qty: qty,
-            remaining_qty: 0,
-            price,
-            exec_id,
-            commission: 1.50,
-        });
     }
 
     /// Inject a position for reconciliation.

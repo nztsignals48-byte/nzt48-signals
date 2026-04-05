@@ -778,38 +778,53 @@ _lead_lag_nightly_last_load = 0.0
 # Each signal contributes 0 or 1 to the composite score.
 def _regime_composite_score(msg, ind=None):
     """Compute 6-factor regime stress score (0-6).
-    Returns (score, regime_name, details_dict)."""
+    Returns (score, regime_name, details_dict).
+
+    Sources macro fields from _macro_cache (FRED data) first, then msg, then defaults.
+    Fields NOT available from FRED (pct_above_200dma, dxy, spx_vs_sma50_pct) use msg fallback.
+    """
     score = 0
     details = {}
-    # 1. VIX level (primary)
-    vix = msg.get("vix", 18)
+    _mc_latest = _macro_cache.get("latest", {}) if _macro_cache else {}
+    _mc_regime = _macro_cache.get("regime_inputs", {}) if _macro_cache else {}
+
+    # 1. VIX level (primary) — FRED: vix_official
+    vix = _mc_latest.get("vix_official", msg.get("vix", 18))
     if vix > 25:
         score += 1
         details["vix_elevated"] = True
     if vix > 35:
         score += 1  # Double-count extreme VIX
         details["vix_extreme"] = True
-    # 2. Credit spreads (HY OAS)
-    credit_spread = msg.get("credit_spread_bps", 120)
+    # 2. Credit spreads (HY OAS) — FRED: high_yield_spread (in pct, convert to bps)
+    _hy_spread_pct = _mc_latest.get("high_yield_spread")
+    if _hy_spread_pct is not None:
+        credit_spread = _hy_spread_pct * 100  # FRED OAS is in pct → bps
+    else:
+        credit_spread = msg.get("credit_spread_bps", 120)
     if credit_spread > 200:
         score += 1
         details["credit_widening"] = True
-    # 3. Market breadth
+    # 3. Market breadth — not in FRED, use msg fallback
     breadth = msg.get("pct_above_200dma", 55)
     if breadth < 40:
         score += 1
         details["breadth_declining"] = True
-    # 4. DXY strength (dollar stress)
+    # 4. DXY strength (dollar stress) — not in FRED, use msg fallback
     dxy = msg.get("dxy", 100)
     if dxy > 108:
         score += 1
         details["dollar_stress"] = True
-    # 5. Yield curve (2s10s spread) — inversion signals recession
-    yield_spread = msg.get("yield_2s10s", 0.5)
+    # 5. Yield curve (2s10s spread) — FRED: yield_curve_spread
+    _yc_spread = _mc_latest.get("yield_curve_spread")
+    if _yc_spread is not None:
+        yield_spread = _yc_spread
+    else:
+        yield_spread = msg.get("yield_2s10s", 0.5)
     if yield_spread < 0:
         score += 1
         details["curve_inverted"] = True
-    # 6. Equity momentum — SPX below 50-day SMA
+    # 6. Equity momentum — SPX below 50-day SMA — not in FRED, use msg fallback
     spx_vs_sma50 = msg.get("spx_vs_sma50_pct", 1.0)
     if spx_vs_sma50 < -3.0:
         score += 1
@@ -2854,6 +2869,23 @@ def _compute_indicators(ticker_id, ticks, msg):
     except Exception:
         pass
 
+    # RSI-14 from 5-minute bar closes (used by TemporalAttention, PPO, etc.)
+    _rsi_14 = 50.0  # neutral default
+    if bars_5m and len(bars_5m) >= 14:
+        _rsi_prices = [b["close"] for b in bars_5m[-30:]]
+        _rsi_val = calculate_rsi(_rsi_prices, period=14)
+        if _rsi_val is not None:
+            _rsi_14 = _rsi_val
+
+    # Spread in basis points (derived from bid/ask already computed above)
+    spread_bps = spread_pct * 100 if spread_pct > 0 else 10.0
+
+    # Quote imbalance from Rust depth data (msg.depth_imbalance)
+    quote_imbalance = msg.get("depth_imbalance", 0.0)
+
+    # Symbol for downstream overlay lookups
+    _symbol = ticker_symbols.get(ticker_id, "")
+
     return {
         "bars_5m": bars_5m, "n_5min_bars": n_5min_bars,
         "rvol": rvol, "hurst": hurst, "hurst_regime": hurst_regime,
@@ -2864,6 +2896,8 @@ def _compute_indicators(ticker_id, ticks, msg):
         "bid": bid, "ask": ask, "spread_pct": spread_pct,
         "structural_score": structural_score, "sts_components": sts,
         "frac_diff_value": frac_diff_value,
+        "rsi": _rsi_14, "spread_bps": spread_bps,
+        "quote_imbalance": quote_imbalance, "symbol": _symbol,
     }
 
 
@@ -4733,9 +4767,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         from python_brain.risk.liquidity_pulse import LiquidityPulseDetector
         _lp_detector = getattr(msg, "_lp_detector", LiquidityPulseDetector())
         lp_alert = _lp_detector.check_tick(
-            price=ind.get("last_price", 0),
-            volume=ind.get("last_volume", 0),
-            spread_bps=ind.get("spread_bps", 10),
+            price=msg.get("last", 0),
+            volume=msg.get("volume", 0),
+            spread_bps=ind.get("spread_bps", 10.0),
             timestamp_secs=msg.get("timestamp_secs", 0),
         )
         if lp_alert and lp_alert.block_entry:
@@ -4836,15 +4870,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         pass
 
     # ── BOOK 44: IBKR RESILIENCE PRE-GATE ──
-    # Check broker connectivity before generating signals
-    try:
-        from python_brain.execution.ibkr_resilience import is_connection_healthy
-        if not is_connection_healthy(msg.get("connection_state", "active")):
-            return []  # Broker degraded → no new entries
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    # Check if ticker is halted (Rust sends halted=True from IBKR tick type 49).
+    # Connection health is managed by Rust — Python only checks per-symbol halt status.
+    if msg.get("halted", False):
+        return []  # Symbol halted → no new entries
 
     # ── BOOK 176: DATA QUALITY PRE-GATE ──
     # Reject ticks with suspicious data (stale price, zero volume, impossible spread)
@@ -7329,8 +7358,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     try:
         from python_brain.analytics.iv_surface import compute_iv_regime, iv_sizing_modifier
         _vix = msg.get("vix", 20)
-        _vix_1m = msg.get("vix_1m", _vix)
-        _vix_3m = msg.get("vix_3m", _vix)
+        _vix_1m = (_macro_cache.get("latest", {}).get("vix_1m", _vix) if _macro_cache else _vix)
+        _vix_3m = (_macro_cache.get("latest", {}).get("vix_3m", _vix) if _macro_cache else _vix)
         _iv_regime = compute_iv_regime(_vix, _vix_1m, _vix_3m)
         _iv_mult = iv_sizing_modifier(_iv_regime)
         if abs(_iv_mult - 1.0) > 0.01:

@@ -198,16 +198,7 @@ mod tests {
         assert_eq!(pos.expect("position exists").qty, 100);
     }
 
-    // ── Test 17: WAL NextValidId event (H47) ──
-    #[test]
-    fn test_wal_next_valid_id_event() {
-        use crate::types::WalPayload;
-        use crate::wal_writer::make_wal_event;
-        let event = make_wal_event(1_000_000, WalPayload::NextValidId { id: 42 });
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains("NextValidId"));
-        assert!(json.contains("42"));
-    }
+    // Test 17 removed: WAL NextValidId variant was dead code (never written).
 
     // ── Test 18: Split quantity helper ──
     #[test]

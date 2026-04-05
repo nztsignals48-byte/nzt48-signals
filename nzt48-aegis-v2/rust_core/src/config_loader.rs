@@ -299,10 +299,18 @@ fn default_checkpoint_interval() -> u64 { 3600 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct IbkrConfig {
     pub client_id_executioner: u32,
+    /// Future use: dedicated client_id for Ouroboros historical data requests.
+    #[allow(dead_code)]
     pub client_id_ouroboros: u32,
+    /// Future use: exponential backoff sequence for IBKR reconnection attempts.
+    #[allow(dead_code)]
     pub reconnect_backoff_secs: Vec<u64>,
     pub rate_limit_msgs_per_sec: u32,
+    /// Future use: pacing delay between reqMktData calls to avoid IBKR throttling.
+    #[allow(dead_code)]
     pub reqmktdata_pacing_ms: u64,
+    /// Future use: cap on historical data requests per 10-minute window (IBKR limit).
+    #[allow(dead_code)]
     pub historical_data_max_per_10min: u32,
     pub max_simultaneous_lines: u32,
 }
@@ -1094,16 +1102,26 @@ pub struct EngineConfig {
     pub rotation: RotationConfig,
     pub crucible: CrucibleConfig,
     pub inverse_pairs: Vec<[String; 2]>,
+    /// Future use: sector heat tracking (sector → ticker list). Loaded from config.toml
+    /// but not yet consumed by engine logic. Will be used for sector rotation signals.
+    #[allow(dead_code)]
     pub sectors: HashMap<String, Vec<String>>,
     pub tickers: Vec<RawTicker>,
     pub contracts: Vec<ContractEntry>,
     pub holidays: Vec<String>,
+    /// WAL schema version — logged at startup but no actual migration check implemented yet.
+    /// TODO: Implement actual schema version check that refuses to replay WAL events
+    /// with a higher schema_version than the running binary supports.
+    #[allow(dead_code)]
     pub wal_schema_version: u8,
     pub gap_cooldown_mins: u32,
     pub slippage_pct: f64,
     /// Sprint 6: Chandelier exit ladder config.
     pub chandelier: RawChandelier,
     /// Sprint 6: Entry type base confidences and thresholds.
+    /// Loaded from config.toml but entry classification moved to Python bridge.py.
+    /// Kept for config hot-reload and potential future Rust-side classification.
+    #[allow(dead_code)]
     pub entry_types: RawEntryTypes,
     /// Sprint 6: Risk arbiter hardening config.
     pub hardening: RawHardening,

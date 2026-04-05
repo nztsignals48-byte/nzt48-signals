@@ -496,8 +496,7 @@ pub enum WalEventType {
     SystemReady,
     /// N2a: Signal generated but rejected by a gate (for missed-winner analysis).
     SignalRejected,
-    /// N2c: Post-hoc missed-winner candidate (written by nightly analysis).
-    MissedWinnerCandidate,
+    // MissedWinnerCandidate removed — WalPayload variant was dead code (never written by Rust or Python).
     /// P2-3.6: Every generated signal for full funnel analysis.
     SignalGenerated,
 }

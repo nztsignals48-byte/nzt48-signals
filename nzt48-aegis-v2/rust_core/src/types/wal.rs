@@ -230,21 +230,8 @@ pub enum WalPayload {
         wal_events_replayed: u64,
         positions_reconciled: u32,
     },
-    NextValidId {
-        id: u64,
-    },
-    /// SC-17: Quote imbalance signal suspension.
-    QuoteImbalanceInvalidated {
-        ticker_id: u32,
-        dropped_count: u32,
-        resumed_at_ts: u64,
-    },
-    /// SC-13: Split adjustment event for Kelly ramp recalibration.
-    SplitAdjustment {
-        ticker_id: u32,
-        ratio_numerator: u32,
-        ratio_denominator: u32,
-    },
+    // Dead variants removed: NextValidId, QuoteImbalanceInvalidated, SplitAdjustment
+    // — defined but never written by any code path. Match arms in wal_replay.rs also removed.
     /// SC-01: System shutting down gracefully.
     SystemShutdown {
         positions_flattened: u32,
@@ -300,25 +287,8 @@ pub enum WalPayload {
         #[serde(default)]
         price_at_reject: f64,
     },
-    /// N2c: Candidate for missed-winner analysis.
-    /// Written by nightly when a SignalRejected's ticker moved >1% in the signal direction
-    /// within 2 hours of rejection. Feeds Ouroboros gate calibration.
-    /// BUILD NOW item N2c from IMPLEMENTATION_MASTER_PLAN v6.0.
-    MissedWinnerCandidate {
-        /// References the original SignalRejected event_id.
-        rejected_event_id: String,
-        ticker_id: u32,
-        symbol: String,
-        gate_name: String,
-        /// Price at rejection time.
-        price_at_reject: f64,
-        /// Best price within the analysis window (2 hours post-reject).
-        best_price_after: f64,
-        /// Hypothetical P&L had the signal been taken.
-        hypothetical_pnl_pct: f64,
-        /// Time from rejection to best price (minutes).
-        time_to_best_mins: u32,
-    },
+    // Dead variant removed: MissedWinnerCandidate — defined but never written.
+    // N2c analysis is done entirely in Python nightly; Rust never emits this event.
     /// P0-1.4: Kelly ramp counter persistence across restarts.
     /// Written on each simulated/live fill. WAL replay restores highest count.
     KellyRampAdvance {

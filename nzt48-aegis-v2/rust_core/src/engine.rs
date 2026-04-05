@@ -42,7 +42,7 @@ use crate::log_thompson_sampler::LogThompsonSampler;
 use crate::python_bridge::BrainSignal;
 use crate::regime_detector::RegimeDetector;
 // Dead code removed: EarlyRunnerDetector (never instantiated, VanguardSniper handles all entries)
-use crate::position_sizer::KellyCalculator;
+// Dead code removed: KellyCalculator field (engine never calls kelly_calculator methods; sizing done in Python bridge)
 use crate::market_scheduler::{self, TradingSession};
 use crate::reconciler;
 use crate::risk_arbiter::{EvalContext, RiskArbiter};
@@ -434,8 +434,6 @@ pub struct Engine<B: BrokerAdapter> {
     pub regime_detector: RegimeDetector,
     // last_regime_decision REMOVED — was written but never read (dead field)
     // early_runner_detectors REMOVED — never populated, VanguardSniper handles all entries
-    /// Phase 1C: Kelly calculator for Rust-side sizing (fractional 0.25).
-    pub kelly_calculator: KellyCalculator,
     /// Phase 2: Current market scheduler session (6-phase global clock).
     pub current_trading_session: TradingSession,
     /// Watchlist hot-reload: last modified time per watchlist file (epoch secs).
@@ -668,7 +666,6 @@ impl<B: BrokerAdapter> Engine<B> {
             regime_detector: RegimeDetector::new(),
             // last_regime_decision removed (dead field)
             // early_runner_detectors removed (dead code)
-            kelly_calculator: KellyCalculator::new(),
             current_trading_session: TradingSession::Closed,
             watchlist_mtimes: HashMap::new(),
             last_watchlist_rotation_ns: 0,

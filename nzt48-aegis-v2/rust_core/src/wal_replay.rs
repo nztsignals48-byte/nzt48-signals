@@ -312,14 +312,10 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
             WalPayload::OrphanResolved { .. }
             | WalPayload::ExitSignal { .. }
             | WalPayload::SystemReady { .. }
-            | WalPayload::NextValidId { .. }
-            | WalPayload::QuoteImbalanceInvalidated { .. }
-            | WalPayload::SplitAdjustment { .. }
             | WalPayload::SystemShutdown { .. }
-            // N2a/N2c: Signal analysis events — no state to restore during replay.
+            // N2a: Signal analysis events — no state to restore during replay.
             // These are consumed by nightly analysis (Python), not the engine.
             | WalPayload::SignalRejected { .. }
-            | WalPayload::MissedWinnerCandidate { .. }
             // P2-3.6: Signal funnel events — no state to restore during replay.
             | WalPayload::SignalGenerated { .. } => {}
         }
