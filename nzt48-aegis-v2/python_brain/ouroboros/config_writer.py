@@ -1859,7 +1859,41 @@ def run_config_writer() -> int:
                         import json as _json_cw
                         with open(_mem_path) as _mf:
                             _mem = _json_cw.load(_mf)
-                        _actual_trades = _mem.get("bayesian", {}).get("trade_count", 0)
+                        # FIX: system_memory.json has multiple possible structures.
+                        # Try persistent_memory format first (total_exits), then
+                        # bayesian.trade_count, then WAL-based count.
+                        _actual_trades = (
+                            _mem.get("total_exits", 0)
+                            or _mem.get("bayesian", {}).get("trade_count", 0)
+                            or _mem.get("trade_count", 0)
+                        )
+                    except Exception:
+                        pass
+                # Also check dynamic_weights.toml trade_count as fallback
+                if _actual_trades == 0:
+                    _dw_path = CONFIG_DIR / "dynamic_weights.toml"
+                    if _dw_path.exists():
+                        try:
+                            with open(_dw_path, "rb") as _dwf:
+                                _dw_data = _tomllib_cw.load(_dwf)
+                            _actual_trades = _dw_data.get("bayesian", {}).get("trade_count", 0)
+                        except Exception:
+                            pass
+                # Also count WAL events directly as ultimate fallback
+                if _actual_trades == 0:
+                    try:
+                        _wal_dir = CONFIG_DIR.parent / "events"
+                        _wal_count = 0
+                        if _wal_dir.exists():
+                            for _wf in _wal_dir.glob("**/*.ndjson"):
+                                try:
+                                    with open(_wf) as _wfh:
+                                        for _wline in _wfh:
+                                            if "PositionClosed" in _wline:
+                                                _wal_count += 1
+                                except Exception:
+                                    pass
+                        _actual_trades = _wal_count
                     except Exception:
                         pass
                 if _actual_trades >= min_trades:
