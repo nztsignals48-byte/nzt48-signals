@@ -246,6 +246,27 @@ impl BarHistory {
         bar_vol * (bars_per_day * 252.0).sqrt()
     }
 
+    /// Relative Volume (RVOL): current bar volume / average bar volume.
+    /// Returns 1.0 (neutral) if insufficient data or zero average volume.
+    /// RVOL >= 10.0 means 10x normal volume (used for exhaustion detection).
+    pub fn rvol(&self) -> f64 {
+        let n = self.volumes.len();
+        if n < 2 {
+            return 1.0; // Not enough data — neutral
+        }
+        let current_vol = *self.volumes.back().unwrap_or(&0);
+        if current_vol == 0 {
+            return 0.0;
+        }
+        // Average volume over all bars except the latest
+        let sum: u64 = self.volumes.iter().take(n - 1).sum();
+        let avg = sum as f64 / (n - 1) as f64;
+        if avg <= 0.0 {
+            return 1.0; // Avoid division by zero
+        }
+        current_vol as f64 / avg
+    }
+
     /// Amihud illiquidity ratio: mean(|return| / volume) over recent bars.
     /// Higher = less liquid. Returns 0.0 if insufficient data.
     pub fn amihud(&self) -> f64 {
@@ -1278,12 +1299,12 @@ impl<B: BrokerAdapter> Engine<B> {
                 }
 
                 // Sprint G: Volume exhaustion — tighten stop when RVOL signals climactic reversal.
-                // RVOL is already relative volume (current/average), so RVOL >= 10 means 10x normal.
+                // RVOL is relative volume (current_bar_volume / avg_bar_volume), so RVOL >= 10 means 10x normal.
                 // If triggered, ratchet stop UP to (highest_high - tight_atr * ATR).
                 if atr > 0.0 {
                     let current_rvol = self.bar_history.get(&tid)
-                        .map(|h| h.realized_vol(6120.0))
-                        .unwrap_or(0.0);
+                        .map(|h| h.rvol())
+                        .unwrap_or(1.0);
                     if let Some(tight_atr) = self.exit_engine.check_exhaustion(current_rvol) {
                         let exhaustion_stop = pos.highest_high - tight_atr * atr;
                         // H68: stop ratchet — can NEVER decrease

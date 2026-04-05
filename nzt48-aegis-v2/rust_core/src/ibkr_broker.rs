@@ -199,6 +199,9 @@ pub struct IbkrBroker {
     config: IbkrBrokerConfig,
     client: Option<Client>,
     connected: bool,
+    /// Maximum concurrent market data subscriptions (from config.ibkr.max_simultaneous_lines).
+    /// Defaults to 100 if not set.
+    pub max_subscriptions: usize,
     next_valid_id: i32,
     order_id_map: HashMap<String, i32>,
     submitted_ids: HashSet<String>,
@@ -283,6 +286,7 @@ impl IbkrBroker {
             depth_subs: Vec::new(),
             depth_books: OrderBookStore::new(),
             total_depth_received: 0,
+            max_subscriptions: 100, // Default; overridden by config.ibkr.max_simultaneous_lines
         }
     }
 
@@ -413,7 +417,7 @@ impl IbkrBroker {
     ///   HKEX: strip leading zeros (0001.HK → "1")
     ///   KRX:  keep leading zeros  (005930.KS → "005930")
     ///   TSE:  numeric codes as-is  (6758.T → "6758")
-    fn derive_ibkr_symbol(symbol: &str, exchange: &str) -> String {
+    pub fn derive_ibkr_symbol(symbol: &str, exchange: &str) -> String {
         // Strip all known exchange suffixes (yfinance convention)
         let suffixes = [
             ".L", ".T", ".AX", ".KS", ".SI", ".HK", ".SS", ".SZ",
@@ -514,11 +518,11 @@ impl IbkrBroker {
     /// reqMktData emission is throttled to 5-second cadence in poll_ticks() to prevent
     /// backpressure thrashing that occurred when mktdata emitted on every tick.
     pub fn subscribe_all(&mut self) -> u32 {
-        // IBKR limits ~100 concurrent market data subscriptions.
+        // IBKR limits concurrent market data subscriptions (config.ibkr.max_simultaneous_lines).
         // Dynamic Universe produces a live_100 via active_watchlist.json.
         // Subscribe those FIRST (they're the highest-conviction names),
         // then fill remaining slots round-robin across exchanges.
-        const MAX_SUBSCRIPTIONS: usize = 100;
+        let max_subs = self.max_subscriptions;
 
         // Phase 0: Load active_watchlist.json for live_100 priority list
         let watchlist_symbols: std::collections::HashSet<String> = {
@@ -539,7 +543,7 @@ impl IbkrBroker {
         eprintln!("SUBSCRIBE: active_watchlist has {} symbols", watchlist_symbols.len());
 
         // Phase 1: Subscribe watchlist tickers first (highest priority)
-        let mut ticker_ids: Vec<TickerId> = Vec::with_capacity(MAX_SUBSCRIPTIONS);
+        let mut ticker_ids: Vec<TickerId> = Vec::with_capacity(max_subs);
         let mut subscribed_syms: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         if !watchlist_symbols.is_empty() {
@@ -550,7 +554,7 @@ impl IbkrBroker {
                 .collect();
             watchlist_tids.sort_by_key(|t| t.0);
             for &tid in &watchlist_tids {
-                if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                if ticker_ids.len() >= max_subs { break; }
                 if let Some(m) = self.contract_map.get(&tid) {
                     if !subscribed_syms.contains(&m.symbol) {
                         ticker_ids.push(tid);
@@ -562,14 +566,14 @@ impl IbkrBroker {
         }
 
         // Phase 2: Fill remaining slots — LSEETF leveraged ETPs (core edge)
-        if ticker_ids.len() < MAX_SUBSCRIPTIONS {
+        if ticker_ids.len() < max_subs {
             let mut lseetf: Vec<TickerId> = self.contract_map.iter()
                 .filter(|(_, m)| m.exchange == "LSEETF" && !subscribed_syms.contains(&m.symbol))
                 .map(|(&tid, _)| tid)
                 .collect();
             lseetf.sort_by_key(|t| t.0);
             for &tid in &lseetf {
-                if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                if ticker_ids.len() >= max_subs { break; }
                 if let Some(m) = self.contract_map.get(&tid) {
                     if !subscribed_syms.contains(&m.symbol) {
                         ticker_ids.push(tid);
@@ -580,7 +584,7 @@ impl IbkrBroker {
         }
 
         // Phase 3: Fill remaining round-robin across other exchanges
-        let remaining = MAX_SUBSCRIPTIONS.saturating_sub(ticker_ids.len());
+        let remaining = max_subs.saturating_sub(ticker_ids.len());
         if remaining > 0 {
             let mut by_exchange: std::collections::HashMap<String, Vec<TickerId>> = std::collections::HashMap::new();
             for (&tid, mapping) in &self.contract_map {
@@ -598,7 +602,7 @@ impl IbkrBroker {
                 if let Some(tids) = by_exchange.get(*exch) {
                     let slots = per_exch + if extra_slots > 0 { extra_slots -= 1; 1 } else { 0 };
                     for &tid in tids.iter().take(slots) {
-                        if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                        if ticker_ids.len() >= max_subs { break; }
                         ticker_ids.push(tid);
                     }
                 }
@@ -608,7 +612,7 @@ impl IbkrBroker {
         // Execute subscriptions
         let mut mkt_count = 0u32;
         for &tid in &ticker_ids {
-            if mkt_count as usize >= MAX_SUBSCRIPTIONS { break; }
+            if mkt_count as usize >= max_subs { break; }
             if self.subscribe_mktdata(tid).is_ok() {
                 mkt_count += 1;
             }
@@ -616,7 +620,7 @@ impl IbkrBroker {
 
         eprintln!(
             "SUBSCRIBE: {} reqMktData (cap={}, watchlist={}, total_contracts={})",
-            mkt_count, MAX_SUBSCRIPTIONS, watchlist_symbols.len(), self.contract_map.len()
+            mkt_count, max_subs, watchlist_symbols.len(), self.contract_map.len()
         );
         mkt_count
     }

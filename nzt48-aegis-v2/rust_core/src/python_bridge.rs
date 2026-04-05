@@ -966,7 +966,7 @@ mod tests {
         let ctx = TickContext::default();
         assert_eq!(ctx.win_rate, 0.5);
         assert_eq!(ctx.leverage, 3);
-        assert_eq!(ctx.equity, 10_000.0);
+        assert_eq!(ctx.equity, 100_000.0);
         assert_eq!(ctx.regime, RiskRegime::Normal);
     }
 

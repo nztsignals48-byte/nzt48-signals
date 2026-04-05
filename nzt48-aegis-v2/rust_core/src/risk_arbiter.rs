@@ -47,20 +47,24 @@ impl TradingSession {
     }
 
     /// Classify ticker's exchange to a session.
+    /// Accepts BOTH ISO MIC codes (XLON, XNYS) AND internal exchange names (LSE, SMART, HKEX).
     pub fn classify_exchange(exchange_mic: &str) -> TradingSession {
         match exchange_mic {
-            // Asia: Tokyo (TSE), Hong Kong (HKEX), Singapore (SGX)
-            "XTSE" | "XHKG" | "XSES" => TradingSession::Asia,
+            // Asia: Tokyo, Hong Kong, Singapore, Korea — MIC and internal names
+            "XTSE" | "XHKG" | "XSES" |
+            "TSE" | "HKEX" | "SEHK" | "SGX" | "KSE" | "KRX" => TradingSession::Asia,
 
-            // Europe: All ISA-eligible European exchanges
-            "XLON" | "XDUB" |  // UK & Ireland (8:00-16:30 GMT/BST)
-            "XETR" | "XPAR" | "XAMS" | "XBRU" | "XLIS" | "XMIL" | "XMAD" | // Euronext/CBF
-            "XSWX" | "XSTO" | "XOSL" | "XCSE" | "XHEL" | "XWAR" => TradingSession::Europe,
+            // Europe: All ISA-eligible European exchanges — MIC and internal names
+            "XLON" | "XDUB" |
+            "XETR" | "XPAR" | "XAMS" | "XBRU" | "XLIS" | "XMIL" | "XMAD" |
+            "XSWX" | "XSTO" | "XOSL" | "XCSE" | "XHEL" | "XWAR" |
+            "LSE" | "LSEETF" | "XETRA" | "EURONEXT" | "SBF" => TradingSession::Europe,
 
-            // US: NYSE (XNYS), NASDAQ (XNAS)
-            "XNYS" | "XNAS" | "ARCX" | "BATS" => TradingSession::Us,
+            // US: NYSE, NASDAQ, ARCA, BATS — MIC and internal names (including SMART routing)
+            "XNYS" | "XNAS" | "ARCX" | "BATS" |
+            "SMART" | "NYSE" | "NASDAQ" | "ARCA" => TradingSession::Us,
 
-            // Unknown: default to Europe
+            // Unknown: default to Europe (conservative — tighter limits)
             _ => TradingSession::Europe,
         }
     }
@@ -187,6 +191,9 @@ pub struct RiskArbiter {
     /// Loaded from config.toml [timing.exchange_cutoffs]. Keys are exchange names (e.g. "LSE", "XETR").
     /// If a ticker's exchange has a cutoff here, it overrides the global entry_cutoff_secs.
     pub exchange_cutoffs_secs: HashMap<String, u32>,
+    /// Ticker-to-exchange mapping for session exposure filtering.
+    /// Populated at startup from contract registrations. Keys are TickerId, values are exchange names.
+    pub ticker_exchanges: HashMap<TickerId, String>,
 }
 
 impl RiskArbiter {
@@ -206,6 +213,7 @@ impl RiskArbiter {
             rotation_scores: HashMap::new(),
             equity_hwm: 0.0,
             exchange_cutoffs_secs: HashMap::new(),
+            ticker_exchanges: HashMap::new(),
         }
     }
 
@@ -320,8 +328,19 @@ impl RiskArbiter {
         // Sprint 7: Use per-exchange cutoff if configured, else fall back to global.
         // In simulation mode, skip time cutoff to collect data across all trading hours.
         if enforce_live_gates {
+            // Normalize exchange names: broker returns "SMART" for US equities but
+            // config keys use "US"; "LSEETF" is a sub-exchange of "LSE", etc.
+            let normalized_exchange = match ctx.exchange_mic.as_str() {
+                "SMART" | "NYSE" | "NASDAQ" | "ARCA" => "US",
+                "LSEETF" => "LSE",
+                "SEHK" => "HKEX",
+                "KSE" => "KRX",
+                "SBF" => "EURONEXT",
+                other => other,
+            };
             let effective_cutoff = self.exchange_cutoffs_secs
-                .get(&ctx.exchange_mic)
+                .get(normalized_exchange)
+                .or_else(|| self.exchange_cutoffs_secs.get(&ctx.exchange_mic))
                 .copied()
                 .unwrap_or(self.config.entry_cutoff_secs);
             if ctx.time_secs >= effective_cutoff {
@@ -631,6 +650,10 @@ impl RiskArbiter {
         // Applied during position sizing below (after effective_kelly calculation).
 
         // All checks passed. Calculate adjusted size.
+        // CHECK 39: Regime-Scaled Risk Per Trade — cap Kelly by regime risk budget.
+        let regime_risk_scale = self.regime_risk_per_trade_scale();
+        let effective_kelly = effective_kelly * regime_risk_scale;
+
         // SC-13: Kelly scaling ramp — configurable target, clamp range
         let kelly_ramp = (self.config.kelly_ramp_trades as f64 / self.config.kelly_ramp_target as f64)
             .clamp(self.config.kelly_ramp_clamp_min, self.config.kelly_ramp_clamp_max);
@@ -866,12 +889,24 @@ impl RiskArbiter {
             }
         };
 
-        // Calculate current session exposure (% of equity)
+        // Calculate current session exposure (% of equity) — filtered by exchange session.
+        // Only count positions whose exchange belongs to the SAME session classification
+        // as the intent ticker's exchange. This prevents Asia positions from counting
+        // against the Europe session limit and vice versa.
         let mut session_notional = 0.0;
 
         for (ticker, position) in portfolio.positions() {
             // Skip the intent ticker (not yet added to portfolio)
             if *ticker == intent_ticker {
+                continue;
+            }
+
+            // Filter: only count positions in the same session as the intent exchange.
+            // If exchange unknown for this ticker, conservatively include it.
+            let pos_session = self.ticker_exchanges.get(ticker)
+                .map(|exch| TradingSession::classify_exchange(exch))
+                .unwrap_or(intent_exchange_session);
+            if pos_session != intent_exchange_session {
                 continue;
             }
 
@@ -1002,16 +1037,18 @@ impl RiskArbiter {
     /// Returns VetoReason if limit breached (initiates FLATTEN), None otherwise.
     fn check_regime_daily_loss(&self, portfolio: &PortfolioState) -> Option<VetoReason> {
         // Regime-scaled limits (more restrictive in crisis)
+        // daily_drawdown_pct() returns POSITIVE values (e.g. 2.5 for 2.5% drawdown).
+        // Compare against positive thresholds.
         let daily_loss_limit = match self.regime {
             RiskRegime::Halt => return None,     // Already halted, skip check
             RiskRegime::Flatten => return None,  // Already flattening, skip check
-            RiskRegime::Reduce => -2.5,          // Reduce uses INFLATION limit
-            RiskRegime::Normal => -3.0,          // Normal uses STEADY limit
+            RiskRegime::Reduce => 2.5,           // Reduce: tighter 2.5% daily limit
+            RiskRegime::Normal => 3.0,           // Normal: 3.0% daily limit
         };
 
         let daily_dd = portfolio.daily_drawdown_pct();
-        if daily_dd < daily_loss_limit {
-            // Exceeded limit (more negative than threshold)
+        if daily_dd > daily_loss_limit {
+            // Exceeded limit (drawdown exceeds threshold)
             eprintln!(
                 "CHECK_37 REGIME_DAILY_LOSS: drawdown {:.2}% exceeds regime limit {:.2}% (regime={:?}) → FLATTEN",
                 daily_dd, daily_loss_limit, self.regime
@@ -1034,17 +1071,18 @@ impl RiskArbiter {
     ///
     /// Returns VetoReason if limit breached (initiates FLATTEN), None otherwise.
     fn check_regime_weekly_loss(&self, portfolio: &PortfolioState) -> Option<VetoReason> {
-        // Regime-scaled limits (more restrictive in crisis)
+        // weekly_drawdown_pct() returns POSITIVE values (e.g. 5.5 for 5.5% drawdown).
+        // Compare against positive thresholds.
         let weekly_loss_limit = match self.regime {
             RiskRegime::Halt => return None,     // Already halted, skip check
             RiskRegime::Flatten => return None,  // Already flattening, skip check
-            RiskRegime::Reduce => -5.5,          // Reduce uses INFLATION limit
-            RiskRegime::Normal => -7.0,          // Normal uses STEADY limit
+            RiskRegime::Reduce => 5.5,           // Reduce: tighter 5.5% weekly limit
+            RiskRegime::Normal => 7.0,           // Normal: 7.0% weekly limit
         };
 
         let weekly_dd = portfolio.weekly_drawdown_pct();
-        if weekly_dd < weekly_loss_limit {
-            // Exceeded limit (more negative than threshold)
+        if weekly_dd > weekly_loss_limit {
+            // Exceeded limit (drawdown exceeds threshold)
             eprintln!(
                 "CHECK_38 REGIME_WEEKLY_LOSS: drawdown {:.2}% exceeds regime limit {:.2}% (regime={:?}) → FLATTEN",
                 weekly_dd, weekly_loss_limit, self.regime

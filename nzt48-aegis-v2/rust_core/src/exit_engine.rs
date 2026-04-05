@@ -20,6 +20,8 @@ pub trait ExitStrategy: Send {
     fn compute_rung(&self, pos: &PositionState, high: f64, atr: f64) -> u8;
     /// Override trailing ATR multiplier (Ouroboros learning layer). Default no-op.
     fn set_trail_atr(&mut self, _mult: f64) {}
+    /// Override initial stop ATR multiplier (Ouroboros learning layer). Default no-op.
+    fn set_initial_stop_atr(&mut self, _mult: f64) {}
     /// P4-C: Update adaptive multipliers (only InfiniteChandelier implements this).
     fn update_multipliers(&mut self, _vol: f64, _time_frac: f64, _momentum: f64,
                           _amihud: f64, _heat: f64, _is_reduce: bool) {}
@@ -232,6 +234,10 @@ impl ExitStrategy for ChandelierStrategy {
 
     fn set_trail_atr(&mut self, mult: f64) {
         self.rung5_trail_atr = mult;
+    }
+
+    fn set_initial_stop_atr(&mut self, mult: f64) {
+        self.initial_stop_atr_mult = mult;
     }
 
     fn check_exhaustion(&self, current_rvol: f64) -> Option<f64> {
@@ -979,6 +985,10 @@ impl ExitStrategy for InfiniteChandelier {
 
     fn set_trail_atr(&mut self, mult: f64) {
         self.base.rung5_trail_atr = mult;
+    }
+
+    fn set_initial_stop_atr(&mut self, mult: f64) {
+        self.base.initial_stop_atr_mult = mult;
     }
 
     fn update_multipliers(&mut self, vol: f64, time_frac: f64, momentum: f64,

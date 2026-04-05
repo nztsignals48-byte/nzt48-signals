@@ -293,25 +293,18 @@ fn main() {
         heartbeat_timeout_ns: 60_000_000_000,
     };
     let mut broker = IbkrBroker::new(broker_config);
+    broker.max_subscriptions = config.ibkr.max_simultaneous_lines as usize;
 
     // Register contract mappings (symbol → TickerId)
-    // Derive IBKR-compatible symbol from our internal symbol:
-    //   LSE: strip ".L" suffix (QQQ3.L → QQQ3)
-    //   HKEX: strip leading zeros (0001 → 1, 0700 → 700)
-    //   Others: use as-is
+    // Use derive_ibkr_symbol() for all exchange-specific suffix stripping:
+    //   LSE: strip ".L", HKEX: strip ".HK" + leading zeros, TSE: strip ".T",
+    //   KRX: strip ".KS" but keep leading zeros, etc. (20+ suffixes handled).
     for (idx, contract) in config.contracts.iter().enumerate() {
-        let base_symbol = contract.symbol.strip_suffix(".L").unwrap_or(&contract.symbol);
-        let ibkr_symbol = if contract.exchange == "HKEX" {
-            base_symbol.trim_start_matches('0')
-        } else {
-            base_symbol
-        };
-        // Safety: if trimming zeros emptied the string (shouldn't happen), use "0"
-        let ibkr_symbol = if ibkr_symbol.is_empty() { "0" } else { ibkr_symbol };
+        let ibkr_symbol = IbkrBroker::derive_ibkr_symbol(&contract.symbol, &contract.exchange);
         broker.register_contract(ContractMapping {
             ticker_id: TickerId(idx as u32),
             symbol: contract.symbol.clone(),
-            ibkr_symbol: ibkr_symbol.to_string(),
+            ibkr_symbol,
             exchange: contract.exchange.clone(),
             currency: contract.currency.clone(),
         });
@@ -456,8 +449,16 @@ fn main() {
     engine.arbiter.simulation_mode = engine.simulation_mode;
     engine.arbiter.paper_uses_live_gates = engine.config.crucible.paper_uses_live_gates;
 
+    // Populate ticker-to-exchange mapping for session exposure filtering (HIGH #7).
+    for (idx, contract) in engine.config.contracts.iter().enumerate() {
+        engine.arbiter.ticker_exchanges.insert(
+            TickerId(idx as u32),
+            contract.exchange.clone(),
+        );
+    }
+
     // Apply Ouroboros DynamicWeights to engine subsystems
-    engine.exit_engine.strategy_mut().set_trail_atr(dw.chandelier_atr_mult);
+    engine.exit_engine.strategy_mut().set_initial_stop_atr(dw.chandelier_atr_mult);
     engine.arbiter.regime_scales = dw.regime_scales.clone();
     engine.arbiter.kelly_fractions = dw.kelly_fractions.clone();
     engine.arbiter.ticker_blacklist = dw.ticker_blacklist.clone();

@@ -33,9 +33,9 @@ t2 = 0.040000                # Conservative until Ouroboros has truthful data
 t3 = 0.030000
 
 [signal]
-# HOTFIX 2026-03-24: Lowered from 65→45 to unblock signal flow.
-# Will be re-tuned by Ouroboros after observe_only phase ends (N=300).
-confidence_floor = 45
+# Aligned with config.toml [signal] confidence_floor = 50 (Session 35 fix).
+# Ouroboros re-tunes after observe_only phase ends (N=300).
+confidence_floor = 50
 
 [ticker_blacklist]
 # Tickers with WR < 30% over 10+ trades — no new entries allowed

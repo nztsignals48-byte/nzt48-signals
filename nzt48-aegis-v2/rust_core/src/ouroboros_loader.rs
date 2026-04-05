@@ -216,10 +216,19 @@ pub struct GarchParams {
     pub params: HashMap<String, (f64, f64, f64)>,
 }
 
-/// Phase 16: Load garch_params.toml with safe fallback.
+/// Phase 16: Load GARCH parameters. Tries .toml first, then .json fallback.
 pub fn load_garch_params(config_dir: &Path) -> GarchParams {
-    let path = config_dir.join("garch_params.toml");
-    _load_garch(&path).unwrap_or_default()
+    let toml_path = config_dir.join("garch_params.toml");
+    if let Ok(params) = _load_garch_toml(&toml_path) {
+        return params;
+    }
+    let json_path = config_dir.join("garch_params.json");
+    if let Ok(params) = _load_garch_json(&json_path) {
+        eprintln!("GARCH: loaded from garch_params.json (toml not found/invalid)");
+        return params;
+    }
+    eprintln!("GARCH: no garch_params.toml or .json found — using defaults");
+    GarchParams::default()
 }
 
 #[derive(Deserialize)]
@@ -229,10 +238,22 @@ struct RawGarchEntry {
     beta: f64,
 }
 
-fn _load_garch(path: &Path) -> Result<GarchParams, String> {
+fn _load_garch_toml(path: &Path) -> Result<GarchParams, String> {
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let raw: HashMap<String, RawGarchEntry> =
         toml::from_str(&content).map_err(|e| e.to_string())?;
+
+    let params = raw
+        .into_iter()
+        .map(|(k, v)| (k, (v.omega, v.alpha, v.beta)))
+        .collect();
+    Ok(GarchParams { params })
+}
+
+fn _load_garch_json(path: &Path) -> Result<GarchParams, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let raw: HashMap<String, RawGarchEntry> =
+        serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
     let params = raw
         .into_iter()
