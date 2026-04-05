@@ -370,16 +370,15 @@ fn main() {
         eprintln!("Market data: skipped (no broker connection)");
     }
 
-    // L1 tick-by-tick: subscribe for ALL registered tickers.
-    // IBKR will succeed for tickers with proper data subs, fail for others (error 10190/354).
-    // The l1_subscribed_set tracks which tickers actually have L1 — engine gates entries on this.
-    // This replaces the old "2 L1 only" approach with honest universe-wide L1 attempt.
+    // L1 tick-by-tick: subscribe ONLY for tickers that have active reqMktData.
+    // Previously tried ALL 4,636 contracts → hit IBKR's tick-by-tick limit (error 10190).
+    // Now limited to the ~100 that subscribe_all() successfully subscribed.
     if broker_connected {
-        let all_tids = broker.contract_map_keys();
-        let l1_count = broker.subscribe_l1_batch(&all_tids);
-        let total = all_tids.len();
+        let subscribed_tids = broker.mktdata_subscribed_tids();
+        let l1_count = broker.subscribe_l1_batch(&subscribed_tids);
+        let total = subscribed_tids.len();
         eprintln!(
-            "L1_GATE: {}/{} tickers have L1 tick-by-tick data — only these are trade-eligible",
+            "L1_GATE: {}/{} mktdata tickers got L1 tick-by-tick (only these are trade-eligible)",
             l1_count, total
         );
     }
@@ -592,10 +591,10 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(15));
                     let sub_count = engine.broker.subscribe_all();
                     eprintln!("BROKER RECONNECTED: subscribed to {sub_count} bar streams");
-                    // Re-subscribe L1 for honest signal gating post-reconnect
-                    let all_tids = engine.broker.contract_map_keys();
-                    let l1_count = engine.broker.subscribe_l1_batch(&all_tids);
-                    eprintln!("BROKER RECONNECTED: L1_GATE {}/{} tickers", l1_count, all_tids.len());
+                    // Re-subscribe L1 only for tickers with active mktdata (not all 4,636)
+                    let subscribed_tids = engine.broker.mktdata_subscribed_tids();
+                    let l1_count = engine.broker.subscribe_l1_batch(&subscribed_tids);
+                    eprintln!("BROKER RECONNECTED: L1_GATE {}/{} mktdata tickers", l1_count, subscribed_tids.len());
 
                     // P0-1.5: Post-reconnect position reconciliation.
                     // If we have open positions, we MUST verify they still exist at the broker.

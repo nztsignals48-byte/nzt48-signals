@@ -503,56 +503,109 @@ impl IbkrBroker {
     /// reqMktData emission is throttled to 5-second cadence in poll_ticks() to prevent
     /// backpressure thrashing that occurred when mktdata emitted on every tick.
     pub fn subscribe_all(&mut self) -> u32 {
-        // IBKR paper accounts limit to ~100 concurrent data subscriptions.
-        // With 266+ contracts across 7 exchanges, we MUST cap subscriptions.
-        // Use reqMktData only (not dual-track) to halve the subscription count.
-        // reqMktData works with both real-time and delayed data.
+        // IBKR limits ~100 concurrent market data subscriptions.
+        // Dynamic Universe produces a live_100 via active_watchlist.json.
+        // Subscribe those FIRST (they're the highest-conviction names),
+        // then fill remaining slots round-robin across exchanges.
         const MAX_SUBSCRIPTIONS: usize = 100;
 
-        // Multi-exchange distribution: allocate slots proportionally across exchanges.
-        // Without this, LSE fills all 100 slots and US/HK/TSE get nothing.
-        let mut by_exchange: std::collections::HashMap<String, Vec<TickerId>> = std::collections::HashMap::new();
-        for (&tid, mapping) in &self.contract_map {
-            by_exchange.entry(mapping.exchange.clone()).or_default().push(tid);
-        }
-        // Sort each exchange's tickers by ticker_id for determinism
-        for tids in by_exchange.values_mut() {
-            tids.sort_by_key(|t| t.0);
-        }
-        // Allocate slots: LSEETF gets priority (core ETPs), then proportional across rest
+        // Phase 0: Load active_watchlist.json for live_100 priority list
+        let watchlist_symbols: std::collections::HashSet<String> = {
+            let watchlist_path = std::path::Path::new("config/active_watchlist.json");
+            if watchlist_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(watchlist_path) {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                        parsed.get("tickers")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect())
+                            .unwrap_or_default()
+                    } else { std::collections::HashSet::new() }
+                } else { std::collections::HashSet::new() }
+            } else { std::collections::HashSet::new() }
+        };
+        eprintln!("SUBSCRIBE: active_watchlist has {} symbols", watchlist_symbols.len());
+
+        // Phase 1: Subscribe watchlist tickers first (highest priority)
         let mut ticker_ids: Vec<TickerId> = Vec::with_capacity(MAX_SUBSCRIPTIONS);
-        // Phase 1: All LSEETF (core leveraged ETPs, ~52)
-        if let Some(lseetf) = by_exchange.get("LSEETF") {
-            ticker_ids.extend(lseetf.iter().take(52));
+        let mut subscribed_syms: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        if !watchlist_symbols.is_empty() {
+            // Find TickerIds matching watchlist symbols
+            let mut watchlist_tids: Vec<TickerId> = self.contract_map.iter()
+                .filter(|(_, m)| watchlist_symbols.contains(&m.symbol))
+                .map(|(&tid, _)| tid)
+                .collect();
+            watchlist_tids.sort_by_key(|t| t.0);
+            for &tid in &watchlist_tids {
+                if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                if let Some(m) = self.contract_map.get(&tid) {
+                    if !subscribed_syms.contains(&m.symbol) {
+                        ticker_ids.push(tid);
+                        subscribed_syms.insert(m.symbol.clone());
+                    }
+                }
+            }
+            eprintln!("SUBSCRIBE: {} watchlist tickers queued", ticker_ids.len());
         }
-        // Phase 2: Fill remaining slots round-robin across other exchanges
-        let remaining = MAX_SUBSCRIPTIONS.saturating_sub(ticker_ids.len());
-        let other_exchanges: Vec<&str> = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX"]
-            .iter().copied().filter(|e| *e != "LSEETF").collect();
-        let per_exchange = if !other_exchanges.is_empty() { remaining / other_exchanges.len() } else { 0 };
-        let mut extra = remaining - per_exchange * other_exchanges.len();
-        for exch in &other_exchanges {
-            if let Some(tids) = by_exchange.get(*exch) {
-                let slots = per_exchange + if extra > 0 { extra -= 1; 1 } else { 0 };
-                ticker_ids.extend(tids.iter().take(slots));
+
+        // Phase 2: Fill remaining slots — LSEETF leveraged ETPs (core edge)
+        if ticker_ids.len() < MAX_SUBSCRIPTIONS {
+            let mut lseetf: Vec<TickerId> = self.contract_map.iter()
+                .filter(|(_, m)| m.exchange == "LSEETF" && !subscribed_syms.contains(&m.symbol))
+                .map(|(&tid, _)| tid)
+                .collect();
+            lseetf.sort_by_key(|t| t.0);
+            for &tid in &lseetf {
+                if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                if let Some(m) = self.contract_map.get(&tid) {
+                    if !subscribed_syms.contains(&m.symbol) {
+                        ticker_ids.push(tid);
+                        subscribed_syms.insert(m.symbol.clone());
+                    }
+                }
             }
         }
 
-        let mut mkt_count = 0u32;
-        let mut skipped = 0u32;
-        for &tid in &ticker_ids {
-            if mkt_count as usize >= MAX_SUBSCRIPTIONS {
-                skipped += 1;
-                continue;
+        // Phase 3: Fill remaining round-robin across other exchanges
+        let remaining = MAX_SUBSCRIPTIONS.saturating_sub(ticker_ids.len());
+        if remaining > 0 {
+            let mut by_exchange: std::collections::HashMap<String, Vec<TickerId>> = std::collections::HashMap::new();
+            for (&tid, mapping) in &self.contract_map {
+                if !subscribed_syms.contains(&mapping.symbol) {
+                    by_exchange.entry(mapping.exchange.clone()).or_default().push(tid);
+                }
             }
+            for tids in by_exchange.values_mut() {
+                tids.sort_by_key(|t| t.0);
+            }
+            let exchanges = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX"];
+            let per_exch = remaining / exchanges.len().max(1);
+            let mut extra_slots = remaining - per_exch * exchanges.len();
+            for exch in &exchanges {
+                if let Some(tids) = by_exchange.get(*exch) {
+                    let slots = per_exch + if extra_slots > 0 { extra_slots -= 1; 1 } else { 0 };
+                    for &tid in tids.iter().take(slots) {
+                        if ticker_ids.len() >= MAX_SUBSCRIPTIONS { break; }
+                        ticker_ids.push(tid);
+                    }
+                }
+            }
+        }
+
+        // Execute subscriptions
+        let mut mkt_count = 0u32;
+        for &tid in &ticker_ids {
+            if mkt_count as usize >= MAX_SUBSCRIPTIONS { break; }
             if self.subscribe_mktdata(tid).is_ok() {
                 mkt_count += 1;
             }
         }
 
         eprintln!(
-            "SUBSCRIBE: {} reqMktData (cap={}, skipped={} over limit, total_contracts={})",
-            mkt_count, MAX_SUBSCRIPTIONS, skipped, ticker_ids.len()
+            "SUBSCRIBE: {} reqMktData (cap={}, watchlist={}, total_contracts={})",
+            mkt_count, MAX_SUBSCRIPTIONS, watchlist_symbols.len(), self.contract_map.len()
         );
         mkt_count
     }
@@ -728,6 +781,12 @@ impl IbkrBroker {
     /// Return all registered TickerIds from the contract map.
     pub fn contract_map_keys(&self) -> Vec<TickerId> {
         self.contract_map.keys().copied().collect()
+    }
+
+    /// Return TickerIds that have active reqMktData subscriptions.
+    /// Use this to limit L1 subscriptions to only tickers with data flowing.
+    pub fn mktdata_subscribed_tids(&self) -> Vec<TickerId> {
+        self.mktdata_subs.iter().map(|s| s.ticker_id).collect()
     }
 
     /// Return the symbol for a given TickerId, if registered.
