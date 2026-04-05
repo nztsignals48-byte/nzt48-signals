@@ -595,17 +595,93 @@ def compute_regime_scales(events: List[Dict[str, Any]]) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Net expectancy computation (replaces raw win rate for Kelly fitness)
+# ---------------------------------------------------------------------------
+def compute_net_expectancy(
+    wins: int,
+    total: int,
+    avg_win_pct: float = 0.03,
+    avg_loss_pct: float = 0.015,
+    cost_pct: float = 0.003,
+) -> float:
+    """Net expectancy in percentage points, after costs.
+
+    Expectancy = (WR * avg_win) - ((1 - WR) * avg_loss) - cost
+    This is the expected return per trade as a fraction, net of spread +
+    commission + FX round-trip costs.
+
+    Args:
+        wins: Number of winning trades.
+        total: Total number of trades.
+        avg_win_pct: Average winner size as a fraction (3% = 0.03).
+        avg_loss_pct: Average loser size as a fraction (1.5% = 0.015).
+        cost_pct: Round-trip cost as a fraction (0.3% = 0.003).
+
+    Returns:
+        Net expectancy as a decimal fraction. Positive = profitable edge.
+        Returns 0.0 if insufficient data (< 5 trades).
+    """
+    if total < 5:
+        return 0.0  # Insufficient data
+    wr = wins / total
+    gross = (wr * avg_win_pct) - ((1 - wr) * avg_loss_pct)
+    return gross - cost_pct  # Net of round-trip cost
+
+
+# ---------------------------------------------------------------------------
 # Kelly fraction per tier computation
 # ---------------------------------------------------------------------------
 def compute_kelly_fractions(metrics: Dict[str, Any], recs: Dict[str, Any]) -> Dict[str, float]:
     """Compute Kelly fractions per tier from metrics and recommendations.
 
-    Uses the base kelly_fraction from recommendations and adjusts per ticker
-    performance tier (t1=full, t2=80%, t3=60%).
+    Uses net expectancy (instead of raw win rate) to derive an
+    expectancy-adjusted base Kelly fraction. Falls back to the nightly
+    recommendation's kelly_fraction when trade data is insufficient.
+
+    Tier scaling: t1=full, t2=80%, t3=60%.
     """
-    base_kelly = recs.get("kelly_fraction", 0.20)
-    if base_kelly is None:
-        base_kelly = 0.20
+    rec_kelly = recs.get("kelly_fraction", 0.20)
+    if rec_kelly is None:
+        rec_kelly = 0.20
+
+    # Attempt expectancy-based Kelly adjustment using persistent memory
+    # or single-day metrics. If expectancy is available and positive,
+    # scale the recommendation's Kelly by the expectancy signal.
+    total_trades = metrics.get("total_trades", 0)
+    raw_win_rate = metrics.get("win_rate", 0.0)
+    try:
+        from python_brain.ouroboros.persistent_memory import load_memory
+        mem = load_memory()
+        if mem.total_exits >= 10:
+            total_trades = mem.total_exits
+            raw_win_rate = mem.all_time_win_rate
+    except Exception:
+        pass
+
+    wins = int(round(raw_win_rate * total_trades)) if total_trades > 0 else 0
+    expectancy = compute_net_expectancy(wins, total_trades)
+
+    if total_trades >= 30 and expectancy != 0.0:
+        # Expectancy-adjusted Kelly: scale rec_kelly by expectancy signal.
+        # Positive expectancy > 0.01 → full Kelly.
+        # Marginal (0 < exp < 0.01) → reduce to 50-100% of Kelly.
+        # Negative expectancy → clamp to minimum Kelly (0.05).
+        if expectancy >= 0.01:
+            base_kelly = rec_kelly  # Full recommendation
+        elif expectancy > 0.0:
+            # Linear scale: 0.0 → 50%, 0.01 → 100%
+            scale = 0.5 + (expectancy / 0.01) * 0.5
+            base_kelly = rec_kelly * scale
+        else:
+            # Negative expectancy: minimum sizing
+            base_kelly = max(0.05, rec_kelly * 0.25)
+        log.info("Kelly expectancy adjustment: exp=%.5f, trades=%d, "
+                 "rec_kelly=%.4f -> base_kelly=%.4f",
+                 expectancy, total_trades, rec_kelly, base_kelly)
+    else:
+        base_kelly = rec_kelly
+        log.info("Kelly using recommendation (trades=%d, exp=%.5f): %.4f",
+                 total_trades, expectancy, base_kelly)
 
     return {
         "t1": round(base_kelly, 6),
@@ -724,20 +800,37 @@ def compute_entry_type_confidences(
                 type_total[etype] = nt
                 type_wins[etype] = nw
 
-    # Compute adjusted confidences
+    # Compute adjusted confidences with staged mutation authority.
+    # Strategies with few trades get limited adjustment range to prevent
+    # over-fitting on small samples.
     result: Dict[str, float] = {}
     for etype, base_conf in ENTRY_CONF_DEFAULTS.items():
         adj = 0.0
 
+        # Staged mutation authority: trade count determines max adjustment
+        strategy_trades = type_total.get(etype, 0)
+        if strategy_trades < 15:
+            # Insufficient data: keep prior, no mutation
+            result[etype] = round(base_conf, 1)
+            log.info("Entry type %s: %d trades < 15 — keeping base %.1f (no mutation)",
+                     etype, strategy_trades, base_conf)
+            continue
+        elif strategy_trades < 30:
+            max_adj = 2.0   # Micro-adjustment only: +/-2 confidence
+        elif strategy_trades < 75:
+            max_adj = 5.0   # Small adjustment: +/-5 confidence
+        elif strategy_trades < 150:
+            max_adj = 10.0  # Medium adjustment: +/-10 confidence
+        else:
+            max_adj = 20.0  # Full mutation authority
+
         # WAL-based adjustment: shift confidence based on observed WR
-        total = type_total.get(etype, 0)
         wins = type_wins.get(etype, 0)
-        if total >= 10:
-            wr = wins / total
-            # +/-10 confidence points per 50pp WR swing from 50% baseline
-            adj += (wr - 0.50) * 20.0
-            log.info("Entry type %s: WAL WR=%.1f%% (%d/%d), adj=%+.1f",
-                     etype, wr * 100, wins, total, adj)
+        wr = wins / strategy_trades
+        # +/-10 confidence points per 50pp WR swing from 50% baseline
+        adj += (wr - 0.50) * 20.0
+        log.info("Entry type %s: WAL WR=%.1f%% (%d/%d), raw_adj=%+.1f, max_adj=%.1f",
+                 etype, wr * 100, wins, strategy_trades, adj, max_adj)
 
         # Backfill delta adjustment: scale small deltas to confidence-point range
         bf_delta = backfill_deltas.get(etype, 0.0)
@@ -746,6 +839,9 @@ def compute_entry_type_confidences(
             adj += bf_adj
             log.info("Entry type %s: backfill delta=%+.2f, adj=%+.1f",
                      etype, bf_delta, bf_adj)
+
+        # Clamp adjustment to staged authority limit
+        adj = max(-max_adj, min(max_adj, adj))
 
         new_conf = base_conf + adj
         new_conf = max(ENTRY_CONF_MIN, min(ENTRY_CONF_MAX, new_conf))
@@ -1002,12 +1098,24 @@ def compute_thompson_entry_confidence(
         all_pnls = type_trades.get(etype, [])
         recent = all_pnls[-THOMPSON_LOOKBACK:]
 
-        if len(recent) < 5:
-            # Insufficient data — keep previous value (or base)
+        # Staged mutation authority: trade count determines max step size
+        n_trades = len(all_pnls)  # total trades, not just recent window
+        if n_trades < 15:
+            # Insufficient data: keep previous value (no mutation)
             result[etype] = prev_conf
-            log.info("Thompson %s: insufficient data (%d trades), keeping %.1f",
-                     etype, len(recent), prev_conf)
+            log.info("Thompson %s: %d trades < 15 — keeping %.1f (no mutation)",
+                     etype, n_trades, prev_conf)
             continue
+        elif n_trades < 30:
+            staged_max_step = 2.0   # Micro-adjustment only
+        elif n_trades < 75:
+            staged_max_step = 3.0   # Small adjustment
+        elif n_trades < 150:
+            staged_max_step = THOMPSON_MAX_STEP  # 5.0 — standard
+        else:
+            staged_max_step = THOMPSON_MAX_STEP * 1.5  # 7.5 — full authority
+
+        recent = all_pnls[-THOMPSON_LOOKBACK:]
 
         # Count wins and losses (ignore breakeven pnl == 0)
         wins = sum(1 for p in recent if p > 0)
@@ -1035,10 +1143,10 @@ def compute_thompson_entry_confidence(
             # Neutral zone (40-50%): keep near base
             target = base_conf
 
-        # Gradual adjustment: move prev_conf toward target by at most THOMPSON_MAX_STEP
+        # Gradual adjustment: move prev_conf toward target by staged max step
         delta = target - prev_conf
-        if abs(delta) > THOMPSON_MAX_STEP:
-            delta = THOMPSON_MAX_STEP if delta > 0 else -THOMPSON_MAX_STEP
+        if abs(delta) > staged_max_step:
+            delta = staged_max_step if delta > 0 else -staged_max_step
         new_conf = prev_conf + delta
 
         # Clamp to bounds
@@ -1046,9 +1154,9 @@ def compute_thompson_entry_confidence(
         result[etype] = round(new_conf, 1)
 
         log.info("Thompson %s: wins=%d losses=%d Beta(%d,%d) sample=%.3f "
-                 "target=%.1f prev=%.1f -> new=%.1f",
+                 "target=%.1f prev=%.1f -> new=%.1f (max_step=%.1f, n=%d)",
                  etype, wins, losses, alpha, beta_param, expected_wr,
-                 target, prev_conf, new_conf)
+                 target, prev_conf, new_conf, staged_max_step, n_trades)
 
     return result
 

@@ -1438,3 +1438,7 @@ class NineAgentDebate:
                 f.write(json.dumps(result, default=str) + "\n")
         except OSError as e:
             log.error("Failed to log debate: %s", e)
+
+
+# Alias for bridge.py backward compatibility (some imports use Debate9).
+Debate9 = NineAgentDebate

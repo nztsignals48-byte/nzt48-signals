@@ -6933,6 +6933,11 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     """Stage 4: Apply confidence adjustments to ALL signals, select best, classify, size."""
     if not all_signals:
         return None
+    _original_confidence = 0  # Set properly after best signal selected
+    _continuous_erosion = 0
+    _event_erosion = 0
+    _advisory_erosion = 0
+    _positive_boost = 0
     hurst_regime = ind["hurst_regime"]
 
     # P2-#7: LSE confidence boost DELETED — was +20 blanket boost that inflated
@@ -8840,6 +8845,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # Select best signal after all adjustments — edge-weighted ranking
     all_signals.sort(key=lambda s: _edge_score(s), reverse=True)
     best = all_signals[0]
+    _original_confidence = best.get("confidence", 0)
 
     # Book 209: Bayesian multi-source aggregation when multiple strategies fire.
     # If 2+ strategies fire on the same tick, the posterior from all sources
@@ -9002,8 +9008,12 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         # on a capital-constrained account fragments capital and generates noise.
         # Focus: VanguardSniper + ApexScout + System S1-S7 only.
         # When account grows to £25K+, re-enable TypeB/F first (highest edge).
-        _DISABLED_TYPES = {"TypeA", "TypeB", "TypeC", "TypeD", "TypeE", "TypeF"}
-        _SHADOW_TYPES = set()
+        _DISABLED_TYPES = set()
+        _SHADOW_TYPES = {
+            "QueueImbalance", "PreMarketAnomaly", "VolTermStructure", "IEXAuctionFade",
+            "LatencyArbitrage", "MacroNowcast", "MultiLegArbitrage", "StatisticalArbitrage",
+            "SwarmPredictor", "TemporalAttention", "EMAT_Attention", "HighFlyer",
+        }
         if entry_type in _DISABLED_TYPES:
             return None
         if entry_type in _SHADOW_TYPES:
@@ -9188,29 +9198,44 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 best["claude_rejected"] = True
                 best["claude_reasoning"] = cr.get("reasoning", "")[:200]
                 _cur_conf = best["confidence"]
-                if 65 <= _cur_conf <= 80:
-                    # Medium confidence — Claude has HARD VETO
-                    sys.stderr.write(
-                        f"CLAUDE_HARD_VETO: tid={ticker_id} conf={_cur_conf} "
-                        f"reason={cr.get('reasoning', '')[:80]}\n"
-                    )
+
+                # Soft gate for ALL tiers during paper trading
+                # Safety-class: check if reason contains safety keywords
+                _reason = cr.get("reasoning", "").lower()
+                _is_safety = any(kw in _reason for kw in ["halt", "isa", "structural", "manipulation", "fraud"])
+
+                if _is_safety:
+                    # Safety-class reject: hard veto allowed
+                    sys.stderr.write(f"CLAUDE_SAFETY_VETO: tid={ticker_id} conf={_cur_conf} reason={_reason[:80]}\n")
                     sys.stderr.flush()
                     return None
-                elif _cur_conf > 80:
-                    # High confidence — Claude reduces but doesn't block
-                    best["confidence"] = max(0, best["confidence"] - 10)
-                    best["kelly_fraction"] = best["kelly_fraction"] * 0.6
-                    best["shares"] = max(1, int(best["shares"] * 6 // 10))
-                else:
-                    # Low confidence — soft gate (original behavior)
+                elif _cur_conf >= 65:
+                    # Context-class: moderate penalty
                     best["confidence"] = max(0, best["confidence"] - 15)
                     best["kelly_fraction"] = best["kelly_fraction"] * 0.5
                     best["shares"] = max(1, best["shares"] // 2)
-                best["shares"] = max(1, best["shares"] // 2)
-                sys.stderr.write(
-                    f"CLAUDE_SOFT_GATE: tid={ticker_id} conf_reduced_by=15 "
-                    f"reason={cr.get('reasoning', '')[:80]}\n"
-                )
+                else:
+                    # Weak reject: light penalty
+                    best["confidence"] = max(0, best["confidence"] - 8)
+                    best["kelly_fraction"] = best["kelly_fraction"] * 0.75
+                    best["shares"] = max(1, int(best["shares"] * 3 // 4))
+
+                # Log veto for counterfactual analysis
+                try:
+                    import json as _json_cv
+                    _veto_entry = {
+                        "ts": time.time(), "ticker": msg.get("symbol", ""),
+                        "strategy": best.get("strategy", ""), "direction": best.get("direction", ""),
+                        "veto_type": "safety" if _is_safety else ("context" if _cur_conf >= 65 else "weak"),
+                        "veto_reason": cr.get("reasoning", "")[:200],
+                        "conf_before": _cur_conf, "conf_after": best["confidence"],
+                    }
+                    with open("/app/data/claude_vetoes.ndjson", "a") as _vf:
+                        _vf.write(_json_cv.dumps(_veto_entry) + "\n")
+                except Exception:
+                    pass
+
+                sys.stderr.write(f"CLAUDE_SOFT_GATE: tid={ticker_id} conf={_cur_conf}\u2192{best['confidence']} type={'safety' if _is_safety else 'context'}\n")
                 sys.stderr.flush()
             elif cr.get("adjusted_confidence"):
                 best["claude_adjusted_confidence"] = cr["adjusted_confidence"]
@@ -9359,6 +9384,58 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                         sys.stderr.flush()
         except Exception:
             pass  # Fail-open: default venue routing if XVA unavailable
+
+    # --- OVERLAY EROSION CAPS ---
+    _total_erosion = _original_confidence - best.get("confidence", 0)
+    _total_boost = max(0, best.get("confidence", 0) - _original_confidence)
+
+    # Cap positive boost at +15
+    if _total_boost > 15:
+        best["confidence"] = _original_confidence + 15
+        best["boost_capped"] = True
+
+    # For erosion, we can't perfectly segregate continuous/event/advisory without
+    # tagging each overlay. For now, cap total erosion at -25 (will refine later
+    # with per-overlay tagging in the diagnostics system).
+    # Exception: if specific event flags are set, allow deeper erosion.
+    _has_event_kill = (
+        best.get("earnings_blackout", False) or
+        best.get("halted_veto", False) or
+        best.get("tilt_halt", False) or
+        best.get("sprt_quarantine", False) or
+        best.get("fomc_blackout", False)
+    )
+    if not _has_event_kill and _total_erosion > 25:
+        best["confidence"] = _original_confidence - 25
+        best["erosion_capped"] = True
+
+    best["overlay_erosion"] = _original_confidence - best.get("confidence", 0)
+    best["conf_original"] = _original_confidence
+
+    # --- SIGNAL DIAGNOSTICS ---
+    try:
+        import json as _json_diag
+        from datetime import datetime as _dt_diag
+        _diag_entry = {
+            "ts": time.time(),
+            "date": _dt_diag.utcnow().strftime("%Y-%m-%d"),
+            "symbol": msg.get("symbol", ""),
+            "strategy": best.get("strategy", ""),
+            "exchange": msg.get("exchange", ""),
+            "conf_original": _original_confidence,
+            "conf_final": best.get("confidence", 0),
+            "overlay_erosion": best.get("overlay_erosion", 0),
+            "kelly_final": best.get("kelly_fraction", 0),
+            "claude_verdict": best.get("claude_verdict", "none"),
+            "erosion_capped": best.get("erosion_capped", False),
+            "selected": True,  # This signal was selected as best
+        }
+        _diag_date = _dt_diag.utcnow().strftime("%Y%m%d")
+        _diag_path = f"/app/data/signal_diagnostics_{_diag_date}.ndjson"
+        with open(_diag_path, "a") as _diagf:
+            _diagf.write(_json_diag.dumps(_diag_entry) + "\n")
+    except Exception:
+        pass  # Non-fatal: diagnostics must never block trading
 
     # Record cooldown
     _last_signal_tick[ticker_id] = tick_count

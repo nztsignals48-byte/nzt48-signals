@@ -381,6 +381,13 @@ W_STATIC_MCAP = 0.25
 W_STATIC_VOLUME = 0.20
 W_STATIC_EXCHANGE = 0.15
 
+# Core LSE ETPs — guaranteed observation residency regardless of score.
+# These are the primary ISA trading instruments with zero FX cost.
+CORE_LSE_ETPS = {
+    "QQQ3.L", "QQQS.L", "3LUS.L", "3USS.L", "QQQ5.L", "5SPY.L",
+    "3SEM.L", "NVD3.L", "TSL3.L", "GPT3.L", "TSM3.L", "MU2.L",
+}
+
 # Minimum thresholds
 MIN_AVG_VOLUME = 100000       # 100K shares/day minimum (was 10K — too low, allowed penny stocks)
 MIN_PRICE = 0.10              # 10p minimum (was 0.01 — sub-penny is untradeable)
@@ -942,6 +949,16 @@ def rank_and_score(scored_tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             for t in static_scored:
                 t["composite_score"] *= scale_factor
 
+    # Cost-derived additive bonus: GBP instruments save ~40bps FX round-trip
+    # vs USD/EUR/HKD instruments that incur FX conversion costs in an ISA.
+    # GBP tickers get +0.04 score bonus (40bps / 1000). Small but meaningful
+    # tiebreaker that favours LSE instruments at equal signal quality.
+    for t in price_scored + static_scored:
+        _currency = t.get("currency", "USD")
+        _fx_saving_bps = 40.0 if _currency == "GBP" else 0.0  # GBP saves 0.4% FX cost
+        _cost_bonus = _fx_saving_bps / 1000.0  # Normalize to score units
+        t["composite_score"] += _cost_bonus
+
     return price_scored + static_scored
 
 
@@ -1067,6 +1084,31 @@ def generate_watchlist(
 
     # Take top 100
     top_100 = scored[:tier1_n]
+
+    # Guaranteed observation residency: core LSE ETPs always appear in the
+    # watchlist regardless of score. These are the primary ISA instruments
+    # with zero FX cost. If any are missing from top_100, append them.
+    top_100_syms = {t["symbol"] for t in top_100}
+    missing_core = CORE_LSE_ETPS - top_100_syms
+    if missing_core:
+        # Find them in the full scored list (before notional/threshold filters)
+        core_lookup = {t["symbol"]: t for t in scored if t["symbol"] in missing_core}
+        for sym in sorted(missing_core):
+            if sym in core_lookup:
+                top_100.append(core_lookup[sym])
+            else:
+                # Not in scored at all (e.g., LSE closed) — add minimal entry
+                top_100.append({
+                    "symbol": sym, "exchange": "LSE", "name": "",
+                    "type": "etp", "sector": "Unknown", "currency": "GBP",
+                    "leveraged": True, "inverse": "S" in sym,
+                    "leverage_factor": 3, "last_price": 0,
+                    "volatility_ann": 0, "avg_daily_volume": 0,
+                    "momentum_pct": 0, "abs_momentum_pct": 0,
+                    "scoring_tier": "residency", "composite_score": 0.0,
+                })
+        log.info("Core LSE ETP residency: %d/%d were missing, injected into watchlist",
+                 len(missing_core), len(CORE_LSE_ETPS))
 
     def clean(t: Dict[str, Any]) -> Dict[str, Any]:
         return {k: v for k, v in t.items()

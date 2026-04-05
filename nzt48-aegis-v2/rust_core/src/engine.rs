@@ -1997,25 +1997,15 @@ impl<B: BrokerAdapter> Engine<B> {
         } else {
             kelly_fraction
         };
-        // Book 180: Quarter-Kelly for leveraged ETPs. The optimal fraction for a Lx leveraged
-        // product is f* = base_kelly / L, because L amplifies both returns AND variance.
-        // 3x ETPs: a 2% underlying move = 6% on the ETP; Kelly must account for this.
-        let leverage = self.config.contracts.get(tid.0 as usize)
-            .map(|c| c.leverage as u32).unwrap_or(1);
-        let leverage_adj_kelly = if leverage >= 3 {
-            sizing_kelly / leverage as f64  // e.g., Kelly/3 for 3x ETPs
-        } else if leverage >= 2 {
-            sizing_kelly / (leverage as f64 * 0.75) // Slightly less aggressive for 2x
-        } else {
-            sizing_kelly
-        };
+        // Book 180 REMOVED: Leverage division removed — Python already prices leverage into
+        // the Kelly fraction via avg_win/avg_loss calibrated for 3x returns. Dividing again
+        // here was a double-count that undersized positions by 3x.
         let trade_value_gbp = if self.simulation_mode {
             // AUDIT-FIX (2026-03-18): Kelly × equity — institutional sizing.
             // Half-Kelly applied above for <250 trades (bootstrap phase).
             // FIXED (Sprint 5, SK-01): Use equity_for_sizing (entry-based) not marked equity.
             // Prevents undersizing after unrealised losses.
-            // Book 180: Use leverage-adjusted Kelly for 3x ETPs.
-            let notional = leverage_adj_kelly * self.portfolio.equity_for_sizing;
+            let notional = sizing_kelly * self.portfolio.equity_for_sizing;
             notional.clamp(100.0, self.portfolio.equity_for_sizing * 0.25) // Floor £100, cap 25%
         } else {
             tick.ask * shares_hint.max(1) as f64
@@ -2060,8 +2050,8 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // Minimum position size gate: reject dust trades.
-        // Simulation: £20 min (need data). Live: £1500 min (commission drag).
-        let min_trade_gbp = if self.simulation_mode { 20.0 } else { 1500.0 };
+        // Simulation: £20 min (need data). Live: uses config min_trade_gbp_live (now £50).
+        let min_trade_gbp = if self.simulation_mode { 20.0 } else { self.arbiter.config.minimum_entry_gbp };
         if trade_value_gbp < min_trade_gbp {
             return;
         }

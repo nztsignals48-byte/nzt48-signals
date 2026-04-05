@@ -152,3 +152,7 @@
 # Gemini Morning Brief — 06:00 UTC Mon-Fri (before European session)
 # Pre-market analysis: focus tickers, avoids, regime assessment, strategy weights.
 0 6 * * 1-5 cd /app && GEMINI_API_KEY="${GEMINI_API_KEY}" python3 -m python_brain.ouroboros.gemini_scanner --brief >> /app/data/gemini_scanner.log 2>&1
+
+# Gemini Dark Horse Scanner — every 15 min during market hours Mon-Fri
+# Discovers unusual movers (RVOL spikes, gap opens) for dark horse slot promotion.
+*/15 7-21 * * 1-5 cd /app && GEMINI_API_KEY="${GEMINI_API_KEY}" python3 -m python_brain.ouroboros.gemini_scanner --dark-horses >> /app/data/gemini_scanner.log 2>&1

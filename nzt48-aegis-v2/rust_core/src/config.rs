@@ -98,6 +98,8 @@ pub struct RiskConfig {
     pub max_correlated_positions: u32,
     /// Max risk per trade as % of equity.
     pub max_risk_per_trade_pct: f64,
+    /// Max entry size as fraction of equity (e.g. 0.25 = 25%).
+    pub max_entry_pct_of_equity: f64,
 
     // ── R6: Dividend withholding ──
 
@@ -160,6 +162,7 @@ impl Default for RiskConfig {
             overnight_exposure_cap_pct: 50.0,
             max_correlated_positions: 3,
             max_risk_per_trade_pct: 0.75,
+            max_entry_pct_of_equity: 0.25,
             // R6: UK ISA dividend withholding (net = gross * 0.85)
             dividend_withholding_factor: 0.85,
         }

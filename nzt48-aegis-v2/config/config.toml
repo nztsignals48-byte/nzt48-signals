@@ -164,11 +164,14 @@ equity_floor_pct = 70.0            # NEW: Hard floor at 70% of initial equity (K
 overnight_exposure_cap_pct = 50.0  # NEW: Max 50% of equity in overnight holds (M-3)
 max_correlated_positions = 3       # NEW: Max positions in >0.7 correlated instruments (M-5)
 max_risk_per_trade_pct = 0.75      # NEW: Dynamic sizing: position = (risk% × equity) / stop_width
+max_entry_pct_of_equity = 0.25     # Cap any single entry at 25% of equity
 spread_veto_pct = 0.3              # Was 0.5%. Tightened per quant audit.
 slippage_assumption_pct = 0.5      # Was 1.0%. More realistic for paper.
 consecutive_loss_halt = 5          # LIVE: 5 consecutive losses → halt. Conservative for £10K capital preservation.
 # N0a: Daily trade frequency limit.
-max_daily_trades = 3               # LIVE: 3 trades/day max. £10K ISA cannot support more without fragmentation.
+max_daily_trades = 5               # Paper needs more data; will tighten for live.
+max_trades_per_strategy_per_day = 2  # Slot governance: prevent single strategy dominating
+max_trades_per_symbol_per_day = 1    # Slot governance: max 1 entry per symbol per day
 # N0d: Minimum gross edge gate — reject trades where expected edge < 2×spread.
 # Prevents cost-killed trades (L5 Spread Victims).
 min_gross_edge_pct = 0.15          # LIVE: 15bps minimum edge. Below this, commission drag kills P&L.
@@ -549,7 +552,7 @@ type_f_rvol_threshold = 0.7
 system_velocity_max = 10
 # Kelly ramp: number of trades before full Kelly applied.
 kelly_ramp_target = 50                # Was 250 — faster ramp for paper validation (reach full Kelly at 50 trades)
-kelly_ramp_clamp_min = 0.3                # Was 0.1 — too aggressive with half-Kelly in Python. Start at 30%.
+kelly_ramp_clamp_min = 0.5                # Was 0.3 — start at 50% Kelly during ramp for faster capital deployment.
 kelly_ramp_clamp_max = 1.0
 # VIX hysteresis deadband (enter/exit thresholds with 3-5 point gap).
 vix_high_enter = 25.0
@@ -607,7 +610,7 @@ signal_cooldown_ticks = 60            # Per-ticker cooldown (60 ticks × 5s = 5 
 # Sprint 6: Position sizing gates.
 [hardening.sizing]
 min_trade_gbp_sim = 20.0
-min_trade_gbp_live = 1500.0
+min_trade_gbp_live = 50.0
 high_price_guard_sim = 2000.0
 stop_pct_clamp_min = 0.01
 stop_pct_clamp_max = 0.10
@@ -644,7 +647,7 @@ entry_cooldown_bars = 0              # No between-entry cooldown in backfill_sim
 # Set to false once 300+ spread-adjusted trades exist in system_memory.json.
 [ouroboros]
 observe_only = true
-min_trades_for_mutation = 300
+min_trades_for_mutation = 30
 
 # TIME-STOP: Maximum minutes to hold a position that hasn't reached Rung 2 (breakeven).
 # After this many minutes, Rust exit_engine should tighten stop aggressively.

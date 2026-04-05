@@ -198,6 +198,8 @@ struct RawRisk {
     max_correlated_positions: u32,
     #[serde(default = "default_risk_per_trade")]
     max_risk_per_trade_pct: f64,
+    #[serde(default = "default_max_entry_pct")]
+    max_entry_pct_of_equity: f64,
 }
 
 fn default_weekly_dd() -> f64 { 7.0 }
@@ -206,6 +208,7 @@ fn default_eq_floor() -> f64 { 70.0 }
 fn default_overnight() -> f64 { 50.0 }
 fn default_max_corr() -> u32 { 3 }
 fn default_risk_per_trade() -> f64 { 0.75 }
+fn default_max_entry_pct() -> f64 { 0.25 }
 
 fn default_global_cutoff() -> String { "20:55".to_string() }
 fn default_daily_trade_limit() -> u32 { 3 }
@@ -1197,6 +1200,7 @@ impl EngineConfig {
             overnight_exposure_cap_pct: raw.risk.overnight_exposure_cap_pct,
             max_correlated_positions: raw.risk.max_correlated_positions,
             max_risk_per_trade_pct: raw.risk.max_risk_per_trade_pct,
+            max_entry_pct_of_equity: raw.risk.max_entry_pct_of_equity,
             // R6: Dividend withholding from config (was hardcoded 0.85 in PortfolioState)
             dividend_withholding_factor: raw.position.dividend_withholding_factor,
         };

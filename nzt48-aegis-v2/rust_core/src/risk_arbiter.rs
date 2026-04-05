@@ -710,6 +710,9 @@ impl RiskArbiter {
         // ── FINAL SIZING ─────────────────────────────────────────────────
         let base_size = ramped_kelly * portfolio.equity;
         let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor * spread_quality_factor;
+        // Multi-constraint sizing: cap by equity percentage to prevent oversized positions.
+        let max_by_equity = portfolio.equity * self.config.max_entry_pct_of_equity;
+        let adjusted_size = adjusted_size.min(max_by_equity);
 
         // Sizing instrumentation: log every candidate that passes all checks
         eprintln!(
