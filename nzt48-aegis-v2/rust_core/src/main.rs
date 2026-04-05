@@ -444,6 +444,94 @@ fn main() {
     // Apply live FX rates from fx_rates.toml (Ouroboros 6-hour refresh)
     engine.fx_table.apply_live_rates(&fx_live.rates, now_ns());
 
+    // FIX 1: Wire spread_cache into engine for SmartRouter cost comparison.
+    // Stored on engine.spread_cache so callers can look up cached spreads when building
+    // SmartRouter route() calls (which take cached_spread_pct as a parameter).
+    // Also used by Python bridge (cost_model.py reads TOML directly, but Rust has it too now).
+    engine.spread_cache = spread_cache.spreads.clone();
+    if !spread_cache.spreads.is_empty() {
+        let mut sorted_spreads: Vec<_> = spread_cache.spreads.iter().collect();
+        sorted_spreads.sort_by(|a, b| a.0.cmp(b.0));
+        for (sym, spread_pct) in &sorted_spreads {
+            eprintln!("SPREAD_CACHE: {} = {:.3}%", sym, spread_pct);
+        }
+        eprintln!("SPREAD_CACHE: {} tickers loaded", spread_cache.spreads.len());
+    } else {
+        eprintln!("SPREAD_CACHE: empty (no spread_cache.toml or no data)");
+    }
+
+    // FIX 2: Seed GarchRegistry with Ouroboros nightly-fitted params (warm start).
+    // Without this, GARCH engines cold-start from empty and CHECK 25 has no data.
+    {
+        // Build symbol → TickerId mapping from contracts
+        let mut symbol_to_tid: HashMap<String, rust_core::types::TickerId> = HashMap::new();
+        for (idx, contract) in engine.config.contracts.iter().enumerate() {
+            // Map both with and without .L suffix for flexibility
+            symbol_to_tid.insert(contract.symbol.clone(), TickerId(idx as u32));
+            if let Some(base) = contract.symbol.strip_suffix(".L") {
+                symbol_to_tid.insert(base.to_string(), TickerId(idx as u32));
+            }
+        }
+        engine.garch_registry.seed_from_ouroboros(&garch_params.params, &symbol_to_tid);
+        eprintln!(
+            "GARCH_REGISTRY: {} engines after Ouroboros seed (was 0 cold-start)",
+            engine.garch_registry.len(),
+        );
+    }
+
+    // FIX 3: Wire inverse_pairs from config into portfolio.
+    // Without this, CHECK 2 (InverseMutualExclusion) in risk_arbiter is always a no-op.
+    {
+        let mut registered = 0u32;
+        for pair in &engine.config.inverse_pairs {
+            let sym_a = &pair[0];
+            let sym_b = &pair[1];
+            // Find TickerIds by matching contract symbols
+            let tid_a = engine.config.contracts.iter().position(|c| &c.symbol == sym_a);
+            let tid_b = engine.config.contracts.iter().position(|c| &c.symbol == sym_b);
+            match (tid_a, tid_b) {
+                (Some(a), Some(b)) => {
+                    engine.portfolio.register_inverse_pair(
+                        TickerId(a as u32),
+                        TickerId(b as u32),
+                    );
+                    registered += 1;
+                    eprintln!("INVERSE_PAIR: {} (tid={}) ↔ {} (tid={})", sym_a, a, sym_b, b);
+                }
+                _ => {
+                    eprintln!(
+                        "INVERSE_PAIR: WARNING — could not resolve pair [{}, {}] to TickerIds (not in contracts.toml)",
+                        sym_a, sym_b,
+                    );
+                }
+            }
+        }
+        eprintln!("INVERSE_PAIRS: {} pairs registered for CHECK 2 mutual exclusion", registered);
+    }
+
+    // FIX 4: Wire exchange_cutoffs from config into risk arbiter.
+    // Without this, CHECK 11 uses only the global cutoff for all exchanges.
+    {
+        let mut cutoff_count = 0u32;
+        for (exchange, hhmm) in &engine.config.exchange_cutoffs {
+            let parts: Vec<&str> = hhmm.split(':').collect();
+            if parts.len() == 2 {
+                let h: u32 = parts[0].parse().unwrap_or(0);
+                let m: u32 = parts[1].parse().unwrap_or(0);
+                let secs = h * 3600 + m * 60;
+                engine.arbiter.exchange_cutoffs_secs.insert(exchange.clone(), secs);
+                cutoff_count += 1;
+                eprintln!("EXCHANGE_CUTOFF: {} = {} ({}s from midnight)", exchange, hhmm, secs);
+            } else {
+                eprintln!("EXCHANGE_CUTOFF: WARNING — invalid format for {}: {:?} (expected HH:MM)", exchange, hhmm);
+            }
+        }
+        eprintln!(
+            "EXCHANGE_CUTOFFS: {} per-exchange cutoffs wired into CHECK 11 (global fallback={}s)",
+            cutoff_count, engine.arbiter.config.entry_cutoff_secs,
+        );
+    }
+
     // P1-2.15: Load economic calendar for macro event blackout windows.
     engine.economic_calendar = rust_core::config_loader::load_economic_calendar(&config_dir);
 
@@ -939,6 +1027,7 @@ fn main() {
                             .get(t.ticker_id.0 as usize)
                             .map(|c| c.exchange.clone())
                             .unwrap_or_default(),
+                        consecutive_losses: engine.portfolio.consecutive_stop_losses,
                     };
 
                     // Evaluate via Python Brain (if available)

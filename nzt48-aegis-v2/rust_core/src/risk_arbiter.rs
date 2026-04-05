@@ -188,6 +188,10 @@ pub struct RiskArbiter {
     pub rotation_scores: HashMap<String, f64>,
     /// Equity ratchet: track all-time HWM for drawdown-based Kelly scaling.
     pub equity_hwm: f64,
+    /// Sprint 7: Per-exchange entry cutoffs in seconds from midnight London time.
+    /// Loaded from config.toml [timing.exchange_cutoffs]. Keys are exchange names (e.g. "LSE", "XETR").
+    /// If a ticker's exchange has a cutoff here, it overrides the global entry_cutoff_secs.
+    pub exchange_cutoffs_secs: HashMap<String, u32>,
 }
 
 impl RiskArbiter {
@@ -206,6 +210,7 @@ impl RiskArbiter {
             equity_snapshots: Vec::new(),
             rotation_scores: HashMap::new(),
             equity_hwm: 0.0,
+            exchange_cutoffs_secs: HashMap::new(),
         }
     }
 
@@ -316,10 +321,17 @@ impl RiskArbiter {
             );
         }
 
-        // CHECK 11: Time-of-Day Cutoff — after 15:45 London (H35)
+        // CHECK 11: Time-of-Day Cutoff — per-exchange or global (H35)
+        // Sprint 7: Use per-exchange cutoff if configured, else fall back to global.
         // In simulation mode, skip time cutoff to collect data across all trading hours.
-        if enforce_live_gates && ctx.time_secs >= self.config.entry_cutoff_secs {
-            return self.reject(VetoReason::TooLateInSession, ts);
+        if enforce_live_gates {
+            let effective_cutoff = self.exchange_cutoffs_secs
+                .get(&ctx.exchange_mic)
+                .copied()
+                .unwrap_or(self.config.entry_cutoff_secs);
+            if ctx.time_secs >= effective_cutoff {
+                return self.reject(VetoReason::TooLateInSession, ts);
+            }
         }
 
         // CHECK 12: REMOVED — Auction period blocking was LSE-specific (07:50-08:00, 16:30-16:35).

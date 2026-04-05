@@ -153,6 +153,52 @@ impl GarchRegistry {
         self.engines.get(&ticker_id).map(|e| e.sigma())
     }
 
+    /// Seed the registry with warm-start GARCH params from Ouroboros nightly fit.
+    /// Uses symbol→TickerId mapping to convert symbol-keyed params to TickerId-keyed engines.
+    /// Only seeds tickers that don't already have an engine (preserves online-learned params).
+    /// Format: symbol → (omega, alpha, beta). sigma2_prev is derived from omega/(1-alpha-beta).
+    pub fn seed_from_ouroboros(
+        &mut self,
+        params: &std::collections::HashMap<String, (f64, f64, f64)>,
+        symbol_to_tid: &std::collections::HashMap<String, TickerId>,
+    ) {
+        let mut seeded = 0u32;
+        let mut skipped = 0u32;
+        for (symbol, &(omega, alpha, beta)) in params {
+            let tid = match symbol_to_tid.get(symbol) {
+                Some(t) => *t,
+                None => { skipped += 1; continue; }
+            };
+            // Don't overwrite existing online-learned params
+            if self.engines.contains_key(&tid) {
+                continue;
+            }
+            let gp = GarchParams {
+                omega,
+                alpha,
+                beta,
+                // Unconditional variance = omega / (1 - alpha - beta)
+                sigma2_prev: if (alpha + beta) < 1.0 && omega > 0.0 {
+                    omega / (1.0 - alpha - beta)
+                } else {
+                    0.0004 // ~2% daily vol fallback
+                },
+            };
+            if gp.is_valid() {
+                self.engines.insert(tid, GarchInference::new(&gp));
+                seeded += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        if seeded > 0 || skipped > 0 {
+            eprintln!(
+                "GARCH_SEED: {} engines warm-started from Ouroboros, {} skipped (invalid/unmapped)",
+                seeded, skipped,
+            );
+        }
+    }
+
     /// Number of registered engines.
     pub fn len(&self) -> usize {
         self.engines.len()

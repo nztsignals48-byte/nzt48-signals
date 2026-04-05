@@ -187,6 +187,16 @@ _ARROW_SIGNAL_PATH = "/dev/shm/aegis_signal.arrow"
 _arrow_tick_codec = _ArrowTickCodec() if _HAS_ARROW else None
 _arrow_signal_codec = _ArrowSignalCodec() if _HAS_ARROW else None
 
+# Correlation tracking — portfolio-level EWMA correlation regime (Book 41)
+# Same singleton pattern as NAVTracker (Session 32 fix for getattr-on-dict bug)
+_corr_tracker_instance = None
+try:
+    from python_brain.risk.correlation import CorrelationTracker
+    _corr_tracker_instance = CorrelationTracker()
+    _HAS_CORR_TRACKER = True
+except ImportError:
+    _HAS_CORR_TRACKER = False
+
 # Outlier detection for anomalous signals
 try:
     from python_brain.features.outlier_detector import get_detector as _get_outlier_detector
@@ -4697,6 +4707,17 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     hurst, hurst_regime = ind["hurst"], ind["hurst_regime"]
     bars_5m = ind["bars_5m"]
 
+    # Feed CorrelationTracker with per-tick return (gap_pct as proxy).
+    # Accumulates multi-asset EWMA correlation for position sizing in _apply_adjustments.
+    try:
+        if _HAS_CORR_TRACKER and _corr_tracker_instance is not None:
+            _ct_symbol = msg.get("symbol", "")
+            _ct_gap = msg.get("gap_pct", 0.0)
+            if _ct_symbol and _ct_gap != 0.0:
+                _corr_tracker_instance.update({_ct_symbol: _ct_gap / 100.0})
+    except Exception:
+        pass
+
     # ── BOOK 162: VPIN TOXICITY GATE ──
     # Block entries when informed flow is toxic. Calibrated thresholds from Book 162.
     # > 0.60: elevated → raise confidence floor by 10 (harder to enter)
@@ -5258,7 +5279,9 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         london_secs = msg.get("london_time_secs", 0)
         utc_secs = london_secs  # Approximate; DST offset handled elsewhere
         symbol = msg.get("symbol", "")
-        underlying_ret = msg.get("underlying_intraday_return", 0.0)
+        # BUG FIX: Rust never sends "underlying_intraday_return".
+        # Use gap_pct as proxy (percentage, convert to fraction).
+        underlying_ret = msg.get("gap_pct", 0.0) / 100.0
         if underlying_ret != 0 and symbol:
             rb = predict_rebalancing(underlying_ret, symbol, utc_secs)
             # predict_rebalancing returns object with confidence, estimated_rebalancing_notional_mm or None
@@ -5377,8 +5400,13 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     try:
         from python_brain.alphas.alpha_factory import AlphaFactory
         import numpy as _np
-        closes = ind.get("closes_arr")
-        volumes = ind.get("volumes_arr")
+        # BUG FIX: ind never contained closes_arr/volumes_arr (always None).
+        # Extract OHLCV arrays from bars_5m which is the canonical price history.
+        closes = None
+        volumes = None
+        if bars_5m and len(bars_5m) >= 20:
+            closes = _np.array([b["close"] for b in bars_5m], dtype=_np.float64)
+            volumes = _np.array([b["volume"] for b in bars_5m], dtype=_np.float64)
         if closes is not None and len(closes) >= 20:
             if not hasattr(_generate_signals, "_alpha_factory"):
                 _generate_signals._alpha_factory = AlphaFactory()
@@ -5751,13 +5779,16 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     try:
         from python_brain.strategies.negrisk_arbitrage import LeveragedETFArbitrage
         symbol = ticker_symbols.get(ticker_id, "")
-        if symbol and msg.get("underlying_return"):
+        # BUG FIX: Rust never sends "underlying_return". Use gap_pct as proxy
+        # (percentage gap from last known price — same concept).
+        _nr_gap_pct = msg.get("gap_pct", 0.0)
+        if symbol and abs(_nr_gap_pct) > 0.1:
             if not hasattr(_generate_signals, "_lev_arb"):
                 _generate_signals._lev_arb = LeveragedETFArbitrage()
             _lev_arb = _generate_signals._lev_arb
             _arb = _lev_arb.check_leverage_ratio(
                 etp_return=msg.get("intraday_return", 0),
-                underlying_return=msg["underlying_return"],
+                underlying_return=_nr_gap_pct / 100.0,  # gap_pct is %, convert to fraction
                 leverage=msg.get("leverage", 3),
             )
             # check_leverage_ratio returns dict with 'signal', 'confidence', 'tracking_error' or None
@@ -7846,16 +7877,15 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # CORRELATION POSITION SIZING (Book 41)
     # Reduce size when portfolio correlation is elevated.
+    # Previously dead code (used getattr on dict). Now uses module singleton.
     try:
-        from python_brain.risk.correlation import CorrelationTracker
-        corr_tracker = getattr(msg, "_corr_tracker", None)
-        if corr_tracker is not None:
-            corr_mult = corr_tracker.position_size_multiplier()
+        if _HAS_CORR_TRACKER and _corr_tracker_instance is not None:
+            corr_mult = _corr_tracker_instance.position_size_multiplier()
             if corr_mult < 1.0:
                 for sig in all_signals:
                     sig["kelly_fraction"] *= corr_mult
                     sig["shares"] = max(1, int(sig["shares"] * corr_mult))
-            if corr_tracker.should_block_long_entry():
+            if _corr_tracker_instance.should_block_long_entry():
                 all_signals = [s for s in all_signals
                                if s.get("ticker", "").endswith("S.L")]  # Only inverse
                 if not all_signals:
@@ -7988,45 +8018,60 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         return None
 
     # ── BOOK 78: IV SIGNALS — Adjust confidence based on implied volatility regime ──
+    # BUG FIX: Rust never sends "iv_data" dict. Construct VolatilitySurface inline
+    # from available IBKR fields: opt_impl_vol, opt_hist_vol, vix + yz_vol from ind.
+    # Also fixed: generate_signals_from_raw() doesn't exist — use generate_signals().
     try:
-        from python_brain.ml.iv_signals import IVSignalGenerator
+        from python_brain.ml.iv_signals import IVSignalGenerator, VolatilitySurface
         if not hasattr(_apply_adjustments, "_iv_gen"):
             _apply_adjustments._iv_gen = IVSignalGenerator()
         _iv_gen = _apply_adjustments._iv_gen
-        _iv_data = msg.get("iv_data")
-        if _iv_data:
-            _iv_signals = _iv_gen.generate_signals_from_raw(
+        _iv_impl_vol = msg.get("opt_impl_vol", 0.0)
+        _iv_hist_vol = msg.get("opt_hist_vol", 0.0)
+        _iv_vix = msg.get("vix", 0.0)
+        _iv_yz_vol = ind.get("yz_vol", 0.0)
+        if _iv_impl_vol > 0.01 or _iv_vix > 5.0:
+            # Build a VolatilitySurface from available tick data.
+            # term_structure: use VIX as spot proxy for ATM IV at different tenors.
+            # skew: use opt_impl_vol as ATM, estimate 25d from VRP spread.
+            _iv_atm = _iv_impl_vol if _iv_impl_vol > 0.01 else (_iv_vix / 100.0)
+            _iv_vrp = _iv_atm - _iv_yz_vol if _iv_yz_vol > 0 else 0.0
+            _iv_surf = VolatilitySurface(
                 symbol=msg.get("symbol", ""),
-                vix_spot=_iv_data.get("vix_spot", 0),
-                vix_front=_iv_data.get("vix_front", 0),
-                vix_second=_iv_data.get("vix_second", 0),
-                realized_vol_20d=ind.get("yz_vol", 0),
+                timestamp=str(msg.get("timestamp_ns", "")),
+                underlying_price=msg.get("last", 0.0),
+                term_structure={"30d": _iv_atm, "60d": _iv_atm * 0.95, "90d": _iv_atm * 0.92} if _iv_atm > 0 else {},
+                skew={"put_25d": _iv_atm * 1.10, "atm": _iv_atm, "call_25d": _iv_atm * 0.90} if _iv_atm > 0 else {},
+                risk_premium=_iv_vrp,
             )
-            if _iv_signals.get("overall_signal"):
+            _iv_signals = _iv_gen.generate_signals(_iv_surf, regime=msg.get("regime", "unknown"))
+            if _iv_signals.get("overall"):
                 for sig in all_signals:
                     sig["confidence"] = _iv_gen.confidence_adjustment(
                         sig["confidence"], _iv_signals
                     )
-                    sig["iv_regime"] = _iv_signals.get("term_structure", {}).get("classification", "unknown")
+                    sig["iv_regime"] = _iv_signals.get("term_structure", {}).get("structure", "unknown")
     except ImportError:
         pass
 
     # ── BOOK 130: IV SKEW DIRECTIONAL SIGNAL — Tactical vol signals from IV rank ──
+    # BUG FIX: Rust never sends "iv_surface". Reuse the surface built above.
+    # Also fixed: current_regime was never defined — use msg.get("regime").
     try:
         from python_brain.ml.iv_signals import IVSignalGenerator, VolatilitySurface
         _iv_gen = _apply_adjustments._iv_gen if hasattr(_apply_adjustments, "_iv_gen") else IVSignalGenerator()
-        _iv_surface = msg.get("iv_surface")
-        if _iv_surface:
-            # Convert msg iv_surface dict to VolatilitySurface
-            _surf = VolatilitySurface(
+        _iv_impl_vol_2 = msg.get("opt_impl_vol", 0.0)
+        if _iv_impl_vol_2 > 0.01:
+            _iv_atm_2 = _iv_impl_vol_2
+            _surf_2 = VolatilitySurface(
                 symbol=msg.get("symbol", ""),
-                timestamp=msg.get("timestamp", ""),
-                underlying_price=msg.get("price", 0),
-                term_structure=_iv_surface.get("term_structure", {}),
-                skew=_iv_surface.get("skew", {}),
-                risk_premium=_iv_surface.get("risk_premium", 0),
+                timestamp=str(msg.get("timestamp_ns", "")),
+                underlying_price=msg.get("last", 0.0),
+                term_structure={"30d": _iv_atm_2, "60d": _iv_atm_2 * 0.95, "90d": _iv_atm_2 * 0.92},
+                skew={"put_25d": _iv_atm_2 * 1.10, "atm": _iv_atm_2, "call_25d": _iv_atm_2 * 0.90},
+                risk_premium=_iv_atm_2 - ind.get("yz_vol", 0.0),
             )
-            _skew_sig = _iv_gen.iv_skew_directional_signal(_surf, regime=current_regime)
+            _skew_sig = _iv_gen.iv_skew_directional_signal(_surf_2, regime=msg.get("regime", "unknown"))
             if _skew_sig.get("confidence", 0) > 55:
                 _kelly = _kelly_for(_skew_sig["confidence"])
                 _iv_skew_signal = {

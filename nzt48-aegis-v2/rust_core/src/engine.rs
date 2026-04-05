@@ -458,6 +458,9 @@ pub struct Engine<B: BrokerAdapter> {
     /// P2-3.8: Nanosecond timestamp when broker disconnect was first detected.
     /// Reset to 0 on reconnect. Used for emergency halt escalation.
     pub broker_disconnect_ns: u64,
+    /// Phase 16: Ouroboros spread cache (symbol → median spread %).
+    /// Used by SmartRouter for cost comparison and subscription prioritization.
+    pub spread_cache: std::collections::HashMap<String, f64>,
 }
 
 /// A simulated trade record for logging and daily PDF reporting.
@@ -675,6 +678,7 @@ impl<B: BrokerAdapter> Engine<B> {
             simulation_mode: is_simulation,
             simulated_trades: Vec::new(),
             broker_disconnect_ns: 0,
+            spread_cache: HashMap::new(),
         }
     }
 

@@ -182,6 +182,9 @@ pub struct TickContext {
     /// Used by CrossVenueArb to identify quote venue.
     #[pyo3(get, set)]
     pub exchange: String,
+    /// Consecutive stop losses from portfolio. Used by Python tilt guard.
+    #[pyo3(get, set)]
+    pub consecutive_losses: u32,
 }
 
 #[pymethods]
@@ -227,6 +230,7 @@ impl TickContext {
             open_positions: 0,
             trades_today: 0,
             exchange: String::new(),
+            consecutive_losses: 0,
         }
     }
 }
@@ -255,6 +259,7 @@ impl Default for TickContext {
             open_positions: 0,
             trades_today: 0,
             exchange: String::new(),
+            consecutive_losses: 0,
         }
     }
 }
@@ -430,7 +435,7 @@ impl PythonBridge {
                 r#""amihud":{:.4},"regime":"{}","spread_pct":{:.4},"time_fraction":{:.4},"#,
                 r#""heat_pct":{:.4},"equity":{:.2},"#,
                 r#""vix":{:.2},"london_time_secs":{},"gap_pct":{:.4},"symbol":"{}","#,
-                r#""open_positions":{},"trades_today":{},"exchange":"{}","#,
+                r#""open_positions":{},"trades_today":{},"exchange":"{}","consecutive_losses":{},"#,
                 // Extended tick data
                 r#""last_size":{},"open":{:.6},"close":{:.6},"trade_count":{},"#,
                 r#""trade_rate":{:.2},"volume_rate":{:.2},"rt_hist_vol":{:.4},"shortable":{:.1},"#,
@@ -475,6 +480,7 @@ impl PythonBridge {
             ctx.open_positions,
             ctx.trades_today,
             ctx.exchange,
+            ctx.consecutive_losses,
             // Extended tick data
             tick.last_size,
             tick.open,
@@ -991,6 +997,7 @@ mod tests {
                 open_positions: 0,
                 trades_today: 0,
                 exchange: String::new(),
+                consecutive_losses: 0,
             };
             // Prevent optimization elision
             std::hint::black_box(&ctx);
