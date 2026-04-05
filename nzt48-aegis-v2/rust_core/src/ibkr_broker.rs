@@ -654,32 +654,34 @@ impl IbkrBroker {
         // BUG FIX: Request ALL generic tick types from IBKR.
         // Without this, IBKR only sends basic bid/ask/last — 25+ extended tick fields
         // (options OI/vol, shortable, halted, auction data, ETF NAV, etc.) were always 0/default.
+        // IBKR legal generic tick types for STK (from Error 321 response).
+        // Removed: 104 (not STK), 291 (not STK), 377 (not STK), 460 (bonds only).
+        // Fixed: 588→595 (Short-Term Volume), added 577/619/623.
         let generic_ticks: &[&str] = &[
             "100",  // Option Volume
             "101",  // Option Open Interest
-            "104",  // Historical Volatility
             "105",  // Average Option Volume
             "106",  // Option Implied Volatility
             "165",  // Miscellaneous Stats (avg volume, 52wk hi/lo, etc.)
-            "221",  // Mark Price
+            "221",  // Creditman Mark Price
             "225",  // Auction data (price, volume, imbalance)
-            "232",  // Last RTH Trade
-            "233",  // RT Volume (trade-by-trade)
-            "236",  // Shortable
+            "232",  // Pl Price
+            "233",  // RTVolume (trade-by-trade)
+            "236",  // Shortable / inventory
             "258",  // Fundamental Ratios
-            "291",  // Close Price
-            "292",  // Open Price
-            "293",  // 13-Week Running High/Low
-            "294",  // Trade Count
+            "292",  // Wide_news
+            "293",  // Trade Count
+            "294",  // Trade Rate
             "295",  // Volume Rate
-            "318",  // Last Regulatory Trade
+            "318",  // Last RTH Trade
             "375",  // RT Trade Volume
-            "377",  // RT Historical Volatility
             "411",  // Real-time Historical Volatility
             "456",  // IB Dividends
-            "460",  // Bond Factor Multiplier
-            "588",  // Short-Term Volume (3/5/10 min)
-            "614",  // ETF NAV (close/last/bid/ask)
+            "577",  // EtfNavLast
+            "595",  // Short-Term Volume X Mins (3/5/10 min)
+            "614",  // ETF NAV Misc (high/low)
+            "619",  // Creditman Slow Mark Price
+            "623",  // EtfFrozenNavLast
         ];
         match client.market_data(&contract).generic_ticks(generic_ticks).subscribe() {
             Ok(sub) => {
