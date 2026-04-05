@@ -567,6 +567,34 @@ impl RiskArbiter {
             }, ts);
         }
 
+        // CHECK 40: EVT CVaR Tail Risk — reject when expected shortfall is extreme.
+        // evt_cvar is the conditional value-at-risk from Extreme Value Theory (GARCH-EVT).
+        // > 0.15 (15% expected loss in tail) on a 3x ETP means potential -45% drawdown.
+        // Scale threshold by leverage: 0.15 for 1x, 0.05 for 3x, 0.03 for 5x.
+        if ctx.evt_cvar > 0.0 {
+            let cvar_threshold = 0.15 / (ctx.leverage_factor.max(1) as f64);
+            if ctx.evt_cvar > cvar_threshold {
+                return self.reject(VetoReason::CvarHeatExceeded {
+                    cvar_pct: (ctx.evt_cvar * 100.0) as u32,
+                }, ts);
+            }
+        }
+
+        // CHECK 41: Kalman Divergence — reject when price diverges >3% from smoothed.
+        // Positive divergence = raw price leads (potential overextension/reversal risk).
+        // Negative divergence = raw price lags (potential gap-fill risk).
+        // Only veto extreme divergence that signals unreliable pricing.
+        if ctx.kalman_divergence.abs() > 0.03 {
+            return self.reject(VetoReason::GapDetected {
+                gap_bps: (ctx.kalman_divergence.abs() * 10_000.0) as u32,
+            }, ts);
+        }
+
+        // CHECK 42: Native Spread Quality — tighten size when spread is wide in native currency.
+        // native_spread_bps pre-FX gives true execution cost. > 50bps = thin market, reduce size.
+        // This is additive to CHECK 13 (spread veto) which uses GBP-converted spread.
+        // Not a veto — just sizing adjustment applied in final sizing below.
+
         // CHECK 36: Session Exposure Limits (Book 7)
         // Max NAV by session: Asia 30%, Europe 50%, US 60%, EU+US Overlap 80%.
         if enforce_live_gates {
@@ -654,19 +682,32 @@ impl RiskArbiter {
             1.0 // No vol data = no adjustment
         };
 
+        // ── NATIVE SPREAD QUALITY SCALING (CHECK 42) ─────────────────────
+        // Wide native spreads = thin market = reduce size to limit slippage.
+        // > 50bps → 0.75x, > 100bps → 0.50x, > 200bps → 0.25x
+        let spread_quality_factor = if ctx.native_spread_bps > 200.0 {
+            0.25
+        } else if ctx.native_spread_bps > 100.0 {
+            0.50
+        } else if ctx.native_spread_bps > 50.0 {
+            0.75
+        } else {
+            1.0
+        };
+
         // ── FINAL SIZING ─────────────────────────────────────────────────
         let base_size = ramped_kelly * portfolio.equity;
-        let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor;
+        let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor * spread_quality_factor;
 
         // Sizing instrumentation: log every candidate that passes all checks
         eprintln!(
             "SIZING: ticker={} kelly_in={:.4} effective={:.4} ramp={:.2} ramped={:.4} \
              equity={:.0} base={:.0} regime={:.2} score={:.2}(raw={:.2}) ratchet={:.2} \
-             atr_factor={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
+             atr_factor={:.2} spread_q={:.2} adjusted={:.0} min_entry={:.0} conf={:.1}",
             intent_ticker.0, intent_kelly, effective_kelly, kelly_ramp,
             ramped_kelly, portfolio.equity, base_size, regime_scale,
             score_multiplier, score_raw, ratchet_multiplier,
-            atr_factor, adjusted_size,
+            atr_factor, spread_quality_factor, adjusted_size,
             self.config.minimum_entry_gbp, intent_confidence,
         );
 

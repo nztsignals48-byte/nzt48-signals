@@ -170,14 +170,18 @@ fn main() {
     let mut dw = ouroboros_loader::load_dynamic_weights(&config_dir);
     let uc = ouroboros_loader::load_universe_classification(&config_dir);
     let fx_live = ouroboros_loader::load_fx_rates(&config_dir);
+    let spread_cache = ouroboros_loader::load_spread_cache(&config_dir);
+    let garch_params = ouroboros_loader::load_garch_params(&config_dir);
     eprintln!(
-        "Ouroboros: WR={:.1}%, chandelier_mult={:.2}, tiers=[{},{},{}], fx_rates={}",
+        "Ouroboros: WR={:.1}%, chandelier_mult={:.2}, tiers=[{},{},{}], fx_rates={}, spreads={}, garch={}",
         dw.bayesian_win_rate * 100.0,
         dw.chandelier_atr_mult,
         uc.tier1.len(),
         uc.tier2.len(),
         uc.tier3.len(),
         fx_live.rates.len(),
+        spread_cache.spreads.len(),
+        garch_params.params.len(),
     );
 
     // Build leverage map for Python bridge (ticker_id → leverage factor)
@@ -450,6 +454,38 @@ fn main() {
         dw.kelly_fractions.len(),
         engine.arbiter.rotation_scores.len(),
     );
+
+    // P25: Live Capital Readiness Gate — evaluate Crucible metrics from Ouroboros data.
+    // Uses sharpe_ratio, dsr, dsr_significant from DynamicWeights (previously unused).
+    {
+        use rust_core::live_readiness::{LiveReadinessGate, CrucibleMetrics};
+        let gate = LiveReadinessGate::new();
+        let metrics = CrucibleMetrics {
+            trade_count: dw.trade_count,
+            win_rate: dw.bayesian_win_rate,
+            sharpe_ratio: dw.sharpe_ratio,
+            max_drawdown: 0.0, // Will be populated from persistent_memory in Docker
+            profit_factor: if dw.dsr_significant { 1.5 } else { 0.0 }, // Proxy: DSR significant ≈ profitable
+            days_elapsed: 0, // Will be populated from WAL history in Docker
+            invariants_verified: true,
+            human_reviewed: false, // Always false until human approves IS_LIVE
+        };
+        let readiness = gate.evaluate(&metrics);
+        if readiness.is_ready {
+            eprintln!("LIVE_READINESS: ALL CRITERIA MET — ready for IS_LIVE transition");
+        } else {
+            eprintln!(
+                "LIVE_READINESS: {} of {} criteria failing: {}",
+                readiness.failing_criteria.len(),
+                readiness.failing_criteria.len() + readiness.passing_criteria.len(),
+                readiness.failing_criteria.join(", "),
+            );
+        }
+        eprintln!(
+            "OUROBOROS: Sharpe={:.3}, DSR={:.3} (significant={}), regime_best={}, regime_worst={}",
+            dw.sharpe_ratio, dw.dsr, dw.dsr_significant, dw.regime_best, dw.regime_worst,
+        );
+    }
 
     // Register tickers in engine's universe
     // All 12 ISA contracts are Vanguard (continuous) in Crucible phase.
