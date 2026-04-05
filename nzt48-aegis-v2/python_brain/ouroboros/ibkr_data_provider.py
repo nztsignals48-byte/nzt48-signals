@@ -748,6 +748,125 @@ class IBKRDataProvider:
             log.error("Unexpected error getting contract details for %s: %s", symbol, e)
             return None
 
+    def get_fundamental_data(
+        self, symbol: str, report_type: str = "CalendarReport"
+    ) -> Optional[Dict[str, Any]]:
+        """Get fundamental data for a symbol via IBKR reqFundamentalData.
+
+        Available report_types:
+            - "CalendarReport": Earnings dates, dividends, splits
+            - "ReportsFinSummary": Financial summary (revenue, EPS, PE)
+            - "ReportSnapshot": Company snapshot (market cap, sector)
+
+        Returns dict with parsed fields, or None if unavailable.
+        Requires IBKR fundamental data subscription (often included with L1/L2).
+        """
+        try:
+            if not self._ensure_connected():
+                return None
+
+            self._rate_limit()
+            contract = self._make_contract(symbol)
+
+            with self._lock:
+                ib = self._ib
+
+            if ib is None:
+                return None
+
+            try:
+                # reqFundamentalData returns XML string
+                xml_data = ib.reqFundamentalData(contract, reportType=report_type)
+                if not xml_data:
+                    log.debug("No fundamental data for %s (type=%s)", symbol, report_type)
+                    return None
+
+                # Parse XML to extract key fields
+                result = self._parse_fundamental_xml(xml_data, report_type, symbol)
+                return result
+
+            except Exception as e:
+                log.debug("reqFundamentalData failed for %s: %s", symbol, e)
+                return None
+
+        except Exception as e:
+            log.error("Unexpected error getting fundamentals for %s: %s", symbol, e)
+            return None
+
+    @staticmethod
+    def _parse_fundamental_xml(
+        xml_data: str, report_type: str, symbol: str
+    ) -> Optional[Dict[str, Any]]:
+        """Parse IBKR fundamental XML response into structured dict."""
+        try:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_data)
+        except Exception as e:
+            log.debug("XML parse failed for %s: %s", symbol, e)
+            return None
+
+        result: Dict[str, Any] = {"symbol": symbol, "report_type": report_type}
+
+        if report_type == "CalendarReport":
+            # Extract next earnings date
+            for event in root.iter("Event"):
+                event_type = event.get("type", "")
+                if event_type in ("Earnings", "EarningsDate"):
+                    date_elem = event.find("Date")
+                    if date_elem is not None and date_elem.text:
+                        result["earnings_date"] = date_elem.text[:10]
+                        break
+            # Extract next dividend date
+            for event in root.iter("Event"):
+                event_type = event.get("type", "")
+                if event_type in ("Dividend", "DividendDate"):
+                    date_elem = event.find("Date")
+                    if date_elem is not None and date_elem.text:
+                        result["dividend_date"] = date_elem.text[:10]
+                        break
+
+        elif report_type == "ReportSnapshot":
+            # Extract market cap, PE ratio
+            for ratio in root.iter("Ratio"):
+                field_name = ratio.get("FieldName", "")
+                if field_name == "MKTCAP" and ratio.text:
+                    try:
+                        result["market_cap"] = float(ratio.text)
+                    except ValueError:
+                        pass
+                elif field_name == "APENORM" and ratio.text:
+                    try:
+                        result["pe_ratio"] = float(ratio.text)
+                    except ValueError:
+                        pass
+            # Company info
+            for info in root.iter("CoGeneralInfo"):
+                result["company_name"] = info.get("CompanyName", "")
+                result["sector"] = info.get("Sector", "")
+                result["industry"] = info.get("IndustryGroup", "")
+
+        elif report_type == "ReportsFinSummary":
+            # Latest EPS, revenue
+            for item in root.iter("FYActual"):
+                for annual in item.iter("FYPeriod"):
+                    period = annual.get("periodType", "")
+                    if period == "Annual":
+                        eps_elem = annual.find(".//lineItem[@coaCode='AEPS']")
+                        if eps_elem is not None and eps_elem.text:
+                            try:
+                                result["eps_annual"] = float(eps_elem.text)
+                            except ValueError:
+                                pass
+                        rev_elem = annual.find(".//lineItem[@coaCode='SREV']")
+                        if rev_elem is not None and rev_elem.text:
+                            try:
+                                result["revenue_annual"] = float(rev_elem.text)
+                            except ValueError:
+                                pass
+                        break  # Only need latest
+
+        return result if len(result) > 2 else None  # Must have more than symbol + report_type
+
     def batch_price_data(
         self,
         symbols: List[str],

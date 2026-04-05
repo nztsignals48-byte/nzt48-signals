@@ -700,6 +700,21 @@ else
 fi
 log "STEP 50: ArcticDB compact DONE"
 
+# ── STEP 51: Earnings boost producer (per-symbol earnings proximity scores) ──
+log "STEP 51: earnings boost producer"
+python3 -c "
+try:
+    from python_brain.feeds.earnings_boost_producer import run_earnings_boost
+    result = run_earnings_boost()
+    print(f'Earnings boost: {result[\"scores_produced\"]} scores '
+          f'({result[\"symbols_boosted\"]} boosted, {result[\"symbols_penalized\"]} penalized), '
+          f'{result[\"total_dates\"]} dates ({result[\"ibkr_dates\"]} IBKR, {result[\"yf_dates\"]} yfinance), '
+          f'{result[\"duration_secs\"]}s')
+except Exception as e:
+    print(f'Earnings boost skipped: {e}')
+" >> "$LOG" 2>&1
+log "STEP 51: earnings boost DONE"
+
 log "=========================================="
-log "NIGHTLY PIPELINE COMPLETE (50 steps)"
+log "NIGHTLY PIPELINE COMPLETE (51 steps)"
 log "=========================================="
