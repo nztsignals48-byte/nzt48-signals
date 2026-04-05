@@ -1874,7 +1874,7 @@ impl<B: BrokerAdapter> Engine<B> {
             kelly_fraction_raw: kelly_fraction,
             garch_sigma,
             leverage_factor,
-            ticker_halted: false, // TODO(2.17): wire post-halt detection when circuit breaker tracking added
+            ticker_halted: tick.halted, // IBKR Halted tick type (generic tick 49)
             ticker_ic: ticker_score.map_or(0.0, |s| s.ic),
             ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
             ticker_locked: ticker_score.map_or(false, |s| s.locked),
@@ -1888,7 +1888,25 @@ impl<B: BrokerAdapter> Engine<B> {
             native_spread_bps,
             structural_score: sig.structural_score,
             exchange_mic,
-            ..EvalContext::default()
+            // Live macro indicator (VIX, DXY, credit spreads, Fear & Greed)
+            macro_indicator: *self.macro_regime.indicator(),
+            macro_stale_threshold_ns: 300_000_000_000, // 5 minutes
+            // Per-position volatilities for CVaR heat check
+            volatilities: {
+                let mut vols = std::collections::HashMap::new();
+                for (pos_tid, pos) in &self.positions {
+                    if let Some(sigma) = self.garch_registry.sigma(*pos_tid) {
+                        vols.insert(*pos_tid, sigma);
+                    } else if let Some(bh) = self.bar_history.get(pos_tid) {
+                        let rv = bh.realized_vol(6120.0);
+                        if rv > 0.0 {
+                            vols.insert(*pos_tid, rv);
+                        }
+                    }
+                    let _ = pos; // suppress unused warning
+                }
+                vols
+            },
         };
         // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)
         if !self.arbiter.ticker_blacklist.is_empty() {

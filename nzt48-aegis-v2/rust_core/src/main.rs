@@ -992,8 +992,19 @@ fn main() {
                                         broker_connected: engine.broker.is_connected(),
                                         wal_available: engine.wal.is_some(),
                                         now_ns: engine.now_ns,
-                                        volatilities: std::collections::HashMap::new(),
-                                        ticker_halted: false,
+                                        volatilities: {
+                                            let mut vols = std::collections::HashMap::new();
+                                            for (pos_tid, _) in &engine.positions {
+                                                if let Some(sigma) = engine.garch_registry.sigma(*pos_tid) {
+                                                    vols.insert(*pos_tid, sigma);
+                                                } else if let Some(bh) = engine.bar_history.get(pos_tid) {
+                                                    let rv = bh.realized_vol(6120.0);
+                                                    if rv > 0.0 { vols.insert(*pos_tid, rv); }
+                                                }
+                                            }
+                                            vols
+                                        },
+                                        ticker_halted: t.halted,
                                         garch_sigma: engine.garch_registry.sigma(t.ticker_id).unwrap_or(0.30),
                                         leverage_factor: 3,
                                         scanner_score: apex_signal.confidence,
