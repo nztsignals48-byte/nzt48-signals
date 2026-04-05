@@ -353,7 +353,14 @@ impl RiskArbiter {
         // provides natural protection during auction periods (spreads widen → rejected).
 
         // CHECK 13: Spread Veto (H36)
-        if ctx.bid > 0.0 {
+        // HIGH 3: Also veto when bid <= 0 (missing quote data — cannot assess spread).
+        if ctx.bid <= 0.0 {
+            return self.reject(
+                VetoReason::SpreadTooWide { spread_bps: u32::MAX },
+                ts,
+            );
+        }
+        {
             let spread_pct = (ctx.ask - ctx.bid) / ctx.bid * 100.0;
             if spread_pct > self.config.spread_veto_pct {
                 return self.reject(
@@ -549,14 +556,21 @@ impl RiskArbiter {
         }
 
         // CHECK 26: Scanner score below minimum threshold (< 30)
-        if ctx.scanner_score > 0.0 && ctx.scanner_score < self.config.scanner_score_min {
+        // MEDIUM-2 FIX: scanner_score == -1.0 (no data) was silently bypassing this check.
+        // Now applies a sizing penalty when no scanner data is available.
+        let scanner_penalty: f64 = if ctx.scanner_score < 0.0 {
+            // No scanner data — mild sizing penalty (0.75x = ~25% reduction)
+            0.75
+        } else if ctx.scanner_score < self.config.scanner_score_min {
             return self.reject(
                 VetoReason::ScannerScoreTooLow {
                     score: ctx.scanner_score as u32,
                 },
                 ts,
             );
-        }
+        } else {
+            1.0
+        };
 
         // CHECK 27: Kelly fraction below floor (< 0.5%)
         // Ouroboros per-ticker Kelly cap overrides global max when available.
@@ -566,7 +580,9 @@ impl RiskArbiter {
         } else {
             intent_kelly
         };
-        if ctx.kelly_fraction_raw > 0.0 && ctx.kelly_fraction_raw < self.config.kelly_fraction_floor {
+        // MEDIUM-3 FIX: Check effective_kelly (includes Ouroboros cap) instead of raw.
+        // Raw Kelly could pass the floor while effective (capped) Kelly is below it.
+        if effective_kelly > 0.0 && effective_kelly < self.config.kelly_fraction_floor {
             return self.reject(VetoReason::KellyBelowFloor, ts);
         }
 
@@ -724,7 +740,7 @@ impl RiskArbiter {
 
         // ── FINAL SIZING ─────────────────────────────────────────────────
         let base_size = ramped_kelly * portfolio.equity;
-        let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor * spread_quality_factor;
+        let adjusted_size = base_size * regime_scale * score_multiplier * ratchet_multiplier * atr_factor * spread_quality_factor * scanner_penalty;
         // Multi-constraint sizing: cap by equity percentage to prevent oversized positions.
         let max_by_equity = portfolio.equity * self.config.max_entry_pct_of_equity;
         let adjusted_size = adjusted_size.min(max_by_equity);
@@ -833,8 +849,16 @@ impl RiskArbiter {
         portfolio: &PortfolioState,
         ctx: &EvalContext,
     ) -> Option<VetoReason> {
-        if ctx.exchange_mic.is_empty() || portfolio.equity <= 0.0 {
-            // Unknown exchange or no equity: skip check (safe default)
+        // HIGH 4: Missing exchange data should block, not pass — fail closed.
+        if ctx.exchange_mic.is_empty() {
+            return Some(VetoReason::SessionExposureExceeded {
+                session: "UNKNOWN".to_string(),
+                exposure_pct: 0,
+                limit_pct: 0,
+            });
+        }
+        if portfolio.equity <= 0.0 {
+            // No equity: skip check (nothing to limit against)
             return None;
         }
 
@@ -847,8 +871,9 @@ impl RiskArbiter {
         // Determine applicable exposure limit based on current time and intent exchange
         let (session_name, limit_pct) = match current_session {
             TradingSession::PostMarket => {
-                // After 21:00 London: no new entries allowed anyway (CHECK 11), skip session check
-                return None;
+                // After 21:00 London: enforce overnight exposure cap.
+                // Existing positions count against the cap even if no new entries are allowed.
+                ("PostMarket", self.config.overnight_exposure_cap_pct)
             }
             TradingSession::Asia => {
                 // 00:00-08:00: Only Asia sessions are open

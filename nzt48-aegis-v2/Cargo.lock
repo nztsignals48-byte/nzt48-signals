@@ -1403,6 +1403,7 @@ dependencies = [
  "crossbeam-channel",
  "ctrlc",
  "ibapi",
+ "libc",
  "mimalloc",
  "proptest",
  "pyo3",

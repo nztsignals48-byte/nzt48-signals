@@ -4,6 +4,27 @@
 //! over stdin/stdout. Each tick sent gets a synchronous response.
 //!
 //! This avoids the PyO3 extension-module vs auto-initialize conflict.
+//!
+//! # ARCHITECTURAL RISK: Python bridge blocks Rust event loop
+//!
+//! The bridge operates synchronously: each tick is sent to Python, then the
+//! Rust main loop BLOCKS waiting for Python's response (up to 5 seconds via
+//! `BRIDGE_READ_TIMEOUT_SECS`). During this window:
+//!
+//! - Stop-loss processing is delayed (no ticks processed while waiting)
+//! - Broker event polling is paused (fills, disconnects go unhandled)
+//! - SIGHUP/SIGTERM handling is deferred
+//!
+//! The 5-second timeout (`read_line_timeout`) prevents infinite hangs, but
+//! even a 5-second delay during a flash crash can cause significant slippage.
+//!
+//! Mitigation (current): The reader thread + mpsc channel + recv_timeout
+//! ensures the main loop regains control within 5 seconds on Python hang.
+//! Consecutive timeouts trigger bridge respawn (see `consecutive_timeouts`).
+//!
+//! Mitigation (future): Move to async bridge with non-blocking tick dispatch.
+//! Process broker events and exit logic on a separate thread/task that does
+//! not depend on Python response latency.
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -188,6 +209,12 @@ pub struct TickContext {
     /// Consecutive stop losses from portfolio. Used by Python tilt guard.
     #[pyo3(get, set)]
     pub consecutive_losses: u32,
+    /// Daily P&L as % of start-of-day equity. Used by regime-adjusted daily loss limits.
+    #[pyo3(get, set)]
+    pub daily_pnl_pct: f64,
+    /// Weekly P&L as % of start-of-week equity. Used by regime-adjusted weekly loss limits.
+    #[pyo3(get, set)]
+    pub weekly_pnl_pct: f64,
 }
 
 #[pymethods]
@@ -234,6 +261,8 @@ impl TickContext {
             trades_today: 0,
             exchange: String::new(),
             consecutive_losses: 0,
+            daily_pnl_pct: 0.0,
+            weekly_pnl_pct: 0.0,
         }
     }
 }
@@ -263,6 +292,8 @@ impl Default for TickContext {
             trades_today: 0,
             exchange: String::new(),
             consecutive_losses: 0,
+            daily_pnl_pct: 0.0,
+            weekly_pnl_pct: 0.0,
         }
     }
 }
@@ -439,6 +470,8 @@ impl PythonBridge {
                 r#""heat_pct":{:.4},"equity":{:.2},"#,
                 r#""vix":{:.2},"london_time_secs":{},"gap_pct":{:.4},"symbol":"{}","#,
                 r#""open_positions":{},"trades_today":{},"exchange":"{}","consecutive_losses":{},"#,
+                // Portfolio P&L percentages for regime-adjusted loss limits
+                r#""daily_pnl_pct":{:.4},"weekly_pnl_pct":{:.4},"#,
                 // Extended tick data
                 r#""last_size":{},"open":{:.6},"close":{:.6},"trade_count":{},"#,
                 r#""trade_rate":{:.2},"volume_rate":{:.2},"rt_hist_vol":{:.4},"shortable":{:.1},"#,
@@ -488,6 +521,9 @@ impl PythonBridge {
             ctx.trades_today,
             ctx.exchange,
             ctx.consecutive_losses,
+            // Portfolio P&L percentages
+            ctx.daily_pnl_pct,
+            ctx.weekly_pnl_pct,
             // Extended tick data
             tick.last_size,
             tick.open,
@@ -1007,6 +1043,8 @@ mod tests {
                 trades_today: 0,
                 exchange: String::new(),
                 consecutive_losses: 0,
+                daily_pnl_pct: -0.5,
+                weekly_pnl_pct: -1.2,
             };
             // Prevent optimization elision
             std::hint::black_box(&ctx);

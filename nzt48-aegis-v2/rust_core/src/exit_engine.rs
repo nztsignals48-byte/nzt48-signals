@@ -252,8 +252,22 @@ struct ExitCheck {
 /// Configuration for the exit engine.
 #[derive(Clone, Debug)]
 pub struct ExitConfig {
-    /// EOD flatten time in seconds from midnight London (16:25 = 59100).
+    /// Default EOD flatten time in seconds from midnight UTC.
+    /// Set to the EARLIEST exchange close (TSE/KRX = 06:00 UTC = 21600) to be safe:
+    /// positions get flattened too early rather than too late.
     pub eod_flatten_secs: u32,
+    /// Per-exchange EOD flatten times in seconds from midnight UTC.
+    /// Keys are exchange names (e.g. "LSE", "TSE", "SMART").
+    /// If a position's exchange is found here, this overrides eod_flatten_secs.
+    /// Default map:
+    ///   LSE/LSEETF: 59100 (16:25 London)
+    ///   XETRA/FWB:  57600 (16:00 London / 17:00 CET)
+    ///   TSE:        21600 (06:00 UTC)
+    ///   HKEX/SEHK:  28800 (08:00 UTC)
+    ///   KRX/KSE:    21600 (06:00 UTC)
+    ///   SGX:        28800 (08:00 UTC)
+    ///   SMART/NYSE/NASDAQ: 72900 (20:15 UTC / 16:15 ET)
+    pub eod_flatten_per_exchange: std::collections::HashMap<String, u32>,
     /// Price spike filter threshold (10% = 0.10).
     pub price_spike_pct: f64,
     /// Minimum expected value after commission to keep a trade open.
@@ -271,10 +285,50 @@ pub struct ExitConfig {
     pub time_stop_aggressive_trail_atr: f64,
 }
 
+impl ExitConfig {
+    /// Build the default per-exchange EOD flatten map.
+    pub fn default_eod_map() -> std::collections::HashMap<String, u32> {
+        let mut m = std::collections::HashMap::new();
+        // London Stock Exchange: 16:25 London ≈ 59100s UTC (ignoring BST for safety)
+        m.insert("LSE".into(), 59100);
+        m.insert("LSEETF".into(), 59100);
+        // Frankfurt / XETRA: 17:00 CET = 16:00 London ≈ 57600s UTC
+        m.insert("XETRA".into(), 57600);
+        m.insert("FWB".into(), 57600);
+        // Tokyo Stock Exchange: 06:00 UTC = 21600s
+        m.insert("TSE".into(), 21600);
+        // Hong Kong: 08:00 UTC = 28800s
+        m.insert("HKEX".into(), 28800);
+        m.insert("SEHK".into(), 28800);
+        // Korea: 06:00 UTC = 21600s
+        m.insert("KRX".into(), 21600);
+        m.insert("KSE".into(), 21600);
+        // Singapore: 08:00 UTC = 28800s
+        m.insert("SGX".into(), 28800);
+        // US exchanges: 16:15 ET ≈ 20:15 UTC = 72900s
+        m.insert("SMART".into(), 72900);
+        m.insert("NYSE".into(), 72900);
+        m.insert("NASDAQ".into(), 72900);
+        m.insert("ARCA".into(), 72900);
+        m
+    }
+
+    /// Look up EOD flatten time for a given exchange. Falls back to the global default.
+    pub fn eod_flatten_for_exchange(&self, exchange: &str) -> u32 {
+        self.eod_flatten_per_exchange
+            .get(exchange)
+            .copied()
+            .unwrap_or(self.eod_flatten_secs)
+    }
+}
+
 impl Default for ExitConfig {
     fn default() -> Self {
         Self {
-            eod_flatten_secs: 59100, // 16:25 London
+            // Default to EARLIEST exchange close (TSE/KRX 06:00 UTC) — safe fallback.
+            // Positions on unknown exchanges get flattened early rather than held too late.
+            eod_flatten_secs: 21600, // 06:00 UTC (TSE/KRX close)
+            eod_flatten_per_exchange: Self::default_eod_map(),
             price_spike_pct: 0.10,
             min_ev_after_commission: 0.0,
             dust_threshold_gbp: 500.0,
@@ -367,6 +421,7 @@ impl ExitEngine {
         is_halt_flatten: bool,
         signal_reversal: bool,
         is_carried: bool,
+        exchange: &str,
     ) -> Option<ExitResult> {
         // S3: Active trading minutes from tick counter (halt-safe — pauses when no ticks arrive).
         // Each update_tracking() call increments active_trading_ticks. At ~5s per tick, 12 ticks ≈ 1 minute.
@@ -527,8 +582,9 @@ impl ExitEngine {
             }
         }
 
-        // Priority 2: EOD flatten
-        if time_secs >= self.config.eod_flatten_secs {
+        // Priority 2: EOD flatten — per-exchange cutoff (MEDIUM-1 fix)
+        let eod_cutoff = self.config.eod_flatten_for_exchange(exchange);
+        if time_secs >= eod_cutoff {
             checks.push(ExitCheck {
                 reason: ExitReason::EodFlatten,
                 priority: ExitPriority::EodFlatten,

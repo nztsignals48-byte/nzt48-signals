@@ -143,6 +143,7 @@ impl ReplayEngine {
             self.exit_engine.update_tracking(pos, routed_tick.last, atr);
             pos.unrealized_pnl = (routed_tick.last - pos.avg_entry) * pos.qty as f64;
             let is_halt = self.arbiter.regime >= crate::types::RiskRegime::Flatten;
+            // MEDIUM-1: Replay doesn't track per-ticker exchanges; pass empty for default EOD.
             let exit_result = self.exit_engine.evaluate(
                 pos,
                 routed_tick.last,
@@ -151,6 +152,7 @@ impl ReplayEngine {
                 is_halt,
                 false,
                 false,
+                "",
             );
             if let Some(ref result) = exit_result {
                 // Extract values before borrowing self mutably

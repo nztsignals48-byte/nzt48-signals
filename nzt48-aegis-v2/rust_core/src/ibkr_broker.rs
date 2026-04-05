@@ -651,11 +651,41 @@ impl IbkrBroker {
             .clone();
 
         let contract = Self::build_contract(&mapping);
-        match client.market_data(&contract).subscribe() {
+        // BUG FIX: Request ALL generic tick types from IBKR.
+        // Without this, IBKR only sends basic bid/ask/last — 25+ extended tick fields
+        // (options OI/vol, shortable, halted, auction data, ETF NAV, etc.) were always 0/default.
+        let generic_ticks: &[&str] = &[
+            "100",  // Option Volume
+            "101",  // Option Open Interest
+            "104",  // Historical Volatility
+            "105",  // Average Option Volume
+            "106",  // Option Implied Volatility
+            "165",  // Miscellaneous Stats (avg volume, 52wk hi/lo, etc.)
+            "221",  // Mark Price
+            "225",  // Auction data (price, volume, imbalance)
+            "232",  // Last RTH Trade
+            "233",  // RT Volume (trade-by-trade)
+            "236",  // Shortable
+            "258",  // Fundamental Ratios
+            "291",  // Close Price
+            "292",  // Open Price
+            "293",  // 13-Week Running High/Low
+            "294",  // Trade Count
+            "295",  // Volume Rate
+            "318",  // Last Regulatory Trade
+            "375",  // RT Trade Volume
+            "377",  // RT Historical Volatility
+            "411",  // Real-time Historical Volatility
+            "456",  // IB Dividends
+            "460",  // Bond Factor Multiplier
+            "588",  // Short-Term Volume (3/5/10 min)
+            "614",  // ETF NAV (close/last/bid/ask)
+        ];
+        match client.market_data(&contract).generic_ticks(generic_ticks).subscribe() {
             Ok(sub) => {
                 eprintln!(
-                    "IBKR: MktData subscribed for {} (ticker_id={}, exchange={})",
-                    mapping.symbol, ticker_id.0, mapping.exchange
+                    "IBKR: MktData subscribed for {} (ticker_id={}, exchange={}, generic_ticks={})",
+                    mapping.symbol, ticker_id.0, mapping.exchange, generic_ticks.len()
                 );
                 self.mktdata_subs.push(MktDataSubscription {
                     ticker_id,
@@ -1634,6 +1664,10 @@ impl BrokerAdapter for IbkrBroker {
             return false;
         }
         true
+    }
+
+    fn poll_events(&mut self) {
+        IbkrBroker::poll_events(self);
     }
 
     fn drain_events(&mut self) -> Vec<BrokerEvent> {

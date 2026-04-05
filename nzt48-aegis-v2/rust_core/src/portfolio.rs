@@ -243,6 +243,26 @@ impl PortfolioState {
         (self.high_water_mark - self.equity) / self.high_water_mark * 100.0
     }
 
+    /// Daily P&L as percentage of start-of-day equity (high water mark).
+    /// Negative = loss. E.g. -1.5 means down 1.5% today.
+    /// Used by Python bridge for regime-adjusted daily loss limits.
+    pub fn daily_pnl_pct(&self) -> f64 {
+        if self.high_water_mark <= 0.0 {
+            return 0.0;
+        }
+        self.daily_pnl / self.high_water_mark * 100.0
+    }
+
+    /// Weekly P&L as percentage of start-of-week equity (weekly HWM).
+    /// Negative = loss. E.g. -3.0 means down 3% this week.
+    /// Used by Python bridge for regime-adjusted weekly loss limits.
+    pub fn weekly_pnl_pct(&self) -> f64 {
+        if self.weekly_high_water_mark <= 0.0 {
+            return 0.0;
+        }
+        (self.equity - self.weekly_high_water_mark) / self.weekly_high_water_mark * 100.0
+    }
+
     /// Sprint 10: Weekly drawdown from weekly HWM (%).
     pub fn weekly_drawdown_pct(&self) -> f64 {
         if self.weekly_high_water_mark <= 0.0 {
@@ -326,6 +346,15 @@ impl PortfolioState {
         if self.equity > self.all_time_hwm {
             self.all_time_hwm = self.equity;
         }
+        // FIX: Update weekly HWM (resets on Monday via reset_weekly_hwm()).
+        if self.equity > self.weekly_high_water_mark {
+            self.weekly_high_water_mark = self.equity;
+        }
+    }
+
+    /// Reset weekly high-water mark to current equity (called on Monday daily reset).
+    pub fn reset_weekly_hwm(&mut self) {
+        self.weekly_high_water_mark = self.equity;
     }
 
     // ── SC-10: Cost-basis VWAP tracker ──

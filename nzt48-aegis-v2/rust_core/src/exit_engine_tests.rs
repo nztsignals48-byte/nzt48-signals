@@ -52,7 +52,7 @@ mod tests {
         // Only one ExitEngine type exists. No duplicate exit logic.
         // Verified by: all exit evaluation goes through engine.evaluate().
         let pos = make_position(10.0, 9.50, 100);
-        let result = engine.evaluate(&pos, 10.10, 0.50, 36_000, false, false, false);
+        let result = engine.evaluate(&pos, 10.10, 0.50, 36_000, false, false, false, "");
         assert!(result.is_none()); // No exit triggered
     }
 
@@ -76,7 +76,7 @@ mod tests {
         // Hard stop at 95.0
         // Price drops to 94.0 → both fire (gap-down)
         pos.stop_price = 95.0;
-        let result = engine.evaluate(&pos, 94.0, 2.0, 36_000, false, false, false);
+        let result = engine.evaluate(&pos, 94.0, 2.0, 36_000, false, false, false, "");
         let r = result.expect("exit should fire");
         assert_eq!(r.signal.reason, ExitReason::HardStopLoss);
         assert_eq!(r.signal.priority, ExitPriority::HardStopLoss);
@@ -91,7 +91,7 @@ mod tests {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
         // Price below hard stop AND past EOD time
-        let result = engine.evaluate(&pos, 9.40, 0.50, 59_200, false, false, false);
+        let result = engine.evaluate(&pos, 9.40, 0.50, 59_200, false, false, false, "");
         let r = result.expect("exit should fire");
         assert_eq!(r.signal.reason, ExitReason::HardStopLoss);
         assert!(r.suppressed_count >= 1); // EOD suppressed
@@ -103,7 +103,7 @@ mod tests {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
         // Hard stop fires at 9.40, but HALT also active
-        let result = engine.evaluate(&pos, 9.40, 0.50, 36_000, true, false, false);
+        let result = engine.evaluate(&pos, 9.40, 0.50, 36_000, true, false, false, "");
         let r = result.expect("exit should fire");
         assert_eq!(r.signal.reason, ExitReason::HaltFlatten);
         assert_eq!(r.signal.order_type, ExitOrderType::MarketToLimit); // H117
@@ -191,19 +191,29 @@ mod tests {
         );
     }
 
-    // ── Test 8: EOD flatten at 16:25 ──
+    // ── Test 8: EOD flatten — per-exchange (MEDIUM-1) ──
     #[test]
     fn test_eod_flatten() {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
-        // Before 16:25 (59100s) → no exit
-        let result = engine.evaluate(&pos, 10.10, 0.50, 59_000, false, false, false);
+        // LSE: Before 16:25 (59100s) → no exit
+        let result = engine.evaluate(&pos, 10.10, 0.50, 59_000, false, false, false, "LSE");
         assert!(result.is_none());
-        // At 16:25 → market sell all
-        let result = engine.evaluate(&pos, 10.10, 0.50, 59_100, false, false, false);
+        // LSE: At 16:25 → market sell all
+        let result = engine.evaluate(&pos, 10.10, 0.50, 59_100, false, false, false, "LSE");
         let r = result.expect("EOD exit");
         assert_eq!(r.signal.reason, ExitReason::EodFlatten);
         assert_eq!(r.signal.order_type, ExitOrderType::MarketSell);
+        // TSE: At 21600 (06:00 UTC) → flatten
+        let result = engine.evaluate(&pos, 10.10, 0.50, 21_600, false, false, false, "TSE");
+        let r = result.expect("TSE EOD exit");
+        assert_eq!(r.signal.reason, ExitReason::EodFlatten);
+        // Unknown exchange: defaults to 21600 (earliest close = safe)
+        let result = engine.evaluate(&pos, 10.10, 0.50, 21_599, false, false, false, "");
+        assert!(result.is_none());
+        let result = engine.evaluate(&pos, 10.10, 0.50, 21_600, false, false, false, "");
+        let r = result.expect("default EOD exit");
+        assert_eq!(r.signal.reason, ExitReason::EodFlatten);
     }
 
     // ── Test 9: Shadow stops — internal, not IBKR trailing stops (H67) ──
@@ -226,11 +236,11 @@ mod tests {
         // Verify HALT exit uses IOC
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
-        let result = engine.evaluate(&pos, 10.0, 0.50, 36_000, true, false, false);
+        let result = engine.evaluate(&pos, 10.0, 0.50, 36_000, true, false, false, "");
         let r = result.expect("HALT exit");
         assert_eq!(r.tif, TimeInForce::Ioc);
         // Verify gap-down exit (price < stop) uses IOC (market sell immediately)
-        let result = engine.evaluate(&pos, 9.40, 0.50, 36_000, false, false, false);
+        let result = engine.evaluate(&pos, 9.40, 0.50, 36_000, false, false, false, "");
         let r = result.expect("gap-down stop exit");
         assert_eq!(r.tif, TimeInForce::Ioc);
     }
@@ -240,7 +250,7 @@ mod tests {
     fn test_mtl_emergency_exits() {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
-        let result = engine.evaluate(&pos, 10.0, 0.50, 36_000, true, false, false);
+        let result = engine.evaluate(&pos, 10.0, 0.50, 36_000, true, false, false, "");
         let r = result.expect("HALT exit");
         assert_eq!(r.signal.order_type, ExitOrderType::MarketToLimit);
     }
@@ -321,7 +331,7 @@ mod tests {
     fn test_signal_reversal_exit() {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
-        let result = engine.evaluate(&pos, 10.50, 0.50, 36_000, false, true, false);
+        let result = engine.evaluate(&pos, 10.50, 0.50, 36_000, false, true, false, "");
         let r = result.expect("signal reversal exit");
         assert_eq!(r.signal.reason, ExitReason::SignalReversal);
         assert_eq!(r.signal.priority, ExitPriority::SignalReversal);
@@ -334,7 +344,7 @@ mod tests {
         // Position with stop at 98.0
         let pos = make_position(100.0, 98.0, 100);
         // Price gaps down to 96.0 (below stop at 98.0)
-        let result = engine.evaluate(&pos, 96.0, 2.0, 36_000, false, false, false);
+        let result = engine.evaluate(&pos, 96.0, 2.0, 36_000, false, false, false, "");
         let r = result.expect("gap-down exit should fire");
         assert_eq!(r.signal.reason, ExitReason::HardStopLoss);
         // Gap-down: price < stop → MarketSell, not LimitAtStop
@@ -349,7 +359,7 @@ mod tests {
         let engine = default_engine();
         let pos = make_position(100.0, 98.0, 100);
         // Price exactly at stop → LimitAtStop (no gap)
-        let result = engine.evaluate(&pos, 98.0, 2.0, 36_000, false, false, false);
+        let result = engine.evaluate(&pos, 98.0, 2.0, 36_000, false, false, false, "");
         let r = result.expect("exact stop exit should fire");
         assert_eq!(r.signal.reason, ExitReason::HardStopLoss);
         assert_eq!(r.signal.order_type, ExitOrderType::LimitAtStop);
@@ -386,7 +396,7 @@ mod tests {
         let engine = default_engine();
         let pos = make_position(10.0, 9.50, 100);
         // Price below stop, past EOD, HALT active
-        let result = engine.evaluate(&pos, 9.40, 0.50, 59_200, true, true, false);
+        let result = engine.evaluate(&pos, 9.40, 0.50, 59_200, true, true, false, "");
         let r = result.expect("HALT wins");
         assert_eq!(r.signal.reason, ExitReason::HaltFlatten);
         assert_eq!(r.signal.order_type, ExitOrderType::MarketToLimit);

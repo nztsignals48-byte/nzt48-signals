@@ -25,6 +25,7 @@ signal-hook = "0.3"
 chrono = "0.4"
 chrono-tz = "0.8"
 arrow = { version = "53", features = ["ipc"], optional = true }
+libc = "0.2"
 
 [features]
 default = []

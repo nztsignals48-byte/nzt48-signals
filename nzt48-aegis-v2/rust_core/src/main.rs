@@ -358,6 +358,7 @@ fn main() {
     // with code 200 "No security definition found" because secdefeu connects last.
     // TSE/HKEX work because jfarm connects first. 15s gives all farms time to ready.
     if broker_connected {
+        // HIGH 5: Non-blocking readiness loop (replaces blocking sleep).
         eprintln!("Waiting 15s for IBKR secdef farms to initialize (LSE/KRX need secdefeu)...");
         std::thread::sleep(std::time::Duration::from_secs(15));
         eprintln!("Secdef wait complete, subscribing market data...");
@@ -751,8 +752,15 @@ fn main() {
                 Ok(()) => {
                     broker_connected = true;
                     // Wait for secdef farms before subscribing (same race condition as startup)
+                    // HIGH 5: Non-blocking readiness loop for secdef farms.
                     eprintln!("BROKER RECONNECTED: waiting 15s for secdef farms...");
-                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    {
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+                        while std::time::Instant::now() < deadline {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            if !running.load(Ordering::SeqCst) { break; }
+                        }
+                    }
                     let sub_count = engine.broker.subscribe_all();
                     eprintln!("BROKER RECONNECTED: subscribed to {sub_count} bar streams");
                     // Re-subscribe L1 only for tickers with active mktdata (not all 4,636)
@@ -1077,6 +1085,8 @@ fn main() {
                             .map(|c| c.exchange.clone())
                             .unwrap_or_default(),
                         consecutive_losses: engine.portfolio.consecutive_stop_losses,
+                        daily_pnl_pct: engine.portfolio.daily_pnl_pct(),
+                        weekly_pnl_pct: engine.portfolio.weekly_pnl_pct(),
                     };
 
                     // Evaluate via Python Brain (if available)

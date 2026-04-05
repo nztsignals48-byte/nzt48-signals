@@ -483,6 +483,9 @@ pub struct Engine<B: BrokerAdapter> {
     /// Phase 16: Ouroboros spread cache (symbol → median spread %).
     /// Used by SmartRouter for cost comparison and subscription prioritization.
     pub spread_cache: std::collections::HashMap<String, f64>,
+    /// HIGH 2: Exit order retry queue.
+    /// Each entry: (ticker_id, side, qty, limit_price, attempt_count, next_retry_ns).
+    pub exit_retry_queue: Vec<(TickerId, OrderSide, u32, f64, u32, u64)>,
 }
 
 /// A simulated trade record for logging and daily PDF reporting.
@@ -700,6 +703,7 @@ impl<B: BrokerAdapter> Engine<B> {
             simulated_trades: Vec::new(),
             broker_disconnect_ns: 0,
             spread_cache: HashMap::new(),
+            exit_retry_queue: Vec::new(),
         }
     }
 
@@ -1333,9 +1337,10 @@ impl<B: BrokerAdapter> Engine<B> {
                 let is_halt = self.arbiter.regime >= RiskRegime::Flatten;
                 let is_eod = Clock::eod_phase_utc(utc_secs, is_bst).is_some();
                 let is_carried = self.carry_manager.is_carried(&tid);
+                let exit_exchange = self.broker.exchange_for_ticker(&tid);
                 let exit_result = self
                     .exit_engine
-                    .evaluate(pos, tick.last, atr, utc_secs, is_halt, is_eod, is_carried);
+                    .evaluate(pos, tick.last, atr, utc_secs, is_halt, is_eod, is_carried, exit_exchange);
                 if let Some(ref result) = exit_result {
                     let reason_str = format!("{:?}", result.signal.reason);
                     let priority_str = format!("{:?}", result.signal.priority);
@@ -2408,6 +2413,25 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // Prune completed orders
         self.executioner.prune_completed();
+        // HIGH 2: Exit retry queue - exponential backoff (5s, 30s, 120s), max 3 tries.
+        if !self.exit_retry_queue.is_empty() && !self.simulation_mode {
+            let now = self.now_ns;
+            let mut keep: Vec<(TickerId, OrderSide, u32, f64, u32, u64)> = Vec::new();
+            let q = std::mem::take(&mut self.exit_retry_queue);
+            for (tid, side, qty, lim, att, nxt) in q {
+                if now < nxt { keep.push((tid, side, qty, lim, att, nxt)); continue; }
+                let oid = format!("exit-retry-{}-{}", tid.0, att);
+                eprintln!("EXIT_RETRY: t={} att={}/3 q={} l={:.4}", tid.0, att, qty, lim);
+                match self.broker.submit_order(&oid, tid, side, qty, lim) {
+                    Ok(()) => { let ev = self.broker.drain_events(); for e in &ev { self.process_broker_event(e); } }
+                    Err(e) => {
+                        if att >= 3 { eprintln!("EXIT_RETRY_FAIL: t={} ({e})->FLATTEN", tid.0); self.arbiter.regime = RiskRegime::Flatten; }
+                        else { let d: u64 = if att == 1 { 30_000_000_000 } else { 120_000_000_000 }; keep.push((tid, side, qty, lim, att+1, now+d)); }
+                    }
+                }
+            }
+            self.exit_retry_queue = keep;
+        }
     }
 
     /// P2-A: Writes ReconciliationDivergence to WAL on any mismatch.

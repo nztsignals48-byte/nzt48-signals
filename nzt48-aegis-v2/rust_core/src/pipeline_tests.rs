@@ -124,12 +124,12 @@ mod tests {
         // No exit at current price
         assert!(
             engine
-                .evaluate(&pos, 10.19, 0.50, 36_000, false, false, false)
+                .evaluate(&pos, 10.19, 0.50, 36_000, false, false, false, "")
                 .is_none()
         );
         // Price below stop → exit
         let exit = engine
-            .evaluate(&pos, 9.60, 0.50, 36_000, false, false, false)
+            .evaluate(&pos, 9.60, 0.50, 36_000, false, false, false, "")
             .expect("stop exit");
         assert_eq!(exit.signal.reason, ExitReason::HardStopLoss);
     }
@@ -304,7 +304,7 @@ mod tests {
         };
         assert!(
             engine
-                .evaluate(&pos, 10.40, 0.50, 36_000, false, false, false)
+                .evaluate(&pos, 10.40, 0.50, 36_000, false, false, false, "")
                 .is_none()
         );
     }

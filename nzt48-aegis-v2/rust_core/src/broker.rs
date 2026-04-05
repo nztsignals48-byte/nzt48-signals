@@ -100,6 +100,11 @@ pub trait BrokerAdapter {
     /// Connection status. Checks both link state and heartbeat freshness.
     fn is_connected(&self) -> bool;
 
+    /// Poll broker for new events (order fills, status updates). Non-blocking.
+    /// Must be called before drain_events() to populate the event queue.
+    /// Default: no-op (PaperBroker generates events synchronously on submit).
+    fn poll_events(&mut self) {}
+
     /// Drain pending broker events (acks, fills, cancels).
     fn drain_events(&mut self) -> Vec<BrokerEvent>;
 

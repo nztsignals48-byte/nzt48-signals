@@ -14,6 +14,8 @@ pub enum WalError {
     Io(std::io::Error),
     Serialize(String),
     DiskSpaceLow,
+    /// MEDIUM-5: Another process already holds an exclusive lock on the WAL file.
+    AlreadyLocked,
 }
 
 impl From<std::io::Error> for WalError {
@@ -28,6 +30,7 @@ impl std::fmt::Display for WalError {
             WalError::Io(e) => write!(f, "WAL IO error: {e}"),
             WalError::Serialize(e) => write!(f, "WAL serialize error: {e}"),
             WalError::DiskSpaceLow => write!(f, "WAL disk space < 5%"),
+            WalError::AlreadyLocked => write!(f, "WAL file already locked by another process"),
         }
     }
 }
@@ -43,6 +46,26 @@ pub struct WalWriter {
 }
 
 impl WalWriter {
+    /// MEDIUM-5: Acquire an exclusive advisory file lock (non-blocking).
+    /// Prevents two AEGIS instances from writing to the same WAL file concurrently.
+    #[cfg(unix)]
+    fn acquire_lock(file: &File) -> Result<(), WalError> {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+        if result != 0 {
+            return Err(WalError::AlreadyLocked);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn acquire_lock(_file: &File) -> Result<(), WalError> {
+        // Advisory file locking not available on non-Unix platforms.
+        // RISK: concurrent WAL writes on Windows are not protected.
+        Ok(())
+    }
+
     /// Open (or create) today's WAL file.
     pub fn open(events_dir: &Path, dead_letter_dir: &Path) -> Result<Self, WalError> {
         fs::create_dir_all(events_dir)?;
@@ -52,6 +75,7 @@ impl WalWriter {
             .create(true)
             .append(true)
             .open(&file_path)?;
+        Self::acquire_lock(&file)?;
         Ok(Self {
             file,
             events_dir: events_dir.to_path_buf(),
@@ -67,6 +91,7 @@ impl WalWriter {
         }
         fs::create_dir_all(dead_letter_dir)?;
         let file = OpenOptions::new().create(true).append(true).open(path)?;
+        Self::acquire_lock(&file)?;
         Ok(Self {
             file,
             events_dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
