@@ -26,6 +26,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional
 
 log = logging.getLogger("regime_risk_limits")
@@ -45,6 +46,32 @@ class RegimeLimits:
     portfolio_heat_pct: float = 10.0              # Legacy: Max portfolio heat
 
 
+def _load_max_positions_from_config() -> int:
+    """Load max_positions from config.toml, default 5."""
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore
+        except ImportError:
+            return 5
+    try:
+        _cfg_path = Path(__file__).resolve().parents[2] / "config" / "config.toml"
+        if not _cfg_path.exists():
+            _cfg_path = Path("/app/config/config.toml")
+        if _cfg_path.exists():
+            with open(_cfg_path, "rb") as f:
+                cfg = tomllib.load(f)
+            return cfg.get("crucible", {}).get("max_positions_override",
+                   cfg.get("risk", {}).get("max_positions", 5))
+    except Exception:
+        pass
+    return 5
+
+
+_BASE_MAX_POSITIONS = _load_max_positions_from_config()
+
+
 # Book 85: Regime → Loss Limits + Risk Per Trade + Cooldown
 REGIME_LIMITS: Dict[str, RegimeLimits] = {
     "STEADY": RegimeLimits(
@@ -55,7 +82,7 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         cooldown_secs=300,           # 5 minutes
         kelly_cap=0.05,
         confidence_floor=50,
-        max_positions=3,
+        max_positions=_BASE_MAX_POSITIONS,
         portfolio_heat_pct=10.0,
     ),
     "INFLATION": RegimeLimits(
@@ -66,7 +93,7 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         cooldown_secs=600,           # 10 minutes
         kelly_cap=0.035,
         confidence_floor=55,
-        max_positions=2,
+        max_positions=max(1, _BASE_MAX_POSITIONS * 2 // 3),
         portfolio_heat_pct=8.0,
     ),
     "WOI": RegimeLimits(
@@ -77,7 +104,7 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         cooldown_secs=900,           # 15 minutes
         kelly_cap=0.035,
         confidence_floor=60,
-        max_positions=2,
+        max_positions=max(1, _BASE_MAX_POSITIONS // 2),
         portfolio_heat_pct=7.0,
     ),
     "CRISIS": RegimeLimits(
