@@ -338,6 +338,40 @@ def _track_strategy_exit(ticker_id, strategy, exit_price):
                          f"weights={{{', '.join(f'{s}:{w:.2f}' for s, w in sorted(_strategy_allocation_weights.items()))}}}\n")
         sys.stderr.flush()
 
+# ── SESSION 35: MIN TICK LOOKUP FOR COST MODEL ──
+# In-memory cache of minTick values read from /app/data/contract_metadata.json.
+# Populated lazily on first lookup. Falls back to 0.01 (penny tick) if unavailable.
+_min_tick_cache: dict = {}
+_min_tick_cache_loaded = False
+
+
+def _get_min_tick_for_symbol(symbol):
+    """Look up real minTick for a symbol from contract metadata cache.
+
+    Returns float tick size (e.g. 0.01 for penny stocks, 0.005 for sub-penny).
+    Falls back to 0.01 if metadata unavailable. Fail-open: never raises.
+    """
+    global _min_tick_cache, _min_tick_cache_loaded
+    try:
+        # Lazy-load the full metadata cache once
+        if not _min_tick_cache_loaded:
+            import json as _json
+            _meta_path = "/app/data/contract_metadata.json"
+            try:
+                with open(_meta_path, "r") as f:
+                    _meta = _json.load(f)
+                for sym, entry in _meta.items():
+                    if isinstance(entry, dict) and "min_tick" in entry:
+                        _min_tick_cache[sym] = float(entry["min_tick"])
+            except (FileNotFoundError, ValueError, KeyError):
+                pass  # File doesn't exist yet or malformed — use defaults
+            _min_tick_cache_loaded = True
+
+        return _min_tick_cache.get(symbol, 0.01)
+    except Exception:
+        return 0.01
+
+
 # ── BOOK 217: COST DECOMPOSITION CALCULATOR ──
 
 def _calculate_trade_costs(signal, fill_price, shares, ticker):
@@ -357,7 +391,15 @@ def _calculate_trade_costs(signal, fill_price, shares, ticker):
         elif spread_pct > 0:
             spread_cost_bps = spread_pct * 100.0 / 2.0  # spread_pct is in % → bps, half-spread
         else:
-            spread_cost_bps = 1.5  # Conservative default: 1.5 bps half-spread
+            # Session 35: use real minTick from contract metadata instead of hardcoded default.
+            # Minimum spread = 1 tick. Half-spread in bps = (minTick / price) * 10000 / 2.
+            _min_tick = _get_min_tick_for_symbol(ticker) if ticker else 0.01
+            if fill_price > 0 and _min_tick > 0:
+                spread_cost_bps = (_min_tick / fill_price) * 10000.0 / 2.0
+                # Floor at 0.5 bps (even penny stocks have some spread)
+                spread_cost_bps = max(spread_cost_bps, 0.5)
+            else:
+                spread_cost_bps = 1.5  # Conservative fallback when no price or tick data
 
         # 2. Commission: IBKR tiered (exchange-dependent)
         exchange = _get_exchange_for_symbol(ticker) if ticker else None

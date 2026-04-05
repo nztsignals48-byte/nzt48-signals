@@ -777,6 +777,95 @@ class IBKRDataProvider:
             log.error("Unexpected error getting contract details for %s: %s", symbol, e)
             return None
 
+    # ------------------------------------------------------------------
+    # Contract metadata cache (24h TTL, persisted to JSON)
+    # ------------------------------------------------------------------
+
+    def get_contract_metadata(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch expanded contract metadata for a list of symbols with 24h cache.
+
+        Loads existing cache from /app/data/contract_metadata.json, fetches
+        missing/stale entries via get_contract_details(), and atomically
+        persists the updated cache back to disk.
+
+        Cached fields per symbol: min_tick, trading_hours, liquid_hours,
+        time_zone_id, valid_exchanges, under_con_id, plus standard fields.
+
+        Args:
+            symbols: List of yfinance-format ticker symbols.
+
+        Returns:
+            Dict mapping symbol -> metadata dict. Symbols that failed
+            lookup are omitted from the result.
+        """
+        import json as _json
+
+        # Load existing cache
+        cache: Dict[str, Any] = {}
+        try:
+            if _CONTRACT_METADATA_FILE.exists():
+                with open(_CONTRACT_METADATA_FILE, "r") as f:
+                    cache = _json.load(f)
+        except Exception as e:
+            log.debug("Failed to load contract metadata cache: %s", e)
+            cache = {}
+
+        now_ts = time.time()
+        updated = False
+
+        for symbol in symbols:
+            # Check if cached entry exists and is fresh (within 24h TTL)
+            existing = cache.get(symbol)
+            if existing and isinstance(existing, dict):
+                cached_ts = existing.get("_cached_at", 0)
+                if (now_ts - cached_ts) < _CONTRACT_METADATA_TTL_SEC:
+                    continue  # Still fresh, skip
+
+            # Fetch from IBKR (or toml fallback)
+            details = self.get_contract_details(symbol)
+            if details:
+                details["_cached_at"] = now_ts
+                details["_symbol"] = symbol
+                cache[symbol] = details
+                updated = True
+                log.debug("Cached contract metadata for %s: min_tick=%s valid_exchanges=%s",
+                          symbol, details.get("min_tick"), details.get("valid_exchanges"))
+            else:
+                log.debug("No contract metadata for %s — skipping cache", symbol)
+
+        # Persist if anything changed
+        if updated:
+            self._write_json(str(_CONTRACT_METADATA_FILE), cache)
+            log.info("Updated contract metadata cache: %d symbols", len(cache))
+
+        # Return without internal cache keys
+        result: Dict[str, Dict[str, Any]] = {}
+        for symbol in symbols:
+            entry = cache.get(symbol)
+            if entry and isinstance(entry, dict):
+                result[symbol] = entry
+        return result
+
+    @staticmethod
+    def get_min_tick(symbol: str) -> float:
+        """Look up minTick for a symbol from the persisted metadata cache.
+
+        Returns the cached min_tick value, or 0.01 as default if not found.
+        This is a static read-only lookup (no IBKR connection needed).
+        Intended for hot-path cost model usage.
+        """
+        import json as _json
+        try:
+            if _CONTRACT_METADATA_FILE.exists():
+                with open(_CONTRACT_METADATA_FILE, "r") as f:
+                    cache = _json.load(f)
+                entry = cache.get(symbol)
+                if entry and isinstance(entry, dict):
+                    return float(entry.get("min_tick", 0.01))
+        except Exception:
+            pass
+        return 0.01
+
     def get_fundamental_data(
         self, symbol: str, report_type: str = "CalendarReport"
     ) -> Optional[Dict[str, Any]]:
