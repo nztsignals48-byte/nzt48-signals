@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use ibapi::accounts::{AccountSummaryResult, AccountSummaryTags};
+use ibapi::accounts::types::AccountGroup;
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
 use ibapi::contracts::tick_types::TickType;
@@ -759,6 +761,46 @@ impl IbkrBroker {
     /// Get depth metrics for a ticker (if L2 data available).
     pub fn depth_metrics(&self, ticker_id: &TickerId) -> Option<DepthMetrics> {
         self.depth_books.metrics(ticker_id)
+    }
+
+    /// Query IBKR account for NetLiquidation value.
+    /// Returns the account's net liquidation value in base currency.
+    /// Used at startup to set initial equity from the ACTUAL IBKR account balance
+    /// rather than a hardcoded config value. Scales from £100 to £10M+ automatically.
+    pub fn query_net_liquidation(&self) -> Result<f64, BrokerError> {
+        let client = self.client.as_ref().ok_or(BrokerError::NotConnected)?;
+        let group = AccountGroup("All".to_string());
+        let tags = &[AccountSummaryTags::NET_LIQUIDATION, AccountSummaryTags::TOTAL_CASH_VALUE];
+
+        match client.account_summary(&group, tags) {
+            Ok(sub) => {
+                let mut net_liq: Option<f64> = None;
+                // Drain the subscription for summary results
+                while let Some(result) = sub.try_next() {
+                    match result {
+                        AccountSummaryResult::Summary(summary) => {
+                            if summary.tag == "NetLiquidation" {
+                                if let Ok(val) = summary.value.parse::<f64>() {
+                                    net_liq = Some(val);
+                                    eprintln!(
+                                        "IBKR_ACCOUNT: NetLiquidation={:.2} {} (account={})",
+                                        val, summary.currency, summary.account,
+                                    );
+                                }
+                            }
+                        }
+                        AccountSummaryResult::End => break,
+                    }
+                }
+                net_liq.ok_or_else(|| {
+                    BrokerError::InvalidOrder("No NetLiquidation in account summary".to_string())
+                })
+            }
+            Err(e) => {
+                eprintln!("IBKR_ACCOUNT: Failed to query account summary: {e}");
+                Err(BrokerError::InvalidOrder(format!("account_summary: {e}")))
+            }
+        }
     }
 
     /// Unsubscribe from L1 bid/ask for a specific ticker (P21: Mode rotation).

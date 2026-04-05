@@ -87,7 +87,7 @@ fn main() {
     // N8a: In paper mode, load base config.toml only. In live mode, overlay config.live.toml.
     // Even in paper mode, validate that config.live.toml parses correctly (early error detection).
     eprintln!("Loading config from {:?}...", config_dir);
-    let config = if IS_LIVE {
+    let mut config = if IS_LIVE {
         match EngineConfig::load_live(&config_dir) {
             Ok(c) => c,
             Err(e) => {
@@ -414,6 +414,39 @@ fn main() {
     };
     // Nanosecond timestamp of next allowed respawn attempt (0 = immediate).
     let mut next_respawn_ns: u64 = 0;
+
+    // Query IBKR for REAL account equity when connected.
+    // This makes the system work with whatever funds are available — £100 to £10M+.
+    // Falls back to config.toml starting_equity_gbp if query fails.
+    if broker_connected {
+        match broker.query_net_liquidation() {
+            Ok(net_liq) if net_liq > 0.0 => {
+                let config_equity = config.crucible.starting_equity_gbp;
+                config.crucible.starting_equity_gbp = net_liq;
+                eprintln!(
+                    "EQUITY_INIT: Using IBKR NetLiquidation={:.2} (config was {:.2})",
+                    net_liq, config_equity,
+                );
+            }
+            Ok(net_liq) => {
+                eprintln!(
+                    "EQUITY_INIT: IBKR NetLiquidation={:.2} (invalid, using config {:.2})",
+                    net_liq, config.crucible.starting_equity_gbp,
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "EQUITY_INIT: IBKR query failed: {e} — using config starting_equity={:.2}",
+                    config.crucible.starting_equity_gbp,
+                );
+            }
+        }
+    } else {
+        eprintln!(
+            "EQUITY_INIT: No broker — using config starting_equity={:.2}",
+            config.crucible.starting_equity_gbp,
+        );
+    }
 
     // Create engine
     let clock = Clock::new(config.holidays.clone());
