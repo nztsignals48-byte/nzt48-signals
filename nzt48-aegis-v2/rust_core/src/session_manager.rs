@@ -76,7 +76,7 @@ impl SessionManager {
         const ACTIVE_END: u32 = 21 * 3600;    // 21:00 London — US closes
 
         // Active hours: 23:00-23:59 and 00:00-21:00 London (wraps midnight)
-        if london_time_secs >= ACTIVE_START || london_time_secs < ACTIVE_END {
+        if !(ACTIVE_END..ACTIVE_START).contains(&london_time_secs) {
             return SessionMode::Active;
         }
 

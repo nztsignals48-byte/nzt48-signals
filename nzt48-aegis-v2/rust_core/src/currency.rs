@@ -186,11 +186,10 @@ impl FxRateTable {
         ];
         let mut updated = 0u32;
         for (key, cur) in mapping {
-            if let Some(&rate) = live.get(*key) {
-                if rate > 0.0 {
+            if let Some(&rate) = live.get(*key)
+                && rate > 0.0 {
                     self.rates_to_gbp.insert(*cur, rate);
                     updated += 1;
-                }
             }
         }
         if updated > 0 {

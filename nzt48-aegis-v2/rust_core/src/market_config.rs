@@ -33,10 +33,9 @@ impl MarketConfig {
     /// Load from contracts.toml, grouping symbols by exchange.
     pub fn from_contracts(config_dir: &Path) -> Self {
         let contracts_path = config_dir.join("contracts.toml");
-        if let Ok(content) = std::fs::read_to_string(&contracts_path) {
-            if let Ok(table) = content.parse::<toml::Table>() {
+        if let Ok(content) = std::fs::read_to_string(&contracts_path)
+            && let Ok(table) = content.parse::<toml::Table>() {
                 return Self::parse_contracts(&table);
-            }
         }
         eprintln!("MARKET_CONFIG: contracts.toml not found or invalid, using empty config");
         Self::empty()

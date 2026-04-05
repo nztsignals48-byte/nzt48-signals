@@ -21,7 +21,7 @@ use crate::wal_writer::make_wal_event;
 #[derive(Debug)]
 pub enum WalCommand {
     /// Append a WalEvent to the journal.
-    Append(WalEvent),
+    Append(Box<WalEvent>),
     /// Flush + fsync immediately (used at shutdown or before critical operations).
     ForceSync,
     /// Graceful shutdown: flush, sync, close file, exit thread.
@@ -49,7 +49,7 @@ impl WalHandle {
     /// Non-blocking enqueue of a WAL event.
     /// P3-B1.5: Returns Backpressure/Disconnected instead of silently dropping.
     pub fn append(&self, event: WalEvent) -> WalAppendResult {
-        match self.tx.try_send(WalCommand::Append(event)) {
+        match self.tx.try_send(WalCommand::Append(Box::new(event))) {
             Ok(()) => WalAppendResult::Ok,
             Err(TrySendError::Full(_)) => {
                 eprintln!("WAL_BACKPRESSURE: channel full (50K capacity) — MUST ESCALATE TO HALT");

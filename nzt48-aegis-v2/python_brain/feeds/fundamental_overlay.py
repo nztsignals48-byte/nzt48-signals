@@ -221,6 +221,18 @@ def apply_fundamental_overlay(
             sig["fundamental_screens"] = list(screens)
 
 
+class FundamentalOverlay:
+    """Object-oriented wrapper around the fundamental overlay functions."""
+
+    def apply(self, all_signals: List[Dict[str, Any]], ticker_symbol: str) -> None:
+        """Apply fundamental-based confidence adjustments to signals in-place."""
+        apply_fundamental_overlay(all_signals, ticker_symbol)
+
+    def get_info(self, ticker_symbol: str) -> Optional[Dict[str, Any]]:
+        """Get fundamental signal info for a single ticker."""
+        return get_fundamental_info(ticker_symbol)
+
+
 def get_fundamental_info(ticker_symbol: str) -> Optional[Dict[str, Any]]:
     """Get fundamental signal info for a single ticker. For diagnostics."""
     data = _load_fund_signals()

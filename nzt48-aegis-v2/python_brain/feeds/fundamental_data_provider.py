@@ -729,6 +729,24 @@ def _generate_fundamental_signals(cache: Dict[str, Dict[str, Any]]) -> Dict[str,
 
 
 # ---------------------------------------------------------------------------
+# Public alias — expected by bridge.py and other consumers
+# ---------------------------------------------------------------------------
+class FundamentalDataProvider:
+    """Object-oriented wrapper around the fundamental data functions."""
+
+    def __init__(self):
+        _load_disk_cache()
+
+    def get(self, symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
+        """Get fundamental data for a symbol."""
+        return get_fundamentals(symbol, force_refresh=force_refresh)
+
+    def refresh_all(self, symbols: List[str], max_symbols: int = 100) -> Dict[str, Any]:
+        """Refresh fundamental data for all given symbols."""
+        return refresh_all_fundamentals(symbols, max_symbols=max_symbols)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 

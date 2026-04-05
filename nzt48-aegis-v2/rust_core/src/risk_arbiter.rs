@@ -623,26 +623,23 @@ impl RiskArbiter {
 
         // CHECK 36: Session Exposure Limits (Book 7)
         // Max NAV by session: Asia 30%, Europe 50%, US 60%, EU+US Overlap 80%.
-        if enforce_live_gates {
-            if let Some(veto) = self.check_session_exposure(intent_ticker, portfolio, ctx) {
+        if enforce_live_gates
+            && let Some(veto) = self.check_session_exposure(intent_ticker, portfolio, ctx) {
                 return self.reject(veto, ts);
-            }
         }
 
         // CHECK 37: Regime-Scaled Daily Loss Limit (Book 85)
         // Dynamic daily circuit breaker based on regime: STEADY -3%, INFLATION -2.5%, WOI -2%, CRISIS -1.5%
-        if enforce_live_gates {
-            if let Some(veto) = self.check_regime_daily_loss(portfolio) {
+        if enforce_live_gates
+            && let Some(veto) = self.check_regime_daily_loss(portfolio) {
                 return self.reject(veto, ts);
-            }
         }
 
         // CHECK 38: Regime-Scaled Weekly Loss Limit (Book 85)
         // Dynamic weekly circuit breaker based on regime: STEADY -7%, INFLATION -5.5%, WOI -4%, CRISIS -2%
-        if enforce_live_gates {
-            if let Some(veto) = self.check_regime_weekly_loss(portfolio) {
+        if enforce_live_gates
+            && let Some(veto) = self.check_regime_weekly_loss(portfolio) {
                 return self.reject(veto, ts);
-            }
         }
 
         // CHECK 39: Regime-Scaled Risk Per Trade (Book 85)
@@ -996,10 +993,9 @@ impl RiskArbiter {
     /// Call this every tick/evaluation cycle with current equity.
     pub fn record_equity_snapshot(&mut self, now_ns: u64, equity: f64) {
         let interval_ns: u64 = self.config.equity_snapshot_interval_secs * 1_000_000_000;
-        if let Some((last_ts, _)) = self.equity_snapshots.last() {
-            if now_ns < *last_ts + interval_ns {
+        if let Some((last_ts, _)) = self.equity_snapshots.last()
+            && now_ns < *last_ts + interval_ns {
                 return;
-            }
         }
         self.equity_snapshots.push((now_ns, equity));
         let cutoff = now_ns.saturating_sub(self.config.equity_snapshot_retention_secs * 1_000_000_000);
@@ -1010,8 +1006,8 @@ impl RiskArbiter {
     pub fn check_drawdown_velocity(&mut self, now_ns: u64, current_equity: f64) -> bool {
         let window_ns = self.config.drawdown_velocity_window_secs * 1_000_000_000;
         let window_ago = now_ns.saturating_sub(window_ns);
-        if let Some((_, equity_then)) = self.equity_snapshots.iter().find(|(ts, _)| *ts >= window_ago) {
-            if *equity_then > 0.0 {
+        if let Some((_, equity_then)) = self.equity_snapshots.iter().find(|(ts, _)| *ts >= window_ago)
+            && *equity_then > 0.0 {
                 let drawdown_pct = ((*equity_then - current_equity) / *equity_then) * 100.0;
                 if drawdown_pct > self.config.drawdown_velocity_pct {
                     eprintln!(
@@ -1021,7 +1017,6 @@ impl RiskArbiter {
                     self.regime = RiskRegime::Halt;
                     return true;
                 }
-            }
         }
         false
     }

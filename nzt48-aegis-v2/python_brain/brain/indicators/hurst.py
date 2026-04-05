@@ -92,3 +92,7 @@ def classify_regime(hurst: float) -> str:
     if hurst < 0.45:
         return "mean_reverting"
     return "random"
+
+
+# Alias for backward compatibility — some callers use compute_hurst
+compute_hurst = estimate_hurst

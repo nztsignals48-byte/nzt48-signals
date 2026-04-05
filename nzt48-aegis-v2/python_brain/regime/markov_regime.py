@@ -287,6 +287,25 @@ def adf_stationarity_test(series: np.ndarray) -> Dict[str, Any]:
         return {"error": str(e)[:100]}
 
 
+# ---------------------------------------------------------------------------
+# Public alias — expected by bridge.py and other consumers
+# ---------------------------------------------------------------------------
+class MarkovRegimeDetector:
+    """Object-oriented wrapper around the Markov regime detection functions."""
+
+    def __init__(self, k_regimes: int = 3, lookback: int = 252):
+        self.k_regimes = k_regimes
+        self.lookback = lookback
+
+    def detect(self, returns: np.ndarray) -> Optional[RegimeDetection]:
+        """Detect current regime from return series."""
+        return detect_regime(returns, k_regimes=self.k_regimes, lookback=self.lookback)
+
+    def run(self, output_path: Optional[str] = None) -> Optional[RegimeDetection]:
+        """Full pipeline: fetch returns, detect regime, write output."""
+        return run_regime_detection(output_path=output_path, lookback_days=self.lookback)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [Regime] %(levelname)s %(message)s")
     detection = run_regime_detection()

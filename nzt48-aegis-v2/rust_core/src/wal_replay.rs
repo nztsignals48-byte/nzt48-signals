@@ -107,7 +107,7 @@ pub fn read_all_wal_files(wal_dir: &Path) -> Vec<WalEvent> {
             .filter(|e| {
                 e.path()
                     .extension()
-                    .map_or(false, |ext| ext == "ndjson")
+                    .is_some_and(|ext| ext == "ndjson")
             })
             .collect();
         archive_files.sort_by_key(|e| e.file_name());

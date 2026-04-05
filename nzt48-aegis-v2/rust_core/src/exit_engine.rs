@@ -324,8 +324,7 @@ impl ExitEngine {
 
     /// Q-051: Construct with round-trip fee from unified cost config.
     pub fn with_costs(round_trip_fee_pct: f64) -> Self {
-        let mut strategy = ChandelierStrategy::default();
-        strategy.round_trip_fee_pct = round_trip_fee_pct;
+        let strategy = ChandelierStrategy { round_trip_fee_pct, ..ChandelierStrategy::default() };
         Self::new(ExitConfig::default(), Box::new(strategy))
     }
 
@@ -486,8 +485,8 @@ impl ExitEngine {
         // Between ramp_hours and max_hold_hours, linearly reduce the trailing ATR multiplier
         // from 1.0x to 0.3x. This accelerates exits on positions approaching their time limit
         // without the cliff-edge of a hard time-stop.
-        if !is_carried {
-            if let (Some(ramp_hours), Some(max_hours)) = (position.exit_urgency_ramp_hours, position.max_hold_hours) {
+        if !is_carried
+            && let (Some(ramp_hours), Some(max_hours)) = (position.exit_urgency_ramp_hours, position.max_hold_hours) {
                 let hold_hours = position.active_trading_ticks as f64 / 720.0;
                 if hold_hours > ramp_hours && hold_hours <= max_hours {
                     // Linear ramp from 1.0 at ramp_hours to 0.3 at max_hours
@@ -506,7 +505,6 @@ impl ExitEngine {
                     }
                 }
             }
-        }
 
         // Priority 2.5: Time-stop — if position hasn't reached rung 2 within max_minutes,
         // tighten stop aggressively to force exit. Prevents capital lock in sideways trades.
@@ -915,6 +913,7 @@ impl Default for AdaptiveConfig {
 
 /// Infinite Chandelier: Chandelier with 8 adaptive multipliers.
 /// The effective trail distance = base_rung5_trail × combined_multiplier.
+#[derive(Default)]
 pub struct InfiniteChandelier {
     pub base: ChandelierStrategy,
     pub multipliers: AdaptiveMultipliers,
@@ -934,16 +933,6 @@ impl InfiniteChandelier {
     pub fn adaptive_trail(&self, high: f64, atr: f64) -> f64 {
         let effective_trail = self.base.rung5_trail_atr * self.multipliers.combined();
         high - effective_trail * atr
-    }
-}
-
-impl Default for InfiniteChandelier {
-    fn default() -> Self {
-        Self {
-            base: ChandelierStrategy::default(),
-            multipliers: AdaptiveMultipliers::default(),
-            adaptive_config: AdaptiveConfig::default(),
-        }
     }
 }
 

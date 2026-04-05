@@ -182,6 +182,10 @@ def get_manager() -> PairsHedgeManager:
     return _manager
 
 
+# Alias for backward compatibility — some callers use KalmanHedgeEngine
+KalmanHedgeEngine = PairsHedgeManager
+
+
 def save_snapshot(data_dir: str = "/app/data") -> None:
     """Save hedge ratio snapshot to disk."""
     mgr = get_manager()

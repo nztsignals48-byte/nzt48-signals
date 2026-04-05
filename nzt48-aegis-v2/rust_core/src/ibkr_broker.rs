@@ -570,11 +570,10 @@ impl IbkrBroker {
             watchlist_tids.sort_by_key(|t| t.0);
             for &tid in &watchlist_tids {
                 if ticker_ids.len() >= max_subs { break; }
-                if let Some(m) = self.contract_map.get(&tid) {
-                    if !subscribed_syms.contains(&m.symbol) {
+                if let Some(m) = self.contract_map.get(&tid)
+                    && !subscribed_syms.contains(&m.symbol) {
                         ticker_ids.push(tid);
                         subscribed_syms.insert(m.symbol.clone());
-                    }
                 }
             }
             eprintln!("SUBSCRIBE: {} watchlist tickers queued", ticker_ids.len());
@@ -589,11 +588,10 @@ impl IbkrBroker {
             lseetf.sort_by_key(|t| t.0);
             for &tid in &lseetf {
                 if ticker_ids.len() >= max_subs { break; }
-                if let Some(m) = self.contract_map.get(&tid) {
-                    if !subscribed_syms.contains(&m.symbol) {
+                if let Some(m) = self.contract_map.get(&tid)
+                    && !subscribed_syms.contains(&m.symbol) {
                         ticker_ids.push(tid);
                         subscribed_syms.insert(m.symbol.clone());
-                    }
                 }
             }
         }
@@ -798,14 +796,13 @@ impl IbkrBroker {
                 while let Some(result) = sub.try_next() {
                     match result {
                         AccountSummaryResult::Summary(summary) => {
-                            if summary.tag == "NetLiquidation" {
-                                if let Ok(val) = summary.value.parse::<f64>() {
+                            if summary.tag == "NetLiquidation"
+                                && let Ok(val) = summary.value.parse::<f64>() {
                                     net_liq = Some(val);
                                     eprintln!(
                                         "IBKR_ACCOUNT: NetLiquidation={:.2} {} (account={})",
                                         val, summary.currency, summary.account,
                                     );
-                                }
                             }
                         }
                         AccountSummaryResult::End => break,
@@ -1049,7 +1046,7 @@ impl IbkrBroker {
                                     acc.auction_volume = ts.size as i32;
                                 }
                                 TickType::AuctionImbalance => {
-                                    acc.auction_imbalance = ts.size as f64;
+                                    acc.auction_imbalance = ts.size;
                                 }
                                 TickType::OptionCallOpenInterest => {
                                     acc.opt_call_oi = ts.size as i32;
@@ -1078,7 +1075,7 @@ impl IbkrBroker {
                                 }
                                 // AUDIT-FIX: Regulatory imbalance (TickType 61)
                                 TickType::RegulatoryImbalance => {
-                                    acc.regulatory_imbalance = ts.size as f64;
+                                    acc.regulatory_imbalance = ts.size;
                                 }
                                 _ => {}
                             }
@@ -1146,11 +1143,11 @@ impl IbkrBroker {
             }
             // THROTTLED EMISSION: Emit synthetic bar every 5 seconds (matches reqRealTimeBars cadence).
             // Only emit if this ticker did NOT get bar data (dedup with reqRealTimeBars).
-            if !has_bar_data {
-                if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
-                    if acc.has_data && acc.last > 0.0
-                        && self.now_ns >= acc.last_emit_ns + five_sec_ns
-                    {
+            if !has_bar_data
+                && let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id)
+                && acc.has_data && acc.last > 0.0
+                && self.now_ns >= acc.last_emit_ns + five_sec_ns
+            {
                         mkt_count += 1;
                         let tick = MarketTick {
                             ticker_id: mkt_sub.ticker_id,
@@ -1210,8 +1207,6 @@ impl IbkrBroker {
                         acc.high = acc.last;
                         acc.low = acc.last;
                         acc.last_emit_ns = self.now_ns;
-                    }
-                }
             }
             // Check for errors on mktdata subscriptions
             if let Some(err) = mkt_sub.sub.error() {
@@ -1303,7 +1298,7 @@ impl IbkrBroker {
         if any_data {
             let total = self.pending_ticks.len();
             let poll_num = self.total_bars_received;
-            if poll_num <= 40 || poll_num % 720 == 0 {
+            if poll_num <= 40 || poll_num.is_multiple_of(720) {
                 eprintln!(
                     "POLL: bars={} mkt={} l1={} depth={} pending={} bar_subs={} mkt_subs={} l1_subs={} depth_subs={} l1_eligible={} lifetime={}",
                     bar_count, mkt_count, l1_count, depth_count, total,
@@ -1318,7 +1313,7 @@ impl IbkrBroker {
         if !any_data && total_subs > 0 {
             self.zero_data_polls += 1;
             // First warning at 500 polls (~60-120s), then every 3000 polls (~5 min)
-            if self.zero_data_polls == 500 || (self.zero_data_polls > 500 && self.zero_data_polls % 3000 == 0) {
+            if self.zero_data_polls == 500 || (self.zero_data_polls > 500 && self.zero_data_polls.is_multiple_of(3000)) {
                 eprintln!(
                     "DATA_DROUGHT: {} consecutive polls with ZERO data (bar_subs={} mkt_subs={} l1_subs={} sub_errors={} lifetime={})",
                     self.zero_data_polls, self.bar_subs.len(), self.mktdata_subs.len(),
@@ -1341,7 +1336,7 @@ impl IbkrBroker {
             // ~1500 polls ≈ 2.5-3 minutes of zero data.
             if self.zero_data_polls >= 3500 {
                 // Only log once at threshold crossing (not every poll)
-                if self.zero_data_polls == 3500 || self.zero_data_polls % 3500 == 0 {
+                if self.zero_data_polls == 3500 || self.zero_data_polls.is_multiple_of(3500) {
                     eprintln!(
                         "DATA DROUGHT CRITICAL: {} empty polls — escalating to HALT. \
                          No market data for ~{:.0} minutes. Engine should halt trading.",
@@ -1349,15 +1344,14 @@ impl IbkrBroker {
                         self.zero_data_polls as f64 * 0.1 / 60.0
                     );
                 }
-            } else if self.zero_data_polls >= 1500 {
-                if self.zero_data_polls == 1500 || self.zero_data_polls % 1500 == 0 {
+            } else if self.zero_data_polls >= 1500
+                && (self.zero_data_polls == 1500 || self.zero_data_polls.is_multiple_of(1500)) {
                     eprintln!(
                         "DATA DROUGHT SEVERE: {} empty polls — recommending reconnect. \
                          No market data for ~{:.0} minutes.",
                         self.zero_data_polls,
                         self.zero_data_polls as f64 * 0.1 / 60.0
                     );
-                }
             }
         } else if any_data {
             // Reset drought counter on any data
@@ -1586,11 +1580,10 @@ impl BrokerAdapter for IbkrBroker {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
-        if let Some(&last_ns) = self.last_modify_ns.get(order_id) {
-            if now - last_ns < 3_000_000_000 {
+        if let Some(&last_ns) = self.last_modify_ns.get(order_id)
+            && now - last_ns < 3_000_000_000 {
                 eprintln!("CANCEL_THROTTLE: Order {} modified <3s ago, deferring cancel", order_id);
                 return Err(BrokerError::PacingViolation);
-            }
         }
         self.last_modify_ns.insert(order_id.to_string(), now);
 

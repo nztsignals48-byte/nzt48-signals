@@ -143,8 +143,8 @@ impl HurstEstimator {
             let mut max_dev: f64 = 0.0;
             let mut min_dev: f64 = 0.0;
 
-            for i in 0..lag {
-                deviation += returns[i] - mean_return;
+            for ret_val in returns.iter().take(lag) {
+                deviation += ret_val - mean_return;
                 max_dev = max_dev.max(deviation);
                 min_dev = min_dev.min(deviation);
             }

@@ -1,9 +1,9 @@
 {
   "_meta": {
     "version": 2,
-    "description": "CANONICAL strategy registry — single source of truth for all 60 strategies. Session 35: IEXAuctionFade.",
+    "description": "CANONICAL strategy registry — single source of truth for all 62 strategies. Session 36: reconcile registry with bridge.py, 7 new MarketTick fields.",
     "created": "2026-03-24",
-    "updated": "2026-04-04",
+    "updated": "2026-04-05",
     "authority": "This file governs live/shadow/disabled status. Code MUST read this.",
     "rules": [
       "Every strategy has exactly ONE entry here.",
@@ -23,7 +23,7 @@
     },
     "S3_MacroTrend": {
       "id": "S3", "name": "Macro Trend Following", "family": "trend",
-      "status": "disabled", "description": "Macro-driven trend following. Disabled: insufficient edge in backtest."
+      "status": "shadow", "description": "Macro-driven trend following. Shadow: fires in code but not taking live positions yet. Insufficient edge in backtest."
     },
     "S4_VolPremium": {
       "id": "S4", "name": "Volatility Premium", "family": "volatility",
@@ -31,7 +31,7 @@
     },
     "S5_OvernightCarry": {
       "id": "S5", "name": "Overnight Carry", "family": "carry",
-      "status": "disabled", "description": "Overnight gap capture. Disabled: negative edge with real costs."
+      "status": "shadow", "description": "Overnight gap capture. Shadow: fires in code but not taking live positions yet. Negative edge with real costs."
     },
     "S6_Catalyst": {
       "id": "S6", "name": "Event Gap Fade", "family": "event_driven",
@@ -52,6 +52,14 @@
     "FOmcDrift": {
       "id": "FOmcDrift", "name": "FOMC Drift", "family": "event_driven",
       "status": "live", "description": "Pre/post FOMC announcement drift. T-1 and T+N variants. +12K PnL/sh."
+    },
+    "FOMMCDriftT-1": {
+      "id": "FOMMCDriftT-1", "name": "FOMC Pre-Event Drift (T-1)", "family": "event_driven",
+      "status": "live", "parent": "FOmcDrift", "description": "Sub-signal of FOmcDrift: pre-FOMC T-1 day drift capture. Long bias before dovish-expected meetings."
+    },
+    "FOMMCDriftT+N": {
+      "id": "FOMMCDriftT+N", "name": "FOMC Post-Event Drift (T+N)", "family": "event_driven",
+      "status": "live", "parent": "FOmcDrift", "description": "Sub-signal of FOmcDrift: post-FOMC T+1 to T+5 continuation drift. Dovish = Long continuation, Hawkish = reduced conviction."
     },
     "TypeD_SupportBounce": {
       "id": "TypeD", "name": "Support Bounce", "family": "mean_reversion",
@@ -79,7 +87,7 @@
     },
     "Orchestrator_VWAPDip": {
       "id": "Orchestrator_S17", "name": "VWAP Dip Buy", "family": "mean_reversion",
-      "status": "live", "description": "VWAP sigma deviation mean-reversion. Multi-regime adaptive. Activated Session 30."
+      "status": "live", "description": "Wrapper orchestrator strategy. VWAP sigma deviation mean-reversion. Multi-regime adaptive. Activated Session 30."
     },
     "VolExpansion": {
       "id": "VolExpansion", "name": "Volatility Expansion Breakout", "family": "momentum",
@@ -87,7 +95,7 @@
     },
     "VolCompression": {
       "id": "VolCompression", "name": "Volatility Compression", "family": "volatility",
-      "status": "disabled", "description": "Bollinger squeeze detection. Disabled: insufficient edge."
+      "status": "shadow", "description": "Bollinger squeeze detection. Shadow: fires in code but not taking live positions yet. Insufficient edge."
     },
     "ORB_Breakout": {
       "id": "ORB", "name": "Opening Range Breakout", "family": "momentum",
@@ -175,47 +183,47 @@
     },
     "Orchestrator_TrendFollow": {
       "id": "Orchestrator_trend", "name": "Trend Following Orchestrator", "family": "trend",
-      "status": "live", "description": "Multi-regime trend-following orchestration. Activated Session 30."
+      "status": "live", "description": "Wrapper orchestrator strategy. Multi-regime trend-following orchestration. Activated Session 30."
     },
     "Orchestrator_MomentumBurst": {
       "id": "Orchestrator_burst", "name": "Momentum Burst Orchestrator", "family": "momentum",
-      "status": "live", "description": "Short-term momentum burst detection. Activated Session 30."
+      "status": "live", "description": "Wrapper orchestrator strategy. Short-term momentum burst detection. Activated Session 30."
     },
     "InsiderFlow": {
       "id": "InsiderFlow", "name": "SEC Insider Trading", "family": "alternative_data",
-      "status": "live", "type": "overlay", "description": "SEC Form 4 cluster buy detection (edgartools, free API). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Overlay — adjusts other signals' confidence via _apply_adjustments(). SEC Form 4 cluster buy detection (edgartools, free API). Activated Session 30."
     },
     "SentimentOverlay": {
       "id": "SentimentOverlay", "name": "FinBERT Sentiment", "family": "alternative_data",
-      "status": "live", "type": "overlay", "description": "FinBERT NLP sentiment overlay from 11 news APIs. Session 25-26."
+      "status": "live", "type": "overlay", "description": "Overlay — adjusts other signals' confidence via _apply_adjustments(). FinBERT NLP sentiment overlay from 11 news APIs. Session 25-26."
     },
     "CongressionalTrading": {
       "id": "CongressTrading", "name": "Congressional Trading", "family": "alternative_data",
-      "status": "shadow", "description": "US Congressional stock trading signals (Quiver Quant API). Session 27."
+      "status": "shadow", "type": "overlay", "description": "Overlay — adjusts other signals' confidence via _apply_adjustments(). US Congressional stock trading signals (Quiver Quant API). Session 27."
     },
     "OptionsFlow": {
       "id": "OptionsFlow", "name": "Unusual Options Flow", "family": "options",
-      "status": "shadow", "description": "Unusual options activity detection from CBOE data. Session 27."
+      "status": "shadow", "type": "overlay", "description": "Overlay — fires through options_flow.py feature module. Unusual options activity detection from CBOE data. Session 27."
     },
     "CryptoFearGreed": {
       "id": "CryptoFearGreed", "name": "Crypto Fear/Greed Index", "family": "macro_overlay",
-      "status": "live", "type": "overlay", "description": "Crypto market sentiment as risk-on/risk-off macro signal (free API). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Overlay — adjusts other signals' confidence via _apply_adjustments(). Crypto market sentiment as risk-on/risk-off macro signal (free API). Activated Session 30."
     },
     "OrderFlowImbalance": {
       "id": "OrderFlowImbalance", "name": "Order Flow Imbalance", "family": "microstructure",
-      "status": "live", "type": "overlay", "description": "LOB order flow imbalance detection (bid/ask L1 from IBKR). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Overlay — fires through order_flow_imbalance.py feature module. LOB order flow imbalance detection (bid/ask L1 from IBKR). Activated Session 30."
     },
     "SocialSentiment": {
       "id": "SocialSentiment", "name": "StockTwits Social Sentiment", "family": "alternative_data",
-      "status": "live", "type": "overlay", "description": "StockTwits social sentiment aggregation (free API, 200 req/hr). Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Overlay — adjusts other signals' confidence via _apply_adjustments(). StockTwits social sentiment aggregation (free API, 200 req/hr). Activated Session 30."
     },
     "KalmanHedge": {
       "id": "KalmanHedge", "name": "Kalman Filter Dynamic Hedge", "family": "statistical_arbitrage",
-      "status": "live", "type": "overlay", "description": "Kalman filter for dynamic hedge ratio estimation in pairs. Activated Session 30."
+      "status": "live", "type": "overlay", "description": "Overlay — fires through kalman_hedge.py feature module. Kalman filter for dynamic hedge ratio estimation in pairs. Activated Session 30."
     },
     "SectorRotation": {
       "id": "SectorRotation", "name": "Sector Rotation", "family": "macro_rotation",
-      "status": "live", "type": "overlay", "description": "Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
+      "status": "live", "type": "overlay", "description": "Overlay — fires through scanner boost in _apply_adjustments(). Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
     },
     "LatencyArbitrage": {
       "id": "LatencyArbitrage", "name": "Latency Arbitrage (NAV vs Market)", "family": "arbitrage",
@@ -271,7 +279,7 @@
     "us_power_hour": "19:00-20:00 UTC (closing volume)",
     "dark": "20:00-22:00 UTC (maintenance + Ouroboros nightly)"
   },
-  "strategy_count": 60,
+  "strategy_count": 62,
   "families": [
     "momentum", "mean_reversion", "microstructure", "volatility", "carry",
     "event_driven", "hedging", "arbitrage", "statistical_arbitrage", "meta_strategy",

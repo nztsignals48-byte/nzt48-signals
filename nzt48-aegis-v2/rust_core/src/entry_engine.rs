@@ -364,7 +364,7 @@ impl OverboughtFadeDetector {
     /// Triggers when:
     /// - RSI > 75 (overbought, ready to pull back)
     /// - Volume divergence confirmed (price rising but volume declining)
-    /// Base confidence: 72%
+    ///   Base confidence: 72%
     ///
     /// Note: volume_divergence_confirmed should be pre-calculated
     /// (price_pct_change > 0 AND volume < vol_ma20)
@@ -444,7 +444,7 @@ impl SupportBounceDetector {
     /// Triggers when:
     /// - Current price within 1% of daily low
     /// - RSI 20-40 (panic oversold, recovery possible)
-    /// Base confidence: 70%
+    ///   Base confidence: 70%
     pub fn detect_cfg(
         current_price: f64,
         daily_low: f64,

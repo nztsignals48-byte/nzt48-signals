@@ -208,15 +208,14 @@ impl DepthMetrics {
 
 /// Per-ticker order book store.
 /// Used by IbkrBroker to maintain depth state and emit metrics.
+#[derive(Default)]
 pub struct OrderBookStore {
     books: HashMap<TickerId, OrderBook>,
 }
 
 impl OrderBookStore {
     pub fn new() -> Self {
-        Self {
-            books: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Get or create an order book for a ticker.
@@ -239,6 +238,11 @@ impl OrderBookStore {
     /// Number of tickers with active order books.
     pub fn len(&self) -> usize {
         self.books.len()
+    }
+
+    /// Whether the store is empty.
+    pub fn is_empty(&self) -> bool {
+        self.books.is_empty()
     }
 
     /// Clear all order books (on disconnect).

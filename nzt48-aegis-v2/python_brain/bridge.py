@@ -3198,9 +3198,9 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
         if _eq_phase < 25000:
             # Phase 1: Only momentum + regime-switch strategies (highest edge-to-cost)
             _PHASE1_ALLOWED = {
-                "Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
+                "VanguardSniper_Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
                 "Orchestrator_trend_follow", "Orchestrator_momentum_burst",
-                "IBS_MeanReversion", "S2_Reversion",  # Keep MR as counterbalance
+                "TypeE_IBS", "S2_Reversion",  # Keep MR as counterbalance
                 "S7_TailHedge", "S5_OvernightCarry",
                 "ApexScout", "MacroNowcast",  # Book 84: event-driven macro nowcasting
             }
@@ -5080,7 +5080,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                 "confidence": result["confidence"],
                 "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                "strategy": "Momentum",
+                "strategy": "VanguardSniper_Momentum",
                 "suggested_max_hold_hours": 24,
                 "exit_urgency_ramp_hours": 12,
                 **common_fields,
@@ -5138,7 +5138,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     "type": "signal", "ticker_id": ticker_id, "direction": "Long",
                     "confidence": ibs_conf,
                     "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                    "strategy": "IBS_MeanReversion", "ibs_entry": round(ibs_val, 4),
+                    "strategy": "TypeE_IBS", "ibs_entry": round(ibs_val, 4),
                     "rsi2_entry": round(rsi2, 2),
                     "suggested_max_hold_hours": 8,
                     "exit_urgency_ramp_hours": 4,
@@ -5806,7 +5806,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "confidence": _skew_conf,
                         "kelly_fraction": kelly["kelly_fraction"],
                         "shares": kelly["shares"],
-                        "strategy": "IVSURF_Skew",
+                        "strategy": "IVSURF_SkewDirectional",
                         "iv_ratio": round(_iv_ratio, 3),
                         "impl_vol": round(_iv_impl, 4),
                         "hist_vol": round(_iv_hist, 4),
@@ -6776,8 +6776,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
     _mtc = msg.get("_mins_to_close", 999)
     _STRATEGY_CUTOFFS = {
-        "IBS_MeanReversion": 30, "S2_Reversion": 30,
-        "Momentum": 60, "VolExpansion": 60, "S3_MacroTrend": 60,
+        "TypeE_IBS": 30, "S2_Reversion": 30,
+        "VanguardSniper_Momentum": 60, "VolExpansion": 60, "S3_MacroTrend": 60,
         "S1_Microstructure": 45, "HighFlyer": 45,
         "NightRider": 0,  # NightRider WANTS to be near close — no penalty
         "EventDrift": 15,  # Event drift is fast — allow close to close
@@ -6791,7 +6791,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
 
     # ── BREAKOUT VALIDATION: apply to momentum signals ──
     _bk_score = msg.get("_breakout_score", 0)
-    _MOMENTUM_STRATS = {"Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer", "S3_MacroTrend"}
+    _MOMENTUM_STRATS = {"VanguardSniper_Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer", "S3_MacroTrend"}
     for sig in all_signals:
         if sig.get("strategy") in _MOMENTUM_STRATS:
             sig["breakout_score"] = _bk_score
@@ -6879,7 +6879,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     # Momentum entries face HFT front-running risk → reduce confidence
     for sig in all_signals:
         _strat = sig.get("strategy", "")
-        if _strat in ("Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer"):
+        if _strat in ("VanguardSniper_Momentum", "VolExpansion", "ORB_Breakout", "HighFlyer"):
             sig["confidence"] = max(0, sig["confidence"] - 5)
             sig["momentum_adv_penalty"] = True
 
@@ -7118,19 +7118,19 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if _mins_since_open < 90:
                 # Opening 1.5hrs: momentum dominates (institutional order flow)
                 for sig in all_signals:
-                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                    if sig.get("strategy") in ("TypeE_IBS", "S2_Reversion"):
                         sig["confidence"] = max(0, sig["confidence"] - 8)
                         sig["session_note"] = "EU_MR_penalized_opening"
-                    elif sig.get("strategy") in ("Momentum", "VolExpansion", "S1_Microstructure"):
+                    elif sig.get("strategy") in ("VanguardSniper_Momentum", "VolExpansion", "S1_Microstructure"):
                         sig["confidence"] = min(100, sig["confidence"] + 3)
                         sig["session_note"] = "EU_momentum_boosted_opening"
             elif 150 < _mins_since_open <= 270:
                 # Midday lull: momentum fails, mean-reversion works
                 for sig in all_signals:
-                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                    if sig.get("strategy") in ("VanguardSniper_Momentum", "VolExpansion", "S3_MacroTrend"):
                         sig["confidence"] = max(0, sig["confidence"] - 5)
                         sig["session_note"] = "EU_momentum_penalized_midday"
-                    elif sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                    elif sig.get("strategy") in ("TypeE_IBS", "S2_Reversion"):
                         sig["confidence"] = min(100, sig["confidence"] + 3)
                         sig["session_note"] = "EU_MR_boosted_midday"
             # ETP-specific: 3x/5x ETPs have volatility drag in choppy conditions
@@ -7145,22 +7145,22 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 # First hour (9:30-10:30 ET): most volatile, wide spreads, reversals common
                 # Mean-reversion works well on gap fills; momentum is unreliable
                 for sig in all_signals:
-                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                    if sig.get("strategy") in ("TypeE_IBS", "S2_Reversion"):
                         sig["confidence"] = min(100, sig["confidence"] + 5)
                         sig["session_note"] = "US_MR_boosted_opening_reversals"
-                    elif sig.get("strategy") in ("Momentum", "VolExpansion"):
+                    elif sig.get("strategy") in ("VanguardSniper_Momentum", "VolExpansion"):
                         sig["confidence"] = max(0, sig["confidence"] - 5)
                         sig["session_note"] = "US_momentum_penalized_opening_noise"
             elif 60 <= _mins_since_open <= 180:
                 # Mid-morning (10:30-12:30 ET): best momentum window
                 for sig in all_signals:
-                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                    if sig.get("strategy") in ("VanguardSniper_Momentum", "VolExpansion", "S3_MacroTrend"):
                         sig["confidence"] = min(100, sig["confidence"] + 3)
                         sig["session_note"] = "US_momentum_prime"
             elif 210 <= _mins_since_open <= 330:
                 # Power hour (13:30-15:00 ET): institutional re-positioning
                 for sig in all_signals:
-                    if sig.get("strategy") in ("Momentum", "S1_Microstructure"):
+                    if sig.get("strategy") in ("VanguardSniper_Momentum", "S1_Microstructure"):
                         sig["confidence"] = min(100, sig["confidence"] + 2)
                         sig["session_note"] = "US_power_hour"
 
@@ -7169,7 +7169,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             if _mins_since_open < 60:
                 # Asian open: reacts to overnight US close, momentum follows
                 for sig in all_signals:
-                    if sig.get("strategy") in ("Momentum", "VolExpansion", "S3_MacroTrend"):
+                    if sig.get("strategy") in ("VanguardSniper_Momentum", "VolExpansion", "S3_MacroTrend"):
                         sig["confidence"] = min(100, sig["confidence"] + 3)
                         sig["session_note"] = "ASIA_momentum_US_overnight_reaction"
             elif 120 <= _mins_since_open <= 180:
@@ -7182,7 +7182,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             # ── TOKYO SESSION ──
             if _mins_since_open < 60:
                 for sig in all_signals:
-                    if sig.get("strategy") in ("Momentum", "S1_Microstructure"):
+                    if sig.get("strategy") in ("VanguardSniper_Momentum", "S1_Microstructure"):
                         sig["confidence"] = min(100, sig["confidence"] + 3)
                         sig["session_note"] = "TSE_opening_momentum"
             # TSE has mandatory lunch break 11:30-12:30 JST (150-210 mins after 9:00 open)
@@ -7229,7 +7229,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         elif _rsi14 is not None and _rsi14 < 20 and _rvol_now > 1.5:
             # Oversold with strong volume = potential reversal long opportunity
             for sig in all_signals:
-                if sig.get("direction") == "Long" and sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                if sig.get("direction") == "Long" and sig.get("strategy") in ("TypeE_IBS", "S2_Reversion"):
                     sig["confidence"] = min(100, sig["confidence"] + 5)
                     sig["oversold_opportunity"] = True
 
@@ -7249,7 +7249,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         if _atr_pct < 0.3:
             # ATR too small — insufficient profit potential to cover costs
             all_signals = [s for s in all_signals if s.get("strategy") not in
-                          ("Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend")]
+                          ("VanguardSniper_Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend")]
         for sig in all_signals:
             sig["atr_pct"] = round(_atr_pct, 3)
 
@@ -7285,7 +7285,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                           (_gap_pct < 0 and _current > _first_bar["open"])
             if _gap_filling:
                 for sig in all_signals:
-                    if sig.get("strategy") in ("IBS_MeanReversion", "S2_Reversion"):
+                    if sig.get("strategy") in ("TypeE_IBS", "S2_Reversion"):
                         sig["confidence"] = min(100, sig["confidence"] + 5)
                         sig["gap_fill_boost"] = True
                         sig["gap_pct"] = round(_gap_pct, 2)
@@ -7677,8 +7677,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             _ou_params = _ou_instruments.get(symbol)
             if _ou_params:
                 _half_life = _ou_params.get("half_life_bars", 999)
-                _MR_STRATS = {"IBS_MeanReversion", "S2_Reversion", "PairsReversion", "CointPairs"}
-                _MOM_STRATS = {"Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend"}
+                _MR_STRATS = {"TypeE_IBS", "S2_Reversion", "PairsReversion", "CointPairs"}
+                _MOM_STRATS = {"VanguardSniper_Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend"}
                 for sig in all_signals:
                     strat = sig.get("strategy", "")
                     if strat in _MR_STRATS and _half_life < 30:
@@ -7695,9 +7695,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     # strategies, and boost signals with RVOL > 2.0 (institutional interest).
     _rvol_entry = ind.get("rvol", 1.0)
     _vol_slope_entry = ind.get("vol_slope", 0.0)
-    _MOMENTUM_STRATEGIES = {"Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
+    _MOMENTUM_STRATEGIES = {"VanguardSniper_Momentum", "VolExpansion", "S1_Microstructure", "S3_MacroTrend",
                             "HighFlyer", "ORB", "GapMomentum"}
-    _MR_STRATEGIES = {"IBS_MeanReversion", "S2_Reversion", "PairsReversion"}
+    _MR_STRATEGIES = {"TypeE_IBS", "S2_Reversion", "PairsReversion"}
     for sig in all_signals:
         strat = sig.get("strategy", "")
         if strat in _MOMENTUM_STRATEGIES:
@@ -8785,6 +8785,78 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             elif _avg_volume < 200000:
                 sig["confidence"] = max(0, sig["confidence"] - 2)
                 sig["liquidity_warning"] = "moderate"
+
+    # ── 52-WEEK RANGE POSITION (proximity indicator) ──
+    # Position in 52-week range: 0.0 = at 52wk low, 1.0 = at 52wk high.
+    # Near 52wk high = momentum confirmation. Near 52wk low = value/reversal.
+    _high_52wk = msg.get("high_52wk", 0.0)
+    _low_52wk = msg.get("low_52wk", 0.0)
+    _range_52wk_pct = None
+    if _high_52wk > 0 and _low_52wk > 0 and _high_52wk > _low_52wk:
+        _last = msg.get("last", 0.0)
+        _range_52wk_pct = (_last - _low_52wk) / (_high_52wk - _low_52wk)
+        _range_52wk_pct = max(0.0, min(1.0, _range_52wk_pct))
+        for sig in all_signals:
+            sig["range_52wk_pct"] = round(_range_52wk_pct, 4)
+            sig["high_52wk"] = _high_52wk
+            sig["low_52wk"] = _low_52wk
+
+    # ── SHORT-TERM VOLUME (3/5/10 min RVOL ratio) ──
+    # RVOL ratio = short_term_vol_3min / (avg_volume / 130 trading-periods-per-day).
+    # RVOL > 3.0 = unusual volume surge → +3 confidence for momentum strategies.
+    _st_vol_3 = msg.get("short_term_vol_3min", 0)
+    _st_vol_5 = msg.get("short_term_vol_5min", 0)
+    _st_vol_10 = msg.get("short_term_vol_10min", 0)
+    if _st_vol_3 > 0 and _avg_volume > 0:
+        _rvol_3min = _st_vol_3 / max(1, _avg_volume / 130)
+        _momentum_strategies = {
+            "VanguardSniper_Momentum", "VolExpansion",
+            "TypeB_EarlyRunner", "HighFlyer", "PreMarketAnomaly",
+            "Orchestrator_MomentumBurst",
+        }
+        for sig in all_signals:
+            sig["short_term_vol_3min"] = _st_vol_3
+            sig["short_term_vol_5min"] = _st_vol_5
+            sig["short_term_vol_10min"] = _st_vol_10
+            sig["rvol_3min"] = round(_rvol_3min, 2)
+            if _rvol_3min > 3.0 and sig.get("strategy", "") in _momentum_strategies:
+                sig["confidence"] = min(100, sig["confidence"] + 3)
+                sig["rvol_3min_boost"] = True
+
+    # ── REGULATORY IMBALANCE (exchange-level order imbalance) ──
+    # Non-zero regulatory imbalance is relevant for order-flow strategies.
+    _reg_imbalance = msg.get("regulatory_imbalance", 0.0)
+    if abs(_reg_imbalance) > 0:
+        _oflow_strategies = {"QueueImbalance", "IEXAuctionFade"}
+        for sig in all_signals:
+            sig["regulatory_imbalance"] = round(_reg_imbalance, 4)
+            if sig.get("strategy", "") in _oflow_strategies:
+                # Positive imbalance = buy pressure, negative = sell pressure
+                if _reg_imbalance > 0 and sig.get("direction") == "Long":
+                    sig["confidence"] = min(100, sig["confidence"] + 2)
+                    sig["reg_imb_confirms"] = True
+                elif _reg_imbalance < 0 and sig.get("direction") == "Long":
+                    sig["confidence"] = max(0, sig["confidence"] - 2)
+                    sig["reg_imb_opposes"] = True
+
+    # ── AVERAGE OPTION VOLUME (options data reliability gate) ──
+    # When avg_opt_volume > 0, options data is reliable for overlays.
+    # When avg_opt_volume == 0, discount options-based confidence adjustments.
+    _avg_opt_volume = msg.get("avg_opt_volume", 0)
+    if _avg_opt_volume > 0:
+        for sig in all_signals:
+            sig["avg_opt_volume"] = _avg_opt_volume
+    elif _avg_opt_volume == 0:
+        # Options data unreliable — discount any options-derived adjustments
+        for sig in all_signals:
+            _opts_adj = sig.get("options_sentiment")
+            if _opts_adj is not None:
+                # Halve the options sentiment adjustment
+                if _opts_adj == "bullish":
+                    sig["confidence"] = max(0, sig["confidence"] - 1)
+                elif _opts_adj == "bearish":
+                    sig["confidence"] = min(100, sig["confidence"] + 1)
+                sig["options_data_unreliable"] = True
 
     # ── ORDER FLOW IMBALANCE (LOB microstructure signal) ──
     # OFI confirms or opposes signal direction from bid/ask dynamics.

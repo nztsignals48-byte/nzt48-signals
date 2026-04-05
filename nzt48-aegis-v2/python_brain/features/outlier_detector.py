@@ -219,6 +219,9 @@ class SignalOutlierDetector:
         }
 
 
+# Alias for backward compatibility — some callers use OutlierDetector
+OutlierDetector = SignalOutlierDetector
+
 # Module singleton
 _detector: Optional[SignalOutlierDetector] = None
 

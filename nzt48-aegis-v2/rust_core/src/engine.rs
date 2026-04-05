@@ -53,6 +53,10 @@ use crate::universe::{RouteResult, Universe, UniverseClass, UniverseConfig};
 use crate::wal_writer::{WalWriter, make_wal_event};
 use std::collections::{HashMap, VecDeque};
 
+/// Exit hints from BrainSignal cached between order submission and fill.
+/// Fields: (max_hold_hours, exit_urgency_ramp_hours, suggested_initial_stop_atr_mult, suggested_rung3_atr, min_profit_target_pct, exit_trail_bias)
+pub type ExitHints = (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<String>);
+
 /// P2-3.18: Promoted constants for compiler optimization.
 const EXIT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
 const HALT_COOLDOWN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
@@ -344,8 +348,7 @@ pub struct Engine<B: BrokerAdapter> {
     pub pending_exit_notifications: Vec<(u32, f64, f64, String)>, // (ticker_id, exit_price, pnl, strategy)
     /// Book 39: Cache exit hints from BrainSignal between order submission and fill.
     /// Consumed when creating PositionState on live fill.
-    pub pending_exit_hints: HashMap<TickerId, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<String>)>,
-    // Fields: (max_hold_hours, exit_urgency_ramp_hours, suggested_initial_stop_atr_mult, suggested_rung3_atr, min_profit_target_pct, exit_trail_bias)
+    pub pending_exit_hints: HashMap<TickerId, ExitHints>,
     /// P1-2.17: Tickers currently in exchange halt (no ticks for >30s + prev halted).
     halted_tickers: std::collections::HashSet<TickerId>,
     /// P1-2.15: Economic calendar events (FOMC, CPI, NFP, BOE) with blackout windows.
@@ -602,7 +605,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 // Book 39: Store default Chandelier for per-position signal hint application
                 exit_engine.set_default_chandelier(default_chandelier);
                 // Book 39: Wire per-strategy Chandelier overrides from config.toml
-                for (name, _ovr) in &ch.per_strategy {
+                for name in ch.per_strategy.keys() {
                     let (rung_pct, init_atr, r3, r4, r5, floor) = ch.params_for_strategy(name);
                     let ovr_strategy = ChandelierStrategy::from_config(
                         &rung_pct, init_atr, r3, r4, r5, round_trip_fee, floor,
@@ -1082,12 +1085,11 @@ impl<B: BrokerAdapter> Engine<B> {
         };
         // Convert tick to GBP for all internal calculations
         let mut tick = tick;
-        if let Some(cur) = fx_currency {
-            if cur != crate::currency::Currency::GBP {
+        if let Some(cur) = fx_currency
+            && cur != crate::currency::Currency::GBP {
                 tick.bid = self.fx_table.to_gbp(tick.bid, cur);
                 tick.ask = self.fx_table.to_gbp(tick.ask, cur);
                 tick.last = self.fx_table.to_gbp(tick.last, cur);
-            }
         }
         // AUDIT-FIX (2026-03-18): GBX→GBP conversion for LSE instruments.
         // IBKR sends LSE ETP prices in GBX (pence), not GBP (pounds).
@@ -1643,7 +1645,7 @@ impl<B: BrokerAdapter> Engine<B> {
         // Feed ALL tickers through MomentumScanner for universal scoring.
         {
             let atr = self.current_atr(tid);
-            if let Some(candidate) = self.momentum_scanner.on_tick(tid, tick.last, tick.volume as u64, atr, self.now_ns) {
+            if let Some(candidate) = self.momentum_scanner.on_tick(tid, tick.last, tick.volume, atr, self.now_ns) {
                 self.scanner_scores.insert(tid, candidate.score);
             }
         }
@@ -1746,20 +1748,20 @@ impl<B: BrokerAdapter> Engine<B> {
                 "IBIS" | "XETRA" => {
                     // XETRA: 08:00-16:30 CET = 07:00-15:30 UTC (winter), 06:00-14:30 UTC (summer)
                     let h = utc_now.hour();
-                    h >= 7 && h < 16
+                    (7..16).contains(&h)
                 }
                 "SBF" | "EURONEXT" | "EURONEXT_PA" | "AEB" | "EURONEXT_AS" => {
                     let h = utc_now.hour();
-                    h >= 8 && h < 17
+                    (8..17).contains(&h)
                 }
                 "SMART" | "NYSE" | "NASDAQ" | "AMEX" => {
                     // US: 14:30-21:00 UTC (09:30-16:00 ET), varies with DST
                     let h = utc_now.hour();
-                    h >= 14 && h < 21
+                    (14..21).contains(&h)
                 }
                 "SGX" => {
                     let h = utc_now.hour();
-                    h >= 1 && h < 9
+                    (1..9).contains(&h)
                 }
                 "KSE" | "KRX" => {
                     let h = utc_now.hour();
@@ -1841,10 +1843,9 @@ impl<B: BrokerAdapter> Engine<B> {
         // P6-E: European session entry gating — enforce XLON open hours during Europe session only.
         // During USOverlap/USSession, US tickers trade — don't gate on XLON.
         // During Asia, Asian tickers trade — don't gate on XLON.
-        if matches!(self.current_mode, TradingMode::Europe) {
-            if !self.european_session.entry_allowed("XLON", utc_secs) {
+        if matches!(self.current_mode, TradingMode::Europe)
+            && !self.european_session.entry_allowed("XLON", utc_secs) {
                 return;
-            }
         }
 
         // Determine signal: from Python Brain (required for live/paper)
@@ -1899,7 +1900,7 @@ impl<B: BrokerAdapter> Engine<B> {
             ticker_halted: tick.halted, // IBKR Halted tick type (generic tick 49)
             ticker_ic: ticker_score.map_or(0.0, |s| s.ic),
             ticker_trade_count: ticker_score.map_or(0, |s| s.trade_count),
-            ticker_locked: ticker_score.map_or(false, |s| s.locked),
+            ticker_locked: ticker_score.is_some_and(|s| s.locked),
             ticker_position_count: self.portfolio.position_count_for(&tid),
             // P2-3.4: Wire scanner_score from MomentumScanner (real Rust-side score, not Python confidence proxy).
             // Falls back to signal confidence if no scanner score available for this ticker.
@@ -1931,14 +1932,12 @@ impl<B: BrokerAdapter> Engine<B> {
             },
         };
         // Ouroboros ticker blacklist check (before risk arbiter — fast path rejection)
-        if !self.arbiter.ticker_blacklist.is_empty() {
-            if let Some(symbol) = self.broker.symbol_for(tid) {
-                if self.arbiter.ticker_blacklist.iter().any(|b| b == &symbol) {
-                    eprintln!("BLACKLIST: {} rejected by Ouroboros blacklist (WR < 30%%)", symbol);
-                    self.telemetry.record_veto("TickerBlacklisted");
-                    return;
-                }
-            }
+        if !self.arbiter.ticker_blacklist.is_empty()
+            && let Some(symbol) = self.broker.symbol_for(tid)
+            && self.arbiter.ticker_blacklist.iter().any(|b| b == &symbol) {
+                eprintln!("BLACKLIST: {} rejected by Ouroboros blacklist (WR < 30%%)", symbol);
+                self.telemetry.record_veto("TickerBlacklisted");
+                return;
         }
 
         let decision = self.arbiter.evaluate(
@@ -1955,7 +1954,7 @@ impl<B: BrokerAdapter> Engine<B> {
             self.telemetry.record_veto(&reason_str);
             // Log first 10 vetoes per reason, then every 100th to avoid log flood
             let veto_count = self.telemetry.veto_count(&reason_str);
-            if veto_count <= 10 || veto_count % 100 == 0 {
+            if veto_count <= 10 || veto_count.is_multiple_of(100) {
                 let sym = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
                 eprintln!(
                     "VETO: {} ticker={} sym={} reason={} (count={})",
@@ -2262,7 +2261,7 @@ impl<B: BrokerAdapter> Engine<B> {
             self.write_wal(WalPayload::KellyRampAdvance {
                 count: self.arbiter.config.kelly_ramp_trades as u64,
             });
-            if self.arbiter.config.kelly_ramp_trades % 25 == 0 || self.arbiter.config.kelly_ramp_trades <= 5 {
+            if self.arbiter.config.kelly_ramp_trades.is_multiple_of(25) || self.arbiter.config.kelly_ramp_trades <= 5 {
                 let ramp_pct = ((self.arbiter.config.kelly_ramp_trades as f64 / self.arbiter.config.kelly_ramp_target as f64).clamp(0.1, 1.0) * 100.0) as u32;
                 eprintln!(
                     "KELLY_RAMP: trade #{} → sizing at {}% Kelly",
@@ -2650,7 +2649,7 @@ impl<B: BrokerAdapter> Engine<B> {
         {
             let epoch_secs = self.now_ns / 1_000_000_000;
             let utc_dt = chrono::DateTime::<chrono::Utc>::from_timestamp(epoch_secs as i64, 0)
-                .unwrap_or_else(|| chrono::Utc::now());
+                .unwrap_or_else(chrono::Utc::now);
             let new_session = market_scheduler::get_current_session(utc_dt);
             if new_session != self.current_trading_session {
                 eprintln!(
@@ -2971,10 +2970,9 @@ impl<B: BrokerAdapter> Engine<B> {
             self.ticker_currencies.insert(tid, currency.clone());
 
             // Dynamically register contract if broker doesn't know about it
-            if !self.broker.has_contract(&tid) {
-                if self.broker.register_dynamic_contract(tid, symbol, exchange, currency) {
+            if !self.broker.has_contract(&tid)
+                && self.broker.register_dynamic_contract(tid, symbol, exchange, currency) {
                     dynamic_registered += 1;
-                }
             }
             new_ticker_ids.push(tid);
         }
@@ -3278,7 +3276,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 let fill_spread_pct = {
                     let last_tick = self.last_prices.get(ticker_id);
                     // Use stored bid/ask if available, otherwise 0.0
-                    if let Some(_) = last_tick {
+                    if last_tick.is_some() {
                         // We don't have separate bid/ask stored per-tick in last_prices,
                         // so use 0.0 for now. Full implementation needs bid/ask cache.
                         0.0_f64
@@ -3614,16 +3612,14 @@ impl<B: BrokerAdapter> Engine<B> {
         // Check file age — 1 hour TTL
         match std::fs::metadata(path) {
             Ok(meta) => {
-                if let Ok(modified) = meta.modified() {
-                    if let Ok(age) = std::time::SystemTime::now().duration_since(modified) {
-                        if age.as_secs() > 3600 {
-                            eprintln!(
-                                "BAR_HISTORY: File is {}s old (>3600s TTL), ignoring stale data",
-                                age.as_secs()
-                            );
-                            return;
-                        }
-                    }
+                if let Ok(modified) = meta.modified()
+                    && let Ok(age) = std::time::SystemTime::now().duration_since(modified)
+                    && age.as_secs() > 3600 {
+                        eprintln!(
+                            "BAR_HISTORY: File is {}s old (>3600s TTL), ignoring stale data",
+                            age.as_secs()
+                        );
+                        return;
                 }
             }
             Err(e) => {

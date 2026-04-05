@@ -285,3 +285,25 @@ def run_options_scan(
 
     log.info("Options flow: %d/%d tickers with unusual activity", len(results), len(tickers))
     return output
+
+
+# ---------------------------------------------------------------------------
+# Public alias — expected by bridge.py and other consumers
+# ---------------------------------------------------------------------------
+class OptionsFlowTracker:
+    """Wrapper class providing an object-oriented interface to options flow analysis."""
+
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}
+
+    def analyze(self, ticker: str, options_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Analyze options flow for a single ticker."""
+        return analyze_options_flow(ticker, options_data)
+
+    def fetch_summary(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Fetch options summary data for a ticker."""
+        return fetch_options_summary(ticker)
+
+    def scan(self, tickers: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """Run full options scan pipeline."""
+        return run_options_scan(tickers)

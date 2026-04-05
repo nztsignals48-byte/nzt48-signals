@@ -89,6 +89,7 @@ pub struct BrainSignal {
 impl BrainSignal {
     #[new]
     #[pyo3(signature = (direction, confidence, kelly_fraction, shares, strategy, rvol=0.0, hurst=0.0, adx=0.0, vol_slope=0.0, vwap_dist_pct=0.0, structural_score=0.0))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         direction: String,
         confidence: f64,
@@ -381,7 +382,7 @@ impl PythonBridge {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 self.consecutive_timeouts += 1;
-                if self.consecutive_timeouts == 1 || self.consecutive_timeouts % 10 == 0 {
+                if self.consecutive_timeouts == 1 || self.consecutive_timeouts.is_multiple_of(10) {
                     eprintln!(
                         "CRITICAL: Python Bridge read TIMEOUT ({}s, #{} consecutive) — stop-loss processing may be delayed!",
                         BRIDGE_READ_TIMEOUT_SECS, self.consecutive_timeouts,
@@ -544,10 +545,7 @@ impl PythonBridge {
         }
 
         // P0-1.2: Read response with timeout (prevents engine freeze if Python hangs)
-        let response_line = match self.read_line_timeout() {
-            Some(line) => line,
-            None => return None, // Timeout or disconnected — no signal
-        };
+        let response_line = self.read_line_timeout()?;
 
         // Parse response
         let resp: serde_json::Value = serde_json::from_str(response_line.trim()).ok()?;
@@ -585,7 +583,7 @@ impl PythonBridge {
             // During off-market hours 0 signals is normal — avoid log pollution.
             // At 5s/tick with 100 tickers, 1000 empties ≈ 50 seconds of market data.
             let n = self.consecutive_empty;
-            if n == 1000 || n == 5000 || (n >= 10000 && n % 10000 == 0) {
+            if n == 1000 || n == 5000 || (n >= 10000 && n.is_multiple_of(10000)) {
                 eprintln!(
                     "WARN: Python bridge returned 0 signals for {} consecutive ticks (may be off-market)",
                     n
@@ -874,10 +872,7 @@ impl PythonBridge {
         }
 
         // P0-1.2: Read response with timeout (prevents engine freeze if Python hangs)
-        let response_line = match self.read_line_timeout() {
-            Some(line) => line,
-            None => return None, // Timeout or disconnected
-        };
+        let response_line = self.read_line_timeout()?;
 
         // Parse response
         let resp: serde_json::Value = serde_json::from_str(response_line.trim()).ok()?;

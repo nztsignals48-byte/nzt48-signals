@@ -4,13 +4,12 @@
 //! LSE opens at 08:00 London time:
 //! - GMT (Oct-Mar): 08:00 London = 08:00 UTC → LSE_OPEN_UTC_SECS = 8*3600
 //! - BST (Mar-Oct): 08:00 London = 07:00 UTC → LSE_OPEN_UTC_SECS must account for this
-//! SOLUTION: Convert all market times to UTC ranges that account for DST dynamically.
+//!   SOLUTION: Convert all market times to UTC ranges that account for DST dynamically.
 
 /// LSE CONTINUOUS TRADING HOURS (UTC-aware):
 /// During GMT (winter, Oct-Mar): 08:00-16:30 London = 08:00-16:30 UTC
 /// During BST (summer, Mar-Oct): 08:00-16:30 London = 07:00-15:30 UTC
 /// This function is called with current epoch time to determine correct range.
-
 /// GST base (no DST): LSE 08:00 London
 pub const LSE_OPEN_UTC_GMT: u32 = 8 * 3600; // 08:00 UTC (when no BST)
 pub const LSE_OPEN_UTC_BST: u32 = 7 * 3600; // 07:00 UTC (when BST active)
@@ -84,10 +83,10 @@ impl TradingMode {
         const DARK_START: u32 = 20 * 3600;    // 20:00 UTC
 
         // Active hours: 22:00-23:59 and 00:00-20:00 (wraps midnight)
-        if utc_secs_from_midnight >= ACTIVE_START || utc_secs_from_midnight < DARK_START {
+        if !(DARK_START..ACTIVE_START).contains(&utc_secs_from_midnight) {
             // Return session window for telemetry (all have identical permissions)
             match utc_secs_from_midnight {
-                t if t >= ACTIVE_START || t < 6 * 3600 => TradingMode::Asia,        // 22:00-06:00 UTC (HKEX/TSE/SGX/ASX/KRX)
+                t if !(6 * 3600..ACTIVE_START).contains(&t) => TradingMode::Asia,        // 22:00-06:00 UTC (HKEX/TSE/SGX/ASX/KRX)
                 t if t < 12 * 3600 + 30 * 60 => TradingMode::Europe,                // 06:00-12:30 UTC (LSE/XETRA/EURONEXT)
                 t if t < 14 * 3600 + 35 * 60 => TradingMode::USOverlap,             // 12:30-14:35 UTC (LSE + NYSE/NASDAQ)
                 _ => TradingMode::USSession,                                         // 14:35-20:00 UTC (NYSE/NASDAQ only)
