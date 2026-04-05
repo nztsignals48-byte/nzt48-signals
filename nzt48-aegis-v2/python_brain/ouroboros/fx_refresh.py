@@ -1,11 +1,12 @@
 """AEGIS V2 — Live FX Rate Refresh.
 
-Fetches current FX rates from Yahoo Finance (free, no API key) and writes
-fx_rates.toml for the Rust engine to load on next tick.
+Fetches current FX rates via IBKR (primary) or Yahoo Finance (fallback)
+and writes fx_rates.toml for the Rust engine to load on next tick.
 
 Pairs fetched: EURGBP, USDGBP, CHFGBP, JPYGBP, HKDGBP, AUDGBP, SEKGBP, NOKGBP, DKKGBP.
 
-Falls back to hardcoded rates if yfinance fails (never leaves the engine without rates).
+Falls back to hardcoded rates if both IBKR and yfinance fail
+(never leaves the engine without rates).
 
 Usage:
     python3 -m python_brain.ouroboros.fx_refresh
@@ -77,8 +78,33 @@ FALLBACK_RATES = {
 }
 
 
-def fetch_live_rates() -> dict[str, float]:
-    """Fetch live FX rates from yfinance. Returns {currency_code: rate_to_gbp}."""
+def _fetch_rates_ibkr() -> dict[str, float]:
+    """Fetch live FX rates from IBKR. Returns {currency_code: rate_to_gbp}."""
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+    except (ImportError, Exception) as e:
+        log.debug("IBKR provider not available for FX: %s", e)
+        return {}
+
+    rates = {}
+    for currency in FALLBACK_RATES.keys():
+        yf_ticker = f"{currency}GBP=X"
+        try:
+            df = provider.get_price_data(yf_ticker, days=1, bar_size="1 day")
+            if df is not None and not df.empty:
+                close = float(df["close"].iloc[-1])
+                if close > 0:
+                    rates[currency] = round(close, 6)
+                    log.info("  IBKR: %s = %.6f GBP", currency, rates[currency])
+        except Exception as e:
+            log.debug("IBKR FX fetch failed for %s: %s", currency, e)
+
+    return rates
+
+
+def _fetch_rates_yfinance() -> dict[str, float]:
+    """Fetch live FX rates from yfinance (fallback). Returns {currency_code: rate_to_gbp}."""
     try:
         import yfinance as yf
     except ImportError:
@@ -101,7 +127,7 @@ def fetch_live_rates() -> dict[str, float]:
                     close = data["Close"][ticker].iloc[-1]
                 if close > 0:
                     rates[currency] = round(float(close), 6)
-                    log.info("  %s = %.6f GBP", currency, rates[currency])
+                    log.info("  yfinance: %s = %.6f GBP", currency, rates[currency])
             except (KeyError, IndexError):
                 log.warning("  %s: no data, using fallback", currency)
     except Exception as e:
@@ -110,11 +136,34 @@ def fetch_live_rates() -> dict[str, float]:
     return rates
 
 
+def fetch_live_rates() -> dict[str, float]:
+    """Fetch live FX rates. Tries IBKR first, falls back to yfinance.
+
+    Returns {currency_code: rate_to_gbp}.
+    """
+    # Try IBKR first (primary)
+    rates = _fetch_rates_ibkr()
+    if rates:
+        log.info("IBKR provided %d/%d FX rates", len(rates), len(FALLBACK_RATES))
+        # If IBKR got most rates, fill gaps with yfinance
+        if len(rates) < len(FALLBACK_RATES):
+            yf_rates = _fetch_rates_yfinance()
+            for cur, rate in yf_rates.items():
+                if cur not in rates:
+                    rates[cur] = rate
+                    log.info("  yfinance gap-fill: %s = %.6f GBP", cur, rate)
+        return rates
+
+    # Fallback to yfinance
+    log.info("IBKR unavailable for FX — falling back to yfinance")
+    return _fetch_rates_yfinance()
+
+
 def write_rates_toml(rates: dict[str, float], path: Path) -> None:
     """Write fx_rates.toml in TOML format for the Rust engine."""
     lines = [
         f"# FX rates updated {time.strftime('%Y-%m-%d %H:%M UTC')}",
-        f"# Source: {'yfinance (live)' if rates else 'hardcoded fallback'}",
+        f"# Source: {'IBKR/yfinance (live)' if rates else 'hardcoded fallback'}",
         "[rates]",
     ]
     # Merge: live rates override fallback

@@ -216,6 +216,26 @@
     "SectorRotation": {
       "id": "SectorRotation", "name": "Sector Rotation", "family": "macro_rotation",
       "status": "live", "description": "Sector momentum rotation via SectorRotationScanner. Tick-fed, 60s recompute, scores merged into scanner_scores. Session 29."
+    },
+    "LatencyArbitrage": {
+      "id": "LatencyArbitrage", "name": "Latency Arbitrage (NAV vs Market)", "family": "arbitrage",
+      "status": "live", "description": "Book 195: NAV-vs-market-price latency arb. Detects temporary mispricing between iNAV and traded price. Session 33."
+    },
+    "MacroNowcast": {
+      "id": "MacroNowcast", "name": "Macro Nowcasting", "family": "event_driven",
+      "status": "live", "description": "Book 84: Real-time economic data interpretation. 30-60s post-release drift capture. Gemini 2.5 Flash. Expected Sharpe +3.2. Session 33."
+    },
+    "MultiLegArbitrage": {
+      "id": "MultiLegArbitrage", "name": "Multi-Leg Vol Rank Arbitrage", "family": "arbitrage",
+      "status": "live", "description": "Book 206: Cross-ETP vol rank extremes. Multi-leg arb across paired ETFs. Session 33."
+    },
+    "StatisticalArbitrage": {
+      "id": "StatisticalArbitrage", "name": "Pairs Statistical Arbitrage", "family": "statistical_arbitrage",
+      "status": "live", "description": "Book 168: Cointegrated pairs trading signal generator. Separate from PairsReversion (OLS-based). Session 33."
+    },
+    "CrossVenueArb": {
+      "id": "CrossVenueArb", "name": "Cross-Venue Arbitrage", "family": "arbitrage",
+      "status": "live", "description": "Cross-venue price discrepancy detection across BATS/Chi-X/IEX/Aquis/LSE. Best execution routing. Session 33."
     }
   },
   "regime_definitions": {
@@ -235,7 +255,7 @@
     "us_power_hour": "19:00-20:00 UTC (closing volume)",
     "dark": "20:00-22:00 UTC (maintenance + Ouroboros nightly)"
   },
-  "strategy_count": 51,
+  "strategy_count": 56,
   "families": [
     "momentum", "mean_reversion", "microstructure", "volatility", "carry",
     "event_driven", "hedging", "arbitrage", "statistical_arbitrage", "meta_strategy",

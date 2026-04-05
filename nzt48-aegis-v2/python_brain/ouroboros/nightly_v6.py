@@ -4184,35 +4184,78 @@ def run_nightly() -> int:
             "TSLA", "NVDA", "AMD", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSM", "MU",
         ]))
         _earnings_out = {}
+        # Try IBKR first (primary) for earnings dates
         try:
-            import yfinance as yf
+            from python_brain.ouroboros.ibkr_data_provider import get_provider as _get_earn_provider
+            _earn_provider = _get_earn_provider()
             for _ul in _etp_underlyings:
                 try:
-                    _tk = yf.Ticker(_ul)
-                    _cal = _tk.calendar
-                    if _cal is not None and hasattr(_cal, 'get'):
-                        _ed = _cal.get("Earnings Date")
-                        if _ed is not None and len(_ed) > 0:
-                            _earnings_out[_ul] = str(_ed[0].date()) if hasattr(_ed[0], 'date') else str(_ed[0])[:10]
-                    elif isinstance(_cal, dict) and "Earnings Date" in _cal:
-                        _ed = _cal["Earnings Date"]
-                        if _ed:
-                            _first = _ed[0] if isinstance(_ed, list) else _ed
-                            _earnings_out[_ul] = str(_first)[:10]
+                    _result = _earn_provider.get_fundamental_data(_ul, report_type="CalendarReport")
+                    if _result and "earnings_date" in _result:
+                        _earnings_out[_ul] = _result["earnings_date"]
                 except Exception:
-                    pass  # Skip individual ticker failures
+                    pass
             if _earnings_out:
-                _earn_path = os.path.join(os.environ.get("AEGIS_DATA_DIR", "/app/data"), "earnings_dates.json")
-                with open(_earn_path, "w") as f:
-                    json.dump(_earnings_out, f, indent=2)
-                log.info("Earnings dates: %d underlyings updated → %s", len(_earnings_out), _earn_path)
-                recommendations["earnings_dates"] = _earnings_out
-            else:
-                log.info("Earnings dates: yfinance returned no dates (market holiday?)")
-        except ImportError:
-            log.info("yfinance not installed — earnings date fetch skipped")
+                log.info("Earnings dates: %d from IBKR", len(_earnings_out))
+        except (ImportError, Exception) as _ibkr_e:
+            log.debug("IBKR earnings fetch not available: %s", _ibkr_e)
+        # Fallback to yfinance for any missing underlyings
+        _missing_ul = [u for u in _etp_underlyings if u not in _earnings_out]
+        if _missing_ul:
+            try:
+                import yfinance as yf
+                for _ul in _missing_ul:
+                    try:
+                        _tk = yf.Ticker(_ul)
+                        _cal = _tk.calendar
+                        if _cal is not None and hasattr(_cal, 'get'):
+                            _ed = _cal.get("Earnings Date")
+                            if _ed is not None and len(_ed) > 0:
+                                _earnings_out[_ul] = str(_ed[0].date()) if hasattr(_ed[0], 'date') else str(_ed[0])[:10]
+                        elif isinstance(_cal, dict) and "Earnings Date" in _cal:
+                            _ed = _cal["Earnings Date"]
+                            if _ed:
+                                _first = _ed[0] if isinstance(_ed, list) else _ed
+                                _earnings_out[_ul] = str(_first)[:10]
+                    except Exception:
+                        pass
+            except ImportError:
+                log.info("yfinance not installed — earnings date fallback skipped")
+        if _earnings_out:
+            _earn_path = os.path.join(os.environ.get("AEGIS_DATA_DIR", "/app/data"), "earnings_dates.json")
+            with open(_earn_path, "w") as f:
+                json.dump(_earnings_out, f, indent=2)
+            log.info("Earnings dates: %d underlyings updated → %s", len(_earnings_out), _earn_path)
+            recommendations["earnings_dates"] = _earnings_out
+        else:
+            log.info("Earnings dates: no dates from IBKR or yfinance (market holiday?)")
     except Exception as e:
         log.warning("Earnings date fetch failed (non-fatal): %s", e)
+
+    # Step N-FUND: Refresh IBKR reqFundamentalData for all universe tickers
+    # Fetches ReportSnapshot + ReportsFinSummary → full fundamental profiles.
+    # Writes /app/data/fundamental_signals.json for bridge.py overlay.
+    # Fields: P/E, P/B, ROE, ROA, EPS, revenue growth, debt/equity, dividend yield,
+    # short interest, analyst ratings, insider ownership, institutional ownership, FCF.
+    try:
+        from python_brain.feeds.fundamental_data_provider import refresh_all_fundamentals
+        # Build symbol list: known US underlyings + any non-suffixed (US) tickers from universe
+        _fund_underlyings = [
+            "TSLA", "NVDA", "AMD", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSM", "MU",
+            "NFLX", "QQQ", "SPY", "SMH", "AVGO", "CRM", "ORCL", "ADBE", "INTC", "QCOM",
+            "COIN", "MARA", "RIOT", "SQ", "SHOP", "SNOW", "PLTR", "SOFI", "UBER", "ABNB",
+        ]
+        _fund_result = refresh_all_fundamentals(_fund_underlyings, max_symbols=100)
+        recommendations["fundamental_data"] = _fund_result
+        log.info("Fundamental data: fetched=%d cached=%d signals=%d (%.1fs)",
+                 _fund_result.get("fetched", 0),
+                 _fund_result.get("cached_used", 0),
+                 _fund_result.get("signals_generated", 0),
+                 _fund_result.get("duration_secs", 0))
+    except ImportError:
+        log.info("Fundamental data provider not installed — skipping")
+    except Exception as e:
+        log.warning("Fundamental data refresh failed (non-fatal): %s", e)
 
     # ════════════════════════════════════════════════════════════════════════
 

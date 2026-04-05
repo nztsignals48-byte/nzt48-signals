@@ -117,6 +117,31 @@ pub struct MarketTick {
     /// Average daily volume over 90 days (generic tick 165)
     #[pyo3(get)]
     pub avg_volume: i64,
+    // ── L2 Depth metrics (from reqMktDepth order book) ──
+    /// Sum of all bid sizes across 5 depth levels
+    #[pyo3(get)]
+    pub total_bid_depth: f64,
+    /// Sum of all ask sizes across 5 depth levels
+    #[pyo3(get)]
+    pub total_ask_depth: f64,
+    /// (total_bid - total_ask) / (total_bid + total_ask), range [-1, 1]
+    #[pyo3(get)]
+    pub depth_imbalance: f64,
+    /// Price level with the largest bid size (wall detection)
+    #[pyo3(get)]
+    pub bid_wall_price: f64,
+    /// Price level with the largest ask size (wall detection)
+    #[pyo3(get)]
+    pub ask_wall_price: f64,
+    /// Top-of-book spread from depth: asks[0] - bids[0]
+    #[pyo3(get)]
+    pub spread_depth_1: f64,
+    /// Full book spread from depth: asks[4] - bids[4] (outermost levels)
+    #[pyo3(get)]
+    pub spread_depth_5: f64,
+    /// Weighted book pressure: sum(size / distance_from_mid), positive = bullish
+    #[pyo3(get)]
+    pub book_pressure: f64,
 }
 
 #[pymethods]
@@ -127,7 +152,10 @@ impl MarketTick {
         rt_hist_vol=0.0, shortable=0.0, halted=false, mark_price=0.0, auction_price=0.0,
         auction_volume=0, auction_imbalance=0.0, etf_nav_close=0.0, etf_nav_last=0.0,
         etf_nav_bid=0.0, etf_nav_ask=0.0, opt_call_oi=0, opt_put_oi=0, opt_call_vol=0,
-        opt_put_vol=0, opt_impl_vol=0.0, opt_hist_vol=0.0, avg_volume=0))]
+        opt_put_vol=0, opt_impl_vol=0.0, opt_hist_vol=0.0, avg_volume=0,
+        total_bid_depth=0.0, total_ask_depth=0.0, depth_imbalance=0.0,
+        bid_wall_price=0.0, ask_wall_price=0.0, spread_depth_1=0.0,
+        spread_depth_5=0.0, book_pressure=0.0))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         ticker_id: TickerId,
@@ -163,6 +191,14 @@ impl MarketTick {
         opt_impl_vol: f64,
         opt_hist_vol: f64,
         avg_volume: i64,
+        total_bid_depth: f64,
+        total_ask_depth: f64,
+        depth_imbalance: f64,
+        bid_wall_price: f64,
+        ask_wall_price: f64,
+        spread_depth_1: f64,
+        spread_depth_5: f64,
+        book_pressure: f64,
     ) -> Self {
         Self {
             timestamp_ns,
@@ -198,6 +234,14 @@ impl MarketTick {
             opt_impl_vol,
             opt_hist_vol,
             avg_volume,
+            total_bid_depth,
+            total_ask_depth,
+            depth_imbalance,
+            bid_wall_price,
+            ask_wall_price,
+            spread_depth_1,
+            spread_depth_5,
+            book_pressure,
         }
     }
 
@@ -245,6 +289,14 @@ impl Default for MarketTick {
             opt_impl_vol: 0.0,
             opt_hist_vol: 0.0,
             avg_volume: 0,
+            total_bid_depth: 0.0,
+            total_ask_depth: 0.0,
+            depth_imbalance: 0.0,
+            bid_wall_price: 0.0,
+            ask_wall_price: 0.0,
+            spread_depth_1: 0.0,
+            spread_depth_5: 0.0,
+            book_pressure: 0.0,
         }
     }
 }

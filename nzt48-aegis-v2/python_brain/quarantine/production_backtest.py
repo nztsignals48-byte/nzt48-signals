@@ -263,7 +263,19 @@ def run_production_backtest(
     equity: float = 10000.0,
 ) -> Dict[str, Any]:
     """Run production-parity backtest using actual bridge.py."""
-    import yfinance as yf
+    # Data fetch helper: IBKR primary, yfinance fallback
+    _ibkr_provider = None
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        _ibkr_provider = get_provider()
+    except (ImportError, Exception):
+        pass
+    try:
+        import yfinance as yf
+        _has_yf = True
+    except ImportError:
+        yf = None  # type: ignore
+        _has_yf = False
 
     ch_cfg = _load_chandelier_config()
     log.info("Chandelier config: initial_stop=%s, rungs=%s",
@@ -309,14 +321,30 @@ def run_production_backtest(
             log.info("  %s: SKIPPED (blacklisted)", symbol)
             continue
 
-        # Fetch data
-        try:
-            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
-            if df is None or df.empty or len(df) < 50:
+        # Fetch data: IBKR primary, yfinance fallback
+        df = None
+        _interval_to_bar = {"1m": "1 min", "2m": "2 mins", "5m": "5 mins", "15m": "15 mins",
+                            "30m": "30 mins", "60m": "1 hour", "1h": "1 hour", "1d": "1 day"}
+        if _ibkr_provider is not None:
+            try:
+                bar_size = _interval_to_bar.get(interval, "5 mins")
+                df = _ibkr_provider.get_price_data(symbol, days=days, bar_size=bar_size)
+                if df is not None and not df.empty and len(df) >= 50:
+                    df.columns = [c.capitalize() for c in df.columns]
+                else:
+                    df = None
+            except Exception:
+                df = None
+        if df is None and _has_yf:
+            try:
+                df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+                if df is None or df.empty or len(df) < 50:
+                    continue
+                if hasattr(df.columns, 'levels'):
+                    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            except Exception:
                 continue
-            if hasattr(df.columns, 'levels'):
-                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        except Exception:
+        if df is None or df.empty or len(df) < 50:
             continue
 
         log.info("  %s: %d bars", symbol, len(df))

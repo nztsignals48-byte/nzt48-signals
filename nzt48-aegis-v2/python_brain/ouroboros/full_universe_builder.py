@@ -681,10 +681,10 @@ def run_method2_exchange_csvs() -> List[Dict[str, Any]]:
 # ============================================================================
 
 def _yf_sector_tickers(exchange_suffix: str, exchange_name: str) -> List[Dict[str, Any]]:
-    """Use yfinance to discover tickers via popular ETFs and their holdings.
+    """Discover tickers via popular ETFs and their holdings.
 
-    Since yfinance doesn't have a direct exchange screener, we use a
-    pragmatic approach: fetch holdings of major index-tracking ETFs.
+    Uses yfinance for ETF holdings data (no IBKR equivalent for holdings lookup).
+    IBKR is used elsewhere for contract validation of discovered tickers.
     """
     try:
         import yfinance as yf

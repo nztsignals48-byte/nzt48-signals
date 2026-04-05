@@ -40,7 +40,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    from python_brain.ouroboros.ibkr_data_provider import get_provider as _get_ibkr_provider
+    _HAS_IBKR = True
+except ImportError:
+    _HAS_IBKR = False
+
+try:
     import yfinance as yf
+    _HAS_YF = True
+except ImportError:
+    yf = None  # type: ignore
+    _HAS_YF = False
+
+try:
     import numpy as np
     import pytz
     import tomllib  # Python 3.11+
@@ -465,22 +477,47 @@ def _parse_yf_batch(batch: List[str], data, results: Dict[str, Dict[str, Any]]) 
     return added
 
 
-def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, Any]]:
-    """Fetch recent price data for a list of symbols via yfinance.
+def _fetch_price_data_ibkr(symbols: List[str], days: int, results: Dict[str, Dict[str, Any]]) -> List[str]:
+    """Fetch price data via IBKR provider. Returns list of symbols that failed."""
+    if not _HAS_IBKR:
+        return list(symbols)
 
-    Uses smaller batch sizes and exponential backoff to avoid rate limits.
-    Failed batches are retried up to 3 times with increasing delays.
+    failed = []
+    try:
+        provider = _get_ibkr_provider()
+    except Exception as e:
+        log.warning("IBKR provider unavailable: %s", e)
+        return list(symbols)
 
-    Returns: {symbol: {"closes": [...], "volumes": [...], "last_price": float}}
-    """
-    results = {}
+    for sym in symbols:
+        try:
+            df = provider.get_price_data(sym, days=days, bar_size="1 day")
+            if df is not None and not df.empty:
+                closes = df["close"].dropna().tolist()
+                volumes = df["volume"].dropna().tolist() if "volume" in df.columns else []
+                if closes:
+                    results[sym] = {
+                        "closes": closes,
+                        "volumes": volumes,
+                        "last_price": closes[-1] if closes else 0,
+                    }
+                    continue
+        except Exception as e:
+            log.debug("IBKR fetch failed for %s: %s", sym, e)
+        failed.append(sym)
+
+    return failed
+
+
+def _fetch_price_data_yfinance(symbols: List[str], days: int, results: Dict[str, Dict[str, Any]]) -> None:
+    """Fetch price data via yfinance (fallback). Populates results dict in-place."""
+    if not _HAS_YF or not symbols:
+        return
+
     period = f"{days}d"
     failed_symbols: List[str] = []
-
-    # Use smaller batches (20) to reduce rate-limit impact per request.
-    # yfinance rate-limits entire batch on 429, so smaller = less wasted.
     batch_size = 20
-    base_delay = 1.0  # seconds between batches
+    base_delay = 1.0
 
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
@@ -502,7 +539,6 @@ def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, 
                     success = True
                     break
                 else:
-                    # Empty data but no exception — symbols may be delisted
                     success = True
                     break
 
@@ -510,7 +546,7 @@ def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, 
                 err_str = str(e)
                 is_rate_limit = "rate" in err_str.lower() or "429" in err_str or "Too Many" in err_str
                 if is_rate_limit and attempt < 2:
-                    backoff = base_delay * (2 ** (attempt + 1))  # 2s, 4s
+                    backoff = base_delay * (2 ** (attempt + 1))
                     log.warning("Rate limited on batch %d-%d (attempt %d/3), retrying in %.0fs",
                                 i, i + batch_size, attempt + 1, backoff)
                     time.sleep(backoff)
@@ -522,14 +558,12 @@ def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, 
         if not success:
             failed_symbols.extend(batch)
 
-        # Adaptive delay: longer pause every 5 batches to stay under rate limit
         batch_num = i // batch_size
         if batch_num > 0 and batch_num % 5 == 0:
-            time.sleep(base_delay * 3)  # 3s pause every 5 batches
+            time.sleep(base_delay * 3)
         else:
             time.sleep(base_delay)
 
-    # Retry failed symbols in even smaller batches with longer delays
     if failed_symbols:
         log.info("Retrying %d failed symbols in micro-batches...", len(failed_symbols))
         micro_batch = 5
@@ -550,7 +584,28 @@ def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, 
                 pass
             time.sleep(2.0)
 
-    log.info("Fetched price data for %d/%d symbols", len(results), len(symbols))
+
+def fetch_price_data(symbols: List[str], days: int = 30) -> Dict[str, Dict[str, Any]]:
+    """Fetch recent price data for a list of symbols.
+
+    Tries IBKR data provider first, falls back to yfinance for any failures.
+    Uses smaller batch sizes and exponential backoff to avoid rate limits.
+
+    Returns: {symbol: {"closes": [...], "volumes": [...], "last_price": float}}
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+
+    # Try IBKR first (primary)
+    remaining = _fetch_price_data_ibkr(symbols, days, results)
+    if results:
+        log.info("IBKR provided price data for %d/%d symbols", len(results), len(symbols))
+
+    # Fallback to yfinance for remaining symbols
+    if remaining:
+        log.info("Falling back to yfinance for %d remaining symbols", len(remaining))
+        _fetch_price_data_yfinance(remaining, days, results)
+
+    log.info("Fetched price data for %d/%d symbols (IBKR+yfinance)", len(results), len(symbols))
     return results
 
 
@@ -1592,20 +1647,41 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
                         break
             else:
                 still_missing.append(sym)
-        # Fetch remaining from yfinance
-        for sym in still_missing[:150]:
+        # Fetch remaining from IBKR (primary) then yfinance (fallback)
+        ibkr_resolved = set()
+        if _HAS_IBKR:
             try:
-                info = yf.Ticker(sym).info
-                short_name = info.get("shortName") or info.get("longName") or ""
-                if short_name:
-                    cached_names[sym] = short_name
-                    for t in scored:
-                        if t.get("symbol") == sym:
-                            t["name"] = short_name
-                            enriched += 1
-                            break
+                provider = _get_ibkr_provider()
+                for sym in still_missing[:150]:
+                    try:
+                        details = provider.get_contract_details(sym)
+                        if details and details.get("long_name"):
+                            cached_names[sym] = details["long_name"]
+                            for t in scored:
+                                if t.get("symbol") == sym:
+                                    t["name"] = details["long_name"]
+                                    enriched += 1
+                                    break
+                            ibkr_resolved.add(sym)
+                    except Exception:
+                        pass
             except Exception:
                 pass
+        yf_remaining = [s for s in still_missing[:150] if s not in ibkr_resolved]
+        if yf_remaining and _HAS_YF:
+            for sym in yf_remaining:
+                try:
+                    info = yf.Ticker(sym).info
+                    short_name = info.get("shortName") or info.get("longName") or ""
+                    if short_name:
+                        cached_names[sym] = short_name
+                        for t in scored:
+                            if t.get("symbol") == sym:
+                                t["name"] = short_name
+                                enriched += 1
+                                break
+                except Exception:
+                    pass
         # Save updated name cache
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         try:

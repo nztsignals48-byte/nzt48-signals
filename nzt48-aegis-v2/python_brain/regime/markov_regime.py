@@ -196,9 +196,23 @@ def _load_market_returns(lookback_days: int = 252) -> Optional[np.ndarray]:
     """Load market returns for regime detection.
 
     Priority:
-      1. SPY daily returns from yfinance
-      2. WAL-derived portfolio returns
+      1. SPY daily returns from IBKR data provider
+      2. SPY daily returns from yfinance (fallback)
+      3. WAL-derived portfolio returns
     """
+    # Try IBKR first (primary)
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        spy = provider.get_price_data("SPY", days=lookback_days + 10, bar_size="1 day")
+        if spy is not None and len(spy) >= 60:
+            closes = spy["close"].dropna().values.astype(float)
+            returns = np.diff(np.log(closes))
+            return returns
+    except Exception as e:
+        log.debug("IBKR SPY fetch failed: %s", str(e)[:80])
+
+    # Fallback to yfinance
     try:
         import yfinance as yf
         spy = yf.download("SPY", period=f"{lookback_days + 10}d", progress=False, auto_adjust=True)

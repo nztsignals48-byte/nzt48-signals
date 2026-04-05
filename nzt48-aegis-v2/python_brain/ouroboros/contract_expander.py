@@ -37,9 +37,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
-    import yfinance as yf
+    from python_brain.ouroboros.ibkr_data_provider import get_provider as _get_ibkr_provider
+    _HAS_IBKR = True
 except ImportError:
-    print("ERROR: yfinance not installed", file=sys.stderr)
+    _HAS_IBKR = False
+
+try:
+    import yfinance as yf
+    _HAS_YF = True
+except ImportError:
+    yf = None  # type: ignore
+    _HAS_YF = False
+
+if not _HAS_IBKR and not _HAS_YF:
+    print("ERROR: Neither IBKR provider nor yfinance available", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -313,55 +324,79 @@ def load_candidates() -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def validate_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Validate candidates have recent price data via yfinance.
+    """Validate candidates have recent price data.
 
+    Tries IBKR data provider first, falls back to yfinance.
     Returns only those with valid price data.
     """
     if not candidates:
         return []
 
     validated = []
-    symbols = [c["symbol"] for c in candidates]
+    remaining = list(candidates)
 
-    for i in range(0, len(symbols), YF_BATCH_SIZE):
-        batch_syms = symbols[i:i + YF_BATCH_SIZE]
-        batch_str = " ".join(batch_syms)
-
+    # Try IBKR first (primary)
+    if _HAS_IBKR:
         try:
-            data = yf.download(
-                batch_str,
-                period="5d",
-                interval="1d",
-                progress=False,
-                threads=True,
-                ignore_tz=True,
-            )
-
-            if data.empty:
-                continue
-
-            for sym in batch_syms:
+            provider = _get_ibkr_provider()
+            ibkr_validated = set()
+            for c in remaining:
+                sym = c["symbol"]
                 try:
-                    if len(batch_syms) == 1:
-                        has_data = not data["Close"].dropna().empty
-                    else:
-                        has_data = (
-                            sym in data["Close"].columns
-                            and not data["Close"][sym].dropna().empty
-                        )
+                    df = provider.get_price_data(sym, days=5, bar_size="1 day")
+                    if df is not None and not df.empty:
+                        validated.append(c)
+                        ibkr_validated.add(sym)
+                except Exception as e:
+                    log.debug("IBKR validation failed for %s: %s", sym, e)
+                time.sleep(0.07)  # IBKR pacing
+            remaining = [c for c in remaining if c["symbol"] not in ibkr_validated]
+            if ibkr_validated:
+                log.info("IBKR validated %d candidates", len(ibkr_validated))
+        except Exception as e:
+            log.warning("IBKR provider failed during validation: %s", e)
 
-                    if has_data:
-                        # Find the candidate dict for this symbol
-                        cand = next((c for c in candidates if c["symbol"] == sym), None)
-                        if cand:
-                            validated.append(cand)
-                except (KeyError, TypeError):
+    # Fallback: validate remaining via yfinance
+    if remaining and _HAS_YF:
+        symbols = [c["symbol"] for c in remaining]
+        for i in range(0, len(symbols), YF_BATCH_SIZE):
+            batch_syms = symbols[i:i + YF_BATCH_SIZE]
+            batch_str = " ".join(batch_syms)
+
+            try:
+                data = yf.download(
+                    batch_str,
+                    period="5d",
+                    interval="1d",
+                    progress=False,
+                    threads=True,
+                    ignore_tz=True,
+                )
+
+                if data.empty:
                     continue
 
-        except Exception as e:
-            log.warning("yfinance batch validation failed: %s", e)
+                for sym in batch_syms:
+                    try:
+                        if len(batch_syms) == 1:
+                            has_data = not data["Close"].dropna().empty
+                        else:
+                            has_data = (
+                                sym in data["Close"].columns
+                                and not data["Close"][sym].dropna().empty
+                            )
 
-        time.sleep(0.3)
+                        if has_data:
+                            cand = next((c for c in remaining if c["symbol"] == sym), None)
+                            if cand:
+                                validated.append(cand)
+                    except (KeyError, TypeError):
+                        continue
+
+            except Exception as e:
+                log.warning("yfinance batch validation failed: %s", e)
+
+            time.sleep(0.3)
 
     return validated
 

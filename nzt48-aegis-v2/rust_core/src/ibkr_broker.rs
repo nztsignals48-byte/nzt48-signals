@@ -9,11 +9,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
 use ibapi::contracts::tick_types::TickType;
-use ibapi::market_data::realtime::{BarSize, BidAsk, TickTypes, WhatToShow};
+use ibapi::market_data::realtime::{BarSize, BidAsk, MarketDepths, TickTypes, WhatToShow};
 use ibapi::orders::OrderUpdate;
 use ibapi::prelude::TradingHours;
 use ibapi::subscriptions::sync::Subscription;
 
+use crate::order_book::{DepthMetrics, OrderBookStore};
 use crate::broker::{
     BrokerAdapter, BrokerError, BrokerEvent, BrokerOpenOrder, BrokerPosition, TokenBucket,
     min_lot_for_exchange,
@@ -73,6 +74,14 @@ struct MktDataSubscription {
     ticker_id: TickerId,
     symbol: String,
     sub: Subscription<TickTypes>,
+}
+
+/// reqMktDepth L2 order book subscription handle.
+struct DepthSubscription {
+    ticker_id: TickerId,
+    #[allow(dead_code)]
+    symbol: String,
+    sub: Subscription<MarketDepths>,
 }
 
 /// Streaming tick accumulator — builds synthetic bars from reqMktData ticks.
@@ -232,6 +241,12 @@ pub struct IbkrBroker {
     /// Set of tickers with active L1 tick-by-tick subscriptions.
     /// Used to gate signal generation — only trade on continuous tape data.
     l1_subscribed_set: HashSet<TickerId>,
+    /// reqMktDepth L2 order book subscriptions.
+    depth_subs: Vec<DepthSubscription>,
+    /// Per-ticker L2 order book state (maintained from depth updates).
+    depth_books: OrderBookStore,
+    /// Diagnostic: total L2 depth updates received (lifetime counter).
+    total_depth_received: u64,
 }
 
 impl IbkrBroker {
@@ -267,6 +282,9 @@ impl IbkrBroker {
             sub_errors_detected: 0,
             last_modify_ns: HashMap::new(),
             l1_subscribed_set: HashSet::new(),
+            depth_subs: Vec::new(),
+            depth_books: OrderBookStore::new(),
+            total_depth_received: 0,
         }
     }
 
@@ -334,6 +352,8 @@ impl IbkrBroker {
         self.tick_accum.clear();
         self.bar_failed_tickers.clear();
         self.l1_cache.clear();
+        self.depth_subs.clear();
+        self.depth_books.clear();
         self.order_update_sub = None;
         self.client = None;
         self.connected = false;
@@ -755,6 +775,80 @@ impl IbkrBroker {
         count
     }
 
+    /// Subscribe to reqMktDepth (L2 order book) for a contract.
+    /// Requests 5 levels of depth. Only subscribes for exchanges with L2 data.
+    /// L2 exchanges: LSE, XETRA, HKEX, TSE, KRX (paid), BATS/Chi-X/IEX (free).
+    pub fn subscribe_depth(&mut self, ticker_id: TickerId) -> Result<(), BrokerError> {
+        let client = self.client.as_ref().ok_or(BrokerError::NotConnected)?;
+        let mapping = self
+            .contract_map
+            .get(&ticker_id)
+            .ok_or_else(|| {
+                BrokerError::InvalidOrder(format!("No contract for ticker {}", ticker_id.0))
+            })?
+            .clone();
+
+        // Only subscribe for exchanges where we have L2 depth data.
+        // Paid: LSE, XETRA/IBIS, HKEX/SEHK, TSE/TSEJ, KRX/KSE
+        // Free: BATS, Chi-X (CHIX), IEX
+        let ibkr_exch = Self::ibkr_exchange(&mapping.exchange);
+        let has_l2 = matches!(
+            ibkr_exch,
+            "LSE" | "LSEETF" | "IBIS" | "SEHK" | "TSEJ" | "KSE"
+                | "BATS" | "CHIX" | "IEX"
+        );
+        if !has_l2 {
+            return Err(BrokerError::InvalidOrder(format!(
+                "No L2 depth for exchange {} ({})",
+                mapping.exchange, ibkr_exch
+            )));
+        }
+
+        let contract = Self::build_contract(&mapping);
+        match client.market_depth(&contract, 5, false) {
+            Ok(sub) => {
+                eprintln!(
+                    "IBKR: Depth subscribed for {} (ticker_id={}, exchange={})",
+                    mapping.symbol, ticker_id.0, mapping.exchange
+                );
+                self.depth_subs.push(DepthSubscription {
+                    ticker_id,
+                    symbol: mapping.symbol,
+                    sub,
+                });
+                // Pre-create the order book entry
+                self.depth_books.get_or_create(ticker_id);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("IBKR: Depth subscription failed for {}: {e}", mapping.symbol);
+                Err(BrokerError::InvalidOrder(format!("depth subscribe: {e}")))
+            }
+        }
+    }
+
+    /// Subscribe to L2 depth for all registered contracts on L2-capable exchanges.
+    /// Called after subscribe_all() / subscribe_all_mktdata().
+    pub fn subscribe_all_depth(&mut self) -> u32 {
+        let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
+        let mut count = 0u32;
+        for tid in ticker_ids {
+            if self.subscribe_depth(tid).is_ok() {
+                count += 1;
+            }
+        }
+        eprintln!(
+            "SUBSCRIBE_DEPTH: {} reqMktDepth (L2) subscriptions active",
+            count
+        );
+        count
+    }
+
+    /// Get depth metrics for a ticker (if L2 data available).
+    pub fn depth_metrics(&self, ticker_id: &TickerId) -> Option<DepthMetrics> {
+        self.depth_books.metrics(ticker_id)
+    }
+
     /// Unsubscribe from L1 bid/ask for a specific ticker (P21: Mode rotation).
     pub fn unsubscribe_l1(&mut self, ticker_id: TickerId) -> Result<(), BrokerError> {
         // Find and remove the L1 subscription
@@ -1114,6 +1208,8 @@ impl IbkrBroker {
                             opt_impl_vol: acc.opt_impl_vol,
                             opt_hist_vol: acc.opt_hist_vol,
                             avg_volume: acc.avg_volume,
+                            // Depth metrics stamped later in step 5 (after depth polling)
+                            ..Default::default()
                         };
                         self.pending_ticks.push_back(tick);
                         // Store high/low for ATR calculation (synthetic bar)
@@ -1142,21 +1238,90 @@ impl IbkrBroker {
             }
         }
 
+        // 4. Drain L2 depth subscriptions — update order books.
+        let mut depth_count = 0u32;
+        for depth_sub in &self.depth_subs {
+            while let Some(depth_update) = depth_sub.sub.try_next() {
+                match depth_update {
+                    MarketDepths::MarketDepth(depth) => {
+                        depth_count += 1;
+                        let book = self.depth_books.get_or_create(depth_sub.ticker_id);
+                        book.apply_update(
+                            depth.position,
+                            depth.operation,
+                            depth.side,
+                            depth.price,
+                            depth.size,
+                            self.now_ns,
+                        );
+                    }
+                    MarketDepths::MarketDepthL2(depth) => {
+                        depth_count += 1;
+                        let book = self.depth_books.get_or_create(depth_sub.ticker_id);
+                        book.apply_update(
+                            depth.position,
+                            depth.operation,
+                            depth.side,
+                            depth.price,
+                            depth.size,
+                            self.now_ns,
+                        );
+                    }
+                    MarketDepths::Notice(notice) => {
+                        if self.sub_errors_detected < 50 {
+                            eprintln!(
+                                "IBKR DEPTH NOTICE [{}]: code={} msg={}",
+                                depth_sub.symbol, notice.code, notice.message
+                            );
+                        }
+                        self.sub_errors_detected += 1;
+                    }
+                }
+            }
+            // Check for errors on depth subscriptions
+            if let Some(err) = depth_sub.sub.error() {
+                if self.sub_errors_detected < 50 {
+                    eprintln!(
+                        "IBKR SUB ERROR [DEPTH {}]: {}",
+                        depth_sub.symbol, err
+                    );
+                }
+                self.sub_errors_detected += 1;
+            }
+        }
+        self.total_depth_received += depth_count as u64;
+
+        // 5. Stamp depth metrics onto all pending ticks that have L2 data.
+        // This enriches the MarketTick with order book aggregate metrics before
+        // they're sent to Python via the bridge.
+        for tick in &mut self.pending_ticks {
+            if let Some(metrics) = self.depth_books.metrics(&tick.ticker_id) {
+                tick.total_bid_depth = metrics.total_bid_depth;
+                tick.total_ask_depth = metrics.total_ask_depth;
+                tick.depth_imbalance = metrics.depth_imbalance;
+                tick.bid_wall_price = metrics.bid_wall_price;
+                tick.ask_wall_price = metrics.ask_wall_price;
+                tick.spread_depth_1 = metrics.spread_depth_1;
+                tick.spread_depth_5 = metrics.spread_depth_5;
+                tick.book_pressure = metrics.book_pressure;
+            }
+        }
+
         // Update lifetime counters
         self.total_bars_received += (bar_count + mkt_count) as u64;
         self.total_l1_received += l1_count as u64;
 
         // Diagnostic: log data arrival
-        let any_data = bar_count > 0 || l1_count > 0 || mkt_count > 0;
+        let any_data = bar_count > 0 || l1_count > 0 || mkt_count > 0 || depth_count > 0;
         if any_data {
             let total = self.pending_ticks.len();
             let poll_num = self.total_bars_received;
             if poll_num <= 40 || poll_num % 720 == 0 {
                 eprintln!(
-                    "POLL: bars={} mkt={} l1={} pending={} bar_subs={} mkt_subs={} l1_subs={} l1_eligible={} lifetime={}",
-                    bar_count, mkt_count, l1_count, total,
+                    "POLL: bars={} mkt={} l1={} depth={} pending={} bar_subs={} mkt_subs={} l1_subs={} depth_subs={} l1_eligible={} lifetime={}",
+                    bar_count, mkt_count, l1_count, depth_count, total,
                     self.bar_subs.len(), self.mktdata_subs.len(), self.l1_subs.len(),
-                    self.l1_subscribed_set.len(), self.total_bars_received
+                    self.depth_subs.len(), self.l1_subscribed_set.len(), self.total_bars_received
                 );
             }
         }

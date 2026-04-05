@@ -36,9 +36,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
-    import yfinance as yf
+    from python_brain.ouroboros.ibkr_data_provider import get_provider as _get_ibkr_provider
+    _HAS_IBKR = True
 except ImportError:
-    print("ERROR: yfinance not installed. Run: pip install yfinance", file=sys.stderr)
+    _HAS_IBKR = False
+
+try:
+    import yfinance as yf
+    _HAS_YF = True
+except ImportError:
+    yf = None  # type: ignore
+    _HAS_YF = False
+
+if not _HAS_IBKR and not _HAS_YF:
+    print("ERROR: Neither IBKR provider nor yfinance available", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -540,66 +551,94 @@ def validate_tickers_batch(
     batch_size: int = 50,
     max_retries: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Validate a list of tickers via yfinance Tickers() in batches.
+    """Validate a list of tickers. Tries IBKR first, falls back to yfinance.
 
     Returns classified ticker dicts for valid tickers.
-    Uses batching to avoid overwhelming the API.
     """
     valid = []
     total = len(symbols)
+    remaining = list(symbols)
 
-    for batch_start in range(0, total, batch_size):
-        batch = symbols[batch_start:batch_start + batch_size]
-        batch_str = " ".join(batch)
-
-        for attempt in range(max_retries):
-            try:
-                tickers = yf.Tickers(batch_str)
-                for sym in batch:
-                    try:
-                        ticker = tickers.tickers.get(sym)
-                        if ticker is None:
-                            continue
-                        info = ticker.info
-                        if not info or info.get("regularMarketPrice") is None:
-                            # Try fast_info as fallback
-                            try:
-                                fi = ticker.fast_info
-                                if fi and hasattr(fi, 'last_price') and fi.last_price:
-                                    info = info or {}
-                                    info["regularMarketPrice"] = fi.last_price
-                                    info["currency"] = getattr(fi, "currency", "USD")
-                                else:
-                                    continue
-                            except Exception:
-                                continue
-
+    # Try IBKR first for validation (contract details + price data check)
+    if _HAS_IBKR:
+        try:
+            provider = _get_ibkr_provider()
+            ibkr_validated = set()
+            for sym in symbols:
+                try:
+                    details = provider.get_contract_details(sym)
+                    if details and details.get("con_id"):
+                        info = {
+                            "shortName": details.get("long_name", ""),
+                            "sector": details.get("category", "Unknown"),
+                            "regularMarketPrice": 1.0,  # Placeholder; IBKR confirmed valid
+                            "currency": details.get("currency", "USD"),
+                        }
                         classified = classify_ticker(info, sym)
                         classified["exchange"] = exchange
                         classified["validated"] = True
+                        classified["con_id"] = details["con_id"]
                         valid.append(classified)
-                    except Exception:
-                        # Individual ticker failure — skip it
-                        continue
+                        ibkr_validated.add(sym)
+                except Exception:
+                    pass
+            remaining = [s for s in symbols if s not in ibkr_validated]
+            if ibkr_validated:
+                log.info("IBKR validated %d/%d tickers for %s", len(ibkr_validated), total, exchange)
+        except Exception as e:
+            log.debug("IBKR validation unavailable: %s", e)
 
-                log.info(
-                    "  Validated batch %d-%d/%d for %s: %d valid",
-                    batch_start + 1, min(batch_start + batch_size, total),
-                    total, exchange, len(valid) - batch_start,
-                )
-                break  # Success — move to next batch
+    # Fallback to yfinance for remaining
+    if remaining and _HAS_YF:
+        for batch_start in range(0, len(remaining), batch_size):
+            batch = remaining[batch_start:batch_start + batch_size]
+            batch_str = " ".join(batch)
 
-            except Exception as e:
-                wait = 2 ** attempt
-                log.warning(
-                    "  Batch %d-%d failed (attempt %d/%d): %s — retrying in %ds",
-                    batch_start + 1, min(batch_start + batch_size, total),
-                    attempt + 1, max_retries, e, wait,
-                )
-                time.sleep(wait)
+            for attempt in range(max_retries):
+                try:
+                    tickers = yf.Tickers(batch_str)
+                    for sym in batch:
+                        try:
+                            ticker = tickers.tickers.get(sym)
+                            if ticker is None:
+                                continue
+                            info = ticker.info
+                            if not info or info.get("regularMarketPrice") is None:
+                                try:
+                                    fi = ticker.fast_info
+                                    if fi and hasattr(fi, 'last_price') and fi.last_price:
+                                        info = info or {}
+                                        info["regularMarketPrice"] = fi.last_price
+                                        info["currency"] = getattr(fi, "currency", "USD")
+                                    else:
+                                        continue
+                                except Exception:
+                                    continue
 
-        # Rate limit between batches
-        time.sleep(0.5)
+                            classified = classify_ticker(info, sym)
+                            classified["exchange"] = exchange
+                            classified["validated"] = True
+                            valid.append(classified)
+                        except Exception:
+                            continue
+
+                    log.info(
+                        "  yfinance validated batch %d-%d/%d for %s",
+                        batch_start + 1, min(batch_start + batch_size, len(remaining)),
+                        len(remaining), exchange,
+                    )
+                    break
+
+                except Exception as e:
+                    wait = 2 ** attempt
+                    log.warning(
+                        "  Batch %d-%d failed (attempt %d/%d): %s — retrying in %ds",
+                        batch_start + 1, min(batch_start + batch_size, len(remaining)),
+                        attempt + 1, max_retries, e, wait,
+                    )
+                    time.sleep(wait)
+
+            time.sleep(0.5)
 
     return valid
 

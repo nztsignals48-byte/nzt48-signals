@@ -432,7 +432,11 @@ impl PythonBridge {
                 r#""auction_imbalance":{:.2},"etf_nav_close":{:.6},"etf_nav_last":{:.6},"#,
                 r#""etf_nav_bid":{:.6},"etf_nav_ask":{:.6},"opt_call_oi":{},"opt_put_oi":{},"#,
                 r#""opt_call_vol":{},"opt_put_vol":{},"opt_impl_vol":{:.4},"opt_hist_vol":{:.4},"#,
-                r#""avg_volume":{}}}"#
+                r#""avg_volume":{},"#,
+                // L2 depth metrics
+                r#""total_bid_depth":{:.2},"total_ask_depth":{:.2},"depth_imbalance":{:.6},"#,
+                r#""bid_wall_price":{:.6},"ask_wall_price":{:.6},"spread_depth_1":{:.6},"#,
+                r#""spread_depth_5":{:.6},"book_pressure":{:.4}}}"#
             ),
             tick.ticker_id.0,
             tick.last,
@@ -489,6 +493,15 @@ impl PythonBridge {
             tick.opt_impl_vol,
             tick.opt_hist_vol,
             tick.avg_volume,
+            // L2 depth metrics
+            tick.total_bid_depth,
+            tick.total_ask_depth,
+            tick.depth_imbalance,
+            tick.bid_wall_price,
+            tick.ask_wall_price,
+            tick.spread_depth_1,
+            tick.spread_depth_5,
+            tick.book_pressure,
         );
 
         // Send — broken pipe means Python process is dead, flag for respawn.

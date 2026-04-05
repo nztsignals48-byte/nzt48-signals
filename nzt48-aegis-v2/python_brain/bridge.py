@@ -159,6 +159,14 @@ except ImportError:
     _HAS_NAV_TRACKER = False
     ETP_NAV_INFO = {}
 
+# Cross-Venue Arbitrage — multi-venue price discrepancy detection
+# Consumes free L2 from BATS Europe, Chi-X, IEX, Aquis + paid LSE, XETRA, HKEX, TSE, KRX
+try:
+    from python_brain.strategies.cross_venue_arb import get_tracker as _get_xva_tracker
+    _HAS_XVA = True
+except ImportError:
+    _HAS_XVA = False
+
 # Kalman filter for dynamic hedge ratios (pairs trading)
 try:
     from python_brain.features.kalman_hedge import get_manager as _get_kalman_mgr
@@ -4988,6 +4996,51 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.write(f"NAVArbitrage error (non-fatal): {e}\n")
         sys.stderr.flush()
 
+    # Cross-Venue Arbitrage — multi-venue price discrepancy detection
+    # Feeds venue quotes and checks for crossed markets / spread improvement.
+    cross_venue_signal = None
+    try:
+        if _HAS_XVA:
+            _xva = _get_xva_tracker()
+            symbol = msg.get("symbol", "")
+            _xva_venue = msg.get("exchange", "")
+            _xva_bid = msg.get("bid", 0.0)
+            _xva_ask = msg.get("ask", 0.0)
+            if symbol and _xva_venue and _xva_bid > 0 and _xva_ask > 0:
+                _xva.update_quote(
+                    symbol=symbol,
+                    venue=_xva_venue,
+                    bid=_xva_bid,
+                    ask=_xva_ask,
+                    bid_size=msg.get("bid_size", 0),
+                    ask_size=msg.get("ask_size", 0),
+                    timestamp=msg.get("timestamp_ns", 0) / 1e9 if msg.get("timestamp_ns", 0) > 0 else 0.0,
+                )
+                _xva_arb = _xva.check_arb(symbol)
+                if _xva_arb and _xva_arb.confidence >= conf_floor:
+                    kelly = _kelly_for(_xva_arb.confidence)
+                    cross_venue_signal = {
+                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                        "confidence": _xva_arb.confidence,
+                        "kelly_fraction": kelly["kelly_fraction"],
+                        "shares": kelly["shares"],
+                        "strategy": "CrossVenueArb",
+                        "arb_buy_venue": _xva_arb.buy_venue,
+                        "arb_sell_venue": _xva_arb.sell_venue,
+                        "arb_edge_bps": _xva_arb.edge_bps,
+                        "arb_edge_pct": _xva_arb.edge_pct,
+                        "arb_n_venues": _xva_arb.n_venues,
+                        "arb_best_spread_venue": _xva_arb.best_spread_venue,
+                        "arb_best_spread_bps": _xva_arb.best_spread_bps,
+                        "preferred_venue": _xva_arb.buy_venue,
+                        **common_fields,
+                    }
+    except ImportError:
+        pass
+    except Exception as e:
+        sys.stderr.write(f"CrossVenueArb error (non-fatal): {e}\n")
+        sys.stderr.flush()
+
     # Alpha Factory Ensemble (Books 121, 168) — formulaic alpha combination
     alpha_signal = None
     try:
@@ -5780,6 +5833,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         emat_signal, attn_signal, swarm_signal, hft_signal, negrisk_signal,
         highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
         drift_signal, coint_signal, latarb_signal, nowcast_signal, multileg_signal, pairs_stat_arb_signal,
+        cross_venue_signal,
     ] if s]
 
     # ── BOOK 179: CAPITAL-PHASE STRATEGY FILTERING (CONSUME _phase1_strategies) ──
@@ -5949,6 +6003,21 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                             sig["options_flow"] = _opt_info.get("signals", [])
     except Exception:
         pass
+
+    # ── FUNDAMENTAL DATA OVERLAY (IBKR reqFundamentalData) ──
+    # Strategy-aware confidence adjustments from company fundamentals.
+    # Value screen → boosts MR strategies. Growth screen → boosts momentum.
+    # Short interest → boosts squeeze strategies. Analyst consensus → all.
+    # Data source: /app/data/fundamental_signals.json (nightly refresh via IBKR).
+    try:
+        from python_brain.feeds.fundamental_overlay import apply_fundamental_overlay
+        _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+        if _ticker_sym:
+            apply_fundamental_overlay(all_signals, _ticker_sym)
+    except ImportError:
+        pass  # Module not installed — skip silently
+    except Exception:
+        pass  # Fail-open: fundamental data is advisory, never blocks signals
 
     # ── SESSION 27: CRYPTO FEAR/GREED MACRO OVERLAY ──
     try:
@@ -6205,6 +6274,8 @@ _STRATEGY_PF_PRIOR: dict = {
     # Orchestrator strategies — default prior (no backtest data yet)
     "vwap_dip_buy": 1.0, "gap_fade": 1.0, "rsi_ibs": 1.0,
     "cross_market_momentum": 1.0, "intraday_momentum": 1.0,
+    # Cross-venue arb — default prior (no backtest data yet, pure structural edge)
+    "CrossVenueArb": 1.0, "cross_venue_arb": 1.0,
 }
 
 
@@ -8001,6 +8072,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # ── ORDER FLOW IMBALANCE (LOB microstructure signal) ──
     # OFI confirms or opposes signal direction from bid/ask dynamics.
+    # When L2 depth data is available (from reqMktDepth), depth_imbalance
+    # and book_pressure enrich the OFI signal with multi-level book info.
     if _HAS_OFI:
         try:
             _ofi_tracker = _get_ofi_tracker()
@@ -8009,7 +8082,11 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             _ofi_result = _ofi_tracker.update(ticker_id, _bid, _ask,
                                                bid_size=msg.get("bid_size", 0),
                                                ask_size=msg.get("ask_size", 0),
-                                               now_ns=msg.get("timestamp_ns", 0))
+                                               now_ns=msg.get("timestamp_ns", 0),
+                                               depth_imbalance=msg.get("depth_imbalance", 0.0),
+                                               book_pressure=msg.get("book_pressure", 0.0),
+                                               total_bid_depth=msg.get("total_bid_depth", 0.0),
+                                               total_ask_depth=msg.get("total_ask_depth", 0.0))
             if _ofi_result is not None:
                 for sig in all_signals:
                     _ofi_adj = _ofi_tracker.confidence_adjustment(
@@ -8018,6 +8095,17 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                         sig["confidence"] = max(0, min(100, sig["confidence"] + int(_ofi_adj)))
                         sig["ofi_score"] = round(_ofi_result, 1)
                         sig["ofi_adjustment"] = round(_ofi_adj, 1)
+                    # Attach depth metrics to signal for downstream consumers
+                    _di = msg.get("depth_imbalance", 0.0)
+                    if abs(_di) > 0.001:
+                        sig["depth_imbalance"] = round(_di, 4)
+                        sig["book_pressure"] = round(msg.get("book_pressure", 0.0), 2)
+                        sig["total_bid_depth"] = msg.get("total_bid_depth", 0.0)
+                        sig["total_ask_depth"] = msg.get("total_ask_depth", 0.0)
+                        sig["bid_wall_price"] = msg.get("bid_wall_price", 0.0)
+                        sig["ask_wall_price"] = msg.get("ask_wall_price", 0.0)
+                        sig["spread_depth_1"] = msg.get("spread_depth_1", 0.0)
+                        sig["spread_depth_5"] = msg.get("spread_depth_5", 0.0)
         except Exception:
             pass
 
@@ -8555,6 +8643,31 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         recent = [(s, t) for s, t in recent if t >= cutoff]
         recent.append((strat, ts_ns))
         _recent_strategy_fires[ticker_id] = recent[-10:]  # Keep last 10
+
+    # ── CROSS-VENUE BEST EXECUTION ROUTING ──
+    # For ANY strategy's signal, check if a better venue exists for order routing.
+    # Attaches preferred_venue field so execution layer can route to best venue.
+    if _HAS_XVA and best.get("type") == "signal" and "preferred_venue" not in best:
+        try:
+            _xva_rt = _get_xva_tracker()
+            _xva_sym = ticker_symbols.get(ticker_id, "")
+            if _xva_sym:
+                _xva_dir = "buy" if best.get("direction") == "Long" else "sell"
+                _xva_bx = _xva_rt.get_best_execution_venue(_xva_sym, _xva_dir)
+                if _xva_bx and _xva_bx.preferred_venue:
+                    best["preferred_venue"] = _xva_bx.preferred_venue
+                    best["venue_improvement_bps"] = _xva_bx.improvement_bps
+                    best["venue_primary"] = _xva_bx.primary_venue
+                    best["venue_n_quoting"] = _xva_bx.n_venues
+                    # Log when routing to non-primary venue saves > 2 bps
+                    if _xva_bx.improvement_bps >= 2.0:
+                        sys.stderr.write(
+                            f"XVA_ROUTE: {_xva_sym} {_xva_dir} -> {_xva_bx.preferred_venue} "
+                            f"(+{_xva_bx.improvement_bps:.1f}bps vs {_xva_bx.primary_venue})\n"
+                        )
+                        sys.stderr.flush()
+        except Exception:
+            pass  # Fail-open: default venue routing if XVA unavailable
 
     # Record cooldown
     _last_signal_tick[ticker_id] = tick_count

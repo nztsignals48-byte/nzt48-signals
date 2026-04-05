@@ -41,6 +41,7 @@ pub mod market_config;
 pub mod market_scheduler;
 pub mod multiframe_vol;
 // STRIPPED: neural_hawkes — feature-gated, never enabled, no value
+pub mod order_book;
 pub mod overnight_carry;
 pub mod ouroboros_loader;
 pub mod paper_broker;

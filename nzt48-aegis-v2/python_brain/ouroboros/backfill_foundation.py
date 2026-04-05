@@ -523,49 +523,68 @@ def make_wal_event(trade: SimulatedTrade) -> dict:
 # Data fetching
 # ---------------------------------------------------------------------------
 def fetch_data(tickers: List[str], days: int) -> Dict[str, Any]:
-    """Fetch 5-minute OHLCV data via yfinance for the requested lookback."""
-    try:
-        import yfinance as yf
-    except ImportError:
-        log.error("yfinance not installed. Run: pip install yfinance")
-        sys.exit(1)
-
-    # yfinance limits 5-min data: max 60 days, must use period string
-    # For > 7d we need to use start/end dates
-    period_map = {
-        range(1, 8): "7d",
-        range(8, 31): "1mo",
-        range(31, 61): "60d",
-    }
-    yf_period = "1mo"
-    for r, p in period_map.items():
-        if days in r:
-            yf_period = p
-            break
-
+    """Fetch 5-minute OHLCV data. Tries IBKR first, falls back to yfinance."""
     data = {}
-    for ticker in tickers:
-        log.info("Fetching %s (period=%s, interval=5m)...", ticker, yf_period)
+
+    # Try IBKR first (primary)
+    remaining = list(tickers)
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        for ticker in tickers:
+            try:
+                df = provider.get_price_data(ticker, days=days, bar_size="5 mins")
+                if df is not None and not df.empty:
+                    # Capitalize columns to match expected convention
+                    df.columns = [c.capitalize() for c in df.columns]
+                    data[ticker] = df
+                    remaining.remove(ticker)
+                    log.info("  IBKR: %s: %d bars fetched", ticker, len(df))
+            except Exception as e:
+                log.debug("IBKR fetch failed for %s: %s", ticker, e)
+    except (ImportError, Exception) as e:
+        log.debug("IBKR provider not available: %s", e)
+
+    # Fallback to yfinance for remaining tickers
+    if remaining:
         try:
-            df = yf.download(
-                ticker,
-                period=yf_period,
-                interval="5m",
-                progress=False,
-                auto_adjust=True,
-            )
-            if df is None or df.empty:
-                log.warning("No data for %s (may be delisted or illiquid)", ticker)
-                continue
-            # Flatten MultiIndex columns if present (yfinance quirk)
-            if hasattr(df.columns, 'levels'):
-                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-            data[ticker] = df
-            log.info("  %s: %d bars fetched, date range %s to %s",
-                     ticker, len(df),
-                     str(df.index[0])[:16], str(df.index[-1])[:16])
-        except Exception as e:
-            log.warning("Failed to fetch %s: %s", ticker, e)
+            import yfinance as yf
+        except ImportError:
+            log.error("yfinance not installed and IBKR unavailable")
+            return data
+
+        period_map = {
+            range(1, 8): "7d",
+            range(8, 31): "1mo",
+            range(31, 61): "60d",
+        }
+        yf_period = "1mo"
+        for r, p in period_map.items():
+            if days in r:
+                yf_period = p
+                break
+
+        for ticker in remaining:
+            log.info("Fetching %s via yfinance (period=%s, interval=5m)...", ticker, yf_period)
+            try:
+                df = yf.download(
+                    ticker,
+                    period=yf_period,
+                    interval="5m",
+                    progress=False,
+                    auto_adjust=True,
+                )
+                if df is None or df.empty:
+                    log.warning("No data for %s (may be delisted or illiquid)", ticker)
+                    continue
+                if hasattr(df.columns, 'levels'):
+                    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+                data[ticker] = df
+                log.info("  yfinance: %s: %d bars fetched, date range %s to %s",
+                         ticker, len(df),
+                         str(df.index[0])[:16], str(df.index[-1])[:16])
+            except Exception as e:
+                log.warning("Failed to fetch %s: %s", ticker, e)
 
     return data
 

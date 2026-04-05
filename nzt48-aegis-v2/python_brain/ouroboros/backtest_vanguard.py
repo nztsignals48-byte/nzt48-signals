@@ -128,16 +128,30 @@ class BacktestResult:
 # Data fetching
 # ---------------------------------------------------------------------------
 def fetch_5min_data(ticker: str, days: int = 30) -> Optional[Any]:
-    """Fetch 5-minute OHLCV data from yfinance."""
+    """Fetch 5-minute OHLCV data. Tries IBKR first, falls back to yfinance."""
+    effective_days = min(days, 59)
+
+    # Try IBKR first (primary)
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        df = provider.get_price_data(ticker, days=effective_days, bar_size="5 mins")
+        if df is not None and not df.empty:
+            # Capitalize columns to match yfinance convention
+            df.columns = [c.capitalize() for c in df.columns]
+            log.info("IBKR: Fetched %d bars for %s (%d days)", len(df), ticker, effective_days)
+            return df
+    except Exception as e:
+        log.debug("IBKR fetch failed for %s: %s", ticker, e)
+
+    # Fallback to yfinance
     try:
         import yfinance as yf
     except ImportError:
-        log.error("yfinance not installed")
+        log.error("yfinance not installed and IBKR unavailable")
         return None
 
     try:
-        # yfinance: max 60 days for 5m data
-        effective_days = min(days, 59)
         data = yf.download(
             ticker,
             period=f"{effective_days}d",
@@ -148,7 +162,7 @@ def fetch_5min_data(ticker: str, days: int = 30) -> Optional[Any]:
         if data is None or data.empty:
             log.warning("No data for %s", ticker)
             return None
-        log.info("Fetched %d bars for %s (%d days)", len(data), ticker, effective_days)
+        log.info("yfinance: Fetched %d bars for %s (%d days)", len(data), ticker, effective_days)
         return data
     except Exception as e:
         log.error("Failed to fetch %s: %s", ticker, e)

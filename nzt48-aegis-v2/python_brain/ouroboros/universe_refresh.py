@@ -34,9 +34,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
-    import yfinance as yf
+    from python_brain.ouroboros.ibkr_data_provider import get_provider as _get_ibkr_provider
+    _HAS_IBKR = True
 except ImportError:
-    print("ERROR: yfinance not installed. Run: pip install yfinance", file=sys.stderr)
+    _HAS_IBKR = False
+
+try:
+    import yfinance as yf
+    _HAS_YF = True
+except ImportError:
+    yf = None  # type: ignore
+    _HAS_YF = False
+
+if not _HAS_IBKR and not _HAS_YF:
+    print("ERROR: Neither IBKR provider nor yfinance available", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -237,63 +248,89 @@ def validate_subset(tickers_to_check: List[Dict[str, Any]]) -> Dict[str, str]:
 
     status: "valid", "no_data", "error"
 
-    Uses yfinance download() for speed — much faster than Tickers().info
-    for large batches. A ticker is "valid" if yfinance returns any price data.
+    Tries IBKR data provider first, falls back to yfinance.
+    A ticker is "valid" if any source returns price data.
     """
     results = {}
     symbols = [t["symbol"] for t in tickers_to_check]
     start_time = time.monotonic()
 
-    batch_size = YF_BATCH_SIZE
-    for i in range(0, len(symbols), batch_size):
-        # Runtime guard
-        elapsed_min = (time.monotonic() - start_time) / 60
-        if elapsed_min > MAX_RUNTIME_MINUTES * 0.8:
-            log.warning("Approaching runtime limit (%.1f min), stopping validation at batch %d",
-                        elapsed_min, i)
-            for sym in symbols[i:]:
-                results[sym] = "error"  # Don't penalise — just ran out of time
-            break
-
-        batch = symbols[i:i + batch_size]
-        batch_str = " ".join(batch)
-
+    # Try IBKR first (primary)
+    remaining = list(symbols)
+    if _HAS_IBKR:
         try:
-            # Use download() for speed — just need to know if data exists
-            data = yf.download(
-                batch_str,
-                period="5d",
-                interval="1d",
-                progress=False,
-                threads=True,
-                ignore_tz=True,
-            )
-
-            if data.empty:
-                for sym in batch:
-                    results[sym] = "no_data"
-            elif len(batch) == 1:
-                sym = batch[0]
-                if not data["Close"].dropna().empty:
-                    results[sym] = "valid"
-                else:
-                    results[sym] = "no_data"
-            else:
-                for sym in batch:
-                    try:
-                        if sym in data["Close"].columns and not data["Close"][sym].dropna().empty:
-                            results[sym] = "valid"
-                        else:
-                            results[sym] = "no_data"
-                    except (KeyError, TypeError):
+            provider = _get_ibkr_provider()
+            ibkr_checked = []
+            for sym in symbols:
+                elapsed_min = (time.monotonic() - start_time) / 60
+                if elapsed_min > MAX_RUNTIME_MINUTES * 0.8:
+                    break
+                try:
+                    df = provider.get_price_data(sym, days=5, bar_size="1 day")
+                    if df is not None and not df.empty:
+                        results[sym] = "valid"
+                    else:
                         results[sym] = "no_data"
-
+                    ibkr_checked.append(sym)
+                except Exception:
+                    pass  # Let yfinance try
+                time.sleep(0.07)
+            remaining = [s for s in symbols if s not in results]
+            if ibkr_checked:
+                log.info("IBKR validated %d/%d tickers", len(ibkr_checked), len(symbols))
         except Exception as e:
-            log.warning("Batch validation failed: %s", e)
-            for sym in batch:
-                results[sym] = "error"
+            log.warning("IBKR provider failed: %s", e)
 
-        time.sleep(0.3)
+    # Fallback to yfinance for remaining
+    if remaining and _HAS_YF:
+        batch_size = YF_BATCH_SIZE
+        for i in range(0, len(remaining), batch_size):
+            elapsed_min = (time.monotonic() - start_time) / 60
+            if elapsed_min > MAX_RUNTIME_MINUTES * 0.8:
+                log.warning("Approaching runtime limit (%.1f min), stopping validation at batch %d",
+                            elapsed_min, i)
+                for sym in remaining[i:]:
+                    results[sym] = "error"
+                break
+
+            batch = remaining[i:i + batch_size]
+            batch_str = " ".join(batch)
+
+            try:
+                data = yf.download(
+                    batch_str,
+                    period="5d",
+                    interval="1d",
+                    progress=False,
+                    threads=True,
+                    ignore_tz=True,
+                )
+
+                if data.empty:
+                    for sym in batch:
+                        results[sym] = "no_data"
+                elif len(batch) == 1:
+                    sym = batch[0]
+                    if not data["Close"].dropna().empty:
+                        results[sym] = "valid"
+                    else:
+                        results[sym] = "no_data"
+                else:
+                    for sym in batch:
+                        try:
+                            if sym in data["Close"].columns and not data["Close"][sym].dropna().empty:
+                                results[sym] = "valid"
+                            else:
+                                results[sym] = "no_data"
+                        except (KeyError, TypeError):
+                            results[sym] = "no_data"
+
+            except Exception as e:
+                log.warning("Batch validation failed: %s", e)
+                for sym in batch:
+                    results[sym] = "error"
+
+            time.sleep(0.3)
 
     return results
 
@@ -382,19 +419,19 @@ def check_for_new_leveraged_etps(existing_symbols: Set[str]) -> List[Dict[str, A
     log.info("Checking %d new leveraged ETP candidates (of %d total unknown)...",
              len(daily_candidates), len(candidates))
 
-    # Fast validation using download()
-    batch_str = " ".join(daily_candidates)
-    try:
-        data = yf.download(batch_str, period="5d", interval="1d",
-                           progress=False, threads=True, ignore_tz=True)
-        if not data.empty and len(daily_candidates) > 1:
+    # Fast validation: try IBKR first, fallback to yfinance
+    ibkr_found = set()
+    if _HAS_IBKR:
+        try:
+            provider = _get_ibkr_provider()
             for sym in daily_candidates:
                 try:
-                    if sym in data["Close"].columns and not data["Close"][sym].dropna().empty:
+                    df = provider.get_price_data(sym, days=5, bar_size="1 day")
+                    if df is not None and not df.empty:
                         leverage = int(sym[0])
                         is_inverse = sym[1] == "S"
-                        last_price = data["Close"][sym].dropna().iloc[-1]
-                        avg_vol = data["Volume"][sym].dropna().mean() if sym in data["Volume"].columns else 0
+                        last_price = float(df["close"].dropna().iloc[-1])
+                        avg_vol = float(df["volume"].dropna().mean()) if "volume" in df.columns else 0
 
                         new_tickers.append({
                             "symbol": sym,
@@ -408,17 +445,59 @@ def check_for_new_leveraged_etps(existing_symbols: Set[str]) -> List[Dict[str, A
                             "leveraged": True,
                             "inverse": is_inverse,
                             "leverage_factor": leverage,
-                            "market_cap_usd": 0,
-                            "avg_daily_volume": int(avg_vol) if avg_vol else 0,
+                            "last_price": last_price,
+                            "avg_daily_volume": int(avg_vol),
                             "validated": True,
                             "last_validated": datetime.now(timezone.utc).isoformat(),
-                            "source": "daily_scan",
+                            "consecutive_failures": 0,
+                            "source": "ibkr_etp_scan",
                         })
-                        log.info("  NEW ETP discovered: %s (price=%.2f)", sym, last_price)
-                except (KeyError, TypeError, IndexError):
-                    continue
-    except Exception as e:
-        log.warning("ETP discovery batch failed: %s", e)
+                        ibkr_found.add(sym)
+                except Exception:
+                    pass
+                time.sleep(0.07)
+        except Exception:
+            pass
+
+    # Fallback: yfinance for remaining candidates
+    yf_candidates = [s for s in daily_candidates if s not in ibkr_found]
+    if yf_candidates and _HAS_YF:
+        batch_str = " ".join(yf_candidates)
+        try:
+            data = yf.download(batch_str, period="5d", interval="1d",
+                               progress=False, threads=True, ignore_tz=True)
+            if not data.empty and len(yf_candidates) > 1:
+                for sym in yf_candidates:
+                    try:
+                        if sym in data["Close"].columns and not data["Close"][sym].dropna().empty:
+                            leverage = int(sym[0])
+                            is_inverse = sym[1] == "S"
+                            last_price = data["Close"][sym].dropna().iloc[-1]
+                            avg_vol = data["Volume"][sym].dropna().mean() if sym in data["Volume"].columns else 0
+
+                            new_tickers.append({
+                                "symbol": sym,
+                                "exchange": "LSE",
+                                "name": "",
+                                "type": "leveraged_etp",
+                                "sector": "Unknown",
+                                "industry": "Unknown",
+                                "currency": "GBP",
+                                "isa_eligible": True,
+                                "leveraged": True,
+                                "inverse": is_inverse,
+                                "leverage_factor": leverage,
+                                "market_cap_usd": 0,
+                                "avg_daily_volume": int(avg_vol) if avg_vol else 0,
+                                "validated": True,
+                                "last_validated": datetime.now(timezone.utc).isoformat(),
+                                "source": "daily_scan",
+                            })
+                            log.info("  NEW ETP discovered: %s (price=%.2f)", sym, last_price)
+                    except (KeyError, TypeError, IndexError):
+                        continue
+        except Exception as e:
+            log.warning("ETP discovery batch failed: %s", e)
 
     return new_tickers
 

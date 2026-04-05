@@ -571,16 +571,62 @@ class CorporateActionChecker:
 
         return tickers
 
+    def _check_ibkr_actions(self, tickers: List[str]) -> tuple:
+        """Check IBKR for upcoming corporate actions. Returns (events, checked_tickers)."""
+        events = []
+        checked = set()
+        now = datetime.now(timezone.utc)
+        from datetime import timedelta
+        veto_cutoff = now + timedelta(hours=self._veto_hours)
+
+        try:
+            from python_brain.ouroboros.ibkr_data_provider import get_provider
+            provider = get_provider()
+        except (ImportError, Exception) as e:
+            log.debug("P1-15: IBKR provider not available: %s", e)
+            return events, checked
+
+        for ticker in tickers[:50]:  # Rate limit: 50 max for IBKR
+            try:
+                result = provider.get_fundamental_data(ticker, report_type="CalendarReport")
+                if result:
+                    checked.add(ticker)
+                    # Check dividend date
+                    div_date_str = result.get("dividend_date")
+                    if div_date_str:
+                        try:
+                            div_date = datetime.strptime(div_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            if now <= div_date <= veto_cutoff:
+                                events.append(CorporateActionEvent(
+                                    ticker=ticker,
+                                    action_type="special_dividend",
+                                    ex_date=div_date,
+                                    source="ibkr",
+                                    details=f"Dividend date from IBKR CalendarReport",
+                                ))
+                        except (ValueError, TypeError):
+                            pass
+            except Exception as e:
+                log.debug("P1-15: IBKR calendar check failed for %s: %s", ticker, e)
+
+        if events:
+            log.info("P1-15: IBKR found %d corporate action events across %d tickers",
+                     len(events), len(set(e.ticker for e in events)))
+
+        return events, checked
+
     def check_yfinance_actions(self, tickers: List[str]) -> List[CorporateActionEvent]:
-        """Check yfinance for upcoming corporate actions within the veto window.
+        """Check for upcoming corporate actions within the veto window.
+
+        Tries IBKR first for calendar data, then falls back to yfinance for
+        remaining tickers and more granular action data (splits, dividends).
 
         For each ticker, queries:
-          - .actions (splits + dividends with dates)
-          - .calendar (upcoming earnings/ex-dividend dates)
+          - IBKR CalendarReport (primary, for dividend dates)
+          - yfinance .actions (fallback, splits + dividends with dates)
+          - yfinance .calendar (fallback, upcoming ex-dates)
 
         Only flags events whose ex-date falls within now .. now+veto_hours.
-        LSE tickers (.L suffix) are the primary concern for ISA compliance,
-        but all tickers are checked for completeness.
 
         Args:
             tickers: List of ticker symbols (yfinance format).
@@ -591,6 +637,15 @@ class CorporateActionChecker:
         events = []
         now = datetime.now(timezone.utc)
 
+        # Try IBKR first (primary)
+        ibkr_events, ibkr_checked = self._check_ibkr_actions(tickers)
+        events.extend(ibkr_events)
+
+        # Fallback: check remaining tickers via yfinance
+        remaining = [t for t in tickers if t not in ibkr_checked]
+        # Also re-check IBKR-checked tickers via yfinance for splits (IBKR only has dividends)
+        remaining_for_splits = list(tickers)
+
         try:
             import yfinance as yf
         except ImportError:
@@ -600,7 +655,7 @@ class CorporateActionChecker:
         from datetime import timedelta
         veto_cutoff = now + timedelta(hours=self._veto_hours)
 
-        for ticker in tickers:
+        for ticker in remaining_for_splits:
             try:
                 yf_ticker = yf.Ticker(ticker)
 
@@ -615,14 +670,12 @@ class CorporateActionChecker:
                             for date_idx, value in col_data.items():
                                 if value == 0 or value == 0.0:
                                     continue
-                                # Convert index to tz-aware datetime
                                 if hasattr(date_idx, 'to_pydatetime'):
                                     dt = date_idx.to_pydatetime()
                                 else:
                                     dt = date_idx
                                 if dt.tzinfo is None:
                                     dt = dt.replace(tzinfo=timezone.utc)
-                                # Check if within veto window (future only)
                                 if now <= dt <= veto_cutoff:
                                     events.append(CorporateActionEvent(
                                         ticker=ticker,
@@ -634,53 +687,51 @@ class CorporateActionChecker:
                 except Exception as e:
                     log.debug("P1-15: yfinance .actions failed for %s: %s", ticker, e)
 
-                # --- Check .calendar (upcoming ex-dates) ---
-                try:
-                    cal = yf_ticker.calendar
-                    if cal is not None:
-                        # yfinance .calendar returns a dict or DataFrame depending on version
-                        ex_date = None
-                        if isinstance(cal, dict):
-                            # Keys like 'Ex-Dividend Date', 'Dividend Date'
-                            for key in ("Ex-Dividend Date", "Ex-Date"):
-                                if key in cal:
-                                    ex_date = cal[key]
-                                    break
-                        elif hasattr(cal, 'columns'):
-                            # DataFrame with columns
-                            for key in ("Ex-Dividend Date", "Ex-Date"):
-                                if key in cal.columns:
-                                    ex_date = cal[key].iloc[0] if len(cal[key]) > 0 else None
-                                    break
-
-                        if ex_date is not None:
-                            if hasattr(ex_date, 'to_pydatetime'):
-                                ex_date = ex_date.to_pydatetime()
-                            elif isinstance(ex_date, str):
-                                try:
-                                    ex_date = datetime.fromisoformat(ex_date)
-                                except (ValueError, TypeError):
-                                    ex_date = None
+                # --- Check .calendar (only for tickers not covered by IBKR) ---
+                if ticker not in ibkr_checked:
+                    try:
+                        cal = yf_ticker.calendar
+                        if cal is not None:
+                            ex_date = None
+                            if isinstance(cal, dict):
+                                for key in ("Ex-Dividend Date", "Ex-Date"):
+                                    if key in cal:
+                                        ex_date = cal[key]
+                                        break
+                            elif hasattr(cal, 'columns'):
+                                for key in ("Ex-Dividend Date", "Ex-Date"):
+                                    if key in cal.columns:
+                                        ex_date = cal[key].iloc[0] if len(cal[key]) > 0 else None
+                                        break
 
                             if ex_date is not None:
-                                if ex_date.tzinfo is None:
-                                    ex_date = ex_date.replace(tzinfo=timezone.utc)
-                                if now <= ex_date <= veto_cutoff:
-                                    events.append(CorporateActionEvent(
-                                        ticker=ticker,
-                                        action_type="special_dividend",
-                                        ex_date=ex_date,
-                                        source="calendar",
-                                        details="Upcoming ex-dividend from calendar",
-                                    ))
-                except Exception as e:
-                    log.debug("P1-15: yfinance .calendar failed for %s: %s", ticker, e)
+                                if hasattr(ex_date, 'to_pydatetime'):
+                                    ex_date = ex_date.to_pydatetime()
+                                elif isinstance(ex_date, str):
+                                    try:
+                                        ex_date = datetime.fromisoformat(ex_date)
+                                    except (ValueError, TypeError):
+                                        ex_date = None
+
+                                if ex_date is not None:
+                                    if ex_date.tzinfo is None:
+                                        ex_date = ex_date.replace(tzinfo=timezone.utc)
+                                    if now <= ex_date <= veto_cutoff:
+                                        events.append(CorporateActionEvent(
+                                            ticker=ticker,
+                                            action_type="special_dividend",
+                                            ex_date=ex_date,
+                                            source="calendar",
+                                            details="Upcoming ex-dividend from calendar",
+                                        ))
+                    except Exception as e:
+                        log.debug("P1-15: yfinance .calendar failed for %s: %s", ticker, e)
 
             except Exception as e:
                 log.debug("P1-15: yfinance lookup failed entirely for %s: %s", ticker, e)
 
         if events:
-            log.info("P1-15: yfinance found %d corporate action events across %d tickers",
+            log.info("P1-15: Found %d corporate action events across %d tickers (IBKR+yfinance)",
                      len(events), len(set(e.ticker for e in events)))
 
         return events
