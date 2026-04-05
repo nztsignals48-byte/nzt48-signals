@@ -5680,6 +5680,14 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         _iv_impl = msg.get("opt_impl_vol", 0.0)
         _iv_hist = msg.get("opt_hist_vol", 0.0)
         # Need valid IV data from IBKR options feed
+        # Options OI/volume data from IBKR OPRA feed
+        _call_oi = msg.get("opt_call_oi", 0)
+        _put_oi = msg.get("opt_put_oi", 0)
+        _call_vol = msg.get("opt_call_vol", 0)
+        _put_vol = msg.get("opt_put_vol", 0)
+        # Put/call ratios (>1.0 = bearish sentiment, <0.7 = bullish)
+        _pc_oi_ratio = (_put_oi / _call_oi) if _call_oi > 0 else 0.0
+        _pc_vol_ratio = (_put_vol / _call_vol) if _call_vol > 0 else 0.0
         if _iv_impl > 0.01 and _iv_hist > 0.01:
             # IV skew ratio: how far implied exceeds historical
             _iv_ratio = _iv_impl / _iv_hist
@@ -5708,6 +5716,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 _skew_conf = min(75, 55 + int((_iv_ratio - 1.3) * 30))
                 if _scanner_iv_hit:
                     _skew_conf = min(80, _skew_conf + 5)
+                # Put/call ratio confirmation: low P/C ratio = bullish for Long
+                if _pc_oi_ratio > 0 and _pc_oi_ratio < 0.7:
+                    _skew_conf = min(85, _skew_conf + 3)  # Bullish OI confirms Long
+                elif _pc_oi_ratio > 1.5:
+                    _skew_conf = max(50, _skew_conf - 5)  # Bearish OI opposes Long
                 if _skew_conf >= effective_floor:
                     kelly = _kelly_for(_skew_conf)
                     ivsurf_skew_signal = {
@@ -5721,6 +5734,10 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "impl_vol": round(_iv_impl, 4),
                         "hist_vol": round(_iv_hist, 4),
                         "scanner_confirmed": _scanner_iv_hit,
+                        "pc_oi_ratio": round(_pc_oi_ratio, 3),
+                        "pc_vol_ratio": round(_pc_vol_ratio, 3),
+                        "call_oi": _call_oi,
+                        "put_oi": _put_oi,
                         "suggested_max_hold_hours": 8,
                         "exit_urgency_ramp_hours": 4,
                         **common_fields,
@@ -8627,6 +8644,48 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                                 sig["portfolio_weight"] = round(_pw, 3)
     except Exception:
         pass  # Fail-open: portfolio optimizer output is advisory
+
+    # ── OPTIONS SENTIMENT OVERLAY (put/call ratios from OPRA) ──
+    # Uses opt_call_oi, opt_put_oi, opt_call_vol, opt_put_vol from reqMktData.
+    # Extreme put/call ratios adjust confidence for Long signals.
+    _call_oi = msg.get("opt_call_oi", 0)
+    _put_oi = msg.get("opt_put_oi", 0)
+    _call_vol = msg.get("opt_call_vol", 0)
+    _put_vol = msg.get("opt_put_vol", 0)
+    if _call_oi > 0 and _put_oi > 0:
+        _pc_oi_ratio = _put_oi / _call_oi
+        _pc_vol_ratio = (_put_vol / _call_vol) if _call_vol > 0 else 0.0
+        for sig in all_signals:
+            if sig.get("direction") == "Long":
+                # Bullish OI (lots of calls vs puts) confirms Long
+                if _pc_oi_ratio < 0.6:
+                    sig["confidence"] = min(100, sig["confidence"] + 2)
+                    sig["options_sentiment"] = "bullish"
+                # Bearish OI (lots of puts) opposes Long
+                elif _pc_oi_ratio > 1.8:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["options_sentiment"] = "bearish"
+                sig["pc_oi_ratio"] = round(_pc_oi_ratio, 3)
+                sig["pc_vol_ratio"] = round(_pc_vol_ratio, 3)
+
+    # ── MARK PRICE / AVG VOLUME ENRICHMENT ──
+    # mark_price: IBKR's theoretical price for margining (better than last for thin books)
+    # avg_volume: 90-day average daily volume for liquidity gating
+    _mark_price = msg.get("mark_price", 0.0)
+    _avg_volume = msg.get("avg_volume", 0)
+    if _mark_price > 0:
+        for sig in all_signals:
+            sig["mark_price"] = _mark_price
+    if _avg_volume > 0:
+        for sig in all_signals:
+            sig["avg_volume_90d"] = _avg_volume
+            # Liquidity gate: reduce confidence for thinly-traded instruments
+            if _avg_volume < 50000:
+                sig["confidence"] = max(0, sig["confidence"] - 5)
+                sig["liquidity_warning"] = "thin"
+            elif _avg_volume < 200000:
+                sig["confidence"] = max(0, sig["confidence"] - 2)
+                sig["liquidity_warning"] = "moderate"
 
     # ── ORDER FLOW IMBALANCE (LOB microstructure signal) ──
     # OFI confirms or opposes signal direction from bid/ask dynamics.

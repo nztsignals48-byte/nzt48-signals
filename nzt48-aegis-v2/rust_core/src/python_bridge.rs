@@ -178,6 +178,10 @@ pub struct TickContext {
     /// P9: Trades executed today for Claude context.
     #[pyo3(get, set)]
     pub trades_today: u32,
+    /// Exchange code from contracts.toml (e.g. "LSE", "SMART", "HKEX").
+    /// Used by CrossVenueArb to identify quote venue.
+    #[pyo3(get, set)]
+    pub exchange: String,
 }
 
 #[pymethods]
@@ -222,6 +226,7 @@ impl TickContext {
             symbol: String::new(),
             open_positions: 0,
             trades_today: 0,
+            exchange: String::new(),
         }
     }
 }
@@ -249,6 +254,7 @@ impl Default for TickContext {
             symbol: String::new(),
             open_positions: 0,
             trades_today: 0,
+            exchange: String::new(),
         }
     }
 }
@@ -424,7 +430,7 @@ impl PythonBridge {
                 r#""amihud":{:.4},"regime":"{}","spread_pct":{:.4},"time_fraction":{:.4},"#,
                 r#""heat_pct":{:.4},"equity":{:.2},"#,
                 r#""vix":{:.2},"london_time_secs":{},"gap_pct":{:.4},"symbol":"{}","#,
-                r#""open_positions":{},"trades_today":{},"#,
+                r#""open_positions":{},"trades_today":{},"exchange":"{}","#,
                 // Extended tick data
                 r#""last_size":{},"open":{:.6},"close":{:.6},"trade_count":{},"#,
                 r#""trade_rate":{:.2},"volume_rate":{:.2},"rt_hist_vol":{:.4},"shortable":{:.1},"#,
@@ -468,6 +474,7 @@ impl PythonBridge {
             ctx.symbol,
             ctx.open_positions,
             ctx.trades_today,
+            ctx.exchange,
             // Extended tick data
             tick.last_size,
             tick.open,
@@ -983,6 +990,7 @@ mod tests {
                 symbol: String::new(),
                 open_positions: 0,
                 trades_today: 0,
+                exchange: String::new(),
             };
             // Prevent optimization elision
             std::hint::black_box(&ctx);

@@ -366,6 +366,11 @@ fn main() {
         eprintln!("Secdef wait complete, subscribing market data...");
         let sub_count = broker.subscribe_all();
         eprintln!("Market data: subscribed to {sub_count} streams");
+
+        // Subscribe L2 depth for all L2-eligible exchanges (LSE, XETRA, HKEX, TSE, KRX paid; BATS/Chi-X/IEX free).
+        // This activates the full reqMktDepth pipeline: order_book.rs → depth metrics → OFI tracker.
+        let depth_count = broker.subscribe_all_depth();
+        eprintln!("Market depth: subscribed to {depth_count} L2 streams");
     } else {
         eprintln!("Market data: skipped (no broker connection)");
     }
@@ -595,6 +600,9 @@ fn main() {
                     let subscribed_tids = engine.broker.mktdata_subscribed_tids();
                     let l1_count = engine.broker.subscribe_l1_batch(&subscribed_tids);
                     eprintln!("BROKER RECONNECTED: L1_GATE {}/{} mktdata tickers", l1_count, subscribed_tids.len());
+                    // Re-subscribe L2 depth
+                    let depth_count = engine.broker.subscribe_all_depth();
+                    eprintln!("BROKER RECONNECTED: {} L2 depth streams", depth_count);
 
                     // P0-1.5: Post-reconnect position reconciliation.
                     // If we have open positions, we MUST verify they still exist at the broker.
@@ -891,6 +899,10 @@ fn main() {
                             .unwrap_or_default(),
                         open_positions: engine.portfolio.filled_count() as u32,
                         trades_today: engine.portfolio.daily_trade_count,
+                        exchange: engine.config.contracts
+                            .get(t.ticker_id.0 as usize)
+                            .map(|c| c.exchange.clone())
+                            .unwrap_or_default(),
                     };
 
                     // Evaluate via Python Brain (if available)

@@ -653,7 +653,7 @@ impl IbkrBroker {
             for tids in by_exchange.values_mut() {
                 tids.sort_by_key(|t| t.0);
             }
-            let exchanges = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX"];
+            let exchanges = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX", "KRX"];
             let per_exch = remaining / exchanges.len().max(1);
             let mut extra_slots = remaining - per_exch * exchanges.len();
             for exch in &exchanges {
@@ -795,7 +795,7 @@ impl IbkrBroker {
         let has_l2 = matches!(
             ibkr_exch,
             "LSE" | "LSEETF" | "IBIS" | "SEHK" | "TSEJ" | "KSE"
-                | "BATS" | "CHIX" | "IEX"
+                | "BATS" | "CHIX" | "IEX" | "AQXE"
         );
         if !has_l2 {
             return Err(BrokerError::InvalidOrder(format!(
