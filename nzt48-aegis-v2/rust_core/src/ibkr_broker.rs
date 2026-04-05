@@ -89,6 +89,31 @@ struct TickAccumulator {
     has_data: bool,
     /// Nanosecond timestamp of last emitted tick (throttle to 5s cadence).
     last_emit_ns: u64,
+    // ── Extended tick data (25 new fields) ──
+    last_size: i32,
+    open: f64,
+    close: f64,
+    trade_count: i32,
+    trade_rate: f64,
+    volume_rate: f64,
+    rt_hist_vol: f64,
+    shortable: f64,
+    halted: bool,
+    mark_price: f64,
+    auction_price: f64,
+    auction_volume: i32,
+    auction_imbalance: f64,
+    etf_nav_close: f64,
+    etf_nav_last: f64,
+    etf_nav_bid: f64,
+    etf_nav_ask: f64,
+    opt_call_oi: i32,
+    opt_put_oi: i32,
+    opt_call_vol: i32,
+    opt_put_vol: i32,
+    opt_impl_vol: f64,
+    opt_hist_vol: f64,
+    avg_volume: i64,
 }
 
 impl Default for TickAccumulator {
@@ -104,6 +129,30 @@ impl Default for TickAccumulator {
             ask_size: 0,
             has_data: false,
             last_emit_ns: 0,
+            last_size: 0,
+            open: 0.0,
+            close: 0.0,
+            trade_count: 0,
+            trade_rate: 0.0,
+            volume_rate: 0.0,
+            rt_hist_vol: 0.0,
+            shortable: 0.0,
+            halted: false,
+            mark_price: 0.0,
+            auction_price: 0.0,
+            auction_volume: 0,
+            auction_imbalance: 0.0,
+            etf_nav_close: 0.0,
+            etf_nav_last: 0.0,
+            etf_nav_bid: 0.0,
+            etf_nav_ask: 0.0,
+            opt_call_oi: 0,
+            opt_put_oi: 0,
+            opt_call_vol: 0,
+            opt_put_vol: 0,
+            opt_impl_vol: 0.0,
+            opt_hist_vol: 0.0,
+            avg_volume: 0,
         }
     }
 }
@@ -854,8 +903,7 @@ impl IbkrBroker {
                     volume: bar.volume as u64,
                     timestamp_ns: ts_ns,
                     recv_timestamp_ns: self.now_ns,
-                    bid_size: 0,
-                    ask_size: 0,
+                    ..Default::default()
                 };
                 self.pending_ticks.push_back(tick);
                 // Store bar high/low for ATR calculation
@@ -911,6 +959,15 @@ impl IbkrBroker {
                                 TickType::Low | TickType::DelayedLow => {
                                     if tp.price > 0.0 { acc.low = tp.price; }
                                 }
+                                // ── Extended price ticks ──
+                                TickType::Open | TickType::DelayedOpen => { acc.open = tp.price; }
+                                TickType::Close | TickType::DelayedClose => { acc.close = tp.price; }
+                                TickType::MarkPrice => { acc.mark_price = tp.price; }
+                                TickType::AuctionPrice => { acc.auction_price = tp.price; }
+                                TickType::EtfNavClose => { acc.etf_nav_close = tp.price; }
+                                TickType::EtfNavLast => { acc.etf_nav_last = tp.price; }
+                                TickType::EtfNavBid => { acc.etf_nav_bid = tp.price; }
+                                TickType::EtfNavAsk => { acc.etf_nav_ask = tp.price; }
                                 _ => {}
                             }
                         }
@@ -926,6 +983,31 @@ impl IbkrBroker {
                                 }
                                 TickType::AskSize | TickType::DelayedAskSize => {
                                     acc.ask_size = ts.size as i32;
+                                }
+                                // ── Extended size ticks ──
+                                TickType::LastSize | TickType::DelayedLastSize => {
+                                    acc.last_size = ts.size as i32;
+                                }
+                                TickType::AuctionVolume => {
+                                    acc.auction_volume = ts.size as i32;
+                                }
+                                TickType::AuctionImbalance => {
+                                    acc.auction_imbalance = ts.size as f64;
+                                }
+                                TickType::OptionCallOpenInterest => {
+                                    acc.opt_call_oi = ts.size as i32;
+                                }
+                                TickType::OptionPutOpenInterest => {
+                                    acc.opt_put_oi = ts.size as i32;
+                                }
+                                TickType::OptionCallVolume => {
+                                    acc.opt_call_vol = ts.size as i32;
+                                }
+                                TickType::OptionPutVolume => {
+                                    acc.opt_put_vol = ts.size as i32;
+                                }
+                                TickType::AvgVolume => {
+                                    acc.avg_volume = ts.size as i64;
                                 }
                                 _ => {}
                             }
@@ -960,6 +1042,23 @@ impl IbkrBroker {
                             }
                         }
                     }
+                    TickTypes::Generic(tg) => {
+                        if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
+                            match tg.tick_type {
+                                TickType::Shortable => { acc.shortable = tg.value; }
+                                TickType::Halted | TickType::DelayedHalted => {
+                                    acc.halted = tg.value != 0.0;
+                                }
+                                TickType::TradeCount => { acc.trade_count = tg.value as i32; }
+                                TickType::TradeRate => { acc.trade_rate = tg.value; }
+                                TickType::VolumeRate => { acc.volume_rate = tg.value; }
+                                TickType::RtHistoricalVol => { acc.rt_hist_vol = tg.value; }
+                                TickType::OptionImpliedVol => { acc.opt_impl_vol = tg.value; }
+                                TickType::OptionHistoricalVol => { acc.opt_hist_vol = tg.value; }
+                                _ => {}
+                            }
+                        }
+                    }
                     TickTypes::Notice(notice) => {
                         if self.sub_errors_detected < 50 {
                             eprintln!(
@@ -990,6 +1089,31 @@ impl IbkrBroker {
                             recv_timestamp_ns: self.now_ns,
                             bid_size: acc.bid_size,
                             ask_size: acc.ask_size,
+                            // Extended fields — propagated from accumulator
+                            last_size: acc.last_size,
+                            open: acc.open,
+                            close: acc.close,
+                            trade_count: acc.trade_count,
+                            trade_rate: acc.trade_rate,
+                            volume_rate: acc.volume_rate,
+                            rt_hist_vol: acc.rt_hist_vol,
+                            shortable: acc.shortable,
+                            halted: acc.halted,
+                            mark_price: acc.mark_price,
+                            auction_price: acc.auction_price,
+                            auction_volume: acc.auction_volume,
+                            auction_imbalance: acc.auction_imbalance,
+                            etf_nav_close: acc.etf_nav_close,
+                            etf_nav_last: acc.etf_nav_last,
+                            etf_nav_bid: acc.etf_nav_bid,
+                            etf_nav_ask: acc.etf_nav_ask,
+                            opt_call_oi: acc.opt_call_oi,
+                            opt_put_oi: acc.opt_put_oi,
+                            opt_call_vol: acc.opt_call_vol,
+                            opt_put_vol: acc.opt_put_vol,
+                            opt_impl_vol: acc.opt_impl_vol,
+                            opt_hist_vol: acc.opt_hist_vol,
+                            avg_volume: acc.avg_volume,
                         };
                         self.pending_ticks.push_back(tick);
                         // Store high/low for ATR calculation (synthetic bar)

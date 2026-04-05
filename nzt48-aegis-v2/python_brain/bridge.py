@@ -148,6 +148,17 @@ try:
 except ImportError:
     _HAS_OFI = False
 
+# NAV Arbitrage — ETP premium/discount tracker (Book 132)
+# Wired with IBKR real-time ETF NAV (tick types 92-99) when available
+_nav_tracker_instance = None
+try:
+    from python_brain.strategies.nav_arbitrage import NAVTracker, ETP_NAV_INFO
+    _nav_tracker_instance = NAVTracker()
+    _HAS_NAV_TRACKER = True
+except ImportError:
+    _HAS_NAV_TRACKER = False
+    ETP_NAV_INFO = {}
+
 # Kalman filter for dynamic hedge ratios (pairs trading)
 try:
     from python_brain.features.kalman_hedge import get_manager as _get_kalman_mgr
@@ -2563,9 +2574,12 @@ def _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx):
     sma_200 = calculate_sma(prices, 200) or 0.0
     sma_5 = calculate_sma(prices, 5) or 0.0
 
-    # Gap detection: use first bar in history as "daily open" proxy
-    daily_open = ticks[0]["last"] if ticks else last_price
-    prev_close = daily_open  # No true prev_close in intraday; use daily_open as proxy
+    # Gap detection: IBKR sends real Open (tick 14) and Close (tick 9, prev day)
+    # Use IBKR values when available, fall back to proxy
+    _ibkr_open = msg.get("open", 0.0)
+    _ibkr_close = msg.get("close", 0.0)
+    daily_open = _ibkr_open if _ibkr_open > 0 else (ticks[0]["last"] if ticks else last_price)
+    prev_close = _ibkr_close if _ibkr_close > 0 else daily_open
     gap_pct = msg.get("gap_pct", 0.0)
 
     # ATR from recent bars (simple approximation)
@@ -4935,14 +4949,23 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.flush()
 
     # NAV Premium/Discount (Book 132) — buy when ETP trades at discount
+    # Wired: IBKR ETF NAV tick types 92-99 feed real NAV data when available.
+    # Previously dead code (used getattr on dict). Now uses module singleton.
     nav_signal = None
     try:
-        from python_brain.strategies.nav_arbitrage import NAVTracker
-        nav_tracker = getattr(msg, "_nav_tracker", None)
-        if nav_tracker is not None:
+        if _HAS_NAV_TRACKER and _nav_tracker_instance is not None:
             symbol = msg.get("symbol", "")
-            sig = nav_tracker.check_signal(symbol)
-            # nav_tracker.check_signal returns object with confidence, direction, z_score, premium_pct or None
+            # Update NAV tracker on every tick with IBKR NAV data
+            _nav_tracker_instance.update(
+                ticker=symbol,
+                market_price=msg.get("last", 0.0),
+                underlying_intraday_return=msg.get("gap_pct", 0.0),
+                ibkr_nav_last=msg.get("etf_nav_last", 0.0),
+                ibkr_nav_bid=msg.get("etf_nav_bid", 0.0),
+                ibkr_nav_ask=msg.get("etf_nav_ask", 0.0),
+                ibkr_nav_close=msg.get("etf_nav_close", 0.0),
+            )
+            sig = _nav_tracker_instance.check_signal(symbol)
             if sig and hasattr(sig, 'confidence'):
                 conf_val = int(sig.confidence) if isinstance(sig.confidence, (int, float)) else 60
                 direction = getattr(sig, 'direction', 'neutral')
@@ -4956,6 +4979,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                         "strategy": "NAVArbitrage",
                         "nav_z_score": getattr(sig, 'z_score', 0),
                         "nav_premium_pct": getattr(sig, 'premium_pct', 0),
+                        "nav_source": "ibkr" if msg.get("etf_nav_last", 0) > 0 else "estimated",
                         **common_fields,
                     }
     except ImportError:
@@ -5220,6 +5244,11 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 "price": msg["last"], "volume": msg.get("volume", 0),
                 "spread": ind.get("spread_pct", 0.1),
                 "prices": [t["last"] for t in ticks[-20:]],
+                "trade_count": msg.get("trade_count", 0),
+                "trade_rate": msg.get("trade_rate", 0.0),
+                "volume_rate": msg.get("volume_rate", 0.0),
+                "last_size": msg.get("last_size", 0),
+                "shortable": msg.get("shortable", 0.0),
             })
             # HFTProbabilitySignal.generate() returns dict with 'direction' and 'confidence' or None
             if _hft_sig:
@@ -5935,6 +5964,42 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                     for sig in all_signals:
                         sig["confidence"] = max(0, min(100, sig["confidence"] + _fg_delta))
                         sig["crypto_fear_greed"] = _fg_overlay.get("description", "")
+    except Exception:
+        pass
+
+    # ── SESSION 32: IBKR AUCTION IMBALANCE OVERLAY (NYSE Order Imbalances sub) ──
+    # IBKR sends real-time auction data via tick types 34-36.
+    # Near US close (3:50-4:00 PM ET), MOC imbalances predict close direction.
+    # Positive imbalance = net buy pressure. Negative = net sell.
+    try:
+        _auction_imb = msg.get("auction_imbalance", 0.0)
+        _auction_vol = msg.get("auction_volume", 0)
+        _auction_price = msg.get("auction_price", 0.0)
+        if abs(_auction_imb) > 0 and _auction_vol > 0:
+            # Normalize imbalance: large positive → bullish, large negative → bearish
+            _imb_ratio = _auction_imb / max(_auction_vol, 1)
+            _auction_delta = 0
+            if _imb_ratio > 0.3:
+                _auction_delta = 3   # Strong buy imbalance
+            elif _imb_ratio > 0.1:
+                _auction_delta = 1   # Moderate buy imbalance
+            elif _imb_ratio < -0.3:
+                _auction_delta = -3  # Strong sell imbalance
+            elif _imb_ratio < -0.1:
+                _auction_delta = -1  # Moderate sell imbalance
+            if _auction_delta != 0:
+                for sig in all_signals:
+                    sig["confidence"] = max(0, min(100, sig["confidence"] + _auction_delta))
+                    sig["auction_imbalance"] = round(_imb_ratio, 3)
+                    sig["auction_volume"] = _auction_vol
+    except Exception:
+        pass
+
+    # ── SESSION 32: IBKR HALTED CHECK ──
+    # IBKR sends halt status via tick type 49. Override universe halt check.
+    try:
+        if msg.get("halted", False):
+            return None  # Halted ticker — reject all signals immediately
     except Exception:
         pass
 

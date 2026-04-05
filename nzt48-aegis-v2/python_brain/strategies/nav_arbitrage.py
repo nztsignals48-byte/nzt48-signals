@@ -102,6 +102,10 @@ class NAVTracker:
         ticker: str,
         market_price: float,
         underlying_intraday_return: float,
+        ibkr_nav_last: float = 0.0,
+        ibkr_nav_bid: float = 0.0,
+        ibkr_nav_ask: float = 0.0,
+        ibkr_nav_close: float = 0.0,
     ):
         """Update NAV estimate and premium/discount.
 
@@ -109,22 +113,36 @@ class NAVTracker:
             ticker: ETP ticker
             market_price: Current market price
             underlying_intraday_return: Decimal return of underlying since yesterday close
+            ibkr_nav_last: Real-time ETF NAV from IBKR (tick type 96). 0 = unavailable.
+            ibkr_nav_bid: ETF NAV bid from IBKR (tick type 94). 0 = unavailable.
+            ibkr_nav_ask: ETF NAV ask from IBKR (tick type 95). 0 = unavailable.
+            ibkr_nav_close: Yesterday's ETF NAV close from IBKR (tick type 92). 0 = unavailable.
         """
         state = self._states.get(ticker)
         if state is None:
             state = NAVState(ticker=ticker)
             self._states[ticker] = state
 
+        # Use IBKR real NAV if available (tick types 92-99), else estimate
+        if ibkr_nav_close > 0:
+            state.yesterday_nav = ibkr_nav_close
+
         if state.yesterday_nav <= 0:
-            # No NAV data — use market price as proxy
             state.yesterday_nav = market_price
             return
 
-        # iNAV estimation
-        L = state.leverage
-        state.estimated_nav = state.yesterday_nav * (
-            1 + L * underlying_intraday_return - state.daily_cost_pct
-        )
+        # IBKR real-time NAV takes priority over estimation
+        if ibkr_nav_last > 0:
+            state.estimated_nav = ibkr_nav_last
+        elif ibkr_nav_bid > 0 and ibkr_nav_ask > 0:
+            state.estimated_nav = (ibkr_nav_bid + ibkr_nav_ask) / 2.0
+        else:
+            # Fallback: estimate NAV from underlying return
+            L = state.leverage
+            state.estimated_nav = state.yesterday_nav * (
+                1 + L * underlying_intraday_return - state.daily_cost_pct
+            )
+
         state.market_price = market_price
 
         # Premium/discount

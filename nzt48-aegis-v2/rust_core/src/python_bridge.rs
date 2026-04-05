@@ -414,7 +414,7 @@ impl PythonBridge {
             .copied()
             .unwrap_or(ctx.leverage);
 
-        // Build JSON message — includes S4-S7 fields (vix, london_time_secs, gap_pct, symbol)
+        // Build JSON message — includes S4-S7 fields + extended tick data (25 new fields)
         let msg = format!(
             concat!(
                 r#"{{"type":"tick","ticker_id":{},"last":{:.6},"high":{:.6},"low":{:.6},"#,
@@ -424,7 +424,15 @@ impl PythonBridge {
                 r#""amihud":{:.4},"regime":"{}","spread_pct":{:.4},"time_fraction":{:.4},"#,
                 r#""heat_pct":{:.4},"equity":{:.2},"#,
                 r#""vix":{:.2},"london_time_secs":{},"gap_pct":{:.4},"symbol":"{}","#,
-                r#""open_positions":{},"trades_today":{}}}"#
+                r#""open_positions":{},"trades_today":{},"#,
+                // Extended tick data
+                r#""last_size":{},"open":{:.6},"close":{:.6},"trade_count":{},"#,
+                r#""trade_rate":{:.2},"volume_rate":{:.2},"rt_hist_vol":{:.4},"shortable":{:.1},"#,
+                r#""halted":{},"mark_price":{:.6},"auction_price":{:.6},"auction_volume":{},"#,
+                r#""auction_imbalance":{:.2},"etf_nav_close":{:.6},"etf_nav_last":{:.6},"#,
+                r#""etf_nav_bid":{:.6},"etf_nav_ask":{:.6},"opt_call_oi":{},"opt_put_oi":{},"#,
+                r#""opt_call_vol":{},"opt_put_vol":{},"opt_impl_vol":{:.4},"opt_hist_vol":{:.4},"#,
+                r#""avg_volume":{}}}"#
             ),
             tick.ticker_id.0,
             tick.last,
@@ -456,6 +464,31 @@ impl PythonBridge {
             ctx.symbol,
             ctx.open_positions,
             ctx.trades_today,
+            // Extended tick data
+            tick.last_size,
+            tick.open,
+            tick.close,
+            tick.trade_count,
+            tick.trade_rate,
+            tick.volume_rate,
+            tick.rt_hist_vol,
+            tick.shortable,
+            tick.halted,
+            tick.mark_price,
+            tick.auction_price,
+            tick.auction_volume,
+            tick.auction_imbalance,
+            tick.etf_nav_close,
+            tick.etf_nav_last,
+            tick.etf_nav_bid,
+            tick.etf_nav_ask,
+            tick.opt_call_oi,
+            tick.opt_put_oi,
+            tick.opt_call_vol,
+            tick.opt_put_vol,
+            tick.opt_impl_vol,
+            tick.opt_hist_vol,
+            tick.avg_volume,
         );
 
         // Send — broken pipe means Python process is dead, flag for respawn.

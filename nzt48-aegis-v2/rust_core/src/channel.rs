@@ -234,15 +234,12 @@ mod tests {
 
     fn make_tick(ticker_id: u32, last: f64, volume: u64) -> MarketTick {
         MarketTick {
-            timestamp_ns: 0,
-            recv_timestamp_ns: 0,
             volume,
             bid: last - 0.01,
             ask: last + 0.01,
             last,
-            bid_size: 0,
-            ask_size: 0,
             ticker_id: TickerId(ticker_id),
+            ..Default::default()
         }
     }
 

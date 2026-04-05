@@ -44,12 +44,91 @@ pub struct MarketTick {
     /// Interned ticker ID (H01). NOT a String.
     #[pyo3(get)]
     pub ticker_id: TickerId,
+    // ── Extended tick data (25 fields from reqMktData) ──
+    /// Last trade size (LastSize / DelayedLastSize)
+    #[pyo3(get)]
+    pub last_size: i32,
+    /// Daily open price (Open / DelayedOpen)
+    #[pyo3(get)]
+    pub open: f64,
+    /// Previous day close (Close / DelayedClose)
+    #[pyo3(get)]
+    pub close: f64,
+    /// Number of trades today (TradeCount generic tick 293)
+    #[pyo3(get)]
+    pub trade_count: i32,
+    /// Trades per minute (TradeRate generic tick 294)
+    #[pyo3(get)]
+    pub trade_rate: f64,
+    /// Volume per minute (VolumeRate generic tick 295)
+    #[pyo3(get)]
+    pub volume_rate: f64,
+    /// Real-time 30-day historical volatility (generic tick 411)
+    #[pyo3(get)]
+    pub rt_hist_vol: f64,
+    /// Shortable indicator: 0=not, >0.5=available, >2.5=easy to borrow (generic tick 236)
+    #[pyo3(get)]
+    pub shortable: f64,
+    /// Trading halt status (Halted / DelayedHalted)
+    #[pyo3(get)]
+    pub halted: bool,
+    /// Mark price for margining (generic tick 232)
+    #[pyo3(get)]
+    pub mark_price: f64,
+    /// Indicative auction clearing price (generic tick 225)
+    #[pyo3(get)]
+    pub auction_price: f64,
+    /// Shares/contracts offered during auction (generic tick 225)
+    #[pyo3(get)]
+    pub auction_volume: i32,
+    /// Auction buy/sell imbalance (generic tick 225)
+    #[pyo3(get)]
+    pub auction_imbalance: f64,
+    /// ETF NAV close (generic tick 578)
+    #[pyo3(get)]
+    pub etf_nav_close: f64,
+    /// ETF NAV last (generic tick 577)
+    #[pyo3(get)]
+    pub etf_nav_last: f64,
+    /// ETF NAV bid (generic tick 576)
+    #[pyo3(get)]
+    pub etf_nav_bid: f64,
+    /// ETF NAV ask (generic tick 576)
+    #[pyo3(get)]
+    pub etf_nav_ask: f64,
+    /// Call option open interest (generic tick 101)
+    #[pyo3(get)]
+    pub opt_call_oi: i32,
+    /// Put option open interest (generic tick 101)
+    #[pyo3(get)]
+    pub opt_put_oi: i32,
+    /// Call option volume (generic tick 100)
+    #[pyo3(get)]
+    pub opt_call_vol: i32,
+    /// Put option volume (generic tick 100)
+    #[pyo3(get)]
+    pub opt_put_vol: i32,
+    /// Option implied volatility (generic tick 106)
+    #[pyo3(get)]
+    pub opt_impl_vol: f64,
+    /// Option 30-day historical volatility (generic tick 104)
+    #[pyo3(get)]
+    pub opt_hist_vol: f64,
+    /// Average daily volume over 90 days (generic tick 165)
+    #[pyo3(get)]
+    pub avg_volume: i64,
 }
 
 #[pymethods]
 impl MarketTick {
     #[new]
-    #[pyo3(signature = (ticker_id, bid, ask, last, volume, timestamp_ns, recv_timestamp_ns, bid_size=0, ask_size=0))]
+    #[pyo3(signature = (ticker_id, bid, ask, last, volume, timestamp_ns, recv_timestamp_ns, bid_size=0, ask_size=0,
+        last_size=0, open=0.0, close=0.0, trade_count=0, trade_rate=0.0, volume_rate=0.0,
+        rt_hist_vol=0.0, shortable=0.0, halted=false, mark_price=0.0, auction_price=0.0,
+        auction_volume=0, auction_imbalance=0.0, etf_nav_close=0.0, etf_nav_last=0.0,
+        etf_nav_bid=0.0, etf_nav_ask=0.0, opt_call_oi=0, opt_put_oi=0, opt_call_vol=0,
+        opt_put_vol=0, opt_impl_vol=0.0, opt_hist_vol=0.0, avg_volume=0))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         ticker_id: TickerId,
         bid: f64,
@@ -60,6 +139,30 @@ impl MarketTick {
         recv_timestamp_ns: u64,
         bid_size: i32,
         ask_size: i32,
+        last_size: i32,
+        open: f64,
+        close: f64,
+        trade_count: i32,
+        trade_rate: f64,
+        volume_rate: f64,
+        rt_hist_vol: f64,
+        shortable: f64,
+        halted: bool,
+        mark_price: f64,
+        auction_price: f64,
+        auction_volume: i32,
+        auction_imbalance: f64,
+        etf_nav_close: f64,
+        etf_nav_last: f64,
+        etf_nav_bid: f64,
+        etf_nav_ask: f64,
+        opt_call_oi: i32,
+        opt_put_oi: i32,
+        opt_call_vol: i32,
+        opt_put_vol: i32,
+        opt_impl_vol: f64,
+        opt_hist_vol: f64,
+        avg_volume: i64,
     ) -> Self {
         Self {
             timestamp_ns,
@@ -71,6 +174,30 @@ impl MarketTick {
             bid_size,
             ask_size,
             ticker_id,
+            last_size,
+            open,
+            close,
+            trade_count,
+            trade_rate,
+            volume_rate,
+            rt_hist_vol,
+            shortable,
+            halted,
+            mark_price,
+            auction_price,
+            auction_volume,
+            auction_imbalance,
+            etf_nav_close,
+            etf_nav_last,
+            etf_nav_bid,
+            etf_nav_ask,
+            opt_call_oi,
+            opt_put_oi,
+            opt_call_vol,
+            opt_put_vol,
+            opt_impl_vol,
+            opt_hist_vol,
+            avg_volume,
         }
     }
 
@@ -79,6 +206,46 @@ impl MarketTick {
             "MarketTick(ticker={}, bid={}, ask={}, last={}, vol={})",
             self.ticker_id.0, self.bid, self.ask, self.last, self.volume
         )
+    }
+}
+
+impl Default for MarketTick {
+    fn default() -> Self {
+        Self {
+            timestamp_ns: 0,
+            recv_timestamp_ns: 0,
+            volume: 0,
+            bid: 0.0,
+            ask: 0.0,
+            last: 0.0,
+            bid_size: 0,
+            ask_size: 0,
+            ticker_id: TickerId(0),
+            last_size: 0,
+            open: 0.0,
+            close: 0.0,
+            trade_count: 0,
+            trade_rate: 0.0,
+            volume_rate: 0.0,
+            rt_hist_vol: 0.0,
+            shortable: 0.0,
+            halted: false,
+            mark_price: 0.0,
+            auction_price: 0.0,
+            auction_volume: 0,
+            auction_imbalance: 0.0,
+            etf_nav_close: 0.0,
+            etf_nav_last: 0.0,
+            etf_nav_bid: 0.0,
+            etf_nav_ask: 0.0,
+            opt_call_oi: 0,
+            opt_put_oi: 0,
+            opt_call_vol: 0,
+            opt_put_vol: 0,
+            opt_impl_vol: 0.0,
+            opt_hist_vol: 0.0,
+            avg_volume: 0,
+        }
     }
 }
 
@@ -240,9 +407,8 @@ mod tests {
             bid: 10.50,
             ask: 10.52,
             last: 10.51,
-            bid_size: 0,
-            ask_size: 0,
             ticker_id: TickerId(42),
+            ..Default::default()
         };
         assert_eq!(tick.ticker_id, TickerId(42));
         assert_eq!(tick.bid, 10.50);
