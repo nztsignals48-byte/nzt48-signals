@@ -5582,105 +5582,16 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         pass
 
     # ── BOOK 102: EMAT MULTI-ASPECT ATTENTION (SIGNAL GENERATOR) ──
+    # DISABLED: untrained model, produces random output
     emat_signal = None
-    try:
-        from python_brain.ml.emat_model import EMATModel
-        import numpy as _np_emat
-        if bars_5m and len(bars_5m) >= 20:
-            _prices = _np_emat.array([b["close"] for b in bars_5m[-60:]])
-            _vols = _np_emat.array([b["volume"] for b in bars_5m[-60:]])
-            _emat = EMATModel(d_model=32, n_heads=2)
-            _emat_pred = _emat.forward(
-                features=_np_emat.column_stack([_prices, _vols]),
-                trend_indicator=ind.get("adx", 50) / 100.0,  # Normalize ADX to [0,1]
-                vol_regime=ind.get("vol_regime", 1),  # Default to normal regime (1)
-            )
-            # EMAT returns dict with 'prediction' as scalar. Map to confidence [0,1].
-            pred_val = float(_emat_pred.get("prediction", 0))
-            # Convert prediction magnitude to confidence: abs(pred) → confidence
-            emat_conf_raw = min(1.0, max(0.0, abs(pred_val)))
-            if emat_conf_raw > 0.1:  # Threshold: signal must be above noise
-                emat_conf = min(85, int(50 + emat_conf_raw * 40))
-                if emat_conf >= effective_floor:
-                    kelly = _kelly_for(emat_conf)
-                    emat_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                        "confidence": emat_conf,
-                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "EMAT_Attention",
-                        "suggested_max_hold_hours": 24,
-                        "exit_urgency_ramp_hours": 12,
-                        **common_fields,
-                    }
-    except ImportError:
-        pass
-    except Exception as e:
-        sys.stderr.write(f"EMAT_Attention error (non-fatal): {e}\n")
-        sys.stderr.flush()
 
     # ── BOOK 157: TEMPORAL ATTENTION (SIGNAL GENERATOR) ──
+    # DISABLED: untrained model, produces random output
     attn_signal = None
-    try:
-        from python_brain.ml.attention_trading import TemporalAttentionSignal
-        import numpy as _np_attn
-        if bars_5m and len(bars_5m) >= 20:
-            _p = _np_attn.array([b["close"] for b in bars_5m[-60:]])
-            _v = _np_attn.array([b["volume"] for b in bars_5m[-60:]])
-            _ind_arr = _np_attn.array([ind.get("rsi", 50)] * len(_p))
-            _attn_gen = TemporalAttentionSignal(n_features=3, seq_len=len(_p))
-            _asig = _attn_gen.generate_signal(_p, _v, _ind_arr)
-            # TemporalAttentionSignal returns dict with 'direction' (long/neutral/short) and 'confidence' [0,1]
-            direction = _asig.get("direction", "neutral")
-            conf_raw = float(_asig.get("confidence", 0.0))
-            if direction == "long" and conf_raw > 0.55:
-                attn_conf = min(85, int(50 + conf_raw * 35))
-                if attn_conf >= effective_floor:
-                    kelly = _kelly_for(attn_conf)
-                    attn_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                        "confidence": attn_conf,
-                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "TemporalAttention",
-                        "suggested_max_hold_hours": 8,
-                        "exit_urgency_ramp_hours": 4,
-                        **common_fields,
-                    }
-    except ImportError:
-        pass
-    except Exception as e:
-        sys.stderr.write(f"TemporalAttention error (non-fatal): {e}\n")
-        sys.stderr.flush()
 
     # ── BOOK 151: SWARM PREDICTOR (SIGNAL GENERATOR) ──
+    # DISABLED: untrained model, produces random output
     swarm_signal = None
-    try:
-        from python_brain.ml.swarm_predictor import SwarmSimulator
-        if bars_5m and len(bars_5m) >= 5:
-            _swarm = SwarmSimulator(n_agents=50)  # Smaller for hot path
-            for b in bars_5m[-10:]:
-                _swarm.step(market_price=b["close"], volume=b["volume"])
-            _spred = _swarm.get_prediction()
-            # SwarmSimulator.get_prediction() returns dict with 'direction' (bullish/neutral/bearish) and 'confidence' [0,1]
-            direction = _spred.get("direction", "neutral") if _spred else "neutral"
-            conf_raw = float(_spred.get("confidence", 0.0)) if _spred else 0.0
-            if direction == "bullish" and conf_raw > 0.6:
-                sw_conf = min(80, int(50 + conf_raw * 30))
-                if sw_conf >= effective_floor:
-                    kelly = _kelly_for(sw_conf)
-                    swarm_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                        "confidence": sw_conf,
-                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "SwarmPredictor",
-                        "suggested_max_hold_hours": 8,
-                        "exit_urgency_ramp_hours": 4,
-                        **common_fields,
-                    }
-    except ImportError:
-        pass
-    except Exception as e:
-        sys.stderr.write(f"SwarmPredictor error (non-fatal): {e}\n")
-        sys.stderr.flush()
 
     # ── BOOK 155: PREDICTION MARKET SIGNALS ──
     try:
@@ -5867,48 +5778,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.flush()
 
     # ── BOOK 166: HIGH-FLYER RETAIL FLOW + MULTI-FACTOR (SIGNAL GENERATOR) ──
+    # DISABLED: untrained model, produces random output
     highflyer_signal = None
-    try:
-        from python_brain.ml.high_flyer_strategies import HighFlyerSignalGenerator
-        import numpy as _np_hf
-        if bars_5m and len(bars_5m) >= 10:
-            if not hasattr(_generate_signals, "_hf"):
-                _generate_signals._hf = HighFlyerSignalGenerator()
-            _hf = _generate_signals._hf
-            _hf_result = _hf.generate(
-                features={
-                    "prices": _np_hf.array([b["close"] for b in bars_5m[-20:]]),
-                    "volumes": _np_hf.array([b["volume"] for b in bars_5m[-20:]]),
-                    "trades": [{"size": b["volume"], "price": b["close"]} for b in bars_5m[-10:]],
-                },
-                volume=msg.get("volume", 0),
-                trades=[],
-            )
-            # HighFlyerSignalGenerator.generate() returns dict with 'direction', 'confidence', 'retail_ratio' or None
-            if _hf_result and isinstance(_hf_result, dict):
-                direction = _hf_result.get("direction", "neutral")
-                conf_val = _hf_result.get("confidence", 0)
-                # Ensure confidence is int [0,100]
-                if isinstance(conf_val, (int, float)):
-                    _hf_conf = int(conf_val)
-                else:
-                    _hf_conf = 60
-                if direction == "long" and _hf_conf >= effective_floor:
-                    kelly = _kelly_for(_hf_conf)
-                    highflyer_signal = {
-                        "type": "signal", "ticker_id": ticker_id, "direction": "Long",
-                        "confidence": _hf_conf,
-                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "HighFlyer", "retail_flow": _hf_result.get("retail_ratio", 0),
-                        "suggested_max_hold_hours": 24,
-                        "exit_urgency_ramp_hours": 12,
-                        **common_fields,
-                    }
-    except ImportError:
-        pass
-    except Exception as e:
-        sys.stderr.write(f"HighFlyer error (non-fatal): {e}\n")
-        sys.stderr.flush()
 
     # ── BOOK 125/126: PAIRS SPREAD REVERSION (SIGNAL GENERATOR) ──
     # Session 28: Kalman hedge filter feeds dynamic hedge ratios into pairs signals.
@@ -5996,56 +5867,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         sys.stderr.flush()
 
     # ── BOOK 203: COPY TRADING — INTERNAL BEST-STRATEGY REPLICATION ──
-    # Redesigned Session 30: instead of dead leader_signal from Rust,
-    # replicate the highest-Sharpe live strategy's signal from this tick.
-    # CopyTrading fires ONLY when the current top-performing strategy also fires,
-    # acting as a confidence multiplier / confirmation signal.
+    # DISABLED: untrained model, produces random output — replicates top strategy, doubles concentration
     copy_signal = None
-    try:
-        # Collect all non-None signals generated so far on this tick
-        _prior_signals = [s for s in [
-            vanguard_signal, orchestrator_signal, ibs_signal, volexp_signal, orb_signal,
-            gap_signal, s1_signal, s2_signal, s4_signal, fomc_signal, s6_signal, s7_signal,
-            rebal_signal, nav_signal, alpha_signal, lead_lag_signal, hft_signal, negrisk_signal,
-        ] if s and isinstance(s, dict)]
-
-        if _prior_signals:
-            # Find which strategies have the best recent Sharpe (from compounding machine)
-            _best_leader = None
-            _best_sharpe = -999.0
-            for _ps in _prior_signals:
-                _ps_strat = _ps.get("strategy", "")
-                _ps_stats = _strategy_pnl_history.get(_ps_strat, [])
-                if len(_ps_stats) >= 10:
-                    _mean = sum(_ps_stats[-30:]) / len(_ps_stats[-30:]) if _ps_stats[-30:] else 0
-                    _std = (sum((x - _mean) ** 2 for x in _ps_stats[-30:]) / len(_ps_stats[-30:])) ** 0.5 if _ps_stats[-30:] else 1
-                    _sharpe = _mean / _std if _std > 0.001 else 0
-                    if _sharpe > _best_sharpe:
-                        _best_sharpe = _sharpe
-                        _best_leader = _ps
-
-            # Only replicate if leader has positive Sharpe and reasonable confidence
-            if _best_leader and _best_sharpe > 0.3:
-                _leader_conf = _best_leader.get("confidence", 0)
-                # CopyTrading confidence: leader's confidence minus 5 (follower discount)
-                _cc = max(0, int(_leader_conf) - 5)
-                if _cc >= effective_floor:
-                    kelly = _kelly_for(_cc)
-                    copy_signal = {
-                        "type": "signal", "ticker_id": ticker_id,
-                        "direction": _best_leader.get("direction", "Long"),
-                        "confidence": _cc,
-                        "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
-                        "strategy": "CopyTrading",
-                        "copy_leader": _best_leader.get("strategy", "unknown"),
-                        "copy_leader_sharpe": round(_best_sharpe, 3),
-                        "suggested_max_hold_hours": 8,
-                        "exit_urgency_ramp_hours": 4,
-                        **common_fields,
-                    }
-    except Exception as e:
-        sys.stderr.write(f"CopyTrading error (non-fatal): {e}\n")
-        sys.stderr.flush()
 
     # ── BOOK 5: OVERNIGHT REVERSAL (NIGHT RIDER) ──
     # Stock declined >1.5% during day, NOT news-driven, volume >1.5x average.
@@ -6953,6 +6776,12 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     """Stage 4: Apply confidence adjustments to ALL signals, select best, classify, size."""
     if not all_signals:
         return None
+
+    # ── OVERLAY DIAGNOSTIC: snapshot pre-overlay values for delta tracking ──
+    for sig in all_signals:
+        sig["_pre_overlay_conf"] = sig.get("confidence", 0)
+        sig["_pre_overlay_kelly"] = sig.get("kelly_fraction", 0)
+
     _original_confidence = 0  # Set properly after best signal selected
     _continuous_erosion = 0
     _event_erosion = 0
@@ -7525,26 +7354,26 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["shares"] = max(1, int(sig["shares"] * _vol_regime_sizing))
 
     # ── BOOK 85: VIX REGIME POSITION SIZING ──
-    # VIX < 15: 1.0x (full). VIX 15-25: 0.8x. VIX 25-35: 0.5x. VIX > 35: 0.25x (inverse only)
+    # VIX > 35 crisis block kept (blocks non-inverse long signals).
+    # VIX 20-35 Kelly scaling COMMENTED OUT — duplicates regime_limits module.
     _vix_adj = msg.get("vix", 21.0)
     if _vix_adj > 35:
-        _vix_scale = 0.25
         # In crisis, only allow inverse ETPs
         _sym = msg.get("symbol", "")
         _is_inverse = any(inv in _sym.upper() for inv in ("QQQS", "3USS", "SUK2", "NV3S", "TS3S"))
         if not _is_inverse:
             all_signals = []  # Block all long signals in crisis
-    elif _vix_adj > 25:
-        _vix_scale = 0.50
-    elif _vix_adj > 20:
-        _vix_scale = 0.80
-    else:
-        _vix_scale = 1.0
-    if _vix_scale < 1.0 and all_signals:
-        for sig in all_signals:
-            sig["kelly_fraction"] *= _vix_scale
-            sig["shares"] = max(1, int(sig["shares"] * _vix_scale))
-            sig["vix_scale"] = round(_vix_scale, 2)
+    # elif _vix_adj > 25:   # DISABLED: duplicates regime_limits module
+    #     _vix_scale = 0.50
+    # elif _vix_adj > 20:   # DISABLED: duplicates regime_limits module
+    #     _vix_scale = 0.80
+    # else:
+    #     _vix_scale = 1.0
+    # if _vix_scale < 1.0 and all_signals:
+    #     for sig in all_signals:
+    #         sig["kelly_fraction"] *= _vix_scale
+    #         sig["shares"] = max(1, int(sig["shares"] * _vix_scale))
+    #         sig["vix_scale"] = round(_vix_scale, 2)
 
     # ── BOOK 85: REGIME RISK PER TRADE (CONSUME _regime_risk_per_trade) ──
     # Scale Kelly to regime-appropriate risk budget. STEADY=0.75%, CRISIS=0.20%.
@@ -9524,6 +9353,9 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             _diagf.write(_json_diag.dumps(_diag_entry) + "\n")
     except Exception:
         pass  # Non-fatal: diagnostics must never block trading
+
+    # ── OVERLAY DIAGNOSTIC: record delta from overlays ──
+    best["_overlay_delta"] = best.get("confidence", 0) - best.get("_pre_overlay_conf", best.get("confidence", 0))
 
     # Record cooldown
     _last_signal_tick[ticker_id] = tick_count

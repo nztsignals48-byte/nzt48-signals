@@ -131,15 +131,15 @@
     },
     "EMAT_Attention": {
       "id": "EMAT_Attention", "name": "EMA Temporal Attention", "family": "momentum",
-      "status": "shadow", "description": "EMA temporal attention scoring. Random-init weights, calibrates via paper trading. Activated Session 30."
+      "status": "disabled", "description": "EMA temporal attention scoring. DISABLED: untrained model, produces random output."
     },
     "TemporalAttention": {
       "id": "TemporalAttention", "name": "Temporal Attention", "family": "ml_signals",
-      "status": "shadow", "description": "Temporal attention for regime-aware signals. Random-init weights, calibrates via paper trading. Activated Session 30."
+      "status": "disabled", "description": "Temporal attention for regime-aware signals. DISABLED: untrained model, produces random output."
     },
     "SwarmPredictor": {
       "id": "SwarmPredictor", "name": "Swarm Predictor", "family": "ensemble",
-      "status": "shadow", "description": "50-agent deterministic swarm consensus. Self-calibrating via wealth accumulation (~1000 tick warm-up). Activated Session 30."
+      "status": "disabled", "description": "50-agent deterministic swarm consensus. DISABLED: untrained model, produces random output."
     },
     "HFT_Probability": {
       "id": "HFT_Probability", "name": "HFT Probability", "family": "microstructure",
@@ -147,7 +147,7 @@
     },
     "HighFlyer": {
       "id": "HighFlyer", "name": "High Flyer", "family": "momentum",
-      "status": "shadow", "description": "Retail flow-driven momentum detection (unusual volume + social). Activated Session 30."
+      "status": "disabled", "description": "Retail flow-driven momentum detection. DISABLED: untrained model, produces random output."
     },
     "NightRider": {
       "id": "NightRider", "name": "Night Rider", "family": "carry",
@@ -159,7 +159,7 @@
     },
     "CopyTrading": {
       "id": "CopyTrading", "name": "Copy Trading", "family": "ensemble",
-      "status": "live", "description": "Internal best-strategy replication. Fires when highest-Sharpe live strategy fires, with -5 confidence discount. Redesigned Session 30."
+      "status": "disabled", "description": "Internal best-strategy replication. DISABLED: replicates top strategy, doubles concentration risk."
     },
     "IVSURF_SkewDirectional": {
       "id": "IVSURF_Skew", "name": "IV Surface Skew", "family": "options",

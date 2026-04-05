@@ -836,14 +836,8 @@ impl<B: BrokerAdapter> Engine<B> {
             }
         }
 
-        // In simulation mode, always start with Normal regime (no stale WAL state).
-        if self.simulation_mode && self.arbiter.regime > RiskRegime::Normal {
-            eprintln!(
-                "STARTUP: Simulation mode — overriding WAL regime {:?} → Normal",
-                self.arbiter.regime
-            );
-            self.arbiter.regime = RiskRegime::Normal;
-        }
+        // REMOVED: sim mode must experience regime escalation for realistic paper trading
+        // Previously: simulation_mode forced regime back to Normal at startup.
 
         // Step 4: Reconcile positions with broker (skip if no broker)
         let (_recon_mismatches, recon_matches) = if has_broker {
@@ -936,7 +930,7 @@ impl<B: BrokerAdapter> Engine<B> {
             (startup_utc_secs % 3600) / 60,
             startup_is_bst,
         );
-        self.write_wal(WalPayload::SystemReady {
+        let _ = self.write_wal(WalPayload::SystemReady {
             wal_events_replayed: replay_result.events_replayed,
             positions_reconciled: recon_matches as u32,
         });
@@ -1043,7 +1037,7 @@ impl<B: BrokerAdapter> Engine<B> {
             eprintln!("WATCHDOG_RECOVERY: Ticks resumed — Halt -> Normal (watchdog-only)");
             self.arbiter.regime = RiskRegime::Normal;
             self.halt_from_watchdog = false;
-            self.write_wal(WalPayload::RiskStateChange {
+            let _ = self.write_wal(WalPayload::RiskStateChange {
                 from: "Halt".to_string(),
                 to: "Normal".to_string(),
                 trigger: "tick_watchdog_recovery".to_string(),
@@ -1370,7 +1364,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     } else {
                         0.0
                     };
-                    self.write_wal(WalPayload::ExitSignal {
+                    let _ = self.write_wal(WalPayload::ExitSignal {
                         ticker_id: tid.0,
                         reason: reason_str.clone(),
                         priority: priority_str,
@@ -1391,7 +1385,7 @@ impl<B: BrokerAdapter> Engine<B> {
 
                     let exit_symbol = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
                     let exit_currency = self.ticker_currencies.get(&tid).cloned().unwrap_or_else(|| "GBP".to_string());
-                    self.write_wal(WalPayload::RoutedOrder {
+                    if let Err(e) = self.write_wal(WalPayload::RoutedOrder {
                         order_id: exit_order_id.clone(),
                         ticker_id: tid.0,
                         side: "Sell".to_string(),
@@ -1413,7 +1407,10 @@ impl<B: BrokerAdapter> Engine<B> {
                         mtf_score: 0.0,
                         entry_type: String::new(),
                         ibs: 0.0,
-                    });
+                    }) {
+                        eprintln!("WAL FAILED: {e} — aborting order");
+                        return;
+                    }
                     self.tracked_orders.push(exit_order_id.clone());
 
                     self.executioner.track_order(TrackedOrder {
@@ -1484,7 +1481,7 @@ impl<B: BrokerAdapter> Engine<B> {
                         else if utc_secs < (open_time + 8 * 3600) { "afternoon" } // open + 8 hours
                         else { "close" }
                     }.to_string();
-                    self.write_wal(WalPayload::PositionClosed {
+                    let _ = self.write_wal(WalPayload::PositionClosed {
                         ticker_id: tid.0,
                         final_pnl,
                         entry_time_ns: entry_time,
@@ -1977,7 +1974,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 } else {
                     0.0
                 };
-                self.write_wal(WalPayload::SignalRejected {
+                let _ = self.write_wal(WalPayload::SignalRejected {
                     ticker_id: tid.0,
                     symbol: sym,
                     strategy: strategy_name.clone(),
@@ -2139,7 +2136,7 @@ impl<B: BrokerAdapter> Engine<B> {
         let symbol_name = self.broker.symbol_for(tid).unwrap_or_else(|| format!("T{}", tid.0));
         let currency = self.ticker_currencies.get(&tid).cloned().unwrap_or_else(|| "GBP".to_string());
 
-        self.write_wal(WalPayload::RoutedOrder {
+        if let Err(e) = self.write_wal(WalPayload::RoutedOrder {
             order_id: order_id.clone(),
             ticker_id: tid.0,
             side: format!("{direction:?}"),
@@ -2161,7 +2158,10 @@ impl<B: BrokerAdapter> Engine<B> {
             mtf_score: sig.structural_score,
             entry_type: entry_type.clone(),
             ibs: sig.ibs,
-        });
+        }) {
+            eprintln!("WAL FAILED: {e} — aborting order");
+            return;
+        }
         self.tracked_orders.push(order_id.clone());
 
         if self.simulation_mode {
@@ -2263,7 +2263,7 @@ impl<B: BrokerAdapter> Engine<B> {
             // P0-1.4: Increment Kelly ramp counter on each fill (paper + live).
             // This is THE validation counter — positions scale from 10% to 100% Kelly over 250 fills.
             self.arbiter.config.kelly_ramp_trades += 1;
-            self.write_wal(WalPayload::KellyRampAdvance {
+            let _ = self.write_wal(WalPayload::KellyRampAdvance {
                 count: self.arbiter.config.kelly_ramp_trades as u64,
             });
             if self.arbiter.config.kelly_ramp_trades.is_multiple_of(25) || self.arbiter.config.kelly_ramp_trades <= 5 {
@@ -2449,7 +2449,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 "CRITICAL: Reconciliation mismatch: {} issues",
                 result.mismatches.len()
             );
-            self.write_wal(WalPayload::ReconciliationDivergence {
+            let _ = self.write_wal(WalPayload::ReconciliationDivergence {
                 mismatches: mismatch_strs,
                 timestamp_ns: self.now_ns,
             });
@@ -2493,7 +2493,7 @@ impl<B: BrokerAdapter> Engine<B> {
             if !any_spoofed {
                 eprintln!("REGIME_RECOVERY: Reduce → Normal (all triggers cleared)");
                 self.arbiter.regime = RiskRegime::Normal;
-                self.write_wal(WalPayload::RiskStateChange {
+                let _ = self.write_wal(WalPayload::RiskStateChange {
                     from: "Reduce".to_string(),
                     to: "Normal".to_string(),
                     trigger: "auto_clear_all_triggers_resolved".to_string(),
@@ -2527,7 +2527,7 @@ impl<B: BrokerAdapter> Engine<B> {
         {
             eprintln!("REGIME_RECOVERY: Halt → Normal (all halt sources cleared, broker healthy)");
             self.arbiter.regime = RiskRegime::Normal;
-            self.write_wal(WalPayload::RiskStateChange {
+            let _ = self.write_wal(WalPayload::RiskStateChange {
                 from: "Halt".to_string(),
                 to: "Normal".to_string(),
                 trigger: "auto_clear_all_halt_sources_resolved".to_string(),
@@ -2544,7 +2544,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 halt_duration_ns / 60_000_000_000
             );
             self.arbiter.regime = RiskRegime::Reduce;
-            self.write_wal(WalPayload::RiskStateChange {
+            let _ = self.write_wal(WalPayload::RiskStateChange {
                 from: "Halt".to_string(),
                 to: "Reduce".to_string(),
                 trigger: "zombie_halt_timeout_30min".to_string(),
@@ -2599,10 +2599,8 @@ impl<B: BrokerAdapter> Engine<B> {
             eprintln!("CHECKPOINT: hash={hash:#018x}");
         }
 
-        // Simulation mode: prevent regime escalation (no stale VIX/macro data).
-        if self.simulation_mode && self.arbiter.regime > RiskRegime::Normal {
-            self.arbiter.regime = RiskRegime::Normal;
-        }
+        // REMOVED: sim mode must experience regime escalation for realistic paper trading
+        // Previously: simulation_mode forced regime back to Normal in reconcile.
 
         // P6-HEARTBEAT: 5-minute status heartbeat for operational monitoring.
         let five_min_ns = 300_000_000_000u64;
@@ -2646,7 +2644,7 @@ impl<B: BrokerAdapter> Engine<B> {
                         "highest_high": (pos.highest_high * 10000.0).round() / 10000.0,
                     }));
                 }
-                self.write_wal(WalPayload::StateSnapshot {
+                let _ = self.write_wal(WalPayload::StateSnapshot {
                     portfolio_json: format!(
                         "{{\"positions\":{},\"high_water\":{:.2},\"unrealized_pnl\":{:.2}}}",
                         self.positions.len(),
@@ -3108,7 +3106,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 self.arbiter.regime = RiskRegime::Halt;
                 self.halt_from_watchdog = true;
                 self.telemetry.regime_escalations.inc();
-                self.write_wal(WalPayload::RiskStateChange {
+                let _ = self.write_wal(WalPayload::RiskStateChange {
                     from: "any".to_string(),
                     to: "Halt".to_string(),
                     trigger: "tick_watchdog_expired".to_string(),
@@ -3199,7 +3197,7 @@ impl<B: BrokerAdapter> Engine<B> {
         self.portfolio.high_water_mark = self.portfolio.equity;
         // N0a: Reset daily trade count on new trading day.
         self.portfolio.daily_trade_count = 0;
-        self.write_wal(WalPayload::DailyReset {
+        let _ = self.write_wal(WalPayload::DailyReset {
             date: current_date.to_string(),
             previous_equity,
             new_equity: self.portfolio.equity,
@@ -3221,7 +3219,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 eprintln!("IBKR ERROR 1100: {message} → HALT");
                 self.arbiter.regime = RiskRegime::Halt;
                 self.halt_from_watchdog = false; // Not watchdog-caused — block auto-recovery
-                self.write_wal(WalPayload::RiskStateChange {
+                let _ = self.write_wal(WalPayload::RiskStateChange {
                     from: "any".to_string(),
                     to: "Halt".to_string(),
                     trigger: format!("IBKR error 1100: {message}"),
@@ -3244,7 +3242,7 @@ impl<B: BrokerAdapter> Engine<B> {
                         for oid in &orphans {
                             let _ = self.broker.cancel_order(oid);
                         }
-                        self.write_wal(WalPayload::RiskStateChange {
+                        let _ = self.write_wal(WalPayload::RiskStateChange {
                             from: format!("{:?}", self.arbiter.regime),
                             to: format!("{:?}", self.arbiter.regime),
                             trigger: format!("orphan_cleanup_1102: {} orders cancelled", orphans.len()),
@@ -3267,7 +3265,7 @@ impl<B: BrokerAdapter> Engine<B> {
                     eprintln!("REGIME_RECOVERY: Halt → Normal (broker reconnected, reconcile clean)");
                     self.arbiter.regime = RiskRegime::Normal;
                     self.halt_from_watchdog = false;
-                    self.write_wal(WalPayload::RiskStateChange {
+                    let _ = self.write_wal(WalPayload::RiskStateChange {
                         from: "Halt".to_string(),
                         to: "Normal".to_string(),
                         trigger: "broker_reconnected_1102".to_string(),
@@ -3314,7 +3312,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 } else {
                     "Buy".to_string()
                 };
-                self.write_wal(WalPayload::FillEvent {
+                let _ = self.write_wal(WalPayload::FillEvent {
                     order_id: order_id.clone(),
                     ticker_id: ticker_id.0,
                     filled_qty: *filled_qty,
@@ -3395,7 +3393,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 status,
                 ..
             } => {
-                self.write_wal(WalPayload::BrokerAck {
+                let _ = self.write_wal(WalPayload::BrokerAck {
                     order_id: order_id.clone(),
                     status: format!("{:?}", status),
                     ibkr_order_id: *ibkr_order_id,
@@ -3422,16 +3420,19 @@ impl<B: BrokerAdapter> Engine<B> {
         }
     }
 
-    pub fn write_wal(&mut self, payload: WalPayload) {
+    pub fn write_wal(&mut self, payload: WalPayload) -> Result<(), String> {
         if let Some(ref mut wal) = self.wal {
             let event = make_wal_event(self.now_ns, payload);
             if let Err(e) = wal.append(&event) {
                 // P3-B1.5: WAL write failure → escalate to HALT (Book 45).
                 // Lost events = incomplete audit trail = unsafe to continue trading.
-                eprintln!("WAL_WRITE_FAIL: {} — escalating to HALT", e);
+                let msg = format!("WAL_WRITE_FAIL: {e}");
+                eprintln!("{msg} — escalating to HALT");
                 self.arbiter.regime = RiskRegime::Halt;
+                return Err(msg);
             }
         }
+        Ok(())
     }
 
     /// Check if it's time for periodic reconciliation (every 5 min).
@@ -3481,7 +3482,7 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // Write state hash as WAL event (H85) — now includes per-position data + unrealised P&L
-        self.write_wal(WalPayload::StateSnapshot {
+        let _ = self.write_wal(WalPayload::StateSnapshot {
             portfolio_json: format!(
                 "{{\"positions\":{},\"high_water\":{:.2},\"unrealized_pnl\":{:.2}}}",
                 self.positions.len(),
@@ -3589,7 +3590,7 @@ impl<B: BrokerAdapter> Engine<B> {
         }
 
         // Step 3: Write SystemShutdown WAL event
-        self.write_wal(WalPayload::SystemShutdown {
+        let _ = self.write_wal(WalPayload::SystemShutdown {
             positions_flattened,
             pending_fills_waited_secs: 0, // Actual wait happens in main.rs
         });

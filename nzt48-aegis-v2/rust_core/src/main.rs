@@ -360,7 +360,12 @@ fn main() {
     if broker_connected {
         // HIGH 5: Non-blocking readiness loop (replaces blocking sleep).
         eprintln!("Waiting 15s for IBKR secdef farms to initialize (LSE/KRX need secdefeu)...");
-        std::thread::sleep(std::time::Duration::from_secs(15));
+        {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
         eprintln!("Secdef wait complete, subscribing market data...");
         let sub_count = broker.subscribe_all();
         eprintln!("Market data: subscribed to {sub_count} streams");
@@ -1303,7 +1308,7 @@ fn main() {
             let from_str = format!("{:?}", last_regime);
             let to_str = format!("{:?}", engine.arbiter.regime);
             eprintln!("REGIME CHANGE: {from_str} → {to_str}");
-            engine.write_wal(WalPayload::RiskStateChange {
+            let _ = engine.write_wal(WalPayload::RiskStateChange {
                 from: from_str,
                 to: to_str,
                 trigger: "engine_loop_detected".to_string(),
