@@ -106,10 +106,15 @@ def _load_config() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Scanner definitions — 5 scanner types covering all entry strategies
+# Scanner definitions — 20 scanner types across all entry strategies
+#
+# Tiered rotation: CORE scanners run every cycle (5min), ROTATING scanners
+# cycle in batches of 5 every 3 rotations (full coverage every 15min).
+# IBKR limit: 10 concurrent subscriptions, ~10 req/600s per scan code.
 # ---------------------------------------------------------------------------
 
-SCANNER_CONFIGS: List[Dict[str, Any]] = [
+# CORE: Run every scan cycle (5 scanners, always active)
+CORE_SCANNER_CONFIGS: List[Dict[str, Any]] = [
     {
         "name": "TypeB_RVOL",
         "scan_code": "HOT_BY_VOLUME",
@@ -129,18 +134,124 @@ SCANNER_CONFIGS: List[Dict[str, Any]] = [
         "description": "Oversold bounce candidates -- biggest fallers with volume",
     },
     {
-        "name": "TypeF_Divergence",
-        "scan_code": "HOT_BY_VOLUME",
-        "entry_type": "TypeF",
-        "description": "OBV divergence candidates -- volume up while price down",
-    },
-    {
         "name": "TypeA_Momentum",
         "scan_code": "TOP_PERC_GAIN",
         "entry_type": "TypeA",
         "description": "Momentum breakout candidates -- biggest gainers with volume",
     },
+    {
+        "name": "Imbalance_Buy",
+        "scan_code": "TOP_STOCK_BUY_IMBALANCE_ADV_RATIO",
+        "entry_type": "OFI",
+        "description": "Buy-side order imbalance -- institutional accumulation",
+    },
 ]
+
+# ROTATING: Batches of 5, cycled every rotation (full coverage every 15min)
+ROTATING_SCANNER_CONFIGS: List[List[Dict[str, Any]]] = [
+    # Batch 0: Microstructure + Breakouts
+    [
+        {
+            "name": "TradeCount",
+            "scan_code": "TOP_TRADE_COUNT",
+            "entry_type": "HFT",
+            "description": "Highest trade frequency -- liquidity proxy for HFT_Probability",
+        },
+        {
+            "name": "TradeRate",
+            "scan_code": "TOP_TRADE_RATE",
+            "entry_type": "Apex",
+            "description": "Trade rate acceleration -- breakout detection for ApexScout",
+        },
+        {
+            "name": "PriceRange",
+            "scan_code": "TOP_PRICE_RANGE",
+            "entry_type": "Gap",
+            "description": "Widest intraday range -- volatility plays for GapFade/ORB",
+        },
+        {
+            "name": "VolumeRate",
+            "scan_code": "TOP_VOLUME_RATE",
+            "entry_type": "RVOL",
+            "description": "Volume rate acceleration -- confirms RVOL spikes",
+        },
+        {
+            "name": "Imbalance_Sell",
+            "scan_code": "TOP_STOCK_SELL_IMBALANCE_ADV_RATIO",
+            "entry_type": "OFI",
+            "description": "Sell-side order imbalance -- institutional distribution",
+        },
+    ],
+    # Batch 1: Gap + After-Hours
+    [
+        {
+            "name": "GapUp",
+            "scan_code": "TOP_OPEN_PERC_GAIN",
+            "entry_type": "Gap",
+            "description": "Gap up since open -- GapFade short candidates",
+        },
+        {
+            "name": "GapDown",
+            "scan_code": "TOP_OPEN_PERC_LOSE",
+            "entry_type": "Gap",
+            "description": "Gap down since open -- GapFade/S6_Catalyst long candidates",
+        },
+        {
+            "name": "AfterHoursUp",
+            "scan_code": "TOP_AFTER_HOURS_PERC_GAIN",
+            "entry_type": "Night",
+            "description": "After-hours gainers -- NightRider/LeadLag overnight setup",
+        },
+        {
+            "name": "AfterHoursDown",
+            "scan_code": "TOP_AFTER_HOURS_PERC_LOSE",
+            "entry_type": "Night",
+            "description": "After-hours losers -- NightRider overnight reversal candidates",
+        },
+        {
+            "name": "Week52High",
+            "scan_code": "SCAN_52WEEK_HIGH",
+            "entry_type": "Trend",
+            "description": "New 52-week highs -- TrendFollow/Momentum breakout",
+        },
+    ],
+    # Batch 2: Options + Deep Value
+    [
+        {
+            "name": "HighIV",
+            "scan_code": "HIGH_OPT_IMP_VOLAT",
+            "entry_type": "Options",
+            "description": "Highest implied volatility -- OptionsFlow/IVSURF_Skew",
+        },
+        {
+            "name": "IVoverHist",
+            "scan_code": "HIGH_OPT_IMP_VOLAT_OVER_HIST",
+            "entry_type": "Vol",
+            "description": "IV >> historical vol -- VolExpansion/VolPremium regime shift",
+        },
+        {
+            "name": "HighPutCall",
+            "scan_code": "HIGH_OPT_VOLUME_PUT_CALL_RATIO",
+            "entry_type": "Options",
+            "description": "High put/call ratio -- fear detection, HEDGE overlay",
+        },
+        {
+            "name": "LowPutCall",
+            "scan_code": "LOW_OPT_VOLUME_PUT_CALL_RATIO",
+            "entry_type": "Options",
+            "description": "Low put/call ratio -- bullish confirmation",
+        },
+        {
+            "name": "Week52Low",
+            "scan_code": "SCAN_52WEEK_LOW",
+            "entry_type": "Reversion",
+            "description": "New 52-week lows -- TypeC_Oversold/S2_Reversion deep value",
+        },
+    ],
+]
+
+# Combined for backwards compatibility — CORE + current rotation batch
+SCANNER_CONFIGS: List[Dict[str, Any]] = CORE_SCANNER_CONFIGS.copy()
 
 # ---------------------------------------------------------------------------
 # Exchange location codes and session mapping
@@ -655,20 +766,31 @@ class MarketScanner:
     def _run_scan_cycle(self) -> Dict[str, Any]:
         """Execute one full scan cycle across all active exchanges.
 
+        Tiered rotation: CORE scanners (5) run every cycle.
+        ROTATING scanners cycle through 3 batches of 5,
+        one batch per cycle = full coverage every 15 minutes.
+
         Returns the consolidated scanner results dict.
         """
         now_utc = datetime.now(timezone.utc)
         utc_hour = now_utc.hour
         active_exchanges = _get_active_exchanges(utc_hour)
 
+        # Select which rotating batch to run this cycle
+        batch_idx = self._scan_count % len(ROTATING_SCANNER_CONFIGS) if ROTATING_SCANNER_CONFIGS else 0
+        rotating_batch = ROTATING_SCANNER_CONFIGS[batch_idx] if ROTATING_SCANNER_CONFIGS else []
+        cycle_scanners = CORE_SCANNER_CONFIGS + rotating_batch
+
         log.info(
-            "Scan cycle #%d — UTC hour=%d, active exchanges=%s",
+            "Scan cycle #%d — UTC hour=%d, active exchanges=%s, "
+            "rotating batch=%d/%d (%d scanners total)",
             self._scan_count + 1, utc_hour, active_exchanges,
+            batch_idx + 1, len(ROTATING_SCANNER_CONFIGS), len(cycle_scanners),
         )
 
         all_scanner_results: Dict[str, Any] = {}
 
-        for scanner_cfg in SCANNER_CONFIGS:
+        for scanner_cfg in cycle_scanners:
             scanner_name = scanner_cfg["name"]
             scan_code = scanner_cfg["scan_code"]
 

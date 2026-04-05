@@ -46,6 +46,8 @@ mod tests {
             volume: 10_000,
             timestamp_ns: ts,
             recv_timestamp_ns: ts + 100,
+            bid_size: 0,
+            ask_size: 0,
         }
     }
 

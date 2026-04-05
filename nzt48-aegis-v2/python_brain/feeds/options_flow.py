@@ -108,15 +108,112 @@ def analyze_options_flow(
     }
 
 
-def fetch_options_summary(ticker: str) -> Optional[Dict[str, Any]]:
-    """Fetch options summary data from available APIs.
+def _fetch_ibkr_options(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch options summary from IBKR scanner results (OPRA subscription).
 
-    Tries: IBKR (via bridge), Polygon, or generates from cached data.
+    Reads pre-computed scanner results from ibkr_market_scanner which now
+    includes HighIV, IVoverHist, HighPutCall, LowPutCall scan codes.
     """
-    if not _HAS_REQUESTS:
+    try:
+        scanner_path = _DATA_DIR / "scanner_results.json"
+        if not scanner_path.exists():
+            return None
+        with open(scanner_path) as f:
+            data = json.load(f)
+
+        scanners = data.get("scanners", {})
+        call_vol = 0
+        put_vol = 0
+        sweeps: List[Dict[str, Any]] = []
+        found = False
+
+        # Check if ticker appears in options-related scanner results
+        for scanner_name in ("HighIV", "IVoverHist", "HighPutCall", "LowPutCall"):
+            scanner_data = scanners.get(scanner_name, {})
+            for result in scanner_data.get("results", []):
+                sym = result.get("symbol", "")
+                if sym.upper() == ticker.upper():
+                    found = True
+                    # Extract whatever options data the scanner provides
+                    call_vol = max(call_vol, result.get("call_volume", 0))
+                    put_vol = max(put_vol, result.get("put_volume", 0))
+                    if result.get("implied_volatility", 0) > 0.8:
+                        sweeps.append({
+                            "type": "call" if result.get("change", 0) > 0 else "put",
+                            "premium": int(result.get("volume", 0) * result.get("price", 0)),
+                        })
+
+        if not found:
+            return None
+
+        return {
+            "call_volume": call_vol or 500,  # Default estimates from scanner presence
+            "put_volume": put_vol or 500,
+            "sweeps": sweeps,
+        }
+    except Exception as e:
+        log.debug("IBKR options scan read failed for %s: %s", ticker, str(e)[:80])
         return None
 
-    # Try Polygon options flow if API key available
+
+def _fetch_ibkr_provider_options(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch options chain data directly from IBKR via ibkr_data_provider.
+
+    Uses OPRA subscription for real-time options data.
+    """
+    try:
+        from python_brain.ouroboros.ibkr_data_provider import get_provider
+        provider = get_provider()
+        if provider is None or not provider.connected:
+            return None
+
+        # Request option chain snapshot for the underlying
+        chain = provider.get_option_chain(ticker, max_strikes=10)
+        if not chain:
+            return None
+
+        call_vol = sum(c.get("volume", 0) for c in chain if c.get("right") == "C")
+        put_vol = sum(c.get("volume", 0) for c in chain if c.get("right") == "P")
+
+        # Detect sweeps: large single-strike volume > 10x average
+        avg_vol = max(1, (call_vol + put_vol) / max(len(chain), 1))
+        sweeps = []
+        for opt in chain:
+            if opt.get("volume", 0) > avg_vol * 10:
+                sweeps.append({
+                    "type": "call" if opt.get("right") == "C" else "put",
+                    "premium": int(opt.get("volume", 0) * opt.get("last", 0) * 100),
+                })
+
+        return {
+            "call_volume": call_vol,
+            "put_volume": put_vol,
+            "sweeps": sweeps,
+        }
+    except Exception as e:
+        log.debug("IBKR provider options fetch failed for %s: %s", ticker, str(e)[:80])
+        return None
+
+
+def fetch_options_summary(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch options summary data. Priority: IBKR provider > scanner > Polygon.
+
+    Uses OPRA L1 subscription for real-time options data via IBKR.
+    Falls back to scanner results, then Polygon if available.
+    """
+    # 1. Try IBKR direct provider (real-time OPRA data)
+    result = _fetch_ibkr_provider_options(ticker)
+    if result and (result.get("call_volume", 0) + result.get("put_volume", 0)) > 0:
+        return result
+
+    # 2. Try IBKR scanner results (from HighIV/HighPutCall scan codes)
+    result = _fetch_ibkr_options(ticker)
+    if result:
+        return result
+
+    # 3. Fallback: Polygon API
+    if not _HAS_REQUESTS:
+        return None
     polygon_key = os.environ.get("POLYGON_API_KEY", "")
     if polygon_key:
         try:
@@ -128,7 +225,7 @@ def fetch_options_summary(ticker: str) -> Optional[Dict[str, Any]]:
                 return {
                     "call_volume": results.get("call_volume", 0),
                     "put_volume": results.get("put_volume", 0),
-                    "sweeps": [],  # Polygon doesn't provide sweep data on basic tier
+                    "sweeps": [],
                 }
         except Exception as e:
             log.debug("Polygon options fetch failed for %s: %s", ticker, str(e)[:80])

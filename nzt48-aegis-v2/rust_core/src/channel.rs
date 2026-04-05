@@ -240,6 +240,8 @@ mod tests {
             bid: last - 0.01,
             ask: last + 0.01,
             last,
+            bid_size: 0,
+            ask_size: 0,
             ticker_id: TickerId(ticker_id),
         }
     }

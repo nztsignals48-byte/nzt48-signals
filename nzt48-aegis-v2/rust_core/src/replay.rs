@@ -407,6 +407,8 @@ pub fn generate_synthetic_day(
                 volume: 10_000 + idx * 10,
                 timestamp_ns: ts,
                 recv_timestamp_ns: ts + 100,
+                bid_size: 0,
+                ask_size: 0,
             });
         }
     }
@@ -424,6 +426,8 @@ pub fn inject_gap_tick(tid: TickerId, prev: f64, gap_pct: f64, ts: u64) -> Marke
         volume: 50_000,
         timestamp_ns: ts,
         recv_timestamp_ns: ts + 100,
+        bid_size: 0,
+        ask_size: 0,
     }
 }
 
@@ -438,6 +442,8 @@ pub fn inject_spike_tick(tid: TickerId, normal: f64, spike_pct: f64, ts: u64) ->
         volume: 1_000,
         timestamp_ns: ts,
         recv_timestamp_ns: ts + 100,
+        bid_size: 0,
+        ask_size: 0,
     }
 }
 
@@ -451,5 +457,7 @@ pub fn inject_flash_crash(tid: TickerId, normal: f64, ts: u64) -> MarketTick {
         volume: 500,
         timestamp_ns: ts,
         recv_timestamp_ns: ts + 100,
+        bid_size: 0,
+        ask_size: 0,
     }
 }

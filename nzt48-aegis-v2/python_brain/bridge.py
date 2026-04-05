@@ -5938,6 +5938,54 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
+    # ── SESSION 32: IBKR SCANNER ENHANCED CONFIDENCE OVERLAY ──
+    # New scanner types feed real-time signals: imbalance → OFI boost,
+    # 52-week breakout → trend boost, gap scanners → gap strategy boost.
+    # Scanner results refresh every 5min. Fail-open: missing = 0 delta.
+    try:
+        _scan_path = "/app/data/scanner_results.json"
+        if os.path.exists(_scan_path):
+            _scan_age = time.time() - os.path.getmtime(_scan_path)
+            if _scan_age < 600:  # Fresh within 10 min
+                with open(_scan_path) as _scan_f:
+                    _scan_data = json.load(_scan_f)
+                _scanners = _scan_data.get("scanners", {})
+                _ticker_sym = ind.get("symbol", msg.get("symbol", ""))
+                _scan_delta = 0
+                _scan_tags = []
+                # Check each scanner for this ticker
+                for _sname, _sdata in _scanners.items():
+                    for _sresult in _sdata.get("results", []):
+                        if _sresult.get("symbol", "").upper() == _ticker_sym.upper():
+                            _etype = _sdata.get("entry_type", "")
+                            if _etype == "OFI":
+                                _scan_delta += 3  # Order imbalance = strong signal
+                                _scan_tags.append(f"ofi_{_sname}")
+                            elif _etype == "Trend":
+                                _scan_delta += 2  # 52-week breakout
+                                _scan_tags.append(f"breakout_{_sname}")
+                            elif _etype == "Gap":
+                                _scan_delta += 2  # Gap detected
+                                _scan_tags.append(f"gap_{_sname}")
+                            elif _etype == "Options":
+                                _scan_delta += 2  # Unusual options activity
+                                _scan_tags.append(f"opt_{_sname}")
+                            elif _etype == "Night":
+                                _scan_delta += 1  # After-hours movement
+                                _scan_tags.append(f"night_{_sname}")
+                            elif _etype in ("HFT", "Apex", "RVOL", "Vol"):
+                                _scan_delta += 1  # Microstructure signal
+                                _scan_tags.append(f"micro_{_sname}")
+                            break  # One match per scanner is enough
+                _scan_delta = min(_scan_delta, 8)  # Cap total scanner boost at 8
+                if _scan_delta > 0:
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, min(100, sig["confidence"] + _scan_delta))
+                        sig["scanner_boost"] = _scan_delta
+                        sig["scanner_tags"] = _scan_tags
+    except Exception:
+        pass  # Fail-open
+
     # ── BOOK 94: STRATEGY-SPECIFIC CLOSE CUTOFF FILTER ──
     _mtc = msg.get("_mins_to_close", 999)
     _STRATEGY_CUTOFFS = {

@@ -35,6 +35,12 @@ pub struct MarketTick {
     /// Last traded price
     #[pyo3(get)]
     pub last: f64,
+    /// Best bid size (lots) — from L1 field 0 or L2 depth. 0 if unavailable.
+    #[pyo3(get)]
+    pub bid_size: i32,
+    /// Best ask size (lots) — from L1 field 3 or L2 depth. 0 if unavailable.
+    #[pyo3(get)]
+    pub ask_size: i32,
     /// Interned ticker ID (H01). NOT a String.
     #[pyo3(get)]
     pub ticker_id: TickerId,
@@ -43,7 +49,7 @@ pub struct MarketTick {
 #[pymethods]
 impl MarketTick {
     #[new]
-    #[pyo3(signature = (ticker_id, bid, ask, last, volume, timestamp_ns, recv_timestamp_ns))]
+    #[pyo3(signature = (ticker_id, bid, ask, last, volume, timestamp_ns, recv_timestamp_ns, bid_size=0, ask_size=0))]
     fn new(
         ticker_id: TickerId,
         bid: f64,
@@ -52,6 +58,8 @@ impl MarketTick {
         volume: u64,
         timestamp_ns: u64,
         recv_timestamp_ns: u64,
+        bid_size: i32,
+        ask_size: i32,
     ) -> Self {
         Self {
             timestamp_ns,
@@ -60,6 +68,8 @@ impl MarketTick {
             bid,
             ask,
             last,
+            bid_size,
+            ask_size,
             ticker_id,
         }
     }
@@ -230,6 +240,8 @@ mod tests {
             bid: 10.50,
             ask: 10.52,
             last: 10.51,
+            bid_size: 0,
+            ask_size: 0,
             ticker_id: TickerId(42),
         };
         assert_eq!(tick.ticker_id, TickerId(42));

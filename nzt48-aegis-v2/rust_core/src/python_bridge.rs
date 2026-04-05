@@ -418,7 +418,7 @@ impl PythonBridge {
         let msg = format!(
             concat!(
                 r#"{{"type":"tick","ticker_id":{},"last":{:.6},"high":{:.6},"low":{:.6},"#,
-                r#""bid":{:.6},"ask":{:.6},"volume":{},"timestamp_ns":{},"#,
+                r#""bid":{:.6},"ask":{:.6},"bid_size":{},"ask_size":{},"volume":{},"timestamp_ns":{},"#,
                 r#""win_rate":{:.4},"total_trades":{},"avg_win":{:.4},"avg_loss":{:.4},"#,
                 r#""leverage":{},"realized_vol":{:.4},"correlation":{:.4},"drawdown_pct":{:.4},"#,
                 r#""amihud":{:.4},"regime":"{}","spread_pct":{:.4},"time_fraction":{:.4},"#,
@@ -432,6 +432,8 @@ impl PythonBridge {
             low,
             tick.bid,
             tick.ask,
+            tick.bid_size,
+            tick.ask_size,
             tick.volume,
             tick.timestamp_ns,
             ctx.win_rate,

@@ -223,6 +223,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns,
             recv_timestamp_ns: base_ns + 100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(normal_tick);
         // Inject >2% gap
@@ -242,6 +244,8 @@ mod tests {
             volume: 12000,
             timestamp_ns: base_ns + 2_000_000_000,
             recv_timestamp_ns: base_ns + 2_000_000_100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(within_cooldown);
         // Should NOT generate a new signal during cooldown
@@ -268,6 +272,8 @@ mod tests {
                 volume: 10000,
                 timestamp_ns: base_ns + i * 100_000_000,
                 recv_timestamp_ns: base_ns + i * 100_000_000 + 100,
+                bid_size: 0,
+                ask_size: 0,
             };
             engine.process_tick(tick);
         }
@@ -287,6 +293,8 @@ mod tests {
             volume: 11000,
             timestamp_ns: base_ns + 4_000_000_000,
             recv_timestamp_ns: base_ns + 4_000_000_100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(normal);
         assert!(
@@ -310,6 +318,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns,
             recv_timestamp_ns: base_ns + 100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(entry_tick);
         // If a position was opened, inject flash crash
@@ -338,6 +348,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns,
             recv_timestamp_ns: base_ns + 100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(tick1);
         // 31 seconds later → synthetic halt
@@ -349,6 +361,8 @@ mod tests {
             volume: 10001,
             timestamp_ns: base_ns + 31_000_000_000,
             recv_timestamp_ns: base_ns + 31_000_000_100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(tick2);
         assert!(
@@ -403,6 +417,8 @@ mod tests {
                     volume: 10_000,
                     timestamp_ns: ts,
                     recv_timestamp_ns: ts + 100,
+                    bid_size: 0,
+                    ask_size: 0,
                 };
                 engine.process_tick(tick);
             }
@@ -435,6 +451,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns,
             recv_timestamp_ns: base_ns + 100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(tick_v);
         // Another Vanguard
@@ -446,6 +464,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns + 1000,
             recv_timestamp_ns: base_ns + 1100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(tick_v2);
         // Apex ticker
@@ -457,6 +477,8 @@ mod tests {
             volume: 10000,
             timestamp_ns: base_ns + 2000,
             recv_timestamp_ns: base_ns + 2100,
+            bid_size: 0,
+            ask_size: 0,
         };
         engine.process_tick(tick_a);
         assert_eq!(engine.counters.ticks_processed, 3);

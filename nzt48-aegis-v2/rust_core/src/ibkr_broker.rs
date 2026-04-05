@@ -84,6 +84,8 @@ struct TickAccumulator {
     high: f64,
     low: f64,
     volume: u64,
+    bid_size: i32,
+    ask_size: i32,
     has_data: bool,
     /// Nanosecond timestamp of last emitted tick (throttle to 5s cadence).
     last_emit_ns: u64,
@@ -98,6 +100,8 @@ impl Default for TickAccumulator {
             high: 0.0,
             low: 0.0,
             volume: 0,
+            bid_size: 0,
+            ask_size: 0,
             has_data: false,
             last_emit_ns: 0,
         }
@@ -850,6 +854,8 @@ impl IbkrBroker {
                     volume: bar.volume as u64,
                     timestamp_ns: ts_ns,
                     recv_timestamp_ns: self.now_ns,
+                    bid_size: 0,
+                    ask_size: 0,
                 };
                 self.pending_ticks.push_back(tick);
                 // Store bar high/low for ATR calculation
@@ -911,8 +917,17 @@ impl IbkrBroker {
                     }
                     TickTypes::Size(ts) => {
                         if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
-                            if matches!(ts.tick_type, TickType::Volume | TickType::DelayedVolume) {
-                                acc.volume = ts.size as u64;
+                            match ts.tick_type {
+                                TickType::Volume | TickType::DelayedVolume => {
+                                    acc.volume = ts.size as u64;
+                                }
+                                TickType::BidSize | TickType::DelayedBidSize => {
+                                    acc.bid_size = ts.size as i32;
+                                }
+                                TickType::AskSize | TickType::DelayedAskSize => {
+                                    acc.ask_size = ts.size as i32;
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -920,10 +935,18 @@ impl IbkrBroker {
                         if let Some(acc) = self.tick_accum.get_mut(&mkt_sub.ticker_id) {
                             match ps.price_tick_type {
                                 TickType::Bid | TickType::DelayedBid => {
-                                    if ps.price > 0.0 { acc.bid = ps.price; acc.has_data = true; }
+                                    if ps.price > 0.0 {
+                                        acc.bid = ps.price;
+                                        acc.bid_size = ps.size as i32;
+                                        acc.has_data = true;
+                                    }
                                 }
                                 TickType::Ask | TickType::DelayedAsk => {
-                                    if ps.price > 0.0 { acc.ask = ps.price; acc.has_data = true; }
+                                    if ps.price > 0.0 {
+                                        acc.ask = ps.price;
+                                        acc.ask_size = ps.size as i32;
+                                        acc.has_data = true;
+                                    }
                                 }
                                 TickType::Last | TickType::DelayedLast => {
                                     if ps.price > 0.0 {
@@ -965,6 +988,8 @@ impl IbkrBroker {
                             volume: acc.volume,
                             timestamp_ns: self.now_ns,
                             recv_timestamp_ns: self.now_ns,
+                            bid_size: acc.bid_size,
+                            ask_size: acc.ask_size,
                         };
                         self.pending_ticks.push_back(tick);
                         // Store high/low for ATR calculation (synthetic bar)
