@@ -558,3 +558,275 @@ inverse_of = "TSL3.L"
 # IBKR exchange: TSEJ | Currency: JPY | Symbol: bare numeric code
 # ═══════════════════════════════════════════════════════════════════════════
 
+
+[[contracts]]
+symbol = "AAPL"
+con_id = 265598
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "MSFT"
+con_id = 272093
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "NVDA"
+con_id = 4815747
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "TSLA"
+con_id = 76792991
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "AMZN"
+con_id = 3691937
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "GOOGL"
+con_id = 208813719
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "META"
+con_id = 107113386
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "AMD"
+con_id = 4391
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "ARM"
+con_id = 653400472
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "TSM"
+con_id = 6223250
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "SPY"
+con_id = 756733
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "QQQ"
+con_id = 320227571
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "IWM"
+con_id = 9579970
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "AVGO"
+con_id = 313130367
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "NFLX"
+con_id = 15124833
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "CRM"
+con_id = 29624264
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "COIN"
+con_id = 481691285
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "MSTR"
+con_id = 272110
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "PLTR"
+con_id = 444857009
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "SMCI"
+con_id = 731466419
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+
+[[contracts]]
+symbol = "SAP.DE"
+con_id = 14204
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "SIE.DE"
+con_id = 14217
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "ALV.DE"
+con_id = 14079
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "DTE.DE"
+con_id = 2254332
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "BAS.DE"
+con_id = 77680640
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "BMW.DE"
+con_id = 14094
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+leverage = 1
+
+[[contracts]]
+symbol = "9988.HK"
+con_id = 391638829
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+
+[[contracts]]
+symbol = "1810.HK"
+con_id = 323608988
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+
+[[contracts]]
+symbol = "2318.HK"
+con_id = 46652400
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+
+[[contracts]]
+symbol = "7203.T"
+con_id = 13905804
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+
+[[contracts]]
+symbol = "6758.T"
+con_id = 13905705
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+
+[[contracts]]
+symbol = "9984.T"
+con_id = 14019490
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+
+[[contracts]]
+symbol = "6861.T"
+con_id = 14017040
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+
+[[contracts]]
+symbol = "8306.T"
+con_id = 13905935
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
