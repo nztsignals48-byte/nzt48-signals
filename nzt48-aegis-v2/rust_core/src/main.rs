@@ -1048,9 +1048,18 @@ fn main() {
                         0.1
                     };
 
+                    // Phase 3B: Per-ticker win_rate from PredictiveScorer (falls back to global Ouroboros).
+                    // PredictiveScorer.ic = win_fraction - 0.5, so win_rate = ic + 0.5.
+                    let (ticker_win_rate, ticker_total_trades) = engine
+                        .predictive_scorer
+                        .score(t.ticker_id)
+                        .filter(|s| s.trade_count >= 5) // Need >=5 trades for per-ticker to be meaningful
+                        .map(|s| (s.ic + 0.5, s.trade_count))
+                        .unwrap_or((dw.bayesian_win_rate, dw.trade_count));
+
                     let ctx = TickContext {
-                        win_rate: dw.bayesian_win_rate,
-                        total_trades: dw.trade_count,
+                        win_rate: ticker_win_rate,
+                        total_trades: ticker_total_trades,
                         // AUDIT-FIX HIGH#2: avg_win/avg_loss loaded from Ouroboros dynamic_weights.toml
                         // [bayesian] section. Defaults to 0.03/0.015 if not in TOML.
                         // Previously hardcoded here, bypassing Ouroboros nightly tuning.

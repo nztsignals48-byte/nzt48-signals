@@ -14,12 +14,14 @@ pub struct JumpDiffusionDetector {
 }
 
 impl JumpDiffusionDetector {
-    /// Create detector with default thresholds (RVOL=8.0, ATR_multiplier=3.0)
-    /// Raised from 3.5/2.0: leveraged ETPs (3x products) routinely annualize at 4-6x
-    /// on 5-second bars. Original thresholds caused 100% false positive rate.
+    /// Create detector with default thresholds.
+    /// Phase 3D: rvol now receives RAW per-bar vol (not annualized).
+    /// Normal 3x ETP bar_vol ≈ 0.003 (0.3% per 5s bar).
+    /// Threshold 0.006 = 2x normal bar vol = genuine vol explosion.
+    /// ATR multiplier 3.0: price move must exceed 3x ATR (same as before).
     pub fn new() -> Self {
         Self {
-            rvol_threshold: 8.0,
+            rvol_threshold: 0.006,
             price_change_threshold_atr_multiplier: 3.0,
         }
     }
@@ -64,31 +66,31 @@ mod jump_tests {
     #[test]
     fn test_jump_detected_both_conditions() {
         let detector = JumpDiffusionDetector::new();
-        // RVOL=4.0 > 3.5 ✓, price_move=1.5 > 2*0.5=1.0 ✓ → jump detected
-        assert!(detector.detect_jump(4.0, 0.5, 1.5));
+        // Phase 3D: raw bar vol 0.01 > 0.006 ✓, price_move=1.5 > 3*0.5=1.5 ✓ → jump detected
+        assert!(detector.detect_jump(0.01, 0.5, 1.6));
     }
 
     #[test]
     fn test_jump_not_detected_low_rvol() {
         let detector = JumpDiffusionDetector::new();
-        // RVOL=2.0 < 3.5 ✗ → no jump
-        assert!(!detector.detect_jump(2.0, 0.5, 1.5));
+        // raw bar vol 0.003 < 0.006 ✗ → no jump (normal ETP vol)
+        assert!(!detector.detect_jump(0.003, 0.5, 1.5));
     }
 
     #[test]
     fn test_jump_not_detected_small_move() {
         let detector = JumpDiffusionDetector::new();
-        // RVOL=4.0 > 3.5 ✓, but price_move=0.8 < 2*0.5=1.0 ✗ → no jump
-        assert!(!detector.detect_jump(4.0, 0.5, 0.8));
+        // raw bar vol 0.01 > 0.006 ✓, but price_move=0.8 < 3*0.5=1.5 ✗ → no jump
+        assert!(!detector.detect_jump(0.01, 0.5, 0.8));
     }
 
     #[test]
     fn test_custom_thresholds() {
-        let detector = JumpDiffusionDetector::with_thresholds(2.5, 3.0);
-        // RVOL=3.0 > 2.5 ✓, price_move=3.5 > 3*1.0=3.0 ✓ → jump detected
-        assert!(detector.detect_jump(3.0, 1.0, 3.5));
-        // RVOL=2.0 < 2.5 ✗ → no jump
-        assert!(!detector.detect_jump(2.0, 1.0, 3.5));
+        let detector = JumpDiffusionDetector::with_thresholds(0.005, 3.0);
+        // raw bar vol 0.007 > 0.005 ✓, price_move=3.5 > 3*1.0=3.0 ✓ → jump detected
+        assert!(detector.detect_jump(0.007, 1.0, 3.5));
+        // raw bar vol 0.003 < 0.005 ✗ → no jump
+        assert!(!detector.detect_jump(0.003, 1.0, 3.5));
     }
 }
 
@@ -373,7 +375,8 @@ mod detector_tests {
     fn test_regime_detector_clean_trending() {
         let detector = RegimeDetector::new();
         let prices: Vec<f64> = (0..50).map(|i| 100.0 + i as f64).collect();
-        let decision = detector.evaluate(1.5, 0.5, 0.3, &prices);
+        // Phase 3D: raw bar vol 0.003 < 0.006 threshold → no jump
+        let decision = detector.evaluate(0.003, 0.5, 0.3, &prices);
         assert!(!decision.has_jump);
         assert_eq!(decision.confidence, 90.0);
     }
@@ -382,7 +385,8 @@ mod detector_tests {
     fn test_regime_detector_with_jump() {
         let detector = RegimeDetector::new();
         let prices: Vec<f64> = (0..50).map(|i| 100.0 + i as f64).collect();
-        let decision = detector.evaluate(4.0, 0.5, 1.5, &prices);
+        // Phase 3D: raw bar vol 0.01 > 0.006 ✓, price_move 2.0 > 3*0.5=1.5 ✓ → jump
+        let decision = detector.evaluate(0.01, 0.5, 2.0, &prices);
         assert!(decision.has_jump);
         assert_eq!(decision.confidence, 75.0);
     }

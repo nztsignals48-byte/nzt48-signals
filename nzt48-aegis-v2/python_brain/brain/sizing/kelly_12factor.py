@@ -13,7 +13,7 @@ The 12 factors applied IN ORDER:
  6. Amihud liquidity scaling
  7. Regime scaling
  8. Spread cost adjustment
- 9. Time-of-day scaling
+ 9. Session quality scaling (spread width + close proximity)
 10. Confidence scaling
 11. Half-Kelly cap (0.5)
 12. Portfolio heat limit (6%)
@@ -144,10 +144,21 @@ def kelly_12factor(
     spread_scale = max(1.0 - spread_pct * 2.0, 0.1)
     factors["f08_spread"] = spread_scale
 
-    # ── Factor 9: Time-of-day scaling ──
-    # Reduce as day progresses (less time for trade to work)
-    tod_scale = max(1.0 - time_of_day_fraction * 0.5, 0.5)
-    factors["f09_time_of_day"] = tod_scale
+    # ── Factor 9: Session quality scaler (replaces linear time-of-day decay) ──
+    # Late entries get smaller sizing due to LIQUIDITY conditions, not arbitrary time.
+    # Uses spread percentile as primary quality signal.
+    if spread_pct > 1.0:
+        tod_scale = 0.3  # Very wide spread = poor liquidity = small size
+    elif spread_pct > 0.5:
+        tod_scale = 0.5  # Wide spread
+    elif spread_pct > 0.2:
+        tod_scale = 0.8  # Moderate spread
+    else:
+        tod_scale = 1.0  # Tight spread = full sizing
+    # Time proximity to close: gentle reduction only in last 30 min
+    if time_of_day_fraction > 0.92:  # Last ~30 min of session
+        tod_scale *= 0.6  # Reduce for close proximity
+    factors["f09_session_quality"] = tod_scale
 
     # ── Factor 10: Confidence scaling ──
     # Scale linearly by confidence [65, 100] → [0.65, 1.0]

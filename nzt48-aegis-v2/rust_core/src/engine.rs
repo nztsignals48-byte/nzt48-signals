@@ -226,9 +226,33 @@ impl BarHistory {
         self.closes.is_empty()
     }
 
+    /// Raw per-bar realized volatility (NOT annualized).
+    /// Returns the standard deviation of log returns per 5-second bar.
+    /// Used by regime gate (jump-diffusion detection) where annualization
+    /// distorts thresholds for intraday data (sqrt(6120*252) ≈ 1242x blowup).
+    /// Returns 0.0003 (default ~0.03% per bar) if insufficient data (<10 bars).
+    pub fn realized_vol_raw(&self) -> f64 {
+        let n = self.closes.len();
+        if n < 10 {
+            return 0.0003; // Cold-start default (~0.03% per 5s bar)
+        }
+        let mut sum = 0.0;
+        let mut sum_sq = 0.0;
+        let count = (n - 1) as f64;
+        for i in 1..n {
+            let lr = (self.closes[i] / self.closes[i - 1]).ln();
+            sum += lr;
+            sum_sq += lr * lr;
+        }
+        let mean = sum / count;
+        let variance = sum_sq / count - mean * mean;
+        variance.max(0.0).sqrt()
+    }
+
     /// Annualized realized volatility from log returns of close prices.
     /// Uses 5-second bars → ~6120 bars/day for LSE (8.5h × 720 bars/h).
     /// Returns 0.30 (default) if insufficient data (<10 bars).
+    /// Used by Kelly sizing (Moreira-Muir) and CVaR heat check where annualized units expected.
     pub fn realized_vol(&self, bars_per_day: f64) -> f64 {
         let n = self.closes.len();
         if n < 10 {
@@ -1223,10 +1247,12 @@ impl<B: BrokerAdapter> Engine<B> {
 
         // Phase 1C: Regime detection (jump-diffusion + Hurst) on each tick.
         // FIX: Calculate price_move BEFORE updating last_prices (was always 0.0).
+        // Phase 3D: Use raw per-bar vol (not annualized) for regime gate.
+        // Annualized vol inflated by sqrt(6120*252)≈1242x, distorting jump-diffusion thresholds.
         let regime_decision = {
             let rvol_val = self.bar_history.get(&tid)
-                .map(|h| h.realized_vol(bars_per_day))
-                .unwrap_or(0.30);
+                .map(|h| h.realized_vol_raw())
+                .unwrap_or(0.0003);
             let price_move = if let Some(&prev) = self.last_prices.get(&tid)
                 && prev > 0.0
             {
