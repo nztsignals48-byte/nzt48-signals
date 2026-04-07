@@ -285,16 +285,18 @@ def _scan_delayed_data_promotions(t5_symbols: List[str], batch_size: int = 50) -
 
                         ibkr_sym = ibkr_to_yf.get(yf_sym, yf_sym)
 
-                        # Promote if: high RVOL, large move, or high notional
-                        if rvol > 2.0 or last_return > 0.03 or notional > 5_000_000:
+                        # Promote if: unusual activity (high RVOL or large move)
+                        # Notional alone is NOT sufficient — most S&P names trade >$5M
+                        # We want KINETIC energy: stocks that are MOVING, not just liquid
+                        if rvol > 2.0 or last_return > 0.05:
                             promotions.add(ibkr_sym)
                             reason = []
                             if rvol > 2.0:
                                 reason.append(f"rvol={rvol:.1f}")
                             if last_return > 0.03:
                                 reason.append(f"ret={last_return:.1%}")
-                            if notional > 5_000_000:
-                                reason.append(f"notional=${notional/1e6:.1f}M")
+                            if notional > 50_000_000:
+                                reason.append(f"notional=${notional/1e6:.0f}M")
                             log.info("PROMOTE: %s → T3 (%s)", ibkr_sym, ", ".join(reason))
                     except Exception:
                         continue
