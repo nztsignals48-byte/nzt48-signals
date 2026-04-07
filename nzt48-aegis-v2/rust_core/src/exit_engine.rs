@@ -419,13 +419,13 @@ impl ExitEngine {
         atr: f64,
         time_secs: u32,
         is_halt_flatten: bool,
-        signal_reversal: bool,
+        _signal_reversal: bool,
         is_carried: bool,
         exchange: &str,
     ) -> Option<ExitResult> {
         // S3: Active trading minutes from tick counter (halt-safe — pauses when no ticks arrive).
         // Each update_tracking() call increments active_trading_ticks. At ~5s per tick, 12 ticks ≈ 1 minute.
-        let active_trading_minutes = position.active_trading_ticks / 12;
+        let _active_trading_minutes = position.active_trading_ticks / 12;
         let mut checks: Vec<ExitCheck> = Vec::new();
 
         // Priority 5: HALT/FLATTEN override — market sell immediately
@@ -481,106 +481,11 @@ impl ExitEngine {
             }
         }
 
-        // Book 39: PARTIAL PROFIT LADDERING — 25% at Rung 3, 25% at Rung 4.
-        // Remaining 50% trails with the Chandelier stop.
-        // partial_exits_done: 0 = none, 1 = rung3 done, 2 = rung3+rung4 done
-        if position.qty > 1 && !is_halt_flatten {
-            let profit_pct = if position.avg_entry > 0.0 {
-                (current_price - position.avg_entry) / position.avg_entry
-            } else {
-                0.0
-            };
-            // Rung 3 partial (25%): profit >= 1.5% and not yet done
-            if position.trailing_rung >= 3 && position.partial_exits_done == 0 && profit_pct >= 0.015 {
-                let partial = (position.qty as f64 * 0.25).max(1.0) as u32;
-                if partial > 0 && partial < position.qty {
-                    checks.push(ExitCheck {
-                        reason: ExitReason::PartialProfitTake,
-                        priority: ExitPriority::TimeStop, // Low priority — doesn't override protective stops
-                        order_type: ExitOrderType::LimitAtStop,
-                        limit_price: Some(current_price),
-                        tif: TimeInForce::Day,
-                    });
-                    // Store the partial qty hint — engine.rs reads this
-                    // Note: we can't mutate position here, engine.rs handles qty reduction
-                }
-            }
-            // Rung 4 partial (25%): profit >= 2.5% and only rung3 done
-            else if position.trailing_rung >= 4 && position.partial_exits_done == 1 && profit_pct >= 0.025 {
-                let remaining = position.qty;
-                let partial = (remaining as f64 * 0.33).max(1.0) as u32; // 33% of remaining ≈ 25% of original
-                if partial > 0 && partial < remaining {
-                    checks.push(ExitCheck {
-                        reason: ExitReason::PartialProfitTake,
-                        priority: ExitPriority::TimeStop,
-                        order_type: ExitOrderType::LimitAtStop,
-                        limit_price: Some(current_price),
-                        tif: TimeInForce::Day,
-                    });
-                }
-            }
-        }
-
-        // Priority 2.7: MAX HOLD HOURS TIME-STOP (Book 39/94)
-        // Force exit if position held past strategy-specific max holding period.
-        if let Some(max_hours) = position.max_hold_hours {
-            let hold_hours = position.active_trading_ticks as f64 / 720.0; // 720 ticks/hour at 5s
-            if hold_hours > max_hours {
-                checks.push(ExitCheck {
-                    reason: ExitReason::TimeStop,
-                    priority: ExitPriority::TimeStop,
-                    order_type: ExitOrderType::MarketSell,
-                    limit_price: None,
-                    tif: TimeInForce::Day,
-                });
-            }
-        }
-
-        // Priority 2.6: URGENCY RAMP — progressively tighten stops after ramp_hours (Book 39/94).
-        // Between ramp_hours and max_hold_hours, linearly reduce the trailing ATR multiplier
-        // from 1.0x to 0.3x. This accelerates exits on positions approaching their time limit
-        // without the cliff-edge of a hard time-stop.
-        if !is_carried
-            && let (Some(ramp_hours), Some(max_hours)) = (position.exit_urgency_ramp_hours, position.max_hold_hours) {
-                let hold_hours = position.active_trading_ticks as f64 / 720.0;
-                if hold_hours > ramp_hours && hold_hours <= max_hours {
-                    // Linear ramp from 1.0 at ramp_hours to 0.3 at max_hours
-                    let ramp_span = (max_hours - ramp_hours).max(0.1);
-                    let urgency_frac = ((hold_hours - ramp_hours) / ramp_span).clamp(0.0, 1.0);
-                    let urgency_mult = 1.0 - urgency_frac * 0.7; // 1.0 → 0.3
-                    let urgency_stop = position.highest_high - urgency_mult * atr;
-                    if current_price <= urgency_stop && urgency_stop > position.stop_price {
-                        checks.push(ExitCheck {
-                            reason: ExitReason::TimeStop,
-                            priority: ExitPriority::TimeStop,
-                            order_type: ExitOrderType::LimitAtStop,
-                            limit_price: Some(urgency_stop),
-                            tif: TimeInForce::Day,
-                        });
-                    }
-                }
-            }
-
-        // Priority 2.5: Time-stop — if position hasn't reached rung 2 within max_minutes,
-        // tighten stop aggressively to force exit. Prevents capital lock in sideways trades.
-        if self.config.time_stop_enabled
-            && !is_carried
-            && active_trading_minutes >= self.config.time_stop_max_minutes_to_rung2
-            && position.trailing_rung < 2
-        {
-            // Aggressive trailing stop: use tight ATR multiplier below highest high
-            let aggressive_stop = position.highest_high
-                - self.config.time_stop_aggressive_trail_atr * atr.max(position.avg_entry * 0.005);
-            if current_price <= aggressive_stop {
-                checks.push(ExitCheck {
-                    reason: ExitReason::TimeStop,
-                    priority: ExitPriority::TimeStop,
-                    order_type: ExitOrderType::MarketSell,
-                    limit_price: None,
-                    tif: TimeInForce::Day,
-                });
-            }
-        }
+        // PHILOSOPHY: Chandelier trailing stop is the primary alpha exit.
+        // Time-based exits (TimeStop, urgency ramp, partial profit laddering) are REMOVED.
+        // Ride winners indefinitely until the Chandelier stop is hit.
+        // Only hard exits remain: EodFlatten (market-structure), HaltFlatten (catastrophic),
+        // and Chandelier trailing stop (price-based profit protection).
 
         // Priority 2: EOD flatten — per-exchange cutoff (MEDIUM-1 fix)
         let eod_cutoff = self.config.eod_flatten_for_exchange(exchange);
@@ -594,16 +499,13 @@ impl ExitEngine {
             });
         }
 
-        // Priority 1: Signal reversal
-        if signal_reversal {
-            checks.push(ExitCheck {
-                reason: ExitReason::SignalReversal,
-                priority: ExitPriority::SignalReversal,
-                order_type: ExitOrderType::MarketSell,
-                limit_price: None,
-                tif: TimeInForce::Day,
-            });
-        }
+        // PHILOSOPHY: SignalReversal REMOVED from exit engine.
+        // The Python brain changing its mind should not override the Chandelier.
+        // If price is above the trailing stop, the position holds.
+        // Mean-reversion strategies should manage their own exits via
+        // tighter Chandelier rungs (lower max_hold / tighter ATR), not
+        // signal reversal overrides.
+        // signal_reversal parameter is now unused — kept in signature for compatibility.
 
         if checks.is_empty() {
             return None;
