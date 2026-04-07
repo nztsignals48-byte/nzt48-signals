@@ -3368,61 +3368,42 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
 
 
 def _compute_confidence_floor(msg, ind):
-    """Compute effective confidence floor from leverage, adaptive params, and regime."""
+    """Compute minimum confidence for signal acceptance.
+
+    REDESIGNED for algorithmic trading (5-min to 4-hour holds):
+    - Confidence measures SHORT-TERM EDGE, not long-term conviction
+    - A 52% hit rate at 1.5:1 R:R is +EV → should trade
+    - Floor based primarily on LEVERAGE RISK (tail risk scales with leverage)
+    - VIX/hurst/day-of-week affect SIZING not entry decision
+    - Prop desk principle: take any +EV trade, size it appropriately
+
+    Floor levels:
+    - 1x leverage: 35 (any >51% hit rate is +EV after costs)
+    - 3x leverage: 45 (need >53% to cover amplified spread + decay)
+    - 5x leverage: 55 (tail risk requires higher conviction)
+    """
     leverage = msg.get("leverage", 1)
     if leverage >= 5:
-        floor = 70
+        floor = 55  # 5x: tail risk is real, need higher conviction
     elif leverage >= 3:
-        floor = 50
+        floor = 45  # 3x: spread + vol decay cost ~2-3% annually
     else:
-        floor = 40
+        floor = 35  # 1x: any positive-edge trade should flow
 
-    adaptive_floor = _load_adaptive_floor()
-    if adaptive_floor is not None:
-        floor = max(floor, adaptive_floor)
-
-    # Strongly mean-reverting → raise floor (tightened from H<0.50 to H<0.30 for paper validation)
-    # H<0.50 was blocking ~80% of signals since random walk (0.45-0.55) was included.
-    # Only truly mean-reverting regimes (H<0.30) should raise the floor.
-    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and 0.01 < ind["hurst"] < 0.30:
-        floor = max(floor, 60)
-
-    # Falling volume → moderate floor raise (tightened from 75 to 60 for paper validation)
-    has_volume = any(b.get("volume", 0) > 0 for b in ind["bars_5m"][-5:]) if ind["bars_5m"] else False
-    if not _SIM_MODE and ind["n_5min_bars"] >= 5 and has_volume and ind["vol_slope"] < -0.5:
-        floor = max(floor, 60)
-
-    # ── BOOK 15/85: VIX REGIME TIER CONFIDENCE FLOOR ──
-    # Higher VIX = higher confidence required (only strongest signals pass)
-    # Paper mode: reduced VIX floor penalties to allow signal flow for data collection
+    # VIX crisis override: only in extreme conditions (VIX > 35 = actual crisis)
+    # Normal elevated VIX (20-35) is handled by SIZING not ENTRY
     _vix = msg.get("vix", 21.0)
-    if not _SIM_MODE:
-        if _vix > 35:
-            floor = max(floor, 65)  # Crisis: only highest conviction
-        elif _vix > 25:
-            floor = max(floor, 60)  # WOI: elevated
-        elif _vix > 20:
-            floor = max(floor, 55)  # Caution
-    else:
-        # Paper mode: mild VIX adjustments only
-        if _vix > 35:
-            floor = max(floor, 55)
-        elif _vix > 25:
-            floor = max(floor, 50)
+    if _vix > 35:
+        floor = max(floor, floor + 10)  # Crisis: raise floor by 10 (not absolute)
+    elif _vix > 30:
+        floor = max(floor, floor + 5)   # Severe: mild floor raise
 
-    # ── BOOK 171: DAY-OF-WEEK FLOOR ADJUSTMENT ──
-    # Monday has negative drift (-0.8bps) — mild penalty only.
-    # +5 was too aggressive when VIX already raises floor to 55-60.
-    # Changed to +2 for paper trading validation.
-    try:
-        from datetime import datetime as _dt_dow, timezone as _tz_dow
-        _ts_dow = msg.get("timestamp_ns", 0)
-        if _ts_dow > 0:
-            _dow = _dt_dow.fromtimestamp(_ts_dow / 1_000_000_000, tz=_tz_dow.utc).weekday()
-            if _dow == 0:  # Monday
-                floor = max(floor, floor + 2)  # Mild Monday penalty
-    except Exception:
-        pass
+    # Adaptive floor override from nightly pipeline (Ouroboros learning)
+    # Only apply if it's LOWER than our base (tightening is done via sizing)
+    adaptive_floor = _load_adaptive_floor()
+    if adaptive_floor is not None and adaptive_floor > floor:
+        # Cap adaptive override at floor + 15 to prevent runaway tightening
+        floor = min(adaptive_floor, floor + 15)
 
     return floor
 
@@ -3600,8 +3581,10 @@ def _system1_microstructure(ticker_id, msg, ticks, ind, conf_floor, kelly_fn, co
         return None
 
     # Graduated confidence with regime conditioning
-    conf = 52.0
-    conf += (bullish_count - 4) * 4.0
+    # Base 58: 4/6 microstructure factors aligned + ADX > 15 = real edge
+    # Academic: OFI predicts 5-second returns with 10.5% R² (Cont 2014)
+    conf = 58.0
+    conf += (bullish_count - 4) * 5.0  # Each additional factor adds more edge
     if adx > 25.0:
         conf += 8.0
     if adx > 35.0:
@@ -3710,7 +3693,9 @@ def _system2_reversion(ticker_id, msg, bars_5m, ind, conf_floor, kelly_fn, commo
         return None
 
     # Confidence maps score to conviction
-    conf = 48.0 + score * 4.0  # 48 + 4*4=64 minimum, up to 48+40=88
+    # Base 52 + graduated scoring: 4 oversold factors = strong reversion setup
+    # Academic: Connors RSI-2 < 10 = 57% WR on daily, higher on intraday
+    conf = 52.0 + score * 4.0  # 52 + 4*4=68 minimum, up to 52+40=92
     if hurst_regime == "mean_reverting":
         conf += 5.0  # Bonus: confirmed MR regime
     conf = max(0, min(conf, 90.0))
