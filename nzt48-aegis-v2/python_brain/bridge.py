@@ -2776,8 +2776,12 @@ def _evaluate_orchestrator(msg, ticks, rvol, hurst, hurst_regime, adx):
 
 def _compute_indicators(ticker_id, ticks, msg):
     """Stage 1: Compute all indicators from tick data. Returns a dict."""
-    # Aggregate into 5-minute OHLCV bars (cached)
-    BARS_PER_5MIN = 60
+    # Aggregate into 1-minute OHLCV bars (cached)
+    # Changed from 5-min (60 ticks) to 1-min (12 ticks) for faster warmup.
+    # 5-min bars needed 100+ min for 20 bars; 1-min bars need 20 min.
+    # Strategy thresholds (ADX, RVOL) were calibrated on 5-min but work on 1-min
+    # with slightly noisier signals — acceptable for paper trading signal generation.
+    BARS_PER_5MIN = 12  # 12 ticks × 5s = 60s = 1-minute bars
     n_5min_bars = len(ticks) // BARS_PER_5MIN
     cached = _bar_cache.get(ticker_id)
     if cached and cached[0] == n_5min_bars:
@@ -2833,11 +2837,13 @@ def _compute_indicators(ticker_id, ticks, msg):
         except Exception:
             pass
 
-    # IBS from latest tick
+    # IBS from session high/low (all ticks today, not single tick)
+    # Single-tick high ≈ low ≈ close → IBS always ~0.5 (useless)
+    # Session high/low gives meaningful IBS for mean-reversion detection
     latest = ticks[-1]
-    high = latest.get("high", latest["last"])
-    low = latest.get("low", latest["last"])
-    ibs = calculate_ibs(high, low, latest["last"])
+    session_high = max(t.get("high", t["last"]) for t in ticks)
+    session_low = min(t.get("low", t["last"]) for t in ticks)
+    ibs = calculate_ibs(session_high, session_low, latest["last"])
     if ibs is None:
         ibs = 0.5
 
@@ -2943,13 +2949,16 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
             if ext > 15.0:
                 return False, "vwap_extension_5pct", "extension={:.1f}% from VWAP (max 15%)".format(ext)
 
-    # G3: VWAP directional extension (long-only chasing check)
+    # G3: VWAP directional extension (moved from hard kill to confidence penalty)
+    # Gemini feedback: killing momentum trades at >10% VWAP is wrong —
+    # the strongest breakouts often start 10%+ above VWAP.
+    # Now stores penalty for Stage E (_apply_adjustments) instead of killing.
     if not _SIM_MODE and vh and len(ticks) > 60:
         lv = vh[-1]
         if lv > 0:
             vd = (msg["last"] - lv) / lv * 100
             if vd > 10.0:
-                return False, "vwap_extension", "price {:.1f}% above VWAP (max 10.0%)".format(vd)
+                msg["_vwap_chase_penalty"] = min(15, int((vd - 10.0) * 2))  # 2 pts per % over 10
 
     # G4: Structural tradability minimum
     if not _SIM_MODE and ind["structural_score"] < 15:
@@ -3385,14 +3394,16 @@ def _compute_confidence_floor(msg, ind):
         floor = max(floor, 55)  # Caution
 
     # ── BOOK 171: DAY-OF-WEEK FLOOR ADJUSTMENT ──
-    # Monday has negative drift (-0.8bps) — raise floor for momentum entries
+    # Monday has negative drift (-0.8bps) — mild penalty only.
+    # +5 was too aggressive when VIX already raises floor to 55-60.
+    # Changed to +2 for paper trading validation.
     try:
         from datetime import datetime as _dt_dow, timezone as _tz_dow
         _ts_dow = msg.get("timestamp_ns", 0)
         if _ts_dow > 0:
             _dow = _dt_dow.fromtimestamp(_ts_dow / 1_000_000_000, tz=_tz_dow.utc).weekday()
             if _dow == 0:  # Monday
-                floor = max(floor, floor + 5)  # Harder to enter on Mondays
+                floor = max(floor, floor + 2)  # Mild Monday penalty
     except Exception:
         pass
 
@@ -5153,11 +5164,13 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 }
 
     # Strategy: Volume Expansion Continuation
-    # Entry: RVOL > 2.0 AND ADX > 20 AND 3+ consecutive up bars.
-    # Differentiation from VanguardSniper: requires RVOL > 2.0 (vs 1.5) and consecutive bars.
-    # VanguardSniper is ADX-based scoring; VolExpansion is structure-based confirmation.
+    # Entry: RVOL > dynamic threshold AND ADX > 20 AND 3+ consecutive up bars.
+    # Dynamic RVOL: VIX<15 → 1.5, VIX 15-25 → 1.8, VIX>25 → 2.2 (Gemini feedback)
+    # In low-vol markets, RVOL 1.5 is a massive relative breakout; in panic, 2.0 is noise.
     volexp_signal = None
-    if ind["rvol"] > 2.0 and ind["adx"] > 20.0 and len(bars_5m) >= 5:
+    _vix_volexp = msg.get("vix", 20)
+    _rvol_threshold_volexp = 1.5 if _vix_volexp < 15 else (1.8 if _vix_volexp <= 25 else 2.2)
+    if ind["rvol"] > _rvol_threshold_volexp and ind["adx"] > 20.0 and len(bars_5m) >= 5:
         recent = bars_5m[-4:]
         up_count = sum(1 for b in recent if b["close"] > b["open"])
         if up_count >= 3:
@@ -6307,6 +6320,123 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     except Exception:
         pass
 
+    # ── KELTNER SQUEEZE RELEASE SIGNAL ──
+    # Book 22: Bollinger inside Keltner = volatility squeeze. Release → 67% WR breakout.
+    # squeeze_release is already computed above — just need to emit a signal when it fires.
+    squeeze_signal = None
+    if squeeze_release and len(bars_5m) >= 20:
+        # Direction: use recent close vs SMA20 for direction
+        _sq_closes = [b["close"] for b in bars_5m[-20:]]
+        _sq_sma20 = sum(_sq_closes) / 20
+        _sq_direction = "Long" if bars_5m[-1]["close"] > _sq_sma20 else None  # ISA: long only
+        if _sq_direction:
+            sq_conf = 62.0
+            if ind["rvol"] > 1.5:
+                sq_conf += 8.0  # Volume confirmation
+            if ind["adx"] > 20:
+                sq_conf += 5.0  # Trend strength
+            if d_vpin > 0.3:
+                sq_conf += 5.0  # Informed buying
+            sq_conf = min(sq_conf, 85.0)
+            if sq_conf >= effective_floor:
+                kelly = _kelly_for(sq_conf)
+                squeeze_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": sq_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "KeltnerSqueeze",
+                    "suggested_max_hold_hours": 8,
+                    "exit_urgency_ramp_hours": 4,
+                    **common_fields,
+                }
+
+    # ── EMA CROSSOVER MOMENTUM ──
+    # 8/21 EMA cross: most robust trend-following signal. Works in all markets.
+    # Jegadeesh & Titman (1993), updated evidence through 2024.
+    # Requires 21+ bars minimum. Long when EMA8 > EMA21 and price above both.
+    ema_signal = None
+    if len(bars_5m) >= 21:
+        _ema_closes = [b["close"] for b in bars_5m]
+        # Compute EMA8 and EMA21
+        _ema8 = _ema_closes[0]
+        _ema21 = _ema_closes[0]
+        _k8 = 2.0 / (8 + 1)
+        _k21 = 2.0 / (21 + 1)
+        for _p in _ema_closes[1:]:
+            _ema8 = _p * _k8 + _ema8 * (1 - _k8)
+            _ema21 = _p * _k21 + _ema21 * (1 - _k21)
+        # Also compute previous EMA for crossover detection
+        _ema8_prev = _ema_closes[0]
+        _ema21_prev = _ema_closes[0]
+        for _p in _ema_closes[1:-1]:
+            _ema8_prev = _p * _k8 + _ema8_prev * (1 - _k8)
+            _ema21_prev = _p * _k21 + _ema21_prev * (1 - _k21)
+        # Fresh golden cross: EMA8 just crossed above EMA21
+        _fresh_cross = _ema8 > _ema21 and _ema8_prev <= _ema21_prev
+        # Or: strong uptrend with price above both EMAs
+        _strong_trend = _ema8 > _ema21 and _ema_closes[-1] > _ema8 and ind["adx"] > 25
+        if _fresh_cross or _strong_trend:
+            ema_conf = 58.0
+            if _fresh_cross:
+                ema_conf += 7.0  # Fresh cross is higher conviction
+            if ind["rvol"] > 1.2:
+                ema_conf += 5.0
+            if ind["adx"] > 30:
+                ema_conf += 5.0
+            if ind["vol_slope"] > 0:
+                ema_conf += 3.0
+            ema_conf = min(ema_conf, 85.0)
+            if ema_conf >= effective_floor:
+                kelly = _kelly_for(ema_conf)
+                ema_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": ema_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "EMACrossover",
+                    "ema8": round(_ema8, 4), "ema21": round(_ema21, 4),
+                    "fresh_cross": _fresh_cross,
+                    "suggested_max_hold_hours": 24,
+                    "exit_urgency_ramp_hours": 12,
+                    **common_fields,
+                }
+
+    # ── RSI MEAN REVERSION (2-period) ──
+    # Connors RSI-2 < 10 on daily is legendary. On 1-min bars, RSI-2 < 15 works.
+    # More aggressive than TypeE_IBS — fires on RSI alone without IBS requirement.
+    rsi_mr_signal = None
+    if len(bars_5m) >= 5:
+        _rsi2_prices = [b["close"] for b in bars_5m]
+        _rsi2_val = calculate_rsi(_rsi2_prices, period=2)
+        if _rsi2_val is not None and _rsi2_val < 15.0:
+            mr_conf = 57.0
+            if _rsi2_val < 5.0:
+                mr_conf += 12.0  # Extreme oversold
+            elif _rsi2_val < 10.0:
+                mr_conf += 7.0
+            # Bollinger Band confirmation (Gemini feedback: touch lower band)
+            if len(bars_5m) >= 20:
+                _bb_closes = [b["close"] for b in bars_5m[-20:]]
+                _bb_mean = sum(_bb_closes) / 20
+                _bb_std = (sum((c - _bb_mean)**2 for c in _bb_closes) / 20) ** 0.5
+                _bb_lower = _bb_mean - 2.0 * _bb_std
+                if bars_5m[-1]["close"] <= _bb_lower:
+                    mr_conf += 8.0  # Touching lower Bollinger = structural confirmation
+            if ind["vol_slope"] > 0:
+                mr_conf += 3.0  # Rising volume on oversold = capitulation
+            mr_conf = min(mr_conf, 85.0)
+            if mr_conf >= effective_floor:
+                kelly = _kelly_for(mr_conf)
+                rsi_mr_signal = {
+                    "type": "signal", "ticker_id": ticker_id, "direction": "Long",
+                    "confidence": mr_conf,
+                    "kelly_fraction": kelly["kelly_fraction"], "shares": kelly["shares"],
+                    "strategy": "RSI2_MeanReversion",
+                    "rsi2": round(_rsi2_val, 2),
+                    "suggested_max_hold_hours": 4,
+                    "exit_urgency_ramp_hours": 2,
+                    **common_fields,
+                }
+
     # Return ALL signals sorted by confidence — no artificial bottleneck.
     # Stage 4 selects the best after applying adjustments to every signal.
     all_signals = [s for s in [
@@ -6317,6 +6447,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         highflyer_signal, pairs_signal, copy_signal, night_rider_signal,
         drift_signal, coint_signal, latarb_signal, nowcast_signal, multileg_signal, pairs_stat_arb_signal,
         cross_venue_signal, qi_signal, premarket_signal, volterm_signal, iex_auction_signal,
+        squeeze_signal, ema_signal, rsi_mr_signal,
     ] if s]
 
     # ── BOOK 179: CAPITAL-PHASE STRATEGY FILTERING (CONSUME _phase1_strategies) ──
@@ -6798,6 +6929,21 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # P2-#7: LSE confidence boost DELETED — was +20 blanket boost that inflated
     # marginal signals (conf 45-49) above floor, causing false entries.
+
+    # ── VWAP CHASE PENALTY (moved from Stage C hard kill to Stage E adjustment) ──
+    # Momentum trades should not be killed for being extended from VWAP.
+    # Instead apply graduated confidence penalty: mean-reversion = extra penalty, momentum = reduced.
+    _vwap_penalty = msg.get("_vwap_chase_penalty", 0)
+    if _vwap_penalty > 0:
+        for sig in all_signals:
+            # Momentum strategies get reduced penalty (they EXPECT extension from VWAP)
+            _is_momentum = sig.get("strategy", "") in (
+                "VanguardSniper_Momentum", "VolExpansion", "EMACrossover",
+                "ORB_Breakout", "KeltnerSqueeze", "S1_Microstructure",
+            )
+            _actual_penalty = _vwap_penalty // 2 if _is_momentum else _vwap_penalty
+            sig["confidence"] = max(0, sig["confidence"] - _actual_penalty)
+            sig["vwap_chase_penalty"] = _actual_penalty
 
     # ── BOOK 82: ENSEMBLE REGIME DETECTION (Fast-Noisy + Slow-Accurate) ──
     try:
