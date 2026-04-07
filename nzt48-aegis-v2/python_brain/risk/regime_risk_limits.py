@@ -73,13 +73,20 @@ _BASE_MAX_POSITIONS = _load_max_positions_from_config()
 
 
 # Book 85: Regime → Loss Limits + Risk Per Trade + Cooldown
+import os as _os_rl
+
+# Paper trading mode: reduce cooldowns to allow signal flow for data collection.
+# Production cooldowns are preserved when AEGIS_SIM_MODE is not set.
+_PAPER_MODE = _os_rl.environ.get("AEGIS_SIM_MODE", "0") == "1"
+_CD_MULT = 0.1 if _PAPER_MODE else 1.0  # 10x shorter cooldowns in paper mode
+
 REGIME_LIMITS: Dict[str, RegimeLimits] = {
     "STEADY": RegimeLimits(
         regime="STEADY",
         daily_loss_limit_pct=-3.0,
         weekly_loss_limit_pct=-7.0,
         risk_per_trade_pct=0.75,
-        cooldown_secs=300,           # 5 minutes
+        cooldown_secs=int(300 * _CD_MULT),     # 5 min prod, 30s paper
         kelly_cap=0.05,
         confidence_floor=50,
         max_positions=_BASE_MAX_POSITIONS,
@@ -90,9 +97,9 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         daily_loss_limit_pct=-2.5,
         weekly_loss_limit_pct=-5.5,
         risk_per_trade_pct=0.60,
-        cooldown_secs=600,           # 10 minutes
+        cooldown_secs=int(600 * _CD_MULT),     # 10 min prod, 60s paper
         kelly_cap=0.035,
-        confidence_floor=55,
+        confidence_floor=55 if not _PAPER_MODE else 45,
         max_positions=max(1, _BASE_MAX_POSITIONS * 2 // 3),
         portfolio_heat_pct=8.0,
     ),
@@ -101,9 +108,9 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         daily_loss_limit_pct=-2.0,
         weekly_loss_limit_pct=-4.0,
         risk_per_trade_pct=0.40,
-        cooldown_secs=900,           # 15 minutes
+        cooldown_secs=int(900 * _CD_MULT),     # 15 min prod, 90s paper
         kelly_cap=0.035,
-        confidence_floor=60,
+        confidence_floor=60 if not _PAPER_MODE else 50,
         max_positions=max(1, _BASE_MAX_POSITIONS // 2),
         portfolio_heat_pct=7.0,
     ),
@@ -112,9 +119,9 @@ REGIME_LIMITS: Dict[str, RegimeLimits] = {
         daily_loss_limit_pct=-1.5,
         weekly_loss_limit_pct=-2.0,
         risk_per_trade_pct=0.20,
-        cooldown_secs=1800,          # 30 minutes
+        cooldown_secs=int(1800 * _CD_MULT),    # 30 min prod, 180s paper
         kelly_cap=0.02,
-        confidence_floor=75,
+        confidence_floor=75 if not _PAPER_MODE else 60,
         max_positions=1,
         portfolio_heat_pct=4.0,
     ),
