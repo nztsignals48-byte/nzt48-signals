@@ -6939,17 +6939,26 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         best = max(all_signals, key=lambda s: s.get("confidence", 0))
         # Classify entry type
         best["entry_type"] = best.get("strategy", "Unclassified")
-        # Ensure required fields
+        # Ensure ALL required fields for NormalizedSignal schema validation
         best.setdefault("type", "signal")
         best.setdefault("ticker_id", ticker_id)
         best.setdefault("direction", "Long")
+        best.setdefault("price", msg.get("last", 0.0))
         best.setdefault("kelly_fraction", 0.01)
         best.setdefault("shares", max(1, int(0.01 * msg.get("equity", 100000) / max(msg.get("last", 1), 0.01))))
+        best.setdefault("strategy", "Unknown")
         best.setdefault("suggested_max_hold_hours", 8)
         best.setdefault("exit_urgency_ramp_hours", 4)
         best.setdefault("garch_sigma", 0.02)
         best.setdefault("scanner_score", 50.0)
         best.setdefault("structural_score", ind.get("structural_score", 50))
+        best.setdefault("rvol", ind.get("rvol", 1.0))
+        best.setdefault("hurst", ind.get("hurst", 0.5))
+        best.setdefault("hurst_regime", ind.get("hurst_regime", "random"))
+        best.setdefault("adx", ind.get("adx", 15.0))
+        best.setdefault("spread_pct", ind.get("spread_pct", 0.1))
+        best.setdefault("vwap_dist_pct", ind.get("vwap_dist_pct", 0.0))
+        best.setdefault("volume_divergence", ind.get("vol_div", 0.0))
         return best
 
     # ── OVERLAY DIAGNOSTIC: snapshot pre-overlay values for delta tracking ──
