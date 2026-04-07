@@ -2847,9 +2847,11 @@ def _compute_indicators(ticker_id, ticks, msg):
     if ibs is None:
         ibs = 0.5
 
-    # VWAP update
+    # VWAP update (uses latest tick's high/low, not session extremes)
     vwap_calc = vwap_calculators[ticker_id]
-    vwap_bar = VWAPBar(high=high, low=low, close=latest["last"], volume=float(latest.get("volume", 0)))
+    _tick_high = latest.get("high", latest["last"])
+    _tick_low = latest.get("low", latest["last"])
+    vwap_bar = VWAPBar(high=_tick_high, low=_tick_low, close=latest["last"], volume=float(latest.get("volume", 0)))
     vwap_result = vwap_calc.update(vwap_bar)
     vwap_sigma, vwap_slope, vwap_price = 0.0, 0.0, latest["last"]
     if vwap_result is not None:
