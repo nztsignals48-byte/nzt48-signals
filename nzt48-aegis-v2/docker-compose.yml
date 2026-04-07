@@ -36,6 +36,8 @@ services:
       - IBKR_PORT=4003
       - REDIS_URL=redis://:${REDIS_PASSWORD:-nzt48redis}@aegis-redis:6379/0
       - IS_LIVE=true
+      # Paper trading mode — bypass overlay gauntlet, let Rust risk arbiter guard
+      - AEGIS_SIM_MODE=1
       # SC-13: Prevent Polars from starving Tokio async reactor (2 vCPU EC2)
       - POLARS_MAX_THREADS=1
       # Data feeds — set API keys in .env (all optional, graceful degradation)

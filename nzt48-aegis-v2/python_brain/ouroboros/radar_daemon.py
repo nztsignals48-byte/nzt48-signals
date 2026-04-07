@@ -507,8 +507,20 @@ class RadarDaemon:
             return False
 
         # 5. Verification probe (Audit lesson #1: phantom zero detection)
+        # Off-market hours: phantom zeros are expected. Sleep until next session.
         if not self._verify_data_flow():
-            log.error("FATAL: Verification probe failed — phantom zero data. Aborting.")
+            import datetime
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            hour = now_utc.hour
+            # Check if any major exchange is open (LSE 08-16:30 UTC, US 13:30-20 UTC, Asia 00-07 UTC)
+            any_open = (0 <= hour < 7) or (8 <= hour < 17) or (13 <= hour < 21)
+            if not any_open:
+                sleep_secs = max(300, (7 - hour) % 24 * 3600)  # Sleep until Asia open
+                log.warning("Off-market hours (UTC %02d:00). Sleeping %ds until next session.", hour, sleep_secs)
+                time.sleep(sleep_secs)
+                return self.startup()  # Retry after sleep
+            # If market should be open but probe failed, it's a real problem
+            log.error("FATAL: Verification probe failed during market hours — phantom zero data. Aborting.")
             return False
 
         total_tickers = sum(len(v) for v in self.radar_universe.values())

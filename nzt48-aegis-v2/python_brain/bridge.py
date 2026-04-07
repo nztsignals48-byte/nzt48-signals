@@ -3009,15 +3009,17 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
                 msg["_tod_scale"] = tod_result.value
 
             # Correlation spike detector — feeds per-tick returns
-            symbol = ticker_symbols.get(ticker_id, "")
-            bars = list(bar_history[ticker_id])
-            if len(bars) >= 2 and bars[-2].get("last", 0) > 0:
-                ret = (bars[-1]["last"] - bars[-2]["last"]) / bars[-2]["last"]
-                spike_action = get_spike_detector().on_tick(symbol, ret, msg.get("timestamp_ns", 0))
-                if spike_action == "FLATTEN":
-                    return False, "corr_spike_flatten", "correlation spike: FLATTEN action"
-                elif spike_action == "REDUCE":
-                    msg["_corr_spike_reduce"] = True
+            # Skip in paper mode: after-hours erratic returns cause false FLATTEN signals
+            if not _SIM_MODE:
+                symbol = ticker_symbols.get(ticker_id, "")
+                bars = list(bar_history[ticker_id])
+                if len(bars) >= 2 and bars[-2].get("last", 0) > 0:
+                    ret = (bars[-1]["last"] - bars[-2]["last"]) / bars[-2]["last"]
+                    spike_action = get_spike_detector().on_tick(symbol, ret, msg.get("timestamp_ns", 0))
+                    if spike_action == "FLATTEN":
+                        return False, "corr_spike_flatten", "correlation spike: FLATTEN action"
+                    elif spike_action == "REDUCE":
+                        msg["_corr_spike_reduce"] = True
         except ImportError:
             pass
 
