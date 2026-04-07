@@ -2797,11 +2797,18 @@ def _compute_indicators(ticker_id, ticks, msg):
             })
         _bar_cache[ticker_id] = (n_5min_bars, bars_5m)
 
-    # Compute indicators on 5-MINUTE bars (preferred) or raw ticks (fallback)
+    # Compute indicators on 1-MINUTE bars (preferred) or raw ticks (fallback)
     if bars_5m:
         prices_5m = [b["close"] for b in bars_5m]
         volumes_5m = [b["volume"] for b in bars_5m]
-        rvol = calculate_rvol(volumes_5m, window=20) if len(volumes_5m) >= 20 else 1.0
+        # RVOL: use bar volumes if enough, else fall back to raw ticks, else default 1.0
+        rvol = calculate_rvol(volumes_5m, window=min(20, len(volumes_5m) - 1)) if len(volumes_5m) >= 5 else 1.0
+        if rvol == 0.0:
+            # Fallback: compute from raw tick volumes (higher resolution)
+            _raw_vols = [t["volume"] for t in ticks]
+            rvol = calculate_rvol(_raw_vols, window=20) if len(_raw_vols) > 20 else 1.0
+        if rvol == 0.0:
+            rvol = 1.0  # Neutral default — never leave at 0
         hurst = estimate_hurst(prices_5m, max_lag=min(20, len(prices_5m) - 1)) if len(prices_5m) >= 5 else 0.5
         vol_div = volume_divergence(prices_5m, volumes_5m, window=10) if len(prices_5m) >= 10 else 0.0
         adx = _compute_adx([{"last": b["close"], "high": b["high"], "low": b["low"], "volume": b["volume"]} for b in bars_5m])
