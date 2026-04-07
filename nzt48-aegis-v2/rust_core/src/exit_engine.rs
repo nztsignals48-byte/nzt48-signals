@@ -287,29 +287,38 @@ pub struct ExitConfig {
 
 impl ExitConfig {
     /// Build the default per-exchange EOD flatten map.
+    /// BST-AWARE: Uses BST times for London exchanges (March-October).
+    /// LSE closes at 16:30 London. During BST, that's 15:30 UTC = 55800s.
+    /// During GMT, that's 16:30 UTC = 59400s.
+    /// We use the EARLIER time (BST) to be safe — flatten before close in both seasons.
     pub fn default_eod_map() -> std::collections::HashMap<String, u32> {
         let mut m = std::collections::HashMap::new();
-        // London Stock Exchange: 16:25 London ≈ 59100s UTC (ignoring BST for safety)
-        m.insert("LSE".into(), 59100);
-        m.insert("LSEETF".into(), 59100);
-        // Frankfurt / XETRA: 17:00 CET = 16:00 London ≈ 57600s UTC
-        m.insert("XETRA".into(), 57600);
-        m.insert("FWB".into(), 57600);
-        // Tokyo Stock Exchange: 06:00 UTC = 21600s
-        m.insert("TSE".into(), 21600);
-        // Hong Kong: 08:00 UTC = 28800s
-        m.insert("HKEX".into(), 28800);
-        m.insert("SEHK".into(), 28800);
-        // Korea: 06:00 UTC = 21600s
-        m.insert("KRX".into(), 21600);
-        m.insert("KSE".into(), 21600);
-        // Singapore: 08:00 UTC = 28800s
-        m.insert("SGX".into(), 28800);
-        // US exchanges: 16:15 ET ≈ 20:15 UTC = 72900s
-        m.insert("SMART".into(), 72900);
-        m.insert("NYSE".into(), 72900);
-        m.insert("NASDAQ".into(), 72900);
-        m.insert("ARCA".into(), 72900);
+        // London Stock Exchange: T-5 before 15:30 UTC (BST close) = 15:25 UTC = 55500s
+        // During GMT this flattens 1h early — acceptable safety margin.
+        m.insert("LSE".into(), 55500);
+        m.insert("LSEETF".into(), 55500);
+        // Frankfurt / XETRA: closes 17:30 CET = 15:30 UTC (winter) / 15:30 CEST = 13:30 UTC (summer)
+        // Use conservative 15:25 UTC to cover both
+        m.insert("XETRA".into(), 55500);
+        m.insert("FWB".into(), 55500);
+        // Tokyo Stock Exchange: closes 15:00 JST = 06:00 UTC. Flatten at 05:55 UTC = 21300s
+        m.insert("TSE".into(), 21300);
+        // Hong Kong: closes 16:00 HKT = 08:00 UTC. Flatten at 07:55 UTC = 28500s
+        m.insert("HKEX".into(), 28500);
+        m.insert("SEHK".into(), 28500);
+        // Korea: closes 15:30 KST = 06:30 UTC. Flatten at 06:25 UTC = 23100s
+        m.insert("KRX".into(), 23100);
+        m.insert("KSE".into(), 23100);
+        // Singapore: closes 17:00 SGT = 09:00 UTC. Flatten at 08:55 UTC = 32100s
+        m.insert("SGX".into(), 32100);
+        // US exchanges: closes 16:00 ET. During EDT (Mar-Nov): 20:00 UTC. Flatten at 19:55 = 71700s
+        // During EST: 21:00 UTC. Using EDT time for safety.
+        m.insert("SMART".into(), 71700);
+        m.insert("NYSE".into(), 71700);
+        m.insert("NASDAQ".into(), 71700);
+        m.insert("ARCA".into(), 71700);
+        m.insert("XNYS".into(), 71700);
+        m.insert("XNAS".into(), 71700);
         m
     }
 
