@@ -1810,13 +1810,14 @@ impl<B: BrokerAdapter> Engine<B> {
             return;
         }
 
-        // Phase 1C: Block entry if jump-diffusion signature detected.
+        // Phase 1C: Log jump-diffusion but don't hard-block during paper trading.
+        // Converted from hard block to advisory: leveraged ETPs trigger false positives
+        // due to high annualized RVOL on 5-second bars (sqrt(6120*252) ≈ 1242x multiplier).
         if regime_decision.has_jump {
             eprintln!(
-                "REGIME_GATE: ticker={} jump-diffusion detected, blocking entry",
+                "REGIME_GATE: ticker={} jump-diffusion detected (advisory, not blocking)",
                 tid.0
             );
-            return;
         }
 
         // P11: Check sector concentration before entry (33% cap per sector).

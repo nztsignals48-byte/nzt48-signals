@@ -793,16 +793,22 @@ impl IbkrBroker {
     /// Subscribe to L2 depth for all registered contracts on L2-capable exchanges.
     /// Called after subscribe_all() / subscribe_all_mktdata().
     pub fn subscribe_all_depth(&mut self) -> u32 {
+        // IBKR limits L2 depth to 3 concurrent streams for most account types.
+        // Prioritize watchlist tickers; stop at cap to avoid error 309 spam.
+        const MAX_DEPTH_SUBS: u32 = 3;
         let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
         let mut count = 0u32;
         for tid in ticker_ids {
+            if count >= MAX_DEPTH_SUBS {
+                break;
+            }
             if self.subscribe_depth(tid).is_ok() {
                 count += 1;
             }
         }
         eprintln!(
-            "SUBSCRIBE_DEPTH: {} reqMktDepth (L2) subscriptions active",
-            count
+            "SUBSCRIBE_DEPTH: {} reqMktDepth (L2) subscriptions active (cap={})",
+            count, MAX_DEPTH_SUBS
         );
         count
     }

@@ -14,11 +14,13 @@ pub struct JumpDiffusionDetector {
 }
 
 impl JumpDiffusionDetector {
-    /// Create detector with default thresholds (RVOL=3.5, ATR_multiplier=2.0)
+    /// Create detector with default thresholds (RVOL=8.0, ATR_multiplier=3.0)
+    /// Raised from 3.5/2.0: leveraged ETPs (3x products) routinely annualize at 4-6x
+    /// on 5-second bars. Original thresholds caused 100% false positive rate.
     pub fn new() -> Self {
         Self {
-            rvol_threshold: 3.5,
-            price_change_threshold_atr_multiplier: 2.0,
+            rvol_threshold: 8.0,
+            price_change_threshold_atr_multiplier: 3.0,
         }
     }
 
