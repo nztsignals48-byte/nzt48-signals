@@ -82,6 +82,15 @@ T3_REGIME_SENSORS: Set[str] = {
     "LLY", "UNH", "JNJ",
     # Commodity proxies
     "FCX", "NEM",
+    # US leveraged ETFs (signal drivers — not ISA-tradeable but strong regime/momentum reads)
+    "TQQQ", "SOXL", "SOXS", "FNGU", "FNGD",
+    "LABU", "LABD", "FAS", "FAZ", "TECL", "TECS",
+    "TNA", "TZA", "UPRO", "SPXU", "UDOW", "SDOW",
+    "ERX", "ERY", "GUSH", "DRIP",
+    "YINN", "YANG",
+    # WisdomTree commodity ETPs (LSE-listed, regime sensors)
+    "PHAU", "PHAG", "LOIL", "SOIL", "LNGA", "SNGA",
+    "3OIL", "3OIS", "LSIL", "SSIL",
     # Key tech (semi/AI capex cycle)
     "ADBE", "AMAT", "CDNS", "CRWD", "DDOG", "FTNT", "ASML",
     # LSE macro anchors (banks, miners, oil, pharma)
@@ -203,6 +212,103 @@ def _load_recent_signal_tickers(days: int = 5) -> Set[str]:
     return tickers
 
 
+def _scan_delayed_data_promotions(t5_symbols: List[str], batch_size: int = 50) -> Set[str]:
+    """Use free delayed data (yfinance) to find T5 tickers worth promoting.
+
+    Scans the reserve pool for tickers showing:
+    - High relative volume (RVOL > 2.0 = unusual activity)
+    - Large price moves (|return| > 3% = breakout/breakdown)
+    - High absolute volume (> $1M notional)
+
+    These get promoted to T3 (regime sensors) for the next day.
+    Runs nightly — costs nothing, uses free delayed Yahoo data.
+    """
+    promotions: Set[str] = set()
+    try:
+        import yfinance as yf
+    except ImportError:
+        log.warning("yfinance not installed — skipping delayed data promotions")
+        return promotions
+
+    # Convert IBKR symbols to yfinance format
+    yf_symbols = []
+    ibkr_to_yf = {}
+    for sym in t5_symbols[:500]:  # Cap at 500 to avoid timeout
+        yf_sym = sym
+        if sym.endswith(".L"):
+            yf_sym = sym  # yfinance uses .L for LSE
+        elif sym.endswith(".T"):
+            yf_sym = sym.replace(".T", ".T")  # Tokyo
+        elif sym.endswith(".HK"):
+            yf_sym = sym  # HKEX
+        elif sym.endswith(".DE"):
+            yf_sym = sym  # XETRA
+        yf_symbols.append(yf_sym)
+        ibkr_to_yf[yf_sym] = sym
+
+    if not yf_symbols:
+        return promotions
+
+    # Batch download last 5 days of daily data
+    try:
+        log.info("Scanning %d T5 tickers via delayed data (yfinance)...", len(yf_symbols))
+        # Process in batches to avoid yfinance timeout
+        for i in range(0, len(yf_symbols), batch_size):
+            batch = yf_symbols[i:i + batch_size]
+            try:
+                data = yf.download(batch, period="5d", interval="1d",
+                                   progress=False, threads=True, group_by="ticker")
+                if data.empty:
+                    continue
+
+                for yf_sym in batch:
+                    try:
+                        if len(batch) == 1:
+                            ticker_data = data
+                        else:
+                            ticker_data = data[yf_sym] if yf_sym in data.columns.get_level_values(0) else None
+                        if ticker_data is None or ticker_data.empty:
+                            continue
+
+                        closes = ticker_data["Close"].dropna()
+                        volumes = ticker_data["Volume"].dropna()
+
+                        if len(closes) < 2 or len(volumes) < 2:
+                            continue
+
+                        # Check for promotion criteria
+                        last_return = abs((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2])
+                        avg_vol = volumes.iloc[:-1].mean() if len(volumes) > 1 else volumes.iloc[0]
+                        last_vol = volumes.iloc[-1]
+                        rvol = last_vol / avg_vol if avg_vol > 0 else 0
+                        notional = closes.iloc[-1] * last_vol
+
+                        ibkr_sym = ibkr_to_yf.get(yf_sym, yf_sym)
+
+                        # Promote if: high RVOL, large move, or high notional
+                        if rvol > 2.0 or last_return > 0.03 or notional > 5_000_000:
+                            promotions.add(ibkr_sym)
+                            reason = []
+                            if rvol > 2.0:
+                                reason.append(f"rvol={rvol:.1f}")
+                            if last_return > 0.03:
+                                reason.append(f"ret={last_return:.1%}")
+                            if notional > 5_000_000:
+                                reason.append(f"notional=${notional/1e6:.1f}M")
+                            log.info("PROMOTE: %s → T3 (%s)", ibkr_sym, ", ".join(reason))
+                    except Exception:
+                        continue
+            except Exception as e:
+                log.warning("yfinance batch %d-%d failed: %s", i, i + batch_size, e)
+                continue
+
+    except Exception as e:
+        log.warning("Delayed data scan failed: %s", e)
+
+    log.info("Delayed data promotions: %d tickers", len(promotions))
+    return promotions
+
+
 def classify_ticker(contract: dict, signal_tickers: Set[str]) -> TieredTicker:
     """Classify a single contract into a tier."""
     symbol = contract.get("symbol", "")
@@ -279,7 +385,30 @@ def curate_universe() -> Dict[int, List[TieredTicker]]:
         tiers[tt.tier].append(tt)
 
     for tier_num, tickers in sorted(tiers.items()):
-        log.info("Tier %d: %d tickers", tier_num, len(tickers))
+        log.info("Tier %d: %d tickers (pre-promotion)", tier_num, len(tickers))
+
+    # Phase 2: Delayed data promotion — scan T5 reserve for high-activity tickers
+    # Uses free yfinance data (no IBKR API cost) to find unusual movers
+    t5_symbols = [tt.symbol for tt in tiers[5]]
+    delayed_promotions = _scan_delayed_data_promotions(t5_symbols)
+
+    if delayed_promotions:
+        # Move promoted tickers from T5 to T3
+        promoted = []
+        remaining_t5 = []
+        for tt in tiers[5]:
+            if tt.symbol in delayed_promotions:
+                tt.tier = 3
+                tt.reason = "delayed_data_promotion"
+                promoted.append(tt)
+            else:
+                remaining_t5.append(tt)
+        tiers[3].extend(promoted)
+        tiers[5] = remaining_t5
+        log.info("Promoted %d tickers from T5 → T3 via delayed data", len(promoted))
+
+    for tier_num, tickers in sorted(tiers.items()):
+        log.info("Tier %d: %d tickers (final)", tier_num, len(tickers))
 
     return tiers
 
