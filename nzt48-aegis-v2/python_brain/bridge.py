@@ -6932,6 +6932,26 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
     if not all_signals:
         return None
 
+    # PAPER MODE FAST PATH: Skip the 50+ overlay gauntlet.
+    # In paper trading, we want signals to flow for data collection.
+    # The Rust risk arbiter (42 CHECKs) still provides safety.
+    if _SIM_MODE:
+        best = max(all_signals, key=lambda s: s.get("confidence", 0))
+        # Classify entry type
+        best["entry_type"] = best.get("strategy", "Unclassified")
+        # Ensure required fields
+        best.setdefault("type", "signal")
+        best.setdefault("ticker_id", ticker_id)
+        best.setdefault("direction", "Long")
+        best.setdefault("kelly_fraction", 0.01)
+        best.setdefault("shares", max(1, int(0.01 * msg.get("equity", 100000) / max(msg.get("last", 1), 0.01))))
+        best.setdefault("suggested_max_hold_hours", 8)
+        best.setdefault("exit_urgency_ramp_hours", 4)
+        best.setdefault("garch_sigma", 0.02)
+        best.setdefault("scanner_score", 50.0)
+        best.setdefault("structural_score", ind.get("structural_score", 50))
+        return best
+
     # ── OVERLAY DIAGNOSTIC: snapshot pre-overlay values for delta tracking ──
     for sig in all_signals:
         sig["_pre_overlay_conf"] = sig.get("confidence", 0)
