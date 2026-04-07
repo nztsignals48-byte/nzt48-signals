@@ -157,14 +157,23 @@ impl PaperBroker {
         let chunk_sizes = split_qty(remaining, chunks);
         let mut running_filled = order.filled_qty;
         let order_id_str = order.order_id.clone();
-        for (i, chunk_qty) in chunk_sizes.iter().enumerate() {
+        for (_i, chunk_qty) in chunk_sizes.iter().enumerate() {
             running_filled += chunk_qty;
             let remaining_after = order.total_qty - running_filled;
             let exec_id = uuid::Uuid::now_v7().to_string();
-            let commission = if i == chunk_sizes.len() - 1 {
-                1.50
-            } else {
-                0.50
+            // IBKR ISA fee model:
+            // - UK stocks (LSE): 0.05% of trade value, min £3.00
+            // - US stocks: $0.005/share, min $1.00 (≈ £0.75)
+            // - European: 0.05% of trade value, min €3.00
+            let trade_value = price * (*chunk_qty as f64);
+            let exchange = self.exchange_for_ticker(&ticker_id);
+            let commission = match exchange {
+                "LSE" | "LSEETF" => (trade_value * 0.0005).max(3.00),
+                "SMART" | "XNYS" | "XNAS" | "ARCA" => {
+                    (0.005 * (*chunk_qty as f64)).max(1.00).min(trade_value * 0.01) * 0.75 // USD→GBP approx
+                }
+                "IBIS" | "XETRA" => (trade_value * 0.0005).max(3.00),
+                _ => (trade_value * 0.0005).max(3.00),
             };
             self.events.push_back(BrokerEvent::Fill {
                 order_id: order_id_str.clone(),

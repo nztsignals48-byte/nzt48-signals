@@ -1208,11 +1208,24 @@ impl<B: BrokerAdapter> Engine<B> {
         // ATR from rolling bar history (Wilder's 14-period)
         let atr = self.current_atr(tid);
 
+        // Exchange-aware annualization: bars_per_day depends on market hours
+        let bars_per_day = {
+            let exchange = self.broker.exchange_for_ticker(&tid);
+            match exchange {
+                "LSE" | "LSEETF" => 6120.0,  // 8.5h × 720 bars/h (5s bars)
+                "SMART" | "XNYS" | "XNAS" | "ARCA" => 4680.0, // 6.5h × 720
+                "IBIS" | "XETRA" => 5400.0,  // 7.5h × 720
+                "SEHK" => 3960.0,             // 5.5h × 720
+                "TSEJ" => 3600.0,             // 5h × 720
+                _ => 6120.0,                  // Default LSE
+            }
+        };
+
         // Phase 1C: Regime detection (jump-diffusion + Hurst) on each tick.
         // FIX: Calculate price_move BEFORE updating last_prices (was always 0.0).
         let regime_decision = {
             let rvol_val = self.bar_history.get(&tid)
-                .map(|h| h.realized_vol(6120.0))
+                .map(|h| h.realized_vol(bars_per_day))
                 .unwrap_or(0.30);
             let price_move = if let Some(&prev) = self.last_prices.get(&tid)
                 && prev > 0.0
@@ -1252,7 +1265,7 @@ impl<B: BrokerAdapter> Engine<B> {
                 let realized_vol = self
                     .bar_history
                     .get(&tid)
-                    .map(|h| h.realized_vol(6120.0))
+                    .map(|h| h.realized_vol(bars_per_day))
                     .unwrap_or(0.30);
                 let time_fraction = Clock::time_of_day_fraction_utc(utc_secs, is_bst);
                 let momentum = if let Some(&prev) = self.last_prices.get(&tid)
@@ -1940,7 +1953,15 @@ impl<B: BrokerAdapter> Engine<B> {
                     if let Some(sigma) = self.garch_registry.sigma(*pos_tid) {
                         vols.insert(*pos_tid, sigma);
                     } else if let Some(bh) = self.bar_history.get(pos_tid) {
-                        let rv = bh.realized_vol(6120.0);
+                        let pos_exchange = self.broker.exchange_for_ticker(pos_tid);
+                        let pos_bpd = match pos_exchange {
+                            "SMART" | "XNYS" | "XNAS" | "ARCA" => 4680.0,
+                            "IBIS" | "XETRA" => 5400.0,
+                            "SEHK" => 3960.0,
+                            "TSEJ" => 3600.0,
+                            _ => 6120.0,
+                        };
+                        let rv = bh.realized_vol(pos_bpd);
                         if rv > 0.0 {
                             vols.insert(*pos_tid, rv);
                         }

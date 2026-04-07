@@ -657,7 +657,7 @@ fn main() {
         }
     }
 
-    // Install signal handler for graceful shutdown
+    // Install signal handlers for graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     if let Err(e) = ctrlc::set_handler(move || {
@@ -665,6 +665,16 @@ fn main() {
         r.store(false, Ordering::SeqCst);
     }) {
         eprintln!("WARNING: Could not set signal handler: {e}");
+    }
+
+    // SIGTERM handler — Docker sends SIGTERM on `docker stop`.
+    // Without this, the engine terminates immediately without flattening positions.
+    // This is the MOST CRITICAL signal handler: orphaned positions = unmanaged risk.
+    let r_term = running.clone();
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&r_term)) {
+        eprintln!("WARNING: Could not register SIGTERM handler: {e}");
+    } else {
+        eprintln!("SIGTERM handler registered (graceful shutdown on docker stop)");
     }
 
     // SIGHUP handler for hot-reloading contracts.toml (sent by contract_expander.py)
@@ -1402,10 +1412,10 @@ fn main() {
         // Heartbeat
         let _ = engine.broker.heartbeat();
 
-        // Simulation mode: override any regime escalation at end of loop.
-        // In simulation mode there's no real broker, no real VIX, no real reconciliation —
-        // all regime escalation triggers are stale/false. Reset to Normal so trades flow.
-        if engine.simulation_mode && engine.arbiter.regime > RiskRegime::Normal {
+        // Simulation mode: only reset Reduce (mild escalation from stale data).
+        // Previously force-reset ALL escalations — this defeated drawdown brakes entirely.
+        // Now: Reduce resets to Normal (mild), but Flatten/Halt persist (real drawdown).
+        if engine.simulation_mode && engine.arbiter.regime == RiskRegime::Reduce {
             engine.arbiter.regime = RiskRegime::Normal;
         }
 
