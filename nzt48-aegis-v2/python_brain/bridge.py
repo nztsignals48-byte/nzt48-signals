@@ -9689,8 +9689,26 @@ def process_tick(msg):
 
     all_signals = _generate_signals(ticker_id, msg, ticks, ind, conf_floor)
 
+    # TEMP DIAG: Log signal generation results
+    if all_signals:
+        sym = ticker_symbols.get(ticker_id, str(ticker_id))
+        strats = [(s.get("strategy", "?"), int(s.get("confidence", 0))) for s in all_signals]
+        sys.stderr.write(f"SIGNAL_GEN: {sym} floor={conf_floor} generated {len(all_signals)}: {strats}\n")
+        sys.stderr.flush()
+
     # Stage 4: Adjust ALL signals, select best, classify, size
     best = _apply_adjustments(ticker_id, msg, ind, all_signals)
+
+    # TEMP DIAG: Log adjustment result
+    if best:
+        sys.stderr.write(f"SIGNAL_APPROVED: {ticker_symbols.get(ticker_id, ticker_id)} "
+                         f"strategy={best.get('strategy')} conf={best.get('confidence')} "
+                         f"dir={best.get('direction')} shares={best.get('shares')}\n")
+        sys.stderr.flush()
+    elif all_signals:
+        sys.stderr.write(f"SIGNAL_KILLED: {ticker_symbols.get(ticker_id, ticker_id)} "
+                         f"had {len(all_signals)} signals but _apply_adjustments returned None\n")
+        sys.stderr.flush()
 
     # Stage 5: Output — Book 208 quality gate + Book 207 schema validation
     if best:
