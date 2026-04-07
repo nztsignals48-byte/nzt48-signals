@@ -270,6 +270,7 @@ EXCHANGE_LOCAL_HOURS = {
     "ASX":          (10, 0, 16, 0,  "Australia/Sydney",   None, None, None, None),    # DST (AEDT/AEST)
     # European markets
     "LSE":          (8, 0,  16, 30, "Europe/London",      None, None, None, None),    # DST (BST/GMT)
+    "LSEETF":       (8, 0,  16, 30, "Europe/London",      None, None, None, None),    # LSE ETPs (same hours as LSE)
     "XETRA":        (8, 0,  16, 30, "Europe/Berlin",      None, None, None, None),    # DST (CEST/CET)
     "EURONEXT_PA":  (9, 0,  17, 30, "Europe/Paris",       None, None, None, None),    # DST (CEST/CET)
     "EURONEXT_AS":  (9, 0,  17, 30, "Europe/Amsterdam",   None, None, None, None),    # DST (CEST/CET)
@@ -278,6 +279,10 @@ EXCHANGE_LOCAL_HOURS = {
     "NYSE":         (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # DST (EDT/EST)
     "NASDAQ":       (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # DST (EDT/EST)
     "AMEX":         (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # DST (EDT/EST)
+    "SMART":        (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # IBKR smart routing (US hours)
+    "IBIS":         (8, 0,  16, 30, "Europe/Berlin",      None, None, None, None),    # XETRA/IBIS (same hours)
+    "TSEJ":         (9, 0,  15, 0,  "Asia/Tokyo",         None, None, None, None),    # Tokyo SE
+    "SEHK":         (9, 30, 16, 0,  "Asia/Hong_Kong",     None, None, None, None),    # HKEX
 }
 
 # Pre-build pytz timezone objects (avoids repeated lookups)
@@ -291,9 +296,9 @@ def _get_exchange_tz(tz_name: str):
 
 # Legacy session filtering (kept for backwards compatibility, not used in unified mode)
 SESSION_EXCHANGES = {
-    "asian": {"HKEX", "TSE", "SGX", "KRX", "ASX", "NZX", "XNZE"},
-    "european": {"LSE", "XETRA", "EURONEXT_PA", "EURONEXT_AS", "SIX"},
-    "american": {"NYSE", "NASDAQ", "AMEX"},
+    "asian": {"HKEX", "TSE", "SGX", "KRX", "ASX", "NZX", "XNZE", "TSEJ", "SEHK"},
+    "european": {"LSE", "LSEETF", "XETRA", "IBIS", "EURONEXT_PA", "EURONEXT_AS", "SIX"},
+    "american": {"NYSE", "NASDAQ", "AMEX", "SMART"},
 }
 
 
@@ -411,9 +416,10 @@ MAX_NEGATIVE_MOMENTUM = -0.03 # Disqualify tickers with worse than -3% momentum 
 
 # Exchange priority scores for static scoring (higher = more liquid)
 EXCHANGE_PRIORITY = {
-    "NYSE": 1.0, "NASDAQ": 1.0, "AMEX": 0.8,
-    "LSE": 0.9, "XETRA": 0.7, "EURONEXT_PA": 0.7, "EURONEXT_AS": 0.7,
-    "TSE": 0.6, "HKEX": 0.6, "TSX": 0.6,
+    "NYSE": 1.0, "NASDAQ": 1.0, "SMART": 1.0, "AMEX": 0.8,
+    "LSE": 0.9, "LSEETF": 0.9, "XETRA": 0.7, "IBIS": 0.7,
+    "EURONEXT_PA": 0.7, "EURONEXT_AS": 0.7,
+    "TSE": 0.6, "TSEJ": 0.6, "HKEX": 0.6, "SEHK": 0.6, "TSX": 0.6,
     "SIX": 0.5, "KRX": 0.5, "SGX": 0.5,
 }
 
