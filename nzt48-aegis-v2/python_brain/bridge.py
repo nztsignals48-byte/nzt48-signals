@@ -3394,13 +3394,21 @@ def _compute_confidence_floor(msg, ind):
 
     # ── BOOK 15/85: VIX REGIME TIER CONFIDENCE FLOOR ──
     # Higher VIX = higher confidence required (only strongest signals pass)
+    # Paper mode: reduced VIX floor penalties to allow signal flow for data collection
     _vix = msg.get("vix", 21.0)
-    if _vix > 35:
-        floor = max(floor, 65)  # Crisis: only highest conviction
-    elif _vix > 25:
-        floor = max(floor, 60)  # WOI: elevated
-    elif _vix > 20:
-        floor = max(floor, 55)  # Caution
+    if not _SIM_MODE:
+        if _vix > 35:
+            floor = max(floor, 65)  # Crisis: only highest conviction
+        elif _vix > 25:
+            floor = max(floor, 60)  # WOI: elevated
+        elif _vix > 20:
+            floor = max(floor, 55)  # Caution
+    else:
+        # Paper mode: mild VIX adjustments only
+        if _vix > 35:
+            floor = max(floor, 55)
+        elif _vix > 25:
+            floor = max(floor, 50)
 
     # ── BOOK 171: DAY-OF-WEEK FLOOR ADJUSTMENT ──
     # Monday has negative drift (-0.8bps) — mild penalty only.
