@@ -1329,9 +1329,25 @@ impl<B: BrokerAdapter> Engine<B> {
                 }
 
                 let is_halt = self.arbiter.regime >= RiskRegime::Flatten;
-                let is_eod = Clock::eod_phase_utc(utc_secs, is_bst).is_some();
                 let is_carried = self.carry_manager.is_carried(&tid);
                 let exit_exchange = self.broker.exchange_for_ticker(&tid);
+                // EOD flatten must be exchange-aware: LSE phases don't apply to US stocks.
+                // Use per-exchange cutoff from exit_engine config, not global LSE phases.
+                let is_eod = match exit_exchange {
+                    "LSE" | "LSEETF" | "" => Clock::eod_phase_utc(utc_secs, is_bst).is_some(),
+                    "SMART" | "XNYS" | "XNAS" | "ARCA" => {
+                        // US EOD: T-35min before 20:00 UTC = 19:25 UTC = 69900s
+                        utc_secs >= 69_900
+                    }
+                    "IBIS" | "XETRA" => {
+                        // XETRA closes 15:30 UTC → EOD at 14:55 UTC = 53700s
+                        utc_secs >= 53_700
+                    }
+                    _ => {
+                        // Default: use LSE phases for unknown exchanges
+                        Clock::eod_phase_utc(utc_secs, is_bst).is_some()
+                    }
+                };
                 let exit_result = self
                     .exit_engine
                     .evaluate(pos, tick.last, atr, utc_secs, is_halt, is_eod, is_carried, exit_exchange);
