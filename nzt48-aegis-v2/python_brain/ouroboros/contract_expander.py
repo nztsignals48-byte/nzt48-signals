@@ -617,14 +617,35 @@ def run_expansion(bulk: bool = False) -> int:
         log.info("Completed in %.1fs", elapsed)
         return 0
 
-    # Step 4: Cap to batch limit
+    # Step 4: Resolve con_ids via IBKR reqContractDetails
     to_add = validated[:batch_limit]
-    log.info("Step 4: Adding %d new contracts (of %d validated)", len(to_add), len(validated))
+    if _HAS_IBKR:
+        try:
+            provider = _get_ibkr_provider()
+            log.info("Step 4: Resolving %d candidates via IBKR reqContractDetails...", len(to_add))
+            to_add = validate_candidates_ibkr(to_add, provider, max_batch=batch_limit)
+            # Filter out any that failed IBKR resolution (con_id=0)
+            before = len(to_add)
+            to_add = [c for c in to_add if c.get("con_id", 0) > 0]
+            log.info("Step 4: %d/%d contracts have valid IBKR con_id", len(to_add), before)
+        except Exception as e:
+            log.warning("Step 4: IBKR resolution failed: %s — skipping unresolved", e)
+            to_add = [c for c in to_add if c.get("con_id", 0) > 0]
+    else:
+        log.warning("Step 4: IBKR provider unavailable — cannot resolve con_ids, skipping")
+        to_add = []
 
+    if not to_add:
+        log.info("No candidates with valid IBKR con_id. Skipping append.")
+        elapsed = time.monotonic() - start
+        log.info("Completed in %.1fs", elapsed)
+        return 0
+
+    log.info("Step 4b: Adding %d new contracts (of %d validated)", len(to_add), len(validated))
     for c in to_add:
-        log.info("  + %s (%s) score=%.3f source=%s",
+        log.info("  + %s (%s) con_id=%d score=%.3f source=%s",
                  c["contract_symbol"], c.get("exchange", "?"),
-                 c["composite_score"], c["source"])
+                 c.get("con_id", 0), c["composite_score"], c["source"])
 
     # Step 5: Append to contracts.toml
     added = append_contracts(to_add)
