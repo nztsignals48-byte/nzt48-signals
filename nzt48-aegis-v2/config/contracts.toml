@@ -566,6 +566,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "MSFT"
@@ -574,6 +576,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "NVDA"
@@ -582,6 +586,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "TSLA"
@@ -590,6 +596,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "AMZN"
@@ -598,6 +606,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "GOOGL"
@@ -606,6 +616,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "META"
@@ -614,6 +626,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "AMD"
@@ -622,6 +636,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "ARM"
@@ -630,6 +646,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "TSM"
@@ -638,6 +656,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "SPY"
@@ -646,6 +666,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "QQQ"
@@ -654,6 +676,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "IWM"
@@ -662,6 +686,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "AVGO"
@@ -670,6 +696,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "NFLX"
@@ -678,6 +706,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "CRM"
@@ -686,6 +716,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "COIN"
@@ -694,6 +726,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "MSTR"
@@ -702,6 +736,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "PLTR"
@@ -710,6 +746,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "SMCI"
@@ -718,6 +756,8 @@ exchange = "SMART"
 sec_type = "STK"
 currency = "USD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "SAP.DE"
@@ -726,6 +766,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "SIE.DE"
@@ -734,6 +776,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "ALV.DE"
@@ -742,6 +786,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "DTE.DE"
@@ -750,6 +796,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "BAS.DE"
@@ -758,6 +806,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "BMW.DE"
@@ -766,6 +816,8 @@ exchange = "IBIS"
 sec_type = "STK"
 currency = "EUR"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "9988.HK"
@@ -774,6 +826,8 @@ exchange = "SEHK"
 sec_type = "STK"
 currency = "HKD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "1810.HK"
@@ -782,6 +836,8 @@ exchange = "SEHK"
 sec_type = "STK"
 currency = "HKD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "2318.HK"
@@ -790,6 +846,8 @@ exchange = "SEHK"
 sec_type = "STK"
 currency = "HKD"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "7203.T"
@@ -798,6 +856,8 @@ exchange = "TSEJ"
 sec_type = "STK"
 currency = "JPY"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "6758.T"
@@ -806,6 +866,8 @@ exchange = "TSEJ"
 sec_type = "STK"
 currency = "JPY"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "9984.T"
@@ -814,6 +876,8 @@ exchange = "TSEJ"
 sec_type = "STK"
 currency = "JPY"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "6861.T"
@@ -822,6 +886,8 @@ exchange = "TSEJ"
 sec_type = "STK"
 currency = "JPY"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
 
 [[contracts]]
 symbol = "8306.T"
@@ -830,3 +896,7895 @@ exchange = "TSEJ"
 sec_type = "STK"
 currency = "JPY"
 leverage = 1
+sector = "Unknown"
+inverse_of = ""
+
+[[contracts]]
+symbol = "3IN.L"
+con_id = 310518261
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AAF.L"
+con_id = 373291234
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Telecommunications services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AAL.L"
+con_id = 788708135
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AAS.L"
+con_id = 542981007
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABDN.L"
+con_id = 337997965
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABF.L"
+con_id = 908924
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & tobacco"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADM.L"
+con_id = 38772705
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AEP.L"
+con_id = 15224436
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AGT.L"
+con_id = 538323394
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AIE.L"
+con_id = 325214293
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AJB.L"
+con_id = 344998936
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALFA.L"
+con_id = 277742397
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software and Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALW.L"
+con_id = 39846471
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AML.L"
+con_id = 460084303
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Automobiles & Parts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ANTO.L"
+con_id = 17628566
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AO.L"
+con_id = 145200283
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retail"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APN.L"
+con_id = 737854294
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ASHM.L"
+con_id = 41957229
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ASL.L"
+con_id = 26652723
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ATR.L"
+con_id = 35151440
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ATT.L"
+con_id = 488950794
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ATYM.L"
+con_id = 300356747
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Metals and Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AUTO.L"
+con_id = 187511156
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AV.L"
+con_id = 561966652
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Life insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AVON.L"
+con_id = 80938165
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Goods and Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AZN.L"
+con_id = 909330
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals & biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BA.L"
+con_id = 908964
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BAB.L"
+con_id = 35156736
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BAG.L"
+con_id = 108068430
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Beverages"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BARC.L"
+con_id = 908940
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BATS.L"
+con_id = 908931
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Tobacco"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BBOX.L"
+con_id = 180019314
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BBY.L"
+con_id = 12599244
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BCG.L"
+con_id = 500243921
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Consumer Digital Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BEZ.L"
+con_id = 229115041
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BGEO.L"
+con_id = 318179621
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banking Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BGFD.L"
+con_id = 37102407
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BHMG.L"
+con_id = 612719958
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Hedge Funds"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BKG.L"
+con_id = 727513801
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Household goods & home construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BLND.L"
+con_id = 957343
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BME.L"
+con_id = 859374088
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BNKR.L"
+con_id = 474187469
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BNZL.L"
+con_id = 34777674
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BOWL.L"
+con_id = 248810607
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel and leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BOY.L"
+con_id = 56437692
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Engineering"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BP.L"
+con_id = 228891
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil & gas producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BPT.L"
+con_id = 504210148
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BRBY.L"
+con_id = 15977601
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Personal goods"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BREE.L"
+con_id = 631226152
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BRGE.L"
+con_id = 35156801
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BRSC.L"
+con_id = 35151600
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Equity Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BRWM.L"
+con_id = 26652969
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BSIF.L"
+con_id = 131031729
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BT.A.L"
+con_id = 13672206
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Telecommunications services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BTRW.L"
+con_id = 12599238
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Household goods & home construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BUT.L"
+con_id = 35150722
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BWY.L"
+con_id = 16520541
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Home Construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BYG.L"
+con_id = 35150697
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BYIT.L"
+con_id = 460084388
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & Defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CBG.L"
+con_id = 12605023
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCC.L"
+con_id = 183240974
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software & Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCEP.L"
+con_id = 737178130
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Beverages"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCH.L"
+con_id = 126945329
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Beverages"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCL.L"
+con_id = 10532000
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCR.L"
+con_id = 386546301
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & Tobacco"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CGT.L"
+con_id = 133624074
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CHG.L"
+con_id = 86212388
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & Defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CHRY.L"
+con_id = 340763417
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CKN.L"
+con_id = 35150752
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Transportation"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CLDN.L"
+con_id = 802169817
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CMCX.L"
+con_id = 221635251
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CNA.L"
+con_id = 31765913
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Multiline utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COA.L"
+con_id = 90600021
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COST.L"
+con_id = 75044922
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Engineering and Construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CRDA.L"
+con_id = 362829916
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSN.L"
+con_id = 35156751
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Life Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTEC.L"
+con_id = 253381733
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Health care equipment & supplies"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTY.L"
+con_id = 26652780
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CURY.L"
+con_id = 73814267
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CVSG.L"
+con_id = 78999748
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CWK.L"
+con_id = 3185818
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CWR.L"
+con_id = 328768119
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Alternative Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DCC.L"
+con_id = 123584215
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DGE.L"
+con_id = 3310674
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Beverages"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DLN.L"
+con_id = 26652807
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DNLM.L"
+con_id = 41962545
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DOCS.L"
+con_id = 468775053
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DOM.L"
+con_id = 236581278
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DPLM.L"
+con_id = 35151287
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DRX.L"
+con_id = 44035682
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electricity"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DSCV.L"
+con_id = 37102382
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EDIN.L"
+con_id = 26652819
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EDV.L"
+con_id = 496837103
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ELM.L"
+con_id = 35151323
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EMG.L"
+con_id = 368285546
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ENOG.L"
+con_id = 310727935
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil & Gas Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ENT.L"
+con_id = 125005888
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ESCT.L"
+con_id = 532211210
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EWI.L"
+con_id = 351513171
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXPN.L"
+con_id = 41044864
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EZJ.L"
+con_id = 103665937
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel and Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FAN.L"
+con_id = 156628627
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FCH.L"
+con_id = 335610842
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FCIT.L"
+con_id = 12103847
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Collective investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FCSS.L"
+con_id = 75306502
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FEML.L"
+con_id = 70943565
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FEV.L"
+con_id = 153452108
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FGEN.L"
+con_id = 147622570
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FGP.L"
+con_id = 12171721
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FGT.L"
+con_id = 37102495
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Equity Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FOUR.L"
+con_id = 80938105
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FRAS.L"
+con_id = 44650318
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FRES.L"
+con_id = 51069466
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FSG.L"
+con_id = 469676846
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Banking and Brokerage Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FSV.L"
+con_id = 198554977
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GAMA.L"
+con_id = 170019557
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Telecommunications"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GAW.L"
+con_id = 35151400
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Leisure Goods"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GBG.L"
+con_id = 90366408
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software and Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GCP.L"
+con_id = 132665922
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General Financial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GDWN.L"
+con_id = 78999714
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GEN.L"
+con_id = 148510133
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GFRD.L"
+con_id = 397999654
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GFTU.L"
+con_id = 136348477
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GLEN.L"
+con_id = 88286963
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GNC.L"
+con_id = 100813788
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food, Beverage and Tobacco"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GNS.L"
+con_id = 37099328
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals & Biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GPE.L"
+con_id = 312176186
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GRG.L"
+con_id = 60215826
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & Drug Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GRI.L"
+con_id = 26652882
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment & Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GROW.L"
+con_id = 236849470
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GSCT.L"
+con_id = 389652047
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GSK.L"
+con_id = 574757089
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals & biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HAS.L"
+con_id = 957694
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HBR.L"
+con_id = 499310945
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil & Gas Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HFEL.L"
+con_id = 42022292
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HFG.L"
+con_id = 79000115
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HGT.L"
+con_id = 368280412
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HICL.L"
+con_id = 359370531
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HIK.L"
+con_id = 38772742
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals and Biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HILS.L"
+con_id = 37102528
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Engineering"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HLMA.L"
+con_id = 15824399
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electronic equipment & parts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HLN.L"
+con_id = 573136108
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals & biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HMSO.L"
+con_id = 732429770
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HOC.L"
+con_id = 41957241
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Basic Resources"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HRI.L"
+con_id = 26652897
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HSBA.L"
+con_id = 909083
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HSL.L"
+con_id = 35151438
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HSX.L"
+con_id = 188614725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Non-life Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HTG.L"
+con_id = 35151455
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil, Gas and Coal"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HTWS.L"
+con_id = 387353627
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Telecomms"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HVPE.L"
+con_id = 224155149
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Equity Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HWDN.L"
+con_id = 12605132
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Homebuilding & construction supplies"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HWG.L"
+con_id = 231837556
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IAG.L"
+con_id = 82965895
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IBST.L"
+con_id = 210810215
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ICG.L"
+con_id = 242485383
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ICGT.L"
+con_id = 35151414
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IEM.L"
+con_id = 50020915
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IGG.L"
+con_id = 38772748
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IHP.L"
+con_id = 308832760
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "III.L"
+con_id = 45145440
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IMB.L"
+con_id = 2117419
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Tobacco"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IMI.L"
+con_id = 144206341
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial engineering"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INCH.L"
+con_id = 75259168
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INF.L"
+con_id = 152238054
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INPP.L"
+con_id = 53766300
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INVP.L"
+con_id = 40714473
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IPF.L"
+con_id = 45136322
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IPO.L"
+con_id = 55584363
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ITH.L"
+con_id = 596698209
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil & Gas Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ITRK.L"
+con_id = 16644346
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ITV.L"
+con_id = 909056
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IWG.L"
+con_id = 258999725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JAM.L"
+con_id = 150696496
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JD.L"
+con_id = 529672016
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JDW.L"
+con_id = 1509934
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JEDT.L"
+con_id = 161680387
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JEGI.L"
+con_id = 543229334
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JEMI.L"
+con_id = 77665889
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JFJ.L"
+con_id = 26652852
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JGGI.L"
+con_id = 218311186
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JII.L"
+con_id = 35151520
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JMAT.L"
+con_id = 218457806
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JMG.L"
+con_id = 453904034
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JSG.L"
+con_id = 35151501
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JTC.L"
+con_id = 310520411
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JUP.L"
+con_id = 76282550
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KGF.L"
+con_id = 909096
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KIE.L"
+con_id = 35156787
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KLR.L"
+con_id = 35151535
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KNOS.L"
+con_id = 199744467
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software & Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LAND.L"
+con_id = 288529684
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real estate investment trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LGEN.L"
+con_id = 909110
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Life insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LLOY.L"
+con_id = 909301
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LMP.L"
+con_id = 79699121
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LRE.L"
+con_id = 45080725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Nonlife Insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LSEG.L"
+con_id = 39234929
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LWDB.L"
+con_id = 35151550
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MAB.L"
+con_id = 41257340
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MEGP.L"
+con_id = 26653032
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Leisure Goods"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MGAM.L"
+con_id = 12605156
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electronic & Electrical Equipment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MGNS.L"
+con_id = 35156804
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MKS.L"
+con_id = 909136
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & drug retailing"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MNDI.L"
+con_id = 680537912
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Containers & packaging"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MNG.L"
+con_id = 387353678
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MNKS.L"
+con_id = 26652992
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MONY.L"
+con_id = 46147099
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MOON.L"
+con_id = 469136346
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRC.L"
+con_id = 319337013
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Collective Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRCH.L"
+con_id = 26652972
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRO.L"
+con_id = 618443784
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MSLH.L"
+con_id = 26652954
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Construction & Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MTO.L"
+con_id = 26652989
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MTRO.L"
+con_id = 632411089
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MUT.L"
+con_id = 26653002
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MYI.L"
+con_id = 626445896
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "N91.L"
+con_id = 409743507
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NAS.L"
+con_id = 791428132
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NBPE.L"
+con_id = 277369976
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Collective Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NCC.L"
+con_id = 69361142
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software and Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NG.L"
+con_id = 273234647
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Multiline utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NWG.L"
+con_id = 581444942
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NXT.L"
+con_id = 957975
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OCDO.L"
+con_id = 77478945
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & drug retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OCI.L"
+con_id = 445198699
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ONT.L"
+con_id = 518133538
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OSB.L"
+con_id = 457960575
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OXB.L"
+con_id = 319644637
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals and Biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OXIG.L"
+con_id = 35151630
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electronic & Electrical Equipment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PAF.L"
+con_id = 79000163
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Precious Metals and Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PAG.L"
+con_id = 48801659
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PAGE.L"
+con_id = 12605163
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PCGH.L"
+con_id = 90831767
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PCT.L"
+con_id = 728460128
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PETS.L"
+con_id = 146065480
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PFD.L"
+con_id = 106964496
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & Drug Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PHI.L"
+con_id = 90831768
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PHP.L"
+con_id = 212281630
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PIN.L"
+con_id = 524000784
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Equity Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PINT.L"
+con_id = 526860158
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PLUS.L"
+con_id = 132004661
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PNL.L"
+con_id = 576941605
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PNN.L"
+con_id = 500760856
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Gas, Water & Multiutilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "POLN.L"
+con_id = 679960318
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PPET.L"
+con_id = 39832855
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PPH.L"
+con_id = 88265560
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel and Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PRN.L"
+con_id = 828022039
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food and drink"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PRU.L"
+con_id = 909164
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Life insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSH.L"
+con_id = 274797523
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSN.L"
+con_id = 12605003
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Household goods & home construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSON.L"
+con_id = 909170
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PTEC.L"
+con_id = 110103472
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software & Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "QLT.L"
+con_id = 561593187
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "QQ.L"
+con_id = 37920799
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & Defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RAT.L"
+con_id = 29712334
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RCP.L"
+con_id = 26653068
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "REL.L"
+con_id = 48005591
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RHIM.L"
+con_id = 294208208
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RICA.L"
+con_id = 86791835
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RIO.L"
+con_id = 2852762
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mining"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RKT.L"
+con_id = 851166531
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Household goods & home construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RMV.L"
+con_id = 331862780
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RNK.L"
+con_id = 43543987
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel and Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ROR.L"
+con_id = 194372137
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Engineering"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RPI.L"
+con_id = 709020613
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RR.L"
+con_id = 88383131
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RS1.L"
+con_id = 12103838
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RSW.L"
+con_id = 26653065
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electronic & Electrical Equipment"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RTO.L"
+con_id = 909192
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SAFE.L"
+con_id = 70942399
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SAGA.L"
+con_id = 449716565
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel and Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SAIN.L"
+con_id = 35151720
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SBRY.L"
+con_id = 29911784
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & drug retailing"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SCT.L"
+con_id = 212918795
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software & Computer Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SDLF.L"
+con_id = 345366483
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Life insurance"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SDP.L"
+con_id = 35151710
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SDR.L"
+con_id = 586245618
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SEIT.L"
+con_id = 345373208
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SEQI.L"
+con_id = 185913806
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SGE.L"
+con_id = 129028068
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Software & computer services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SGRO.L"
+con_id = 64769359
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real estate investment trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHAW.L"
+con_id = 827664351
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banking"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHC.L"
+con_id = 73793147
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHEL.L"
+con_id = 542125742
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Oil & gas producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SMIN.L"
+con_id = 44668420
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SMT.L"
+con_id = 158725708
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Collective investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SMWH.L"
+con_id = 49280138
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SN.L"
+con_id = 909254
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Health care equipment & supplies"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SNR.L"
+con_id = 35151725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Aerospace & Defence"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SOI.L"
+con_id = 37102686
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SPI.L"
+con_id = 160954868
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Health Care Equipment & Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SPX.L"
+con_id = 196961203
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial engineering"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SRE.L"
+con_id = 268770387
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SRP.L"
+con_id = 12605063
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SSE.L"
+con_id = 2570998
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Electrical utilities & independent power producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SSPG.L"
+con_id = 360836492
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STAN.L"
+con_id = 909271
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STJ.L"
+con_id = 12177246
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SUPR.L"
+con_id = 449034352
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SVS.L"
+con_id = 39143089
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment & Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SVT.L"
+con_id = 41172884
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Multiline utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SYNC.L"
+con_id = 116511725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Pharmaceuticals & Biotechnology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TATE.L"
+con_id = 559436965
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food Producers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TBCG.L"
+con_id = 243505352
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Banks"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TCAP.L"
+con_id = 473984411
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TEM.L"
+con_id = 504693411
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TEP.L"
+con_id = 35151768
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Telecomms"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TFIF.L"
+con_id = 123777414
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "THG.L"
+con_id = 445529101
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Personal Products"
+inverse_of = ""
+
+[[contracts]]
+symbol = "THRG.L"
+con_id = 35151777
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Equity Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "THRL.L"
+con_id = 377043186
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TMPL.L"
+con_id = 561557597
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Collective Investments"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TPK.L"
+con_id = 484706721
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRIG.L"
+con_id = 132218131
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRN.L"
+con_id = 371871705
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial Transportation"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRST.L"
+con_id = 478596142
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRY.L"
+con_id = 26653169
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TSCO.L"
+con_id = 471204140
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Food & drug retailing"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TW.L"
+con_id = 12605081
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Household goods & home construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UEM.L"
+con_id = 312939135
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UKW.L"
+con_id = 125137275
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Gas, Water & Multiutilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ULVR.L"
+con_id = 837455630
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Personal goods"
+inverse_of = ""
+
+[[contracts]]
+symbol = "USA.L"
+con_id = 312029564
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UTG.L"
+con_id = 38772769
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real estate investment trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UU.L"
+con_id = 52950461
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Multiline utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VCT.L"
+con_id = 26653191
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Chemicals"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VEIL.L"
+con_id = 239598328
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General Financial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VOD.L"
+con_id = 140148322
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Mobile telecommunications"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VOF.L"
+con_id = 227795494
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General Financial"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VSVS.L"
+con_id = 118857122
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "General Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VTY.L"
+con_id = 26652747
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Home Construction"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WEIR.L"
+con_id = 21915985
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Industrial goods and services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WIX.L"
+con_id = 484554952
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retailers"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WIZZ.L"
+con_id = 185320420
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Travel & Leisure"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WKP.L"
+con_id = 92297924
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Real Estate Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WOSG.L"
+con_id = 369005276
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Personal Goods"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WPP.L"
+con_id = 119773886
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Media"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WTB.L"
+con_id = 42402491
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Retail hospitality"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WWH.L"
+con_id = 644841058
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Investment Trusts"
+inverse_of = ""
+
+[[contracts]]
+symbol = "XPS.L"
+con_id = 266308363
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Financial Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZIG.L"
+con_id = 69034979
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+leverage = 1
+sector = "Support Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "A"
+con_id = 1715006
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABBV"
+con_id = 118089500
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABT"
+con_id = 4065
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ACGL"
+con_id = 10763362
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ACN"
+con_id = 67889930
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADM"
+con_id = 4165
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AEE"
+con_id = 13181
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AES"
+con_id = 2560358
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AFL"
+con_id = 4227
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AIG"
+con_id = 61319701
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AIZ"
+con_id = 27727424
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AJG"
+con_id = 4325
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AKAM"
+con_id = 6220356
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALB"
+con_id = 4347
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALL"
+con_id = 4357
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALLE"
+con_id = 138438437
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AMCR"
+con_id = 845305949
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AME"
+con_id = 4392
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AMP"
+con_id = 35970258
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AMT"
+con_id = 99831145
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ANET"
+con_id = 740948854
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AON"
+con_id = 414366114
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AOS"
+con_id = 12225
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APA"
+con_id = 474515500
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APD"
+con_id = 4487
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APH"
+con_id = 4493
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APO"
+con_id = 535288388
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APTV"
+con_id = 748351585
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ARE"
+con_id = 6607487
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ARES"
+con_id = 341904548
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ATO"
+con_id = 4644
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AVB"
+con_id = 5026974
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AVY"
+con_id = 4694
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AWK"
+con_id = 50530752
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AXP"
+con_id = 4721
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AZO"
+con_id = 4750
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BA"
+con_id = 4762
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BAC"
+con_id = 10098
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BALL"
+con_id = 5052
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BAX"
+con_id = 8111188
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BBY"
+con_id = 4817
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BDX"
+con_id = 4886
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BEN"
+con_id = 4906
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BG"
+con_id = 663174498
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BK"
+con_id = 44986804
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BLDR"
+con_id = 34851874
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BLK"
+con_id = 729193719
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BMY"
+con_id = 5111
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BR"
+con_id = 43523793
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BRO"
+con_id = 6607613
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BSX"
+con_id = 5270
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BX"
+con_id = 372834689
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BXP"
+con_id = 5021340
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "C"
+con_id = 87335484
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CAG"
+con_id = 5402
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CAH"
+con_id = 5407
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CARR"
+con_id = 410755397
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CAT"
+con_id = 5437
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CB"
+con_id = 218939694
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CBOE"
+con_id = 76227954
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CBRE"
+con_id = 95514904
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCI"
+con_id = 176571182
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCL"
+con_id = 5516
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CF"
+con_id = 35447205
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CFG"
+con_id = 167955370
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CHD"
+con_id = 5651
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CHRW"
+con_id = 36320731
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CI"
+con_id = 346403540
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CIEN"
+con_id = 41045553
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CINF"
+con_id = 267661
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CL"
+con_id = 5749
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CLX"
+con_id = 5794
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CME"
+con_id = 45127739
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CMG"
+con_id = 37655664
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CMI"
+con_id = 6207
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CMS"
+con_id = 5840
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CNC"
+con_id = 13878278
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CNP"
+con_id = 8093
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COF"
+con_id = 5941
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COHR"
+con_id = 584127832
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COO"
+con_id = 685217803
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COP"
+con_id = 10885
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COR"
+con_id = 1714996
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CPAY"
+con_id = 691994611
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CPB"
+con_id = 5980
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CPT"
+con_id = 6004
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CRH"
+con_id = 655276609
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CRL"
+con_id = 2730877
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTRA"
+con_id = 5946
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTVA"
+con_id = 366239371
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CVNA"
+con_id = 274144952
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CVS"
+con_id = 2585769
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CVX"
+con_id = 5684
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "D"
+con_id = 6327
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DAL"
+con_id = 44001820
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DD"
+con_id = 365921621
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DE"
+con_id = 6393
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DECK"
+con_id = 268376
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DELL"
+con_id = 346218218
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DG"
+con_id = 70212228
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DGX"
+con_id = 2459465
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DHI"
+con_id = 268627
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DHR"
+con_id = 6442
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DIS"
+con_id = 6459
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DLR"
+con_id = 31832526
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DOC"
+con_id = 389700396
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DOV"
+con_id = 6517
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DOW"
+con_id = 356576040
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DPZ"
+con_id = 29831612
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DRI"
+con_id = 661440
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DTE"
+con_id = 6585
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DUK"
+con_id = 110176011
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DVA"
+con_id = 1035459
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DVN"
+con_id = 754442
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ECL"
+con_id = 6682
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ED"
+con_id = 6691
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EFX"
+con_id = 6735
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EG"
+con_id = 6477725
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EIX"
+con_id = 11899
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EL"
+con_id = 1448477
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ELV"
+con_id = 173962302
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EME"
+con_id = 6820
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EMR"
+con_id = 6842
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EOG"
+con_id = 6890
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EPAM"
+con_id = 101898880
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EQIX"
+con_id = 181764593
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EQR"
+con_id = 6917
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EQT"
+con_id = 57698865
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ERIE"
+con_id = 4730254
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ES"
+con_id = 182880167
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ESS"
+con_id = 6946
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ETN"
+con_id = 118017869
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ETR"
+con_id = 6969
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EVRG"
+con_id = 320106069
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EW"
+con_id = 8101142
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXE"
+con_id = 470458975
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXPD"
+con_id = 269082
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXPE"
+con_id = 98542021
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXR"
+con_id = 30351205
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "F"
+con_id = 9599491
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FCX"
+con_id = 7089
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FDS"
+con_id = 1847145
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FDX"
+con_id = 5100583
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FE"
+con_id = 3265376
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FFIV"
+con_id = 6248713
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FICO"
+con_id = 269280
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FIS"
+con_id = 37866641
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FITB"
+con_id = 269318
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FIX"
+con_id = 6607708
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FOX"
+con_id = 356858007
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FOXA"
+con_id = 356858008
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FRT"
+con_id = 535271307
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FSLR"
+con_id = 41622169
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FTV"
+con_id = 236074120
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GD"
+con_id = 7496
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GDDY"
+con_id = 188986978
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GE"
+con_id = 498843743
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GEN"
+con_id = 390332324
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GEV"
+con_id = 691984365
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GIS"
+con_id = 7616
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GL"
+con_id = 375868349
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GLW"
+con_id = 7655
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GM"
+con_id = 80986742
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GNRC"
+con_id = 72529783
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GPC"
+con_id = 7745
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GPN"
+con_id = 11477774
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GRMN"
+con_id = 76791198
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GS"
+con_id = 4627828
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GWW"
+con_id = 7867
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HAL"
+con_id = 7890
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HAS"
+con_id = 754956
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HBAN"
+con_id = 270018
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HCA"
+con_id = 85076790
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HD"
+con_id = 7930
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HIG"
+con_id = 1217009
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HII"
+con_id = 86033355
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HLT"
+con_id = 257944570
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HOLX"
+con_id = 270188
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HOOD"
+con_id = 504546674
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HPE"
+con_id = 209411798
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HPQ"
+con_id = 209411801
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HRL"
+con_id = 8153
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HSIC"
+con_id = 3655640
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HST"
+con_id = 8057
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HSY"
+con_id = 8199
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HUBB"
+con_id = 216386790
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HUM"
+con_id = 8251
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HWM"
+con_id = 403121976
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IBKR"
+con_id = 43645865
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IBM"
+con_id = 8314
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ICE"
+con_id = 136370275
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IEX"
+con_id = 8377
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IFF"
+con_id = 8385
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INCY"
+con_id = 4369855
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INVH"
+con_id = 264405214
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IP"
+con_id = 8511
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IQV"
+con_id = 295757261
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IR"
+con_id = 404509190
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IRM"
+con_id = 180350774
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IT"
+con_id = 4457287
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ITW"
+con_id = 8620
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IVZ"
+con_id = 47550606
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "J"
+con_id = 582332987
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JBHT"
+con_id = 270825
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JBL"
+con_id = 4457282
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JCI"
+con_id = 244164913
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JKHY"
+con_id = 270869
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JNJ"
+con_id = 8719
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "JPM"
+con_id = 1520593
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KEY"
+con_id = 8809
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KEYS"
+con_id = 170167160
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KIM"
+con_id = 8845
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KKR"
+con_id = 321328198
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KMB"
+con_id = 8864
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KMI"
+con_id = 83975037
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KO"
+con_id = 8894
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KR"
+con_id = 8908
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "KVUE"
+con_id = 629043863
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "L"
+con_id = 9252
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LDOS"
+con_id = 134280621
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LEN"
+con_id = 9091
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LH"
+con_id = 703660032
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LHX"
+con_id = 371886040
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LII"
+con_id = 6608113
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LITE"
+con_id = 201113895
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LLY"
+con_id = 9160
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LMT"
+con_id = 611191
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LNT"
+con_id = 5026984
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LOW"
+con_id = 9199
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LUV"
+con_id = 9282
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LVS"
+con_id = 32602412
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LYB"
+con_id = 74866700
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "LYV"
+con_id = 37511786
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MA"
+con_id = 38685693
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MAA"
+con_id = 9317
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MAS"
+con_id = 9360
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MCD"
+con_id = 9408
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MCK"
+con_id = 9657
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MCO"
+con_id = 6497
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MDT"
+con_id = 181387075
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MET"
+con_id = 8093509
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MGM"
+con_id = 9560
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MKC"
+con_id = 271556
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MLM"
+con_id = 9690
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MMM"
+con_id = 9720
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MO"
+con_id = 9769
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MOS"
+con_id = 88292752
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MPC"
+con_id = 89495776
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRK"
+con_id = 70101545
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MRSH"
+con_id = 9705
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MS"
+con_id = 2841574
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MSCI"
+con_id = 47101335
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MSI"
+con_id = 81581011
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MTB"
+con_id = 2585323
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "MTD"
+con_id = 6477908
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NCLH"
+con_id = 120643512
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NDSN"
+con_id = 272314
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NEE"
+con_id = 75960201
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NEM"
+con_id = 10174
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NI"
+con_id = 10260
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NKE"
+con_id = 10291
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NOC"
+con_id = 10376
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NOW"
+con_id = 109911821
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NRG"
+con_id = 10188791
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NSC"
+con_id = 10497
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NTAP"
+con_id = 49921110
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NTRS"
+con_id = 272565
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NUE"
+con_id = 10557
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NVR"
+con_id = 755864
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NWS"
+con_id = 129348130
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "NWSA"
+con_id = 129348126
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "O"
+con_id = 10672
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OKE"
+con_id = 10794
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OMC"
+con_id = 10811
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ORCL"
+con_id = 272800
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OTIS"
+con_id = 410755402
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "OXY"
+con_id = 10880
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PCG"
+con_id = 2586035
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PEG"
+con_id = 11005
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PFE"
+con_id = 11031
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PFG"
+con_id = 11032
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PG"
+con_id = 11054
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PGR"
+con_id = 11080
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PH"
+con_id = 11094
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PHM"
+con_id = 11109
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PKG"
+con_id = 7740411
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PLD"
+con_id = 88819288
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PM"
+con_id = 49588376
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PNC"
+con_id = 11240
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PNR"
+con_id = 153068487
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PNW"
+con_id = 11257
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PODD"
+con_id = 44061838
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "POOL"
+con_id = 39195389
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PPG"
+con_id = 11295
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PPL"
+con_id = 661547
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PRU"
+con_id = 13865082
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSA"
+con_id = 12002
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSKY"
+con_id = 804144296
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PSX"
+con_id = 105669270
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PTC"
+con_id = 121507047
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "PWR"
+con_id = 6608432
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "Q"
+con_id = 824788107
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RCL"
+con_id = 11520
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "REG"
+con_id = 11574
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RF"
+con_id = 273815
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RJF"
+con_id = 11656
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RL"
+con_id = 92306678
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RMD"
+con_id = 4817352
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ROK"
+con_id = 11697
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ROL"
+con_id = 11700
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RSG"
+con_id = 6478024
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RTX"
+con_id = 415342104
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "RVTY"
+con_id = 6737
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SATS"
+con_id = 47965865
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SBAC"
+con_id = 262397910
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SCHW"
+con_id = 11905
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SHW"
+con_id = 12120
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SJM"
+con_id = 15130038
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SLB"
+con_id = 12200
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SNA"
+con_id = 12259
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SNDK"
+con_id = 760250490
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SO"
+con_id = 12300
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SOLV"
+con_id = 691984360
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SPG"
+con_id = 2009113
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SPGI"
+con_id = 229629397
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SRE"
+con_id = 11020
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STE"
+con_id = 358060563
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STLD"
+con_id = 6478095
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STT"
+con_id = 2730980
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "STZ"
+con_id = 276066
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SW"
+con_id = 713434903
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SWK"
+con_id = 73354293
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SWKS"
+con_id = 4726021
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SYF"
+con_id = 162231797
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SYK"
+con_id = 4430948
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SYY"
+con_id = 12581
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "T"
+con_id = 37018770
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TAP"
+con_id = 33191300
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TDG"
+con_id = 38285434
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TDY"
+con_id = 6340773
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TECH"
+con_id = 172729810
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TEL"
+con_id = 731466408
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TER"
+con_id = 12729
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TFC"
+con_id = 393460310
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TGT"
+con_id = 6437
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TJX"
+con_id = 12814
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TKO"
+con_id = 652841542
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TMO"
+con_id = 12869
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TPL"
+con_id = 463654490
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TPR"
+con_id = 292491487
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRGP"
+con_id = 81671838
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRMB"
+con_id = 275294
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TROW"
+con_id = 275321
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TRV"
+con_id = 43150617
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TSCO"
+con_id = 6858322
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TSN"
+con_id = 275405
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TT"
+con_id = 406709270
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TXT"
+con_id = 13101
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "TYL"
+con_id = 13116
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UAL"
+con_id = 79498203
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UBER"
+con_id = 365207014
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UDR"
+con_id = 43274444
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UHS"
+con_id = 13206
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ULTA"
+con_id = 46970422
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UNH"
+con_id = 13272
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UNP"
+con_id = 13284
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UPS"
+con_id = 6231002
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "URI"
+con_id = 3629755
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "USB"
+con_id = 11669769
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "V"
+con_id = 49462172
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VICI"
+con_id = 292080616
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VLO"
+con_id = 13497
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VLTO"
+con_id = 655276622
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VMC"
+con_id = 13515
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Materials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VRSN"
+con_id = 4173050
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VRT"
+con_id = 402783527
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VST"
+con_id = 254457731
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VTR"
+con_id = 4044062
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VTRS"
+con_id = 454859695
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VZ"
+con_id = 4901
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WAB"
+con_id = 661633
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WAT"
+con_id = 1448494
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WEC"
+con_id = 198560237
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WELL"
+con_id = 207739931
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WFC"
+con_id = 10375
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WM"
+con_id = 13379
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WMB"
+con_id = 13805
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WRB"
+con_id = 266822
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WSM"
+con_id = 5019164
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WST"
+con_id = 13909
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WTW"
+con_id = 217947855
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WY"
+con_id = 13949
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "WYNN"
+con_id = 16454492
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "XOM"
+con_id = 13977
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "XYL"
+con_id = 95703740
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "XYZ"
+con_id = 212671971
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "YUM"
+con_id = 3206042
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZBH"
+con_id = 12851783
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZBRA"
+con_id = 276304
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ZTS"
+con_id = 121665622
+exchange = "NYSE"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ABNB"
+con_id = 459530964
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADBE"
+con_id = 265768
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADI"
+con_id = 4157
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADP"
+con_id = 4661
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ADSK"
+con_id = 265681
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AEP"
+con_id = 4211
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALGN"
+con_id = 11459264
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ALNY"
+con_id = 29442968
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AMAT"
+con_id = 266093
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AMGN"
+con_id = 266145
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "APP"
+con_id = 481863646
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "ASML"
+con_id = 117902840
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "AXON"
+con_id = 272104927
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BIIB"
+con_id = 26734397
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BKNG"
+con_id = 308728373
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "BKR"
+con_id = 281316445
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CCEP"
+con_id = 234647242
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CDNS"
+con_id = 5552
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CDW"
+con_id = 130432552
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CEG"
+con_id = 538132976
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CHTR"
+con_id = 233674866
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CMCSA"
+con_id = 267748
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "COST"
+con_id = 272997
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CPRT"
+con_id = 4728523
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CRWD"
+con_id = 370757467
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSCO"
+con_id = 268084
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSGP"
+con_id = 6726677
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Real Estate"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CSX"
+con_id = 6150
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTAS"
+con_id = 268149
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "CTSH"
+con_id = 4728759
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DASH"
+con_id = 459309417
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DDOG"
+con_id = 383858515
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DLTR"
+con_id = 49388062
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Staples"
+inverse_of = ""
+
+[[contracts]]
+symbol = "DXCM"
+con_id = 33837089
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EA"
+con_id = 268995
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EBAY"
+con_id = 4347086
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Consumer Discretionary"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EXC"
+con_id = 11000
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Utilities"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FANG"
+con_id = 115441080
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Energy"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FAST"
+con_id = 269120
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FER"
+con_id = 702304865
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FISV"
+con_id = 269315
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Financials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FTNT"
+con_id = 70236214
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Information Technology"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GEHC"
+con_id = 601776309
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GILD"
+con_id = 269753
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "GOOG"
+con_id = 208813720
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Communication Services"
+inverse_of = ""
+
+[[contracts]]
+symbol = "HON"
+con_id = 4350
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Industrials"
+inverse_of = ""
+
+[[contracts]]
+symbol = "IDXX"
+con_id = 270413
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
+
+[[contracts]]
+symbol = "INSM"
+con_id = 84889699
+exchange = "NASDAQ"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Health Care"
+inverse_of = ""
