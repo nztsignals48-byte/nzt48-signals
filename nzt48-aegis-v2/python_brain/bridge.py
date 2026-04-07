@@ -82,7 +82,7 @@ from brain.indicators.volume_analytics import calculate_rvol, volume_divergence,
 try:
     from brain.indicators.hurst import estimate_hurst, classify_regime
 except ImportError:
-    def estimate_hurst(prices, max_lag=20):
+    def estimate_hurst(prices, max_lag=50):
         return 0.5
     def classify_regime(hurst):
         return "random"
@@ -205,11 +205,13 @@ except ImportError:
     _HAS_OUTLIER = False
 
 # Congressional/insider smart money tracker
-try:
-    from python_brain.feeds.congressional_tracker import get_tracker as _get_cong_tracker
-    _HAS_CONGRESSIONAL = True
-except ImportError:
-    _HAS_CONGRESSIONAL = False
+if False:  # DISABLED: irrelevant to LSE ETPs
+    try:
+        from python_brain.feeds.congressional_tracker import get_tracker as _get_cong_tracker
+        _HAS_CONGRESSIONAL = True
+    except ImportError:
+        _HAS_CONGRESSIONAL = False
+_HAS_CONGRESSIONAL = False
 
 MAX_BARS = 500
 
@@ -2564,7 +2566,7 @@ def _load_ticker_rankings():
 # Helper: compute ADX from bar history (reuse VanguardSniper's logic)
 # ============================================================================
 
-def _compute_adx(ticks, period=14):
+def _compute_adx(ticks, period=10):
     """Compute current ADX from tick history. Returns float or 20.0 on error."""
     import numpy as np
     n = len(ticks)
@@ -2809,14 +2811,14 @@ def _compute_indicators(ticker_id, ticks, msg):
             rvol = calculate_rvol(_raw_vols, window=20) if len(_raw_vols) > 20 else 1.0
         if rvol == 0.0:
             rvol = 1.0  # Neutral default — never leave at 0
-        hurst = estimate_hurst(prices_5m, max_lag=min(20, len(prices_5m) - 1)) if len(prices_5m) >= 5 else 0.5
+        hurst = estimate_hurst(prices_5m, max_lag=min(50, len(prices_5m) - 1)) if len(prices_5m) >= 5 else 0.5
         vol_div = volume_divergence(prices_5m, volumes_5m, window=10) if len(prices_5m) >= 10 else 0.0
         adx = _compute_adx([{"last": b["close"], "high": b["high"], "low": b["low"], "volume": b["volume"]} for b in bars_5m])
     else:
         volumes = [t["volume"] for t in ticks]
         prices = [t["last"] for t in ticks]
         rvol = calculate_rvol(volumes, window=20)
-        hurst = estimate_hurst(prices, max_lag=20)
+        hurst = estimate_hurst(prices, max_lag=50)
         vol_div = volume_divergence(prices, volumes, window=10)
         adx = _compute_adx(ticks)
     hurst_regime = classify_regime(hurst)
@@ -2904,11 +2906,11 @@ def _compute_indicators(ticker_id, ticks, msg):
     except Exception:
         pass
 
-    # RSI-14 from 5-minute bar closes (used by TemporalAttention, PPO, etc.)
+    # RSI-7 from 5-minute bar closes (faster for intraday 1-min bars)
     _rsi_14 = 50.0  # neutral default
-    if bars_5m and len(bars_5m) >= 14:
+    if bars_5m and len(bars_5m) >= 7:
         _rsi_prices = [b["close"] for b in bars_5m[-30:]]
-        _rsi_val = calculate_rsi(_rsi_prices, period=14)
+        _rsi_val = calculate_rsi(_rsi_prices, period=7)
         if _rsi_val is not None:
             _rsi_14 = _rsi_val
 
@@ -5294,7 +5296,8 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
     s4_signal = _system4_volatility(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
 
     # ── SYSTEM 5: Overnight Carry (Phase 8) ──
-    s5_signal = _system5_overnight(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
+    # QUARANTINED: overnight holds contradict intraday mandate.
+    s5_signal = None
 
     # ── BOOK 5: FOMC Pre-drift Positioning ──
     fomc_signal = _fomc_pre_drift_positioning(ticker_id, msg, ind, conf_floor, _kelly_for, common_fields)
@@ -6403,17 +6406,17 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
                 }
 
     # ── RSI MEAN REVERSION (2-period) ──
-    # Connors RSI-2 < 10 on daily is legendary. On 1-min bars, RSI-2 < 15 works.
+    # Connors RSI-2 < 10 on daily is legendary. On 1-min bars, RSI-2 < 10 with RVOL gate.
     # More aggressive than TypeE_IBS — fires on RSI alone without IBS requirement.
     rsi_mr_signal = None
-    if len(bars_5m) >= 5:
+    if len(bars_5m) >= 5 and ind.get("rvol", 0) > 1.2:  # RVOL > 1.2 gate: only trade in active volume
         _rsi2_prices = [b["close"] for b in bars_5m]
         _rsi2_val = calculate_rsi(_rsi2_prices, period=2)
-        if _rsi2_val is not None and _rsi2_val < 15.0:
+        if _rsi2_val is not None and _rsi2_val < 10.0:
             mr_conf = 57.0
             if _rsi2_val < 5.0:
                 mr_conf += 12.0  # Extreme oversold
-            elif _rsi2_val < 10.0:
+            elif _rsi2_val < 8.0:
                 mr_conf += 7.0
             # Bollinger Band confirmation (Gemini feedback: touch lower band)
             if len(bars_5m) >= 20:
@@ -6944,6 +6947,13 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         best.setdefault("spread_pct", ind.get("spread_pct", 0.1))
         best.setdefault("vwap_dist_pct", ind.get("vwap_dist_pct", 0.0))
         best.setdefault("volume_divergence", ind.get("vol_div", 0.0))
+        # CRITICAL RISK OVERLAYS — even paper mode must respect these
+        dd_pct = msg.get("drawdown_pct", 0.0)
+        if dd_pct > 8.0:
+            return None  # Sacred -8% halt
+        _vix_fast = msg.get("vix", 20)
+        if _vix_fast > 40:
+            return None  # VIX crisis — no new entries
         return best
 
     # ── OVERLAY DIAGNOSTIC: snapshot pre-overlay values for delta tracking ──
@@ -7925,22 +7935,24 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # DRAWDOWN RECOVERY SIZING (Book 42)
     # Scale Kelly based on current drawdown phase. Deeper drawdown = smaller size.
-    try:
-        from python_brain.risk.drawdown_recovery import DrawdownMonitor
-        dd_monitor = DrawdownMonitor(initial_equity=msg.get("initial_equity", 10000.0))
-        dd_monitor.update(msg.get("equity", 100000.0))
-        dd_scale = dd_monitor.kelly_scale()
-        dd_min_conf = dd_monitor.min_confidence()
-        if dd_scale < 1.0:
-            for sig in all_signals:
-                sig["kelly_fraction"] *= dd_scale
-                sig["shares"] = max(1, int(sig["shares"] * dd_scale))
-        # Filter by drawdown-adjusted confidence floor
-        all_signals = [s for s in all_signals if s["confidence"] >= dd_min_conf]
-        if not all_signals:
-            return None
-    except Exception:
-        pass
+    # DISABLED: duplicate of Book 85 drawdown ladder at ~line 7043. Keep first, disable 2nd.
+    if False:
+        try:
+            from python_brain.risk.drawdown_recovery import DrawdownMonitor
+            dd_monitor = DrawdownMonitor(initial_equity=msg.get("initial_equity", 10000.0))
+            dd_monitor.update(msg.get("equity", 100000.0))
+            dd_scale = dd_monitor.kelly_scale()
+            dd_min_conf = dd_monitor.min_confidence()
+            if dd_scale < 1.0:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= dd_scale
+                    sig["shares"] = max(1, int(sig["shares"] * dd_scale))
+            # Filter by drawdown-adjusted confidence floor
+            all_signals = [s for s in all_signals if s["confidence"] >= dd_min_conf]
+            if not all_signals:
+                return None
+        except Exception:
+            pass
 
     # CORRELATION POSITION SIZING (Book 41)
     # Reduce size when portfolio correlation is elevated.
@@ -7981,24 +7993,26 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
 
     # ── BOOK 10: ROLLING KELLY + DRAWDOWN STAGING ──
     # Dynamic Kelly based on recent performance + 4-stage drawdown response.
-    try:
-        from python_brain.sizing.rolling_kelly import get_drawdown_stager
-        dd_stager = get_drawdown_stager()
-        dd_stager.update(msg.get("equity", 100000.0))
-        dd_kelly_scale = dd_stager.kelly_scale()
-        dd_conf_add = dd_stager.confidence_floor_add()
-        if dd_stager.should_block_new_entries():
-            return None  # FLATTEN stage: exit-only mode
-        if dd_kelly_scale < 1.0:
-            for sig in all_signals:
-                sig["kelly_fraction"] *= dd_kelly_scale
-                sig["shares"] = max(1, int(sig["shares"] * dd_kelly_scale))
-        if dd_conf_add > 0:
-            all_signals = [s for s in all_signals if s["confidence"] >= (50 + dd_conf_add)]
-            if not all_signals:
-                return None
-    except ImportError:
-        pass
+    # DISABLED: triplicate of Book 85 drawdown ladder at ~line 7043. Keep first, disable 3rd.
+    if False:
+        try:
+            from python_brain.sizing.rolling_kelly import get_drawdown_stager
+            dd_stager = get_drawdown_stager()
+            dd_stager.update(msg.get("equity", 100000.0))
+            dd_kelly_scale = dd_stager.kelly_scale()
+            dd_conf_add = dd_stager.confidence_floor_add()
+            if dd_stager.should_block_new_entries():
+                return None  # FLATTEN stage: exit-only mode
+            if dd_kelly_scale < 1.0:
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= dd_kelly_scale
+                    sig["shares"] = max(1, int(sig["shares"] * dd_kelly_scale))
+            if dd_conf_add > 0:
+                all_signals = [s for s in all_signals if s["confidence"] >= (50 + dd_conf_add)]
+                if not all_signals:
+                    return None
+        except ImportError:
+            pass
 
     # ── BOOK 12: REALISTIC SLIPPAGE MODEL ──
     # Replace flat 0.5% slippage with dynamic model (RVOL, ToD, order-size).
@@ -8393,43 +8407,45 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         pass
 
     # ── BOOK 170: GAME THEORY CROWDING DETECTION ──
-    try:
-        from python_brain.ml.game_theory_execution import GameTheoreticSignal
-        if not hasattr(_apply_adjustments, "_gts"):
-            _apply_adjustments._gts = GameTheoreticSignal()
-        _gts = _apply_adjustments._gts
-        _crowding = _gts.assess_crowding(
-            volume_profile={"volume": msg.get("volume", 0)},
-            order_imbalance=ind.get("quote_imbalance", 0),
-        )
-        if _crowding and _crowding.get("crowding_score", 0) > 0.6:
-            _crowd_penalty = int(_crowding["crowding_score"] * 20)
-            for sig in all_signals:
-                sig["confidence"] = max(0, sig["confidence"] - _crowd_penalty)
-                sig["crowding_score"] = round(_crowding["crowding_score"], 2)
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    if False:  # DISABLED: no crowd on 49 LSE ETP instruments
+        try:
+            from python_brain.ml.game_theory_execution import GameTheoreticSignal
+            if not hasattr(_apply_adjustments, "_gts"):
+                _apply_adjustments._gts = GameTheoreticSignal()
+            _gts = _apply_adjustments._gts
+            _crowding = _gts.assess_crowding(
+                volume_profile={"volume": msg.get("volume", 0)},
+                order_imbalance=ind.get("quote_imbalance", 0),
+            )
+            if _crowding and _crowding.get("crowding_score", 0) > 0.6:
+                _crowd_penalty = int(_crowding["crowding_score"] * 20)
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - _crowd_penalty)
+                    sig["crowding_score"] = round(_crowding["crowding_score"], 2)
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     # ── BOOK 144: CONFORMAL INTERVAL WIDTH → CONFIDENCE ──
-    try:
-        from python_brain.ml.conformal_signals import OnlineConformalTracker
-        if not hasattr(_apply_adjustments, "_conf_tracker"):
-            _apply_adjustments._conf_tracker = OnlineConformalTracker()
-        _cw = _apply_adjustments._conf_tracker.get_current_width()
-        if _cw < 0.3:  # Narrow interval = high confidence environment
-            for sig in all_signals:
-                sig["confidence"] = min(100, sig["confidence"] + 3)
-                sig["conformal_width"] = round(_cw, 3)
-        elif _cw > 0.7:  # Wide interval = uncertain environment
-            for sig in all_signals:
-                sig["confidence"] = max(0, sig["confidence"] - 5)
-                sig["conformal_width"] = round(_cw, 3)
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    if False:  # DISABLED: no trained conformal model — always returns default width
+        try:
+            from python_brain.ml.conformal_signals import OnlineConformalTracker
+            if not hasattr(_apply_adjustments, "_conf_tracker"):
+                _apply_adjustments._conf_tracker = OnlineConformalTracker()
+            _cw = _apply_adjustments._conf_tracker.get_current_width()
+            if _cw < 0.3:  # Narrow interval = high confidence environment
+                for sig in all_signals:
+                    sig["confidence"] = min(100, sig["confidence"] + 3)
+                    sig["conformal_width"] = round(_cw, 3)
+            elif _cw > 0.7:  # Wide interval = uncertain environment
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 5)
+                    sig["conformal_width"] = round(_cw, 3)
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     # ── BOOK 172: MODEL DISAGREEMENT PENALTY ──
     if len(all_signals) >= 3:
@@ -8467,33 +8483,34 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         pass
 
     # ── BOOK 213: CONSTRAINED PPO RISK-SHAPED TIMING ──
-    try:
-        from python_brain.ml.constrained_ppo import ConstrainedPPOAgent, PPOConfig
-        if not hasattr(_apply_adjustments, "_ppo"):
-            _apply_adjustments._ppo = ConstrainedPPOAgent(
-                state_dim=8, action_dim=3, config=PPOConfig(),
-            )
-        import numpy as _np_ppo
-        _ppo_state = _np_ppo.array([
-            ind.get("rsi", 50) / 100, ind.get("adx", 15) / 50,
-            ind.get("rvol", 1.0), ind.get("hurst", 0.5),
-            ind.get("vpin", 0.5), ind.get("spread_pct", 0.1),
-            msg.get("drawdown_pct", 0) / 8.0,  # Normalized to sacred limit
-            msg.get("equity", 100000) / 10000,
-        ])
-        _ppo_action, _ppo_logp = _apply_adjustments._ppo.select_action(_ppo_state)
-        if _ppo_action == 0:  # SKIP
-            for sig in all_signals:
-                sig["confidence"] = max(0, sig["confidence"] - 10)
-                sig["ppo_action"] = "skip"
-        elif _ppo_action == 2:  # SCALE DOWN
-            for sig in all_signals:
-                sig["kelly_fraction"] *= 0.6
-                sig["ppo_action"] = "scale_down"
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    if False:  # DISABLED: untrained weights — random actions penalizing 2/3 of signals
+        try:
+            from python_brain.ml.constrained_ppo import ConstrainedPPOAgent, PPOConfig
+            if not hasattr(_apply_adjustments, "_ppo"):
+                _apply_adjustments._ppo = ConstrainedPPOAgent(
+                    state_dim=8, action_dim=3, config=PPOConfig(),
+                )
+            import numpy as _np_ppo
+            _ppo_state = _np_ppo.array([
+                ind.get("rsi", 50) / 100, ind.get("adx", 15) / 50,
+                ind.get("rvol", 1.0), ind.get("hurst", 0.5),
+                ind.get("vpin", 0.5), ind.get("spread_pct", 0.1),
+                msg.get("drawdown_pct", 0) / 8.0,  # Normalized to sacred limit
+                msg.get("equity", 100000) / 10000,
+            ])
+            _ppo_action, _ppo_logp = _apply_adjustments._ppo.select_action(_ppo_state)
+            if _ppo_action == 0:  # SKIP
+                for sig in all_signals:
+                    sig["confidence"] = max(0, sig["confidence"] - 10)
+                    sig["ppo_action"] = "skip"
+            elif _ppo_action == 2:  # SCALE DOWN
+                for sig in all_signals:
+                    sig["kelly_fraction"] *= 0.6
+                    sig["ppo_action"] = "scale_down"
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     # ── BOOK 131: META-ALLOCATOR STRATEGY WEIGHTING ──
     try:
@@ -8549,34 +8566,35 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         pass
 
     # ── BOOK 128: PATH SIGNATURE REGIME CONFIRMATION ──
-    try:
-        from python_brain.ml.path_signatures import compute_signature, rolling_signatures
-        import numpy as _np_ps
-        if bars_5m and len(bars_5m) >= 20:
-            _path = _np_ps.column_stack([
-                [b["close"] for b in bars_5m[-20:]],
-                [b["volume"] for b in bars_5m[-20:]],
-            ])
-            _sig_feats = compute_signature(_path, depth=2)
-            if len(_sig_feats) > 0:
-                # Positive first-order signature = uptrend → boost longs, penalize shorts
-                if _sig_feats[0] > 0:
-                    for sig in all_signals:
-                        if sig.get("direction") == "Long":
-                            sig["confidence"] = min(100, sig["confidence"] + 3)
-                            sig["path_sig_trend"] = "up"
-                elif _sig_feats[0] < 0:
-                    # Negative signature = downtrend → penalize longs, reduce sizing
-                    for sig in all_signals:
-                        if sig.get("direction") == "Long":
-                            sig["confidence"] = max(0, sig["confidence"] - 5)
-                            sig["kelly_fraction"] *= 0.8
-                            sig["shares"] = max(1, int(sig["shares"] * 0.8))
-                            sig["path_sig_trend"] = "down"
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    if False:  # DISABLED: O(n*d^2) compute for binary up/down check — ADX already covers this
+        try:
+            from python_brain.ml.path_signatures import compute_signature, rolling_signatures
+            import numpy as _np_ps
+            if bars_5m and len(bars_5m) >= 20:
+                _path = _np_ps.column_stack([
+                    [b["close"] for b in bars_5m[-20:]],
+                    [b["volume"] for b in bars_5m[-20:]],
+                ])
+                _sig_feats = compute_signature(_path, depth=2)
+                if len(_sig_feats) > 0:
+                    # Positive first-order signature = uptrend → boost longs, penalize shorts
+                    if _sig_feats[0] > 0:
+                        for sig in all_signals:
+                            if sig.get("direction") == "Long":
+                                sig["confidence"] = min(100, sig["confidence"] + 3)
+                                sig["path_sig_trend"] = "up"
+                    elif _sig_feats[0] < 0:
+                        # Negative signature = downtrend → penalize longs, reduce sizing
+                        for sig in all_signals:
+                            if sig.get("direction") == "Long":
+                                sig["confidence"] = max(0, sig["confidence"] - 5)
+                                sig["kelly_fraction"] *= 0.8
+                                sig["shares"] = max(1, int(sig["shares"] * 0.8))
+                                sig["path_sig_trend"] = "down"
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     # ── BOOK 30: NEWS SENTIMENT OVERLAY (STRENGTHENED) ──
     # Sentiment is now a HARD factor: very negative sentiment blocks longs,

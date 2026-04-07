@@ -170,31 +170,29 @@ def classify_regime(vix: float = 21.0, hurst: float = 0.5) -> str:
     Fallback when nightly pipeline unavailable. Uses VIX as primary signal,
     Hurst exponent as confirmation.
 
-    Thresholds:
-    - CRISIS: VIX >= 30 or (Hurst < 0.2 and high volatility)
-    - WOI: VIX 20-29 or high structural stress
-    - INFLATION: VIX 15-19 or mild uncertainty (Hurst 0.4-0.5)
-    - STEADY: VIX < 15 and Hurst near 0.5 (random walk)
+    Thresholds (Phase 1 alignment — widened STEADY band):
+    - CRISIS: VIX >= 35
+    - WOI: VIX >= 28 or (VIX >= 22 and extreme Hurst)
+    - INFLATION: VIX >= 22 or (VIX < 22 and Hurst < 0.3)
+    - STEADY: VIX < 22 and Hurst near 0.5 (random walk)
     """
     # Primary: VIX level
-    if vix >= 30:
+    if vix >= 35:
         return "CRISIS"
-    elif vix >= 20:
-        # WOI zone: include Hurst confirmation
-        if hurst < 0.2 or hurst > 0.7:  # Either mean-reverting stress or trending panic
-            return "WOI"
-        elif vix >= 25:
+    elif vix >= 28:
+        return "WOI"
+    elif vix >= 22:
+        # Elevated zone: Hurst helps distinguish WOI vs INFLATION
+        if hurst < 0.2 or hurst > 0.7:  # Extreme Hurst = structural stress → WOI
             return "WOI"
         else:
             return "INFLATION"
-    elif vix >= 15:
-        # Elevated but not crisis: Hurst helps distinguish INFLATION vs STEADY
-        if hurst < 0.3:  # Mean-reverting = elevated uncertainty (INFLATION)
+    else:
+        # VIX < 22: Hurst helps distinguish INFLATION vs STEADY
+        if hurst < 0.3:  # Mean-reverting = mild uncertainty (INFLATION)
             return "INFLATION"
         else:
             return "STEADY"
-    else:
-        return "STEADY"
 
 
 def get_regime_limits(
