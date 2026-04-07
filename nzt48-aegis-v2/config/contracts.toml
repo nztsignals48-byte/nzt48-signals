@@ -8788,3 +8788,715 @@ currency = "USD"
 leverage = 1
 sector = "Health Care"
 inverse_of = ""
+
+[[contracts]]
+symbol = "VXX"
+con_id = 717288676
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Volatility"
+inverse_of = ""
+
+[[contracts]]
+symbol = "UVXY"
+con_id = 829567196
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Volatility"
+inverse_of = ""
+
+[[contracts]]
+symbol = "SVXY"
+con_id = 331641614
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Volatility"
+inverse_of = ""
+
+[[contracts]]
+symbol = "VIXY"
+con_id = 738675328
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Volatility"
+inverse_of = ""
+
+[[contracts]]
+symbol = "1321.T"
+con_id = 54987234
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+leverage = 1
+sector = "Index ETF (Nikkei 225)"
+inverse_of = ""
+
+[[contracts]]
+symbol = "2800.HK"
+con_id = 6244735
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+leverage = 1
+sector = "Index ETF (Hang Seng)"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EWG"
+con_id = 2586603
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Index ETF (Germany)"
+inverse_of = ""
+
+[[contracts]]
+symbol = "EWJ"
+con_id = 253190534
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Index ETF (Japan)"
+inverse_of = ""
+
+[[contracts]]
+symbol = "FXI"
+con_id = 31421120
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+leverage = 1
+sector = "Index ETF (China)"
+inverse_of = ""
+
+# -- NEW GraniteShares/LevShares products (auto-discovered) --
+
+[[contracts]]
+symbol = "3CNE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 532462865
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3HIM"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 868938541
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3LNF"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 726401505
+leverage = 3
+inverse_of = ""
+sector = "GRANITESHARES 3X LONG NFLX"
+
+[[contracts]]
+symbol = "3LOI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 457068877
+leverage = 3
+inverse_of = ""
+sector = "WT WTI CRUDE 3X DAILY LVRGD"
+
+[[contracts]]
+symbol = "3LPA"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 726074225
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3LSQ"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 621500460
+leverage = 3
+inverse_of = ""
+sector = "GRANITESHARES 3X LONG SQ"
+
+[[contracts]]
+symbol = "3LUB"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 647805770
+leverage = 3
+inverse_of = ""
+sector = "GRANITESHARES 3X LONG UBER"
+
+[[contracts]]
+symbol = "3LVE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 708624388
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SAE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 647805857
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SDO"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 665364718
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SLE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 566361410
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SLV"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 566361415
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SMI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 785357605
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SNF"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 788704026
+leverage = 3
+inverse_of = ""
+sector = "GRANITESHARES 3X SHORT NFLX"
+
+[[contracts]]
+symbol = "3SOI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 717308220
+leverage = 3
+inverse_of = ""
+sector = "WT WTI CRUDE 3X DAILY SHORT"
+
+[[contracts]]
+symbol = "3SPA"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 785354815
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SRR"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 790141963
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SSQ"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 709866799
+leverage = 3
+inverse_of = ""
+sector = "GRANITESHARES 3X SHORT SQ"
+
+[[contracts]]
+symbol = "3STE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 787556762
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3STP"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 787556757
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3SVE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 711467384
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "3TSE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 681568926
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5IEF"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 631368730
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5QQQ"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 532462978
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5SIE"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 631368229
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5STI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 631368241
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5STL"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 631368224
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "5TLT"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 631368274
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "BCHN"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 356425940
+leverage = 1
+inverse_of = ""
+sector = "IVZ COINSHRS BLOCKCHAIN UCIT"
+
+[[contracts]]
+symbol = "BTIC"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 538801524
+leverage = 1
+inverse_of = ""
+sector = "INVESCO PHYSICAL BITCOIN"
+
+[[contracts]]
+symbol = "CO3S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 796599600
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "COII"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 731681652
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "COIY"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 731681659
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "CON3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 532462863
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "DAX3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 566361321
+leverage = 3
+inverse_of = ""
+sector = "3X GERMANY 40"
+
+[[contracts]]
+symbol = "GDX3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 532462882
+leverage = 3
+inverse_of = ""
+sector = "LS 3X GOLD MINERS"
+
+[[contracts]]
+symbol = "HIM3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 868938547
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "IE5S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 631368234
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "IEF5"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 631370026
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "MAG5"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 693388393
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "MST3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 870488035
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "MSTI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 796085055
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "PAL3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 726074223
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "PLTI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 796085063
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "PLTY"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 796085058
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "QQ3S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 532462738
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "S3CO"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 796599598
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SEMI"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 676368104
+leverage = 1
+inverse_of = ""
+sector = "ISHARES MSCI GLB SEMICNDCT A"
+
+[[contracts]]
+symbol = "SLV3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 566361407
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SMI3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 785357600
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SP5Y"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 532462967
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SPL3"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 785357596
+leverage = 3
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SPYS"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 532462732
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SQQQ"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 532462743
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "SSPY"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 532462729
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TI5S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 631368239
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TL5S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 631368220
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TLT5"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 631368268
+leverage = 5
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TS3S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "EUR"
+con_id = 808604898
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TS3S"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 808604894
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "TSLQ"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "GBP"
+con_id = 808604903
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"
+
+[[contracts]]
+symbol = "YMST"
+sec_type = "STK"
+exchange = "LSEETF"
+currency = "USD"
+con_id = 796085050
+leverage = 1
+inverse_of = ""
+sector = "Leveraged ETP"

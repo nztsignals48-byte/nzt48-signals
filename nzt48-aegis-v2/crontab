@@ -14,6 +14,10 @@
 # Sprint S05 (H1): Sequential Nightly Pipeline — replaces individual entries
 # Order: nightly_v6 → config_writer → win_loss_delta → claude_review → challenger → approval_gate
 # flock prevents parallel execution. set -euo pipefail aborts on critical failures.
+# Universe Curator — 04:48 UTC Mon-Fri (before nightly pipeline)
+# Auto-curates radar_universe.toml: assigns tiers, promotes signal-active tickers, demotes dormant.
+48 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.universe_curator >> /var/log/universe_curator.log 2>&1
+
 50 4 * * 1-5 flock -n /tmp/nightly.lock /app/scripts/nightly_pipeline.sh >> /var/log/nightly_pipeline.log 2>&1
 
 # N6b: Claude Morning Briefing — 07:45 UTC Mon-Fri (before European session, uses N6a output)
