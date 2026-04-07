@@ -635,6 +635,59 @@ class IBKRDataProvider:
     # Public API
     # ------------------------------------------------------------------
 
+    def get_live_snapshot(self, symbol: str) -> Optional[Dict[str, float]]:
+        """Get a live snapshot (bid, ask, last, volume) for a single ticker.
+
+        Session 35: Used by dynamic_universe.py airlock verification.
+        Uses reqMktData with snapshot=True to get a single point-in-time quote.
+
+        Returns:
+            dict with keys: last, bid, ask, volume. Or None on failure.
+        """
+        try:
+            self._ensure_connected()
+            if not self._ib or not self._ib.isConnected():
+                log.warning("get_live_snapshot: not connected")
+                return None
+
+            with self._rate_lock:
+                self._rate_limited_sleep()
+
+            contract = Stock(symbol, "SMART", "USD")
+            # Try to qualify; for LSE tickers, adjust exchange/currency
+            if symbol.endswith(".L"):
+                local_sym = symbol[:-2]
+                contract = Stock(local_sym, "LSEETF", "GBP")
+
+            qualified = self._ib.qualifyContracts(contract)
+            if not qualified:
+                log.debug("get_live_snapshot: failed to qualify %s", symbol)
+                return None
+
+            # Request snapshot (blocking, returns immediately with current quote)
+            ticker = self._ib.reqMktData(contract, genericTickList="", snapshot=True)
+            self._ib.sleep(2)  # Wait for snapshot to populate
+
+            result = {
+                "last": float(ticker.last) if ticker.last and ticker.last == ticker.last else 0.0,
+                "bid": float(ticker.bid) if ticker.bid and ticker.bid == ticker.bid else 0.0,
+                "ask": float(ticker.ask) if ticker.ask and ticker.ask == ticker.ask else 0.0,
+                "volume": int(ticker.volume) if ticker.volume and ticker.volume == ticker.volume else 0,
+            }
+
+            # Cancel to free the slot
+            self._ib.cancelMktData(contract)
+
+            if result["last"] <= 0 and result["bid"] <= 0:
+                log.debug("get_live_snapshot: %s returned zeros", symbol)
+                return None
+
+            return result
+
+        except Exception as e:
+            log.warning("get_live_snapshot failed for %s: %s", symbol, e)
+            return None
+
     def get_price_data(
         self,
         symbol: str,

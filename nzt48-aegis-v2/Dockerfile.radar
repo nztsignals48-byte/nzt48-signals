@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+COPY requirements-radar.txt .
+RUN pip install --no-cache-dir -r requirements-radar.txt
+
+# Copy only what's needed — minimal attack surface
+COPY python_brain/ouroboros/radar_daemon.py ./radar_daemon.py
+COPY python_brain/ouroboros/session_map.py ./session_map.py
+
+CMD ["python", "-u", "radar_daemon.py"]

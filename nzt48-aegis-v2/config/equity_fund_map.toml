@@ -1,0 +1,136 @@
+# AEGIS V2 — Equity-to-Fund Mapping (Single Source of Truth)
+#
+# Maps US equities to ISA-eligible leveraged/inverse ETPs on LSE.
+# Read by: radar_daemon.py, bridge.py, earnings_boost_producer.py
+# Updated manually when new single-stock ETPs are listed on LSE.
+#
+# SESSION 35: Created to resolve conflicting maps in bridge.py:1108
+# and earnings_boost_producer.py:47 (GPT3.L, 3LAM.L, 3SAM.L disagreed).
+#
+# CORRECT MAPPINGS (verified against GraniteShares product pages):
+#   GPT3.L  → NVDA (AI/Tech basket, NVDA-heavy)
+#   3LAM.L  → AMD  (GraniteShares 3x Long AMD — NOT AMZN!)
+#   3SAM.L  → AMD  (GraniteShares 3x Short AMD — inverse of 3LAM.L)
+#   AMZ3.L  → AMZN (GraniteShares 3x Long Amazon — distinct product)
+
+[meta]
+version = 1
+description = "Maps US equities to ISA-eligible leveraged/inverse ETPs on LSE"
+
+# ═══════════════════════════════════════════════════════════════════
+# Single-Stock Mappings
+# ═══════════════════════════════════════════════════════════════════
+
+[single_stock.NVDA]
+exchange = "NASDAQ"
+long = ["NVD3.L", "3LNV.L"]
+inverse = ["3SNV.L"]
+leverage = 3
+related = ["GPT3.L"]
+
+[single_stock.TSLA]
+exchange = "NASDAQ"
+long = ["TSL3.L", "3LTS.L"]
+inverse = ["3STS.L"]
+leverage = 3
+
+[single_stock.AAPL]
+exchange = "NASDAQ"
+long = ["APL3.L", "3LAP.L"]
+inverse = ["3SAP.L"]
+leverage = 3
+
+[single_stock.MSFT]
+exchange = "NASDAQ"
+long = ["MSF3.L", "3LMS.L"]
+inverse = ["3SMS.L"]
+leverage = 3
+
+[single_stock.AMD]
+exchange = "NASDAQ"
+long = ["AMD3.L", "3LAM.L"]
+inverse = ["3SAM.L"]
+leverage = 3
+
+[single_stock.AMZN]
+exchange = "NASDAQ"
+long = ["AMZ3.L", "3LAZ.L"]
+inverse = []
+leverage = 3
+
+[single_stock.GOOGL]
+exchange = "NASDAQ"
+long = ["GOO3.L", "3LGO.L"]
+inverse = []
+leverage = 3
+
+[single_stock.META]
+exchange = "NASDAQ"
+long = ["MET3.L", "3LME.L"]
+inverse = []
+leverage = 3
+
+[single_stock.TSM]
+exchange = "NYSE"
+long = ["TSM3.L"]
+inverse = []
+leverage = 3
+
+[single_stock.MU]
+exchange = "NASDAQ"
+long = ["MU2.L"]
+inverse = []
+leverage = 2
+
+# ═══════════════════════════════════════════════════════════════════
+# Index-Level Mappings (derived from equity breadth)
+# ═══════════════════════════════════════════════════════════════════
+
+[index.sp500]
+components_top_n = 50
+long = ["5SPY.L", "3LUS.L"]
+inverse = ["3USS.L"]
+
+[index.nasdaq100]
+components_top_n = 30
+long = ["QQQ5.L", "QQQ3.L"]
+inverse = ["QQQS.L"]
+
+[index.semiconductors]
+components = ["NVDA", "AMD", "TSM", "MU", "AVGO", "QCOM"]
+weights = [0.30, 0.20, 0.20, 0.10, 0.10, 0.10]
+long = ["3SEM.L"]
+inverse = []
+
+# ═══════════════════════════════════════════════════════════════════
+# Macro Signal Triggers
+# ═══════════════════════════════════════════════════════════════════
+
+[macro.gold]
+trigger_equities = ["NEM", "GOLD", "AEM"]
+trigger_direction = "BULLISH"
+fund = "SGLN.L"
+
+[macro.oil]
+trigger_equities = ["XOM", "CVX", "BP.L", "SHEL.L"]
+trigger_direction = "BULLISH"
+fund = "CRUD.L"
+
+[macro.risk_off]
+trigger_equities = ["JPM", "GS", "HSBA.L", "BARC.L"]
+trigger_direction = "BEARISH"
+fund = "IDTL.L"
+
+# ═══════════════════════════════════════════════════════════════════
+# UCITS Equivalents (ISA-compatible alternatives to US ETFs)
+# ═══════════════════════════════════════════════════════════════════
+
+[ucits]
+SPY = "CSPX.L"
+QQQ = "EQQQ.L"
+IWM = "ISF.L"
+EEM = "IEEM.L"
+GLD = "SGLN.L"
+TLT = "IDTL.L"
+USO = "CRUD.L"
+VT  = "VWRL.L"

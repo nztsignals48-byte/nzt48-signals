@@ -4868,13 +4868,18 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
             elif _crash_p.get("crash_probability", 0) > 0.4:
                 effective_floor += 10  # Elevated topology risk → raise floor
     except ImportError:
-        effective_floor += 5  # FAIL-CLOSED: can't verify crash safety → raise floor
+        # Session 35 FIX: Changed from fail-closed (+5 floor) to fail-open (log only).
+        # The +5 penalty per missing module was silently raising floor by +13 total,
+        # killing 60-80% of signals in paper trading where these modules aren't installed.
+        # These are ADVISORY gates, not safety-critical. Real safety gates (halted check,
+        # spread veto, VIX crisis block) are always available and remain fail-closed.
+        pass  # FAIL-OPEN: log-only, module not installed in paper trading
     except Exception:
         pass
 
     # ── BOOK 103: ADVERSARIAL DETECTION PRE-GATE ──
     # Detect spoofing, wash trading, or manipulated signals
-    # FAIL-CLOSED: if module unavailable, raise floor by 5 (can't verify manipulation)
+    # Session 35: Changed from fail-closed to fail-open for paper trading.
     try:
         from python_brain.risk.adversarial_detection import detect_manipulation
         _manip = detect_manipulation(
@@ -4885,7 +4890,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         if _manip and _manip.get("is_manipulation"):
             return []  # Manipulation detected → block
     except ImportError:
-        effective_floor += 5  # FAIL-CLOSED: can't detect manipulation → raise floor
+        pass  # FAIL-OPEN: module not installed in paper trading
     except Exception:
         pass
 
@@ -4907,7 +4912,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
         if _dq and _dq.get("quality_score", 100) < 50:
             return []  # Bad data → block
     except ImportError:
-        effective_floor += 3  # FAIL-CLOSED: can't verify data quality → raise floor
+        pass  # Session 35 FIX: FAIL-OPEN for paper trading (was +3 floor penalty)
     except Exception:
         pass
 

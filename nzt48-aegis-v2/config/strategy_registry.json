@@ -247,7 +247,7 @@
     },
     "QueueImbalance": {
       "id": "QueueImbalance", "name": "Queue Imbalance", "family": "microstructure",
-      "status": "shadow", "description": "L1 bid/ask size imbalance detection. Bid_size > 3x ask_size with tight spread = informed accumulation. Glosten & Milgrom (1985). 60% WR within 5 ticks. Session 34."
+      "status": "live", "description": "L1 bid/ask size imbalance detection. Bid_size > 3x ask_size with tight spread = informed accumulation. Glosten & Milgrom (1985). 60% WR within 5 ticks. Session 34. Promoted Session 35: L2 now wired, academic backing strong."
     },
     "PreMarketAnomaly": {
       "id": "PreMarketAnomaly", "name": "Pre-Market Volume Anomaly", "family": "institutional_flow",
@@ -255,7 +255,7 @@
     },
     "VolTermStructure": {
       "id": "VolTermStructure", "name": "Vol Term Structure", "family": "volatility",
-      "status": "shadow", "description": "IV vs HV premium detection. When IV > HV by >20% in mean-reverting regime = vol overpriced, buy underlying for mean reversion. Demeterfi et al. (1999), Gatheral (2006). Session 34."
+      "status": "live", "description": "IV vs HV premium detection. When IV > HV by >20% in mean-reverting regime = vol overpriced, buy underlying for mean reversion. Demeterfi et al. (1999), Gatheral (2006). Session 34. Promoted Session 35: OPRA IV data now flowing from radar daemon."
     },
     "IEXAuctionFade": {
       "id": "IEXAuctionFade", "name": "IEX Auction Fade", "family": "microstructure",

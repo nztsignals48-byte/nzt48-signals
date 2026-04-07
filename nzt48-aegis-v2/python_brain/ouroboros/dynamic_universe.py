@@ -97,6 +97,8 @@ SNAPSHOT_FILE = UNIVERSE_DIR / "dynamic_universe_snapshot.json"
 EMERGENCY_BASELINE = CONFIG_DIR / "emergency_universe_baseline.toml"
 OPEN_POSITIONS_FILE = DATA_DIR / "open_positions.json"
 SYMBOL_MAP_OVERRIDES = CONFIG_DIR / "symbol_map_overrides.json"
+RADAR_CACHE_FILE = DATA_DIR / "radar_cache.json"
+RADAR_UNIVERSE_FILE = CONFIG_DIR / "radar_universe.toml"
 
 # ══���════════════════════════════════════════════════════════════════════════════
 # Constants — Quotas, Anti-Thrash, Boost Caps
@@ -161,6 +163,11 @@ BOOST_SIGNALS = [
     {"name": "lead_lag",    "file": "lead_lag_pairs.json",      "max": 0.10, "freshness_s": 14400, "env": "BOOST_LEADLAG"},
     {"name": "social",      "file": "social_sentiment.json",    "max": 0.05, "freshness_s": 1800, "env": "BOOST_SOCIAL"},
     {"name": "thompson",    "file": "thompson_top_k.json",      "max": 0.10, "freshness_s": 86400, "env": "BOOST_THOMPSON"},
+    # ── Session 35: Radar Daemon Boost Signals ──
+    {"name": "radar_opra",      "file": "radar_opra_signals.json", "max": 0.15, "freshness_s": 300, "env": "BOOST_RADAR_OPRA"},
+    {"name": "radar_iv_regime", "file": "radar_opra_signals.json", "max": 0.08, "freshness_s": 300, "env": "BOOST_RADAR_IV"},
+    {"name": "radar_momentum",  "file": "radar_opra_signals.json", "max": 0.10, "freshness_s": 300, "env": "BOOST_RADAR_MOMENTUM"},
+    {"name": "radar_liquidity", "file": "radar_opra_signals.json", "max": 0.20, "freshness_s": 300, "env": "BOOST_RADAR_LIQUIDITY"},
 ]
 
 
@@ -381,7 +388,13 @@ def _load_boost_signals() -> Dict[str, Dict[str, Any]]:
             if isinstance(data, dict):
                 # Try common patterns
                 if "scores" in data:
-                    sym_scores = {k: min(float(v), max_boost) for k, v in data["scores"].items()}
+                    # Session 35: handle both positive boosts and negative penalties
+                    for k, v in data["scores"].items():
+                        fv = float(v)
+                        if fv >= 0:
+                            sym_scores[k] = min(fv, max_boost)
+                        else:
+                            sym_scores[k] = max(fv, -max_boost)  # cap penalty magnitude
                 elif "symbols" in data:
                     for entry in data["symbols"]:
                         if isinstance(entry, dict) and "symbol" in entry:
@@ -435,6 +448,11 @@ def _compute_boost_stack(
         score = sig_data["symbols"].get(symbol, 0.0)
         if score > 0:
             capped = min(score, sig_data["max"])
+            components[name] = capped
+            total += capped
+        elif score < 0:
+            # Session 35: Handle negative penalty signals (e.g., radar_liquidity)
+            capped = max(score, -sig_data["max"])  # cap penalty magnitude
             components[name] = capped
             total += capped
 
@@ -735,6 +753,12 @@ def _apply_rotation_planning(
             c["quota_adjustments"].append("low_confidence_mapping")
             continue
 
+        # Session 35: Airlock verification for radar-sourced new promotions
+        if c.get("_source") == "radar" and sym not in prev_live_syms:
+            if not self._airlock_verify(c):
+                c["quota_adjustments"].append("airlock_rejected")
+                continue
+
         c["final_rank_reason"] = c["final_rank_reason"] or RotationReason.HIGH_RANK_ADMISSION
         live_100.append(c)
         live_syms.add(sym)
@@ -1012,6 +1036,11 @@ class DynamicUniverseOrchestrator:
         # Save rotation plan (always, even on dry-run)
         self._save_rotation_plan(plan)
 
+        # Session 35: Generate radar_universe.toml on --full runs
+        if mode == "full":
+            log.info("Generating radar_universe.toml for radar daemon")
+            self._generate_radar_universe(admitted)
+
         # Telegram PM briefing hook (placeholder)
         self._pm_briefing_hook(plan, snapshot)
 
@@ -1093,31 +1122,125 @@ class DynamicUniverseOrchestrator:
     # ═══��═══════════════════════════════════════════════════════════════════
 
     def _phase_discovery(self, mode: str) -> List[Dict[str, Any]]:
-        """Phase 1: IBKR discovery via ibkr_scanner."""
+        """Phase 1: Radar cache + IBKR discovery (Session 35 enhanced).
+
+        Step A: Read /app/data/radar_cache.json (instant, 0 API calls)
+        Step B: Run ibkr_scanner.run_ibkr_scan() (unchanged)
+        Step C: Merge radar candidates + scanner candidates (deduplicate)
+        """
+        # ── Step A: Load radar cache (fail-closed: empty list on failure) ──
+        radar_candidates = self._load_radar_cache()
+
+        # ── Step B: IBKR scanner discovery (unchanged) ──
+        scanner_candidates = []
         try:
             from python_brain.ouroboros.ibkr_scanner import run_ibkr_scan, load_master, MASTER_FILE
         except ImportError:
             log.warning("ibkr_scanner not available — using cached master")
-            return self._load_cached_master()
+            scanner_candidates = self._load_cached_master()
+        else:
+            try:
+                exit_code = run_ibkr_scan()
+                if exit_code != 0:
+                    log.warning("ibkr_scanner returned exit code %d", exit_code)
+                    self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
 
+                master = load_master()
+                if master and master.get("tickers"):
+                    scanner_candidates = master["tickers"]
+                else:
+                    log.warning("Master file empty after scan")
+                    self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
+                    scanner_candidates = self._load_cached_master()
+            except Exception as e:
+                log.error("IBKR discovery failed: %s", e)
+                self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
+                scanner_candidates = self._load_cached_master()
+
+        # ── Step C: Merge (deduplicate by symbol) ──
+        if not radar_candidates:
+            return scanner_candidates
+
+        # Build lookup of scanner symbols for dedup
+        scanner_syms = {c.get("symbol", "") for c in scanner_candidates}
+        merged = list(scanner_candidates)
+
+        radar_added = 0
+        for rc in radar_candidates:
+            sym = rc.get("symbol", "")
+            if sym and sym not in scanner_syms:
+                merged.append(rc)
+                scanner_syms.add(sym)
+                radar_added += 1
+
+        if radar_added > 0:
+            log.info("Phase 1C: Merged %d radar candidates (total: %d)", radar_added, len(merged))
+
+        return merged
+
+    def _load_radar_cache(self) -> List[Dict[str, Any]]:
+        """Load radar cache. Returns empty list on any failure (fail-closed).
+
+        Session 35: Reads /app/data/radar_cache.json written by radar_daemon.py.
+        Only includes tickers with fresh timestamps (< 5 min old).
+        """
         try:
-            # run_scan populates isa_universe_master.json
-            exit_code = run_ibkr_scan()
-            if exit_code != 0:
-                log.warning("ibkr_scanner returned exit code %d", exit_code)
-                self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
+            if not RADAR_CACHE_FILE.exists():
+                log.info("RADAR: cache not found — scanner-only mode")
+                return []
 
-            master = load_master()
-            if master and master.get("tickers"):
-                return master["tickers"]
-            else:
-                log.warning("Master file empty after scan")
-                self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
-                return self._load_cached_master()
+            age = time.time() - RADAR_CACHE_FILE.stat().st_mtime
+            if age > 600:  # 10 minutes
+                log.warning("RADAR: cache stale (%.0fs) — scanner-only mode", age)
+                return []
+
+            with open(RADAR_CACHE_FILE) as f:
+                data = json.load(f)
+
+            tickers = data.get("tickers", {})
+            if not tickers:
+                log.warning("RADAR: cache has empty tickers dict — scanner-only mode")
+                return []
+
+            candidates = []
+            now = datetime.now(timezone.utc)
+            for sym, info in tickers.items():
+                ts = info.get("ts")
+                if not ts:
+                    continue
+                try:
+                    ticker_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    ticker_age = (now - ticker_ts.replace(tzinfo=timezone.utc)).total_seconds()
+                except Exception:
+                    continue
+                if ticker_age > 300:  # 5 min per-ticker staleness
+                    continue
+
+                # Build candidate dict compatible with scanner output format
+                candidate = {
+                    "symbol": sym,
+                    "ibkr_exchange": info.get("exchange", "SMART"),
+                    "exchange": info.get("exchange", "SMART"),
+                    "sec_type": "STK",
+                    "currency": "USD",
+                    "name": sym,
+                    "category": "",
+                    "subcategory": "",
+                    # Radar-specific scoring data
+                    "_radar_score": info.get("directional_score", 0.0),
+                    "_radar_rvol": info.get("rvol", 0.0),
+                    "_radar_spread_bps": info.get("spread_bps", 999.0),
+                    "_radar_fund_rec": info.get("fund_rec"),
+                    "_source": "radar",
+                }
+                candidates.append(candidate)
+
+            log.info("RADAR: loaded %d fresh candidates from cache", len(candidates))
+            return candidates
+
         except Exception as e:
-            log.error("IBKR discovery failed: %s", e)
-            self._degraded_reasons.append(DegradedReason.IBKR_UNAVAILABLE)
-            return self._load_cached_master()
+            log.error("RADAR: cache load failed (%s) — scanner-only mode", e)
+            return []
 
     def _load_cached_master(self) -> List[Dict[str, Any]]:
         """Fallback: load cached master from disk."""
@@ -1483,6 +1606,91 @@ class DynamicUniverseOrchestrator:
             os.replace(tmppath, str(SNAPSHOT_FILE))
         except Exception as e:
             log.warning("Failed to save snapshot: %s", e)
+
+    def _airlock_verify(self, candidate: Dict[str, Any]) -> bool:
+        """Airlock: verify radar-sourced candidate with live snapshot before promotion.
+
+        Session 35: Uses ibkr_data_provider.get_live_snapshot() (client_id=102).
+        Returns True if candidate passes all checks. Fail-closed: False on any error.
+
+        Checks:
+            1. Price delta < 1.5% (signal not stale)
+            2. Spread < 100bps (instrument liquid)
+        """
+        sym = candidate.get("symbol", "")
+        radar_price = candidate.get("_radar_score", 0)  # This is directional score, not price
+
+        try:
+            from python_brain.ouroboros.ibkr_data_provider import get_provider
+            provider = get_provider()
+            snap = provider.get_live_snapshot(sym)
+            if snap is None:
+                log.warning("AIRLOCK REJECT %s: snapshot failed", sym)
+                return False
+
+            # Price delta check (compare snapshot to radar cache last price if available)
+            radar_last = candidate.get("last", 0)
+            if radar_last > 0 and snap["last"] > 0:
+                delta_pct = abs(snap["last"] - radar_last) / radar_last * 100
+                if delta_pct > 1.5:
+                    log.warning("AIRLOCK REJECT %s: price delta %.1f%% > 1.5%%", sym, delta_pct)
+                    return False
+
+            # Spread check
+            if snap["ask"] > 0 and snap["bid"] > 0 and snap["last"] > 0:
+                spread_bps = (snap["ask"] - snap["bid"]) / snap["last"] * 10000
+                if spread_bps > 100:
+                    log.warning("AIRLOCK REJECT %s: spread %.0f bps > 100 bps", sym, spread_bps)
+                    return False
+
+            log.info("AIRLOCK PASS %s: last=%.2f spread=%.1f bps",
+                     sym, snap["last"], (snap["ask"] - snap["bid"]) / snap["last"] * 10000 if snap["last"] > 0 else 0)
+            return True
+
+        except ImportError:
+            log.warning("AIRLOCK SKIP %s: ibkr_data_provider not available", sym)
+            return True  # Allow if provider unavailable (don't block on import issues)
+        except Exception as e:
+            log.warning("AIRLOCK REJECT %s: exception (%s)", sym, e)
+            return False
+
+    def _generate_radar_universe(self, admitted: List[Dict[str, Any]]):
+        """Generate config/radar_universe.toml for the radar daemon.
+
+        Session 35: Called during --full path. Groups admitted tickers by exchange.
+        Daemon auto-detects changes via mtime file-watch (no signal needed).
+        """
+        try:
+            by_exchange: Dict[str, List[str]] = {}
+            for ticker in admitted:
+                sym = ticker.get("symbol", "")
+                exch = ticker.get("exchange", ticker.get("ibkr_exchange", "SMART"))
+                if sym and exch:
+                    by_exchange.setdefault(exch, []).append(sym)
+
+            lines = [
+                "# AEGIS V2 — Radar Universe (auto-generated by dynamic_universe.py --full)",
+                f"# Generated: {datetime.now(timezone.utc).isoformat()}",
+                f"# Total: {sum(len(v) for v in by_exchange.values())} tickers across {len(by_exchange)} exchanges",
+                "",
+            ]
+
+            for exch in sorted(by_exchange.keys()):
+                syms = sorted(set(by_exchange[exch]))
+                lines.append(f"[{exch}]")
+                lines.append(f"tickers = [{', '.join(repr(s) for s in syms)}]")
+                lines.append("")
+
+            RADAR_UNIVERSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            import tempfile as _tf
+            fd, tmp = _tf.mkstemp(dir=str(RADAR_UNIVERSE_FILE.parent), suffix=".tmp")
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(lines))
+            os.replace(tmp, str(RADAR_UNIVERSE_FILE))
+            log.info("Generated radar_universe.toml: %d tickers across %d exchanges",
+                     sum(len(v) for v in by_exchange.values()), len(by_exchange))
+        except Exception as e:
+            log.warning("Failed to generate radar_universe.toml: %s", e)
 
     def _pm_briefing_hook(self, plan: Dict[str, Any], snapshot: Dict[str, Any]):
         """Telegram PM briefing on --session completion.

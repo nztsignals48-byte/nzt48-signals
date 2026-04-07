@@ -44,18 +44,23 @@ CONTRACTS_FILE = CONFIG_DIR / "contracts.toml"
 MASTER_FILE = CONFIG_DIR / "isa_universe_master.json"
 
 # ETP → underlying mapping (leveraged ETPs inherit underlying's earnings dates)
+# Session 35 FIX: Corrected 3LAM.L/3SAM.L from AMZN→AMD, GPT3.L from MSFT→NVDA.
+# Single source of truth: config/equity_fund_map.toml
+# See also: bridge.py:1108 (must stay in sync)
 _ETP_UNDERLYING_MAP = {
     "QQQ3.L": "QQQ", "QQQS.L": "QQQ", "QQQ5.L": "QQQ",
-    "3LUS.L": "SPY", "3USS.L": "SPY",
-    "NVD3.L": "NVDA", "NVS3.L": "NVDA",
-    "TSL3.L": "TSLA", "TSS3.L": "TSLA",
-    "GPT3.L": "MSFT", "GPS3.L": "MSFT",
+    "3LUS.L": "SPY", "3USS.L": "SPY", "5SPY.L": "SPY",
+    "NVD3.L": "NVDA", "3LNV.L": "NVDA", "3SNV.L": "NVDA",
+    "TSL3.L": "TSLA", "3LTS.L": "TSLA", "3STS.L": "TSLA",
+    "GPT3.L": "NVDA",  # FIX: was MSFT, confirmed NVDA (AI/Tech basket, NVDA-heavy)
     "TSM3.L": "TSM",
-    "3LAM.L": "AMZN", "3SAM.L": "AMZN",
-    "3LME.L": "META", "3SME.L": "META",
-    "3LAP.L": "AAPL", "3SAP.L": "AAPL",
-    "3LAL.L": "GOOGL", "3SAL.L": "GOOGL",
-    "AMD3.L": "AMD", "AMS3.L": "AMD",
+    "AMD3.L": "AMD", "3LAM.L": "AMD", "3SAM.L": "AMD",  # FIX: was AMZN, confirmed AMD
+    "AMZ3.L": "AMZN", "3LAZ.L": "AMZN",
+    "APL3.L": "AAPL", "3LAP.L": "AAPL", "3SAP.L": "AAPL",
+    "MSF3.L": "MSFT", "3LMS.L": "MSFT", "3SMS.L": "MSFT",
+    "GOO3.L": "GOOGL", "3LGO.L": "GOOGL",
+    "MET3.L": "META", "3LME.L": "META",
+    "MU2.L": "MU",
     "3LNF.L": "NFLX",
     "3SEM.L": "SMH",  # Semiconductor index
 }
