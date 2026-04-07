@@ -3002,12 +3002,15 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
             pass
 
     # ── BOOK 12/177: HARD TIME-OF-DAY BLOCK ──
-    # Block entries in worst microstructure windows: first 15min, last 30min, ETP rebalance
+    # Block entries in worst microstructure windows (LSE-only: first 15min, ETP rebalance).
+    # Non-LSE tickers (US, XETRA, HKEX, TSE) are NOT subject to LSE timing gates.
     if not _SIM_MODE:
         try:
             from datetime import datetime as _dt_tod, timezone as _tz_tod
             _ts = msg.get("timestamp_ns", 0)
-            if _ts > 0:
+            _exch = msg.get("exchange", "")
+            _is_lse = _exch in ("LSE", "LSEETF", "")  # empty exchange = legacy LSE default
+            if _ts > 0 and _is_lse:
                 _dt = _dt_tod.fromtimestamp(_ts / 1_000_000_000, tz=_tz_tod.utc)
                 _h, _m = _dt.hour, _dt.minute
                 _mins = _h * 60 + _m
@@ -3017,7 +3020,6 @@ def _check_quality_gates(ticker_id, msg, ticks, ind):
                 # Block: ETP rebalancing window (16:00-16:35 = 960-995)
                 if 960 <= _mins < 995:
                     return False, "tod_rebalance_avoid", "ETP rebalancing window 16:00-16:35"
-                # Block: last 10 min of LSE (16:20-16:30 = 980-990) — already covered above
         except Exception:
             pass
 
