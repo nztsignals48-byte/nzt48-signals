@@ -8014,141 +8014,155 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         _closes_warm = _np_warm.array([b["close"] for b in ind["bars_5m"][-60:]])
         _vols_warm = _np_warm.array([b["volume"] for b in ind["bars_5m"][-60:]])
 
-        # Book 75: TFT quantile prediction → confidence width adjustment
-        try:
-            from python_brain.ml.temporal_fusion_transformer import TFTPreprocessor
-            if not hasattr(_apply_adjustments, "_tft_pre"):
-                _apply_adjustments._tft_pre = TFTPreprocessor()
-            _tft_pre = _apply_adjustments._tft_pre
-            # TFT gives prediction intervals — narrower = more confident
-            if not hasattr(_apply_adjustments, "_tft_cache"):
-                _apply_adjustments._tft_cache = {}
-            _apply_adjustments._tft_cache[ticker_id] = {"available": True}
-        except ImportError:
-            pass
+        # ══════════════════════════════════════════════════════════════════
+        # Session 35: DISABLED 6 untrained ML overlays.
+        #
+        # These models (TFT, Mamba, GP, Wavelet, Reservoir, GNN) have no
+        # trained weights. With random initialization they produce random
+        # confidence adjustments (+/-3 to -8) and random Kelly scaling.
+        # The Reservoir model can return None (kill ALL signals) on a
+        # random score > 0.85.
+        #
+        # Session 34 killed 5 untrained ML *generators* (EMAT, Temporal,
+        # Swarm, HighFlyer, CopyTrading). These 6 are untrained *overlays*
+        # in the adjustment pipeline — same problem, different location.
+        #
+        # Re-enable individually after training on paper trading data.
+        # Gate: require _ML_OVERLAYS_ENABLED env var or 100+ training samples.
+        # ══════════════════════════════════════════════════════════════════
+        _ML_OVERLAYS_ENABLED = os.environ.get("ML_OVERLAYS_ENABLED", "0") == "1"
 
-        # Book 161: Mamba S4 sequence prediction → directional bias
-        try:
-            from python_brain.ml.mamba_model import MambaModel, S4Config
-            if not hasattr(_apply_adjustments, "_mamba_cache"):
-                _apply_adjustments._mamba_cache = {}
-            _mamba = MambaModel(S4Config(d_model=32, d_state=8, seq_len=min(60, len(_closes_warm))))
-            _mamba_pred = _mamba.predict(_np_warm.column_stack([_closes_warm[-30:], _vols_warm[-30:]]))
-            if _mamba_pred and _mamba_pred.get("direction") == "bullish":
-                for sig in all_signals:
-                    sig["confidence"] = min(100, sig["confidence"] + 3)
-                    sig["mamba_boost"] = True
-            elif _mamba_pred and _mamba_pred.get("direction") == "bearish":
-                for sig in all_signals:
-                    sig["confidence"] = max(0, sig["confidence"] - 3)
-                    sig["mamba_dampen"] = True
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        if _ML_OVERLAYS_ENABLED:
+            # Book 75: TFT quantile prediction → confidence width adjustment
+            try:
+                from python_brain.ml.temporal_fusion_transformer import TFTPreprocessor
+                if not hasattr(_apply_adjustments, "_tft_pre"):
+                    _apply_adjustments._tft_pre = TFTPreprocessor()
+                _tft_pre = _apply_adjustments._tft_pre
+                if not hasattr(_apply_adjustments, "_tft_cache"):
+                    _apply_adjustments._tft_cache = {}
+                _apply_adjustments._tft_cache[ticker_id] = {"available": True}
+            except ImportError:
+                pass
 
-        # Book 114: GP uncertainty → Kelly adjustment
-        try:
-            from python_brain.ml.kernel_methods import GaussianProcess, RBFKernel
-            if len(_closes_warm) >= 20:
-                _X_gp = _np_warm.arange(len(_closes_warm)).reshape(-1, 1)
-                _gp = GaussianProcess(kernel=RBFKernel(sigma=1.0))
-                _gp.fit(_X_gp[:-1], _np_warm.diff(_closes_warm))
-                _mu, _var = _gp.predict(_X_gp[-1:])
-                _uncertainty = float(_np_warm.sqrt(_var[0])) if _var[0] > 0 else 1.0
-                # Higher uncertainty → reduce Kelly
-                if _uncertainty > 0.02:
-                    _unc_scale = max(0.5, 1.0 - _uncertainty * 10)
+            # Book 161: Mamba S4 sequence prediction → directional bias
+            try:
+                from python_brain.ml.mamba_model import MambaModel, S4Config
+                if not hasattr(_apply_adjustments, "_mamba_cache"):
+                    _apply_adjustments._mamba_cache = {}
+                _mamba = MambaModel(S4Config(d_model=32, d_state=8, seq_len=min(60, len(_closes_warm))))
+                _mamba_pred = _mamba.predict(_np_warm.column_stack([_closes_warm[-30:], _vols_warm[-30:]]))
+                if _mamba_pred and _mamba_pred.get("direction") == "bullish":
                     for sig in all_signals:
-                        sig["kelly_fraction"] *= _unc_scale
-                        sig["gp_uncertainty"] = round(_uncertainty, 4)
-        except ImportError:
-            pass
-        except Exception:
-            pass
-
-        # Book 115: Wavelet denoised features → trend confirmation + COUNTER-TREND PENALTY
-        try:
-            from python_brain.features.wavelet_processor import WaveletFeaturePipeline
-            if not hasattr(_apply_adjustments, "_wfp"):
-                _apply_adjustments._wfp = WaveletFeaturePipeline()
-            _wfp = _apply_adjustments._wfp
-            _wf = _wfp.process(_closes_warm, _vols_warm)
-            _wavelet_trend = _wf.get("denoised_trend", "neutral")
-            if _wavelet_trend == "up":
-                for sig in all_signals:
-                    if sig.get("direction") == "Long":
                         sig["confidence"] = min(100, sig["confidence"] + 3)
-                        sig["wavelet_trend"] = "confirmed"
-                    else:
-                        sig["confidence"] = max(0, sig["confidence"] - 5)
-                        sig["wavelet_trend"] = "counter_long_uptrend"
-            elif _wavelet_trend == "down":
-                for sig in all_signals:
-                    if sig.get("direction") == "Long":
-                        # Long entry against denoised downtrend — penalize heavily
-                        sig["confidence"] = max(0, sig["confidence"] - 8)
-                        sig["wavelet_trend"] = "counter_short_downtrend"
-                        sig["kelly_fraction"] *= 0.7
-                        sig["shares"] = max(1, int(sig["shares"] * 0.7))
-        except ImportError:
-            pass
-        except Exception:
-            pass
+                        sig["mamba_boost"] = True
+                elif _mamba_pred and _mamba_pred.get("direction") == "bearish":
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 3)
+                        sig["mamba_dampen"] = True
+            except ImportError:
+                pass
+            except Exception:
+                pass
 
-        # Book 129: Reservoir computing regime change → BLOCK at extreme, SIZE DOWN at moderate
-        try:
-            from python_brain.ml.reservoir_computing import ReservoirFeatureExtractor
-            if not hasattr(_apply_adjustments, "_rfe"):
-                _apply_adjustments._rfe = ReservoirFeatureExtractor()
-            _rfe = _apply_adjustments._rfe
-            _rc_score = _rfe.regime_change_score(_closes_warm)
-            if _rc_score > 0.85:
-                # Extreme regime shift — block all entries until regime stabilizes
-                return None
-            elif _rc_score > 0.7:
-                for sig in all_signals:
-                    sig["confidence"] = max(0, sig["confidence"] - 8)
-                    sig["kelly_fraction"] *= 0.6
-                    sig["shares"] = max(1, int(sig["shares"] * 0.6))
-                    sig["reservoir_regime_shift"] = round(_rc_score, 3)
-            elif _rc_score > 0.5:
-                for sig in all_signals:
-                    sig["confidence"] = max(0, sig["confidence"] - 3)
-                    sig["reservoir_regime_shift"] = round(_rc_score, 3)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+            # Book 114: GP uncertainty → Kelly adjustment
+            try:
+                from python_brain.ml.kernel_methods import GaussianProcess, RBFKernel
+                if len(_closes_warm) >= 20:
+                    _X_gp = _np_warm.arange(len(_closes_warm)).reshape(-1, 1)
+                    _gp = GaussianProcess(kernel=RBFKernel(sigma=1.0))
+                    _gp.fit(_X_gp[:-1], _np_warm.diff(_closes_warm))
+                    _mu, _var = _gp.predict(_X_gp[-1:])
+                    _uncertainty = float(_np_warm.sqrt(_var[0])) if _var[0] > 0 else 1.0
+                    if _uncertainty > 0.02:
+                        _unc_scale = max(0.5, 1.0 - _uncertainty * 10)
+                        for sig in all_signals:
+                            sig["kelly_fraction"] *= _unc_scale
+                            sig["gp_uncertainty"] = round(_uncertainty, 4)
+            except ImportError:
+                pass
+            except Exception:
+                pass
 
-        # Book 96: GNN cross-instrument signal → USE graph density for confidence adjustment
-        try:
-            from python_brain.ml.gnn_market_structure import GNNSignalGenerator
-            if not hasattr(_apply_adjustments, "_gnn"):
-                _apply_adjustments._gnn = GNNSignalGenerator()
-            _gnn = _apply_adjustments._gnn
-            _gnn_result = _gnn.generate_signals(
-                ticker_id=ticker_id,
-                prices=_closes_warm,
-                volumes=_vols_warm,
-            )
-            if _gnn_result:
-                _graph_density = _gnn_result.get("graph_density", 0.5)
-                _sector_momentum = _gnn_result.get("sector_momentum", 0)
-                # High graph density + aligned sector momentum = strong structural support
-                if _graph_density > 0.7 and _sector_momentum > 0:
+            # Book 115: Wavelet denoised features → trend confirmation
+            try:
+                from python_brain.features.wavelet_processor import WaveletFeaturePipeline
+                if not hasattr(_apply_adjustments, "_wfp"):
+                    _apply_adjustments._wfp = WaveletFeaturePipeline()
+                _wfp = _apply_adjustments._wfp
+                _wf = _wfp.process(_closes_warm, _vols_warm)
+                _wavelet_trend = _wf.get("denoised_trend", "neutral")
+                if _wavelet_trend == "up":
                     for sig in all_signals:
                         if sig.get("direction") == "Long":
                             sig["confidence"] = min(100, sig["confidence"] + 3)
-                            sig["gnn_structural_support"] = True
-                elif _graph_density > 0.7 and _sector_momentum < -0.3:
-                    # Sector divergence — this ticker is fighting its sector
+                            sig["wavelet_trend"] = "confirmed"
+                        else:
+                            sig["confidence"] = max(0, sig["confidence"] - 5)
+                            sig["wavelet_trend"] = "counter_long_uptrend"
+                elif _wavelet_trend == "down":
                     for sig in all_signals:
                         if sig.get("direction") == "Long":
-                            sig["confidence"] = max(0, sig["confidence"] - 5)
-                            sig["gnn_sector_divergence"] = True
-        except ImportError:
-            pass
+                            sig["confidence"] = max(0, sig["confidence"] - 8)
+                            sig["wavelet_trend"] = "counter_short_downtrend"
+                            sig["kelly_fraction"] *= 0.7
+                            sig["shares"] = max(1, int(sig["shares"] * 0.7))
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+            # Book 129: Reservoir computing regime change
+            try:
+                from python_brain.ml.reservoir_computing import ReservoirFeatureExtractor
+                if not hasattr(_apply_adjustments, "_rfe"):
+                    _apply_adjustments._rfe = ReservoirFeatureExtractor()
+                _rfe = _apply_adjustments._rfe
+                _rc_score = _rfe.regime_change_score(_closes_warm)
+                if _rc_score > 0.85:
+                    return None
+                elif _rc_score > 0.7:
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 8)
+                        sig["kelly_fraction"] *= 0.6
+                        sig["shares"] = max(1, int(sig["shares"] * 0.6))
+                        sig["reservoir_regime_shift"] = round(_rc_score, 3)
+                elif _rc_score > 0.5:
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 3)
+                        sig["reservoir_regime_shift"] = round(_rc_score, 3)
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+            # Book 96: GNN cross-instrument signal
+            try:
+                from python_brain.ml.gnn_market_structure import GNNSignalGenerator
+                if not hasattr(_apply_adjustments, "_gnn"):
+                    _apply_adjustments._gnn = GNNSignalGenerator()
+                _gnn = _apply_adjustments._gnn
+                _gnn_result = _gnn.generate_signals(
+                    ticker_id=ticker_id,
+                    prices=_closes_warm,
+                    volumes=_vols_warm,
+                )
+                if _gnn_result:
+                    _graph_density = _gnn_result.get("graph_density", 0.5)
+                    _sector_momentum = _gnn_result.get("sector_momentum", 0)
+                    if _graph_density > 0.7 and _sector_momentum > 0:
+                        for sig in all_signals:
+                            if sig.get("direction") == "Long":
+                                sig["confidence"] = min(100, sig["confidence"] + 3)
+                                sig["gnn_structural_support"] = True
+                    elif _graph_density > 0.7 and _sector_momentum < -0.3:
+                        for sig in all_signals:
+                            if sig.get("direction") == "Long":
+                                sig["confidence"] = max(0, sig["confidence"] - 5)
+                                sig["gnn_sector_divergence"] = True
+            except ImportError:
+                pass
+        # END ML_OVERLAYS_ENABLED gate
 
     # ── BOOK 123: MARKET IMPACT ESTIMATION ──
     # Attach pre-trade impact estimate to best signal for Rust execution layer
