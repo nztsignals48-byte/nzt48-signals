@@ -7530,18 +7530,22 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["kelly_fraction"] = max(0.001, sig["kelly_fraction"] * (1 - cost_frac))
             sig["shares"] = max(1, int(sig["shares"] * (1 - cost_frac)))
 
-    # COMPOUNDING: Cost-aware edge filter — reject if cost > 50% of expected edge.
-    # Expected edge ≈ kelly_fraction * equity * (WR - 0.5) * 2 (simplified edge proxy).
-    # If the cost of the trade exceeds half the expected profit, it's not worth taking.
+    # COMPOUNDING: Cost-aware edge penalty — penalize signals where cost erodes edge.
+    # Session 39: Converted from hard kill to confidence penalty to prevent Gauntlet Starvation.
     wr = msg.get("win_rate", 0.5)
-    edge_proxy = max(wr - 0.45, 0) * 2  # edge above 45% WR breakeven (after costs)
-    all_signals = [
-        sig for sig in all_signals
-        if sig["sim_total_cost_gbp"] <= 0 or edge_proxy <= 0 or
-        sig["sim_total_cost_gbp"] < (sig["kelly_fraction"] * msg.get("equity", 100000) * edge_proxy * 0.5)
-    ]
-    if not all_signals:
-        return None
+    edge_proxy = max(wr - 0.45, 0) * 2
+    for sig in all_signals:
+        _cost = sig.get("sim_total_cost_gbp", 0)
+        _eq = msg.get("equity", 100000)
+        _edge_gbp = sig["kelly_fraction"] * _eq * edge_proxy * 0.5
+        if _cost > 0 and _edge_gbp > 0 and _cost >= _edge_gbp:
+            # Cost exceeds 50% of expected edge — penalize proportionally
+            _cost_ratio = min(_cost / max(_edge_gbp, 0.01), 3.0)
+            _penalty = int(5 * _cost_ratio)  # 5-15 conf penalty
+            sig["confidence"] = max(0, sig["confidence"] - _penalty)
+            sig["kelly_fraction"] *= max(0.3, 1.0 - _cost_ratio * 0.2)
+            sig["shares"] = max(1, int(sig["shares"] * max(0.3, 1.0 - _cost_ratio * 0.2)))
+            sig["cost_edge_penalty"] = _penalty
 
     # ── BOOK 124: Apply vol regime sizing multiplier to Kelly ──
     if _vol_regime_sizing < 1.0:
@@ -7634,11 +7638,15 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["shares"] = max(1, int(sig["shares"] * _adv_s))
             sig["adv_participation_scaled"] = round(_adv_s, 2)
 
-    # ── BOOK 144: CONFORMAL DIRECTIONAL HARD GATE ──
-    # PROMOTED: If prediction interval straddles zero, there is NO statistically significant
-    # direction. Hard-block all signals (was -10 conf, now full block).
+    # ── BOOK 144: CONFORMAL DIRECTIONAL PENALTY ──
+    # Session 39: Converted from hard kill to confidence penalty.
+    # If PI straddles zero, apply strong penalty instead of blocking.
     if msg.get("_conformal_no_trade"):
-        return None  # Hard block: no directional clarity
+        for sig in all_signals:
+            sig["confidence"] = max(0, sig["confidence"] - 20)
+            sig["kelly_fraction"] *= 0.4
+            sig["shares"] = max(1, int(sig["shares"] * 0.4))
+            sig["conformal_no_trade_penalty"] = True
     elif msg.get("_conformal_fraction"):
         _cf = msg["_conformal_fraction"]
         for sig in all_signals:
@@ -8084,21 +8092,21 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["shares"] = max(1, int(sig["shares"] * _kelly_cal_adj))
             sig["kelly_calibration_adj"] = round(_kelly_cal_adj, 3)
 
-    # ── BOOK 101: EXECUTION COST VS SIGNAL ALPHA GATE ──
-    # Reject if estimated execution cost exceeds estimated signal alpha
-    _cost_alpha_filtered = []
+    # ── BOOK 101: EXECUTION COST VS SIGNAL ALPHA PENALTY ──
+    # Session 39: Converted from hard kill to penalty. Cost-alpha comparison now
+    # penalizes confidence instead of dropping signals outright.
     for sig in all_signals:
         _alpha_est = sig.get("kelly_fraction", 0) * max(sig.get("confidence", 50) - 45, 0) / 100
         _cost_gbp = sig.get("sim_total_cost_gbp", 0)
         _eq = msg.get("equity", 100000)
         _alpha_gbp = _alpha_est * _eq
         if _cost_gbp > 0 and _alpha_gbp > 0 and _cost_gbp > _alpha_gbp:
-            sig["cost_exceeds_alpha"] = True
-            continue  # Drop this signal
-        _cost_alpha_filtered.append(sig)
-    all_signals = _cost_alpha_filtered
-    if not all_signals:
-        return None
+            _overshoot = min(_cost_gbp / max(_alpha_gbp, 0.01), 5.0)
+            _pen = int(4 * _overshoot)  # 4-20 conf penalty
+            sig["confidence"] = max(0, sig["confidence"] - _pen)
+            sig["kelly_fraction"] *= max(0.2, 1.0 - _overshoot * 0.15)
+            sig["shares"] = max(1, int(sig["shares"] * max(0.2, 1.0 - _overshoot * 0.15)))
+            sig["cost_exceeds_alpha_penalty"] = _pen
 
     # ── BOOK 78: IV SIGNALS — Adjust confidence based on implied volatility regime ──
     # BUG FIX: Rust never sends "iv_data" dict. Construct VolatilitySurface inline
@@ -8308,6 +8316,7 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 pass
 
             # Book 129: Reservoir computing regime change
+            # Session 39: Converted 0.85 hard kill to confidence penalty (continuous curve).
             try:
                 from python_brain.ml.reservoir_computing import ReservoirFeatureExtractor
                 if not hasattr(_apply_adjustments, "_rfe"):
@@ -8315,7 +8324,11 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
                 _rfe = _apply_adjustments._rfe
                 _rc_score = _rfe.regime_change_score(_closes_warm)
                 if _rc_score > 0.85:
-                    return None
+                    for sig in all_signals:
+                        sig["confidence"] = max(0, sig["confidence"] - 18)
+                        sig["kelly_fraction"] *= 0.3
+                        sig["shares"] = max(1, int(sig["shares"] * 0.3))
+                        sig["reservoir_regime_shift"] = round(_rc_score, 3)
                 elif _rc_score > 0.7:
                     for sig in all_signals:
                         sig["confidence"] = max(0, sig["confidence"] - 8)

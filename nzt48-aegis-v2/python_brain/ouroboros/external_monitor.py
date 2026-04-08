@@ -288,6 +288,86 @@ def check_ibkr_connection() -> Dict[str, Any]:
     return check
 
 
+def check_independent_risk() -> Dict[str, Any]:
+    """SC-05: Independent risk monitoring — drawdown, equity floor, position age.
+
+    This runs INDEPENDENTLY of the engine's internal risk arbiter, providing
+    a second pair of eyes on portfolio risk. If the engine's risk checks fail
+    or are bypassed, this monitor will catch it and alert via Telegram.
+    """
+    check = {"name": "independent_risk", "status": "ok", "detail": "", "data": {}}
+    if not TELEMETRY_FILE.exists():
+        check["status"] = "info"
+        check["detail"] = "No telemetry available"
+        return check
+
+    try:
+        with open(TELEMETRY_FILE) as f:
+            data = json.load(f)
+
+        equity = data.get("equity", 0)
+        initial_equity = data.get("initial_equity", 10000)
+        positions = data.get("positions", 0)
+        regime = data.get("regime", "Normal")
+        drawdown_pct = data.get("drawdown_pct", 0)
+
+        details = []
+
+        # CHECK R1: Drawdown breach — independent of Rust arbiter
+        if drawdown_pct > 8.0:
+            check["status"] = "critical"
+            details.append(f"DRAWDOWN {drawdown_pct:.1f}% > 8% SACRED LIMIT")
+            # Write KILL file to force engine shutdown
+            kill_file = DATA_DIR / "KILL"
+            if not kill_file.exists():
+                try:
+                    kill_file.write_text(f"INDEPENDENT_RISK: drawdown {drawdown_pct:.1f}%")
+                    details.append("KILL file written — engine will shutdown")
+                except OSError:
+                    details.append("WARNING: could not write KILL file")
+        elif drawdown_pct > 5.0:
+            check["status"] = "warning"
+            details.append(f"Drawdown {drawdown_pct:.1f}% approaching limit")
+
+        # CHECK R2: Equity floor breach (70% of initial)
+        if initial_equity > 0 and equity > 0:
+            equity_ratio = equity / initial_equity
+            check["data"]["equity_ratio"] = round(equity_ratio, 3)
+            if equity_ratio < 0.70:
+                check["status"] = "critical"
+                details.append(f"EQUITY FLOOR BREACH: {equity:.0f} < 70% of {initial_equity:.0f}")
+            elif equity_ratio < 0.80:
+                if check["status"] != "critical":
+                    check["status"] = "warning"
+                details.append(f"Equity {equity:.0f} = {equity_ratio*100:.1f}% of initial")
+
+        # CHECK R3: Regime sanity — if regime is HALT/FLATTEN but positions exist
+        if regime in ("Halt", "Flatten") and positions > 0:
+            if check["status"] != "critical":
+                check["status"] = "warning"
+            details.append(f"Regime={regime} but {positions} positions still open")
+
+        # CHECK R4: Excessive position count
+        if positions > 5:
+            if check["status"] != "critical":
+                check["status"] = "warning"
+            details.append(f"{positions} open positions (limit 3, max 5)")
+
+        if not details:
+            details.append(f"OK: equity={equity:.0f}, dd={drawdown_pct:.1f}%, {positions} pos, regime={regime}")
+
+        check["detail"] = "; ".join(details)
+        check["data"]["drawdown_pct"] = drawdown_pct
+        check["data"]["equity"] = equity
+        check["data"]["positions"] = positions
+        check["data"]["regime"] = regime
+
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        check["status"] = "warning"
+        check["detail"] = f"Risk check failed: {e}"
+    return check
+
+
 # ---------------------------------------------------------------------------
 # Main monitoring orchestrator
 # ---------------------------------------------------------------------------
@@ -303,6 +383,7 @@ def run_full_check() -> Dict[str, Any]:
         check_wal_files(),
         check_kill_switch(),
         check_ibkr_connection(),
+        check_independent_risk(),
     ]
 
     # Determine overall status

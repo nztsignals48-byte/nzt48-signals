@@ -87,13 +87,12 @@ pub struct BrainSignal {
     /// Qualitative trail bias: "wide", "tight", or "neutral".
     #[pyo3(get)]
     pub exit_trail_bias: Option<String>,
-    /// Strategy-specific max holding period in hours.
+    /// VESTIGIAL: kept for PositionState struct compatibility. Always None in practice.
+    /// Chandelier-only philosophy — no time-based exits.
     #[pyo3(get)]
     pub max_hold_hours: Option<f64>,
-    /// Strategy-suggested max holding period (overrides leverage-based).
     #[pyo3(get)]
     pub suggested_max_hold_hours: Option<f64>,
-    /// Hours after which to start tightening stops (urgency ramp).
     #[pyo3(get)]
     pub exit_urgency_ramp_hours: Option<f64>,
     /// Minimum profit target % to justify breakeven stop (spread-adjusted).
@@ -300,7 +299,7 @@ impl Default for TickContext {
 
 /// P0-1.2: Read timeout in seconds for Python bridge responses.
 /// 5 seconds allows for yfinance I/O + GIL contention in Python.
-const BRIDGE_READ_TIMEOUT_SECS: u64 = 5;
+const BRIDGE_READ_TIMEOUT_SECS: u64 = 3;
 
 /// Subprocess-based Python Bridge.
 pub struct PythonBridge {

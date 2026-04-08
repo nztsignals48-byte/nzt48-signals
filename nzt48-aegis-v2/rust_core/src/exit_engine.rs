@@ -276,13 +276,6 @@ pub struct ExitConfig {
     pub dust_threshold_gbp: f64,
     /// P4-C: Use InfiniteChandelier (8 adaptive multipliers) instead of basic ChandelierStrategy.
     pub use_infinite_chandelier: bool,
-    /// S3: Time-stop — if position hasn't reached rung 2 within this many minutes,
-    /// tighten the trailing stop aggressively to force an exit on sideways positions.
-    pub time_stop_enabled: bool,
-    /// S3: Maximum minutes to reach rung 2 before aggressive trail kicks in.
-    pub time_stop_max_minutes_to_rung2: u32,
-    /// S3: Aggressive ATR multiplier applied when time-stop triggers (e.g., 0.3).
-    pub time_stop_aggressive_trail_atr: f64,
 }
 
 impl ExitConfig {
@@ -342,9 +335,6 @@ impl Default for ExitConfig {
             min_ev_after_commission: 0.0,
             dust_threshold_gbp: 500.0,
             use_infinite_chandelier: false,
-            time_stop_enabled: true,
-            time_stop_max_minutes_to_rung2: 45,
-            time_stop_aggressive_trail_atr: 0.3,
         }
     }
 }
@@ -418,7 +408,7 @@ impl ExitEngine {
 
     /// Evaluate ALL exit conditions for a position on the current tick.
     /// Returns the highest-priority exit that fires, or None.
-    /// Priority: HALT > HardStop > Chandelier > TimeStop > EOD > Signal.
+    /// Priority: HALT > HardStop > Chandelier > EOD.
     /// Same-tick collision: highest priority wins, lower suppressed.
     #[allow(clippy::too_many_arguments)]
     pub fn evaluate(
@@ -470,16 +460,39 @@ impl ExitEngine {
         // Priority 3: Chandelier trailing stop
         // P21: Skip Chandelier evaluation if position is in carry state (stops frozen)
         if !is_carried {
+            // SC-04: Phase-adaptive EOD tightening — as exchange close approaches,
+            // tighten the Chandelier stop to protect gains. This is NOT a time-stop;
+            // it's a risk-adjusted stop that respects the Chandelier philosophy.
+            let eod_cutoff = self.config.eod_flatten_for_exchange(exchange);
+            let eod_tightened_atr = if eod_cutoff > 0 && time_secs > 0 {
+                let minutes_to_close = if time_secs < eod_cutoff {
+                    (eod_cutoff - time_secs) / 60
+                } else {
+                    0
+                };
+                if minutes_to_close <= 15 {
+                    // Phase 3: ≤15 min to close — tighten to 60% of normal ATR
+                    Some(atr * 0.6)
+                } else if minutes_to_close <= 30 {
+                    // Phase 2: 15-30 min to close — tighten to 80% of normal ATR
+                    Some(atr * 0.8)
+                } else {
+                    None // No tightening
+                }
+            } else {
+                None
+            };
+
+            let effective_atr = eod_tightened_atr.unwrap_or(atr);
             let chandelier_stop = self
                 .strategy
-                .compute_stop(position, position.highest_high, atr);
+                .compute_stop(position, position.highest_high, effective_atr);
             if current_price <= chandelier_stop && chandelier_stop > position.stop_price {
                 let gapped_through = current_price < chandelier_stop;
                 checks.push(ExitCheck {
                     reason: ExitReason::ChandelierTrailing,
                     priority: ExitPriority::ChandelierStop,
                     order_type: if gapped_through {
-                        // Stop breached by gap/slippage — emergency market sell
                         ExitOrderType::MarketSell
                     } else {
                         ExitOrderType::LimitAtStop
@@ -531,20 +544,8 @@ impl ExitEngine {
             (winner.order_type, winner.tif, winner.limit_price)
         };
 
-        // Book 39: Compute partial_qty for profit laddering exits
-        let partial_qty = if winner.reason == ExitReason::PartialProfitTake {
-            if position.partial_exits_done == 0 {
-                // Rung 3: sell 25% of position
-                Some((position.qty as f64 * 0.25).max(1.0) as u32)
-            } else if position.partial_exits_done == 1 {
-                // Rung 4: sell 33% of remaining (≈25% of original)
-                Some((position.qty as f64 * 0.33).max(1.0) as u32)
-            } else {
-                None // Already did both partials
-            }
-        } else {
-            None
-        };
+        // Partial profit laddering REMOVED per philosophy: 100% exits only via Chandelier stop.
+        let partial_qty = None;
 
         Some(ExitResult {
             signal: ExitSignal {

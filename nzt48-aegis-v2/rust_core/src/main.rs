@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rust_core::broker::BrokerAdapter;
+use rust_core::broker::{BrokerAdapter, BrokerEvent};
 use rust_core::channel::{ChannelConfig, TickChannel};
 use rust_core::clock::Clock;
 use rust_core::config_loader::EngineConfig;
@@ -24,7 +24,7 @@ use rust_core::ibkr_broker::{ContractMapping, IbkrBroker, IbkrBrokerConfig};
 use rust_core::ouroboros_loader;
 use rust_core::python_bridge::{PythonBridge, TickContext};
 use rust_core::python_subprocess_manager::{PythonSubprocessManager, RespawnDecision};
-use rust_core::types::{MarketTick, RiskRegime, TickerId, WalPayload};
+use rust_core::types::{MarketTick, OrderSide, RiskRegime, TickerId, WalPayload};
 use rust_core::universe::{RouteResult, UniverseClass};
 use rust_core::wal_writer::WalWriter;
 
@@ -970,6 +970,23 @@ fn main() {
             }
         }
 
+        // SC-03: Bridge health — check needs_respawn flag + stale heartbeat
+        // If bridge exists but has flagged needs_respawn (write failure) or hasn't
+        // produced output in 60s, mark it dead and trigger respawn.
+        if let Some(ref bridge) = python_bridge {
+            if bridge.needs_respawn {
+                eprintln!("SC-03: Bridge flagged needs_respawn (write failure) — dropping for respawn");
+                python_bridge = None;
+            } else if bridge.consecutive_timeouts > 12 {
+                // 12 consecutive 5s timeouts = 60s with no response
+                eprintln!(
+                    "SC-03: Bridge unresponsive ({} consecutive timeouts) — dropping for respawn",
+                    bridge.consecutive_timeouts
+                );
+                python_bridge = None;
+            }
+        }
+
         // Python bridge health check + respawn (RM-5)
         // If bridge is dead and cooldown has elapsed, attempt restart.
         if python_bridge.is_none() && loop_start >= next_respawn_ns {
@@ -1437,16 +1454,88 @@ fn main() {
         }
     }
 
-    // Graceful shutdown — WAL flush guarantee
-    eprintln!("SHUTDOWN: Flushing WAL before exit...");
+    // Graceful shutdown — flatten + fill-wait + WAL flush
+    eprintln!("SHUTDOWN: Initiating graceful shutdown sequence...");
     if let Some(ref mut bridge) = python_bridge {
         bridge.shutdown();
     }
-    engine.shutdown(); // SC-01: cancels orders, flattens positions, writes SystemShutdown WAL event (fsync'd)
+    engine.shutdown(); // SC-01: cancels entries, flattens positions
 
-    // Explicit WAL sync: engine.shutdown() writes SystemShutdown via write_wal() which
-    // calls WalWriter::append() → flush() + sync_all(). But as a belt-and-suspenders
-    // guarantee, force one final fsync on the WAL file to ensure no buffered data is lost.
+    // SC-02: Fill-wait loop — poll broker for up to 30s waiting for exit fills.
+    // Without this, SIGTERM could orphan unfilled exit orders at IBKR.
+    // After 30s, any remaining positions are force-closed at market.
+    {
+        let fill_wait_start = now_ns();
+        let fill_wait_deadline_ns = 30_000_000_000u64; // 30 seconds
+        let open_at_start = engine.portfolio.filled_count();
+
+        if open_at_start > 0 && !engine.simulation_mode {
+            eprintln!(
+                "SC-02: Waiting up to 30s for {} exit orders to fill...",
+                open_at_start
+            );
+            loop {
+                let elapsed = now_ns().saturating_sub(fill_wait_start);
+                if elapsed > fill_wait_deadline_ns {
+                    eprintln!("SC-02: Fill-wait timeout (30s). Force-closing remainders.");
+                    // Force-close any remaining positions at market
+                    let remaining: Vec<(TickerId, u32)> = engine
+                        .portfolio
+                        .positions()
+                        .iter()
+                        .map(|(&tid, pos)| (tid, pos.qty))
+                        .collect();
+                    for (tid, qty) in &remaining {
+                        let order_id = uuid::Uuid::now_v7().to_string();
+                        eprintln!("SC-02: Force market sell {:?} ({} shares)", tid, qty);
+                        let _ = engine.broker.submit_order(
+                            &order_id,
+                            *tid,
+                            OrderSide::Sell,
+                            *qty,
+                            0.01, // Penny limit = effectively market
+                        );
+                    }
+                    break;
+                }
+
+                // Poll broker for fill events
+                engine.broker.poll_events();
+                let events = engine.broker.drain_events();
+                for event in &events {
+                    if let BrokerEvent::Fill { order_id, ticker_id, filled_qty, price, .. } = event {
+                        eprintln!(
+                            "SC-02: Fill received: {:?} {} @ {:.4} (order {})",
+                            ticker_id, filled_qty, price, order_id
+                        );
+                    }
+                }
+                // Process fills through engine portfolio
+                engine.process_broker_events_shutdown(&events);
+
+                if engine.portfolio.filled_count() == 0 {
+                    let wait_s = elapsed / 1_000_000_000;
+                    eprintln!("SC-02: All positions filled after {}s.", wait_s);
+                    break;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        } else if engine.simulation_mode {
+            eprintln!("SC-02: Simulation mode — no fill-wait needed.");
+        } else {
+            eprintln!("SC-02: No open positions — no fill-wait needed.");
+        }
+
+        // Update WAL with actual wait time
+        let final_wait = (now_ns().saturating_sub(fill_wait_start)) / 1_000_000_000;
+        let _ = engine.write_wal(WalPayload::SystemShutdown {
+            positions_flattened: open_at_start as u32,
+            pending_fills_waited_secs: final_wait as u32,
+        });
+    }
+
+    // Explicit WAL sync — belt-and-suspenders guarantee
     if let Some(ref mut wal) = engine.wal {
         if let Err(e) = wal.sync() {
             eprintln!("SHUTDOWN: WAL final sync failed: {e} (data may be in OS buffer)");

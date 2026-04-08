@@ -622,9 +622,6 @@ impl<B: BrokerAdapter> Engine<B> {
                 let exit_config = ExitConfig {
                     price_spike_pct: ch.price_spike_pct,
                     dust_threshold_gbp: ch.dust_threshold_gbp,
-                    time_stop_enabled: config.exit_time_stop.enabled,
-                    time_stop_max_minutes_to_rung2: config.exit_time_stop.max_minutes_to_rung2,
-                    time_stop_aggressive_trail_atr: config.exit_time_stop.aggressive_trail_atr,
                     ..ExitConfig::default()
                 };
                 let default_chandelier = strategy.clone();
@@ -973,12 +970,7 @@ impl<B: BrokerAdapter> Engine<B> {
             self.arbiter.config.cash_buffer_pct, self.arbiter.config.spread_veto_pct,
             self.arbiter.config.minimum_entry_gbp, self.simulation_mode,
         );
-        eprintln!(
-            "EXIT_CONFIG: time_stop_enabled={} max_minutes_to_rung2={} aggressive_trail_atr={:.2}",
-            self.exit_engine.config.time_stop_enabled,
-            self.exit_engine.config.time_stop_max_minutes_to_rung2,
-            self.exit_engine.config.time_stop_aggressive_trail_atr,
-        );
+        eprintln!("EXIT_CONFIG: Chandelier-only (time-stop REMOVED)");
         eprintln!(
             "Q-051 COST_CONFIG: round_trip_fee={:.3}%, commission=GBP{:.2}, fx_cost={:.3}%",
             self.config.costs.round_trip_fee_pct * 100.0,
@@ -3618,10 +3610,10 @@ impl<B: BrokerAdapter> Engine<B> {
     }
 
     /// SC-01: Graceful shutdown sequence.
-    /// 1. Cancel all pending orders
+    /// 1. Cancel all pending entry orders
     /// 2. Flatten all open positions (market sell)
-    /// 3. Write SystemShutdown WAL event
-    ///    Note: fill-wait loop runs in main.rs (requires IbkrBroker-specific polling).
+    /// 3. Persist bar_history
+    /// Note: WAL SystemShutdown event + fill-wait loop run in main.rs (SC-02).
     pub fn shutdown(&mut self) {
         eprintln!("ENGINE: Shutting down (SC-01 graceful)...");
 
@@ -3644,29 +3636,57 @@ impl<B: BrokerAdapter> Engine<B> {
             eprintln!("ENGINE: Flattening {:?} ({} shares) {}", tid, qty,
                 if self.simulation_mode { "[SIMULATED]" } else { "[LIVE]" });
             if !self.simulation_mode {
-                // Only submit real orders in live mode
                 // P2-#10: Use 5% below last bid (was hardcoded 0.01 penny limit).
                 let bid = self.last_prices.get(tid).copied().unwrap_or(0.01);
                 let emergency_limit = (bid * 0.95).max(0.01);
                 let _ = self.broker.submit_order(&order_id, *tid, OrderSide::Sell, *qty, emergency_limit);
             }
-            // In simulation mode, positions are just removed from self.positions
         }
-
-        // Step 3: Write SystemShutdown WAL event
-        let _ = self.write_wal(WalPayload::SystemShutdown {
-            positions_flattened,
-            pending_fills_waited_secs: 0, // Actual wait happens in main.rs
-        });
 
         // P0-1.8: Persist bar_history to disk for crash recovery.
         self.save_bar_history();
 
         self.startup_complete = false;
         eprintln!(
-            "ENGINE: Shutdown complete. Flattened {} positions.",
+            "ENGINE: Shutdown complete. Submitted flatten for {} positions.",
             positions_flattened
         );
+    }
+
+    /// SC-02: Process broker events during shutdown fill-wait loop.
+    /// Lightweight version that only updates portfolio on fills — no new signals.
+    pub fn process_broker_events_shutdown(&mut self, events: &[BrokerEvent]) {
+        for event in events {
+            match event {
+                BrokerEvent::Fill { order_id, ticker_id, filled_qty, remaining_qty, price, commission, .. } => {
+                    // Remove from tracked orders if fully filled
+                    if *remaining_qty == 0 {
+                        self.tracked_orders.retain(|oid| oid != order_id);
+                    }
+                    // Update portfolio — reduce or remove the position
+                    let should_remove = {
+                        if let Some(pos) = self.portfolio.positions_mut().get_mut(ticker_id) {
+                            if *filled_qty >= pos.qty {
+                                true
+                            } else {
+                                pos.qty -= filled_qty;
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    };
+                    if should_remove {
+                        self.portfolio.positions_mut().remove(ticker_id);
+                    }
+                    eprintln!(
+                        "SC-02: Portfolio updated — {:?} filled {} @ {:.4} (remaining: {}, comm: {:.2})",
+                        ticker_id, filled_qty, price, remaining_qty, commission
+                    );
+                }
+                _ => {} // Ignore non-fill events during shutdown
+            }
+        }
     }
 
     /// P0-1.8: Save bar_history to JSON file for crash recovery.
