@@ -108,17 +108,18 @@ def discover_ibkr_scanner() -> List[dict]:
     existing = _load_existing_symbols()
     existing_ids = _load_existing_con_ids()
 
+    # IBKR scanner uses location codes, not exchange codes
+    # See: https://interactivebrokers.github.io/tws-api/market_scanners.html
     scanner_configs = [
-        # US: most active stocks today
-        ("TOP_PERC_GAIN", "STK", "SMART", "USD", "US high gainers"),
-        ("TOP_PERC_LOSE", "STK", "SMART", "USD", "US high losers"),
-        ("MOST_ACTIVE", "STK", "SMART", "USD", "US most active"),
-        ("HOT_BY_VOLUME", "STK", "SMART", "USD", "US hot by volume"),
-        # LSE: most active
-        ("MOST_ACTIVE", "STK", "LSE", "GBP", "LSE most active"),
-        ("TOP_PERC_GAIN", "STK", "LSE", "GBP", "LSE high gainers"),
-        # LSEETF: most active (discover new leveraged products)
-        ("MOST_ACTIVE", "STK", "LSEETF", "USD", "LSEETF most active"),
+        # US stocks
+        ("TOP_PERC_GAIN", "STK", "STK.US.MAJOR", "USD", "US high gainers"),
+        ("TOP_PERC_LOSE", "STK", "STK.US.MAJOR", "USD", "US high losers"),
+        ("MOST_ACTIVE", "STK", "STK.US.MAJOR", "USD", "US most active"),
+        ("HOT_BY_VOLUME", "STK", "STK.US.MAJOR", "USD", "US hot by volume"),
+        # European stocks
+        ("MOST_ACTIVE", "STK", "STK.EU.LSEETF", "GBP", "LSEETF most active"),
+        ("MOST_ACTIVE", "STK", "STK.EU.LSE", "GBP", "LSE most active"),
+        ("TOP_PERC_GAIN", "STK", "STK.EU.LSE", "GBP", "LSE high gainers"),
     ]
 
     for scan_code, sec_type, location, currency, reason in scanner_configs:
