@@ -317,7 +317,9 @@ pub fn replay_events(events: &[WalEvent], portfolio: &mut PortfolioState) -> Rep
             // These are consumed by nightly analysis (Python), not the engine.
             | WalPayload::SignalRejected { .. }
             // P2-3.6: Signal funnel events — no state to restore during replay.
-            | WalPayload::SignalGenerated { .. } => {}
+            | WalPayload::SignalGenerated { .. }
+            // P15: Split adjustments — already applied to positions when written.
+            | WalPayload::SplitAdjusted { .. } => {}
         }
     }
 

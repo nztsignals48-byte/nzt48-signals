@@ -30,7 +30,7 @@ use crate::multiframe_vol::{MultiFrameVol, TimeFrame};
 use crate::sector_rotation::{SectorHeatTracker, sector_for_ticker};
 use crate::predictive_scoring::PredictiveScorer;
 use crate::quote_imbalance::QuoteImbalanceDetector;
-use crate::split_handler::SplitHandler;
+use crate::split_handler::{SplitEvent, SplitHandler};
 use crate::liquidation_defense::LiquidationDefense;
 use crate::broker_resilience::BrokerHealthMonitor;
 use crate::wal_compressor::WalCompressor;
@@ -3554,32 +3554,108 @@ impl<B: BrokerAdapter> Engine<B> {
         self.last_state_hash_ns = self.now_ns;
     }
 
-    /// P15: Check for pending split events and apply adjustments.
+    /// P15: Check for pending split events and apply position adjustments.
     ///
-    /// BLOCKED (R1): Cannot uncomment split adjustment logic until:
-    ///   1. ibkr_broker.rs emits SplitEvent when contractDetailsEnd detects
-    ///      changed multiplier/conId (IBKR callback integration needed).
-    ///   2. This loop must be refactored to collect tickers first, then mutate
-    ///      positions (borrow checker: can't mutate while iterating &self.positions).
+    /// Reads from /app/data/pending_splits.json (written by Python nightly pipeline).
+    /// File format: [{"ticker_id": 123, "ratio_from": 1, "ratio_to": 10, "effective_ns": ...}]
+    /// After processing, deletes the file to prevent re-processing.
     ///
     /// P0 SAFETY: Without this, a 1:10 reverse split causes 10x notional exposure.
-    /// Priority: Wire before going live with any stock-split-prone underlyings.
     pub fn check_pending_splits(&mut self) {
-        for (&tid, pos) in &self.positions {
-            if self.split_handler.was_processed(tid, self.now_ns) {
-                continue;
-            }
-            // TODO(R1): When IBKR split events are wired, refactor to:
-            //   1. Collect pending splits into Vec<(TickerId, SplitEvent)>
-            //   2. After iteration, for each (tid, event):
-            //      let pos = self.positions.get_mut(&tid).unwrap();
-            //      let adj = self.split_handler.apply_split(&event, pos.qty, pos.avg_entry, pos.stop_price);
-            //      pos.qty = adj.new_qty as u32;
-            //      pos.avg_entry = adj.new_entry_price;
-            //      pos.stop_price = adj.new_stop_price;
-            //      self.split_handler.record_processed(event);
-            let _ = pos.qty; // Position exists, no split detected yet
+        let path = std::path::Path::new("/app/data/pending_splits.json");
+        if !path.exists() {
+            return;
         }
+
+        // Read and parse the pending splits file
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("SPLIT_HANDLER: Failed to read pending_splits.json: {e}");
+                return;
+            }
+        };
+
+        let events: Vec<serde_json::Value> = match serde_json::from_str(&contents) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("SPLIT_HANDLER: Failed to parse pending_splits.json: {e}");
+                return;
+            }
+        };
+
+        if events.is_empty() {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+
+        // Collect applicable splits (borrow-checker safe: collect first, then mutate)
+        let mut applicable: Vec<(TickerId, SplitEvent)> = Vec::new();
+        for evt in &events {
+            let tid_raw = evt.get("ticker_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let tid = TickerId(tid_raw);
+            let ratio_from = evt.get("ratio_from").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+            let ratio_to = evt.get("ratio_to").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+            let effective_ns = evt.get("effective_ns").and_then(|v| v.as_u64()).unwrap_or(self.now_ns);
+
+            if ratio_from == 0 || ratio_to == 0 || ratio_from == ratio_to {
+                continue; // Skip invalid or no-op splits
+            }
+
+            let split_event = SplitEvent {
+                ticker_id: tid,
+                ratio_from,
+                ratio_to,
+                effective_ns,
+            };
+
+            // Only apply to positions we hold and haven't processed
+            if self.positions.contains_key(&tid) && !self.split_handler.was_processed(tid, effective_ns) {
+                applicable.push((tid, split_event));
+            }
+        }
+
+        // Apply splits (borrow-checker safe: collect results, then write WAL)
+        let mut wal_entries: Vec<WalPayload> = Vec::new();
+        for (tid, event) in applicable {
+            if let Some(pos) = self.positions.get_mut(&tid) {
+                let adj = self.split_handler.apply_split(&event, pos.qty as i64, pos.avg_entry, pos.stop_price);
+                let old_qty = pos.qty;
+                let old_entry = pos.avg_entry;
+                pos.qty = adj.new_qty.max(1) as u32;
+                pos.avg_entry = adj.new_entry_price;
+                pos.stop_price = adj.new_stop_price;
+                let new_qty = pos.qty;
+                let new_entry = pos.avg_entry;
+                let new_stop = pos.stop_price;
+                // Update portfolio copy too
+                if let Some(port_pos) = self.portfolio.positions_mut().get_mut(&tid) {
+                    port_pos.qty = new_qty;
+                    port_pos.avg_entry = new_entry;
+                    port_pos.stop_price = new_stop;
+                }
+                self.split_handler.record_processed(event.clone());
+                let ratio = SplitHandler::split_ratio(&event);
+                eprintln!(
+                    "SPLIT_HANDLER: Applied {}:{} split to {:?} — qty {}→{}, entry {:.4}→{:.4} (ratio {:.2})",
+                    event.ratio_from, event.ratio_to, tid,
+                    old_qty, new_qty, old_entry, new_entry, ratio
+                );
+                wal_entries.push(WalPayload::SplitAdjusted {
+                    ticker_id: tid.0,
+                    ratio_from: event.ratio_from,
+                    ratio_to: event.ratio_to,
+                    old_qty,
+                    new_qty,
+                });
+            }
+        }
+        for entry in wal_entries {
+            let _ = self.write_wal(entry);
+        }
+
+        // Delete the file after processing
+        let _ = std::fs::remove_file(path);
     }
 
     /// P2-3.8: Emergency halt on prolonged broker disconnect with open positions.

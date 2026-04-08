@@ -230,8 +230,14 @@ pub enum WalPayload {
         wal_events_replayed: u64,
         positions_reconciled: u32,
     },
-    // Dead variants removed: NextValidId, QuoteImbalanceInvalidated, SplitAdjustment
-    // — defined but never written by any code path. Match arms in wal_replay.rs also removed.
+    /// P15: Corporate split adjustment applied to an open position.
+    SplitAdjusted {
+        ticker_id: u32,
+        ratio_from: u32,
+        ratio_to: u32,
+        old_qty: u32,
+        new_qty: u32,
+    },
     /// SC-01: System shutting down gracefully.
     SystemShutdown {
         positions_flattened: u32,

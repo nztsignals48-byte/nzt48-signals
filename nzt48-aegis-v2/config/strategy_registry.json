@@ -163,7 +163,7 @@
     },
     "IVSURF_SkewDirectional": {
       "id": "IVSURF_Skew", "name": "IV Surface Skew", "family": "options",
-      "status": "shadow", "description": "IV skew directional signal. Uses IBKR opt_impl_vol vs opt_hist_vol ratio + scanner HIGH_OPT_IMP_VOLAT confirmation. Shadow: collecting data for promotion."
+      "status": "live", "description": "IV skew directional signal. Uses IBKR opt_impl_vol vs opt_hist_vol ratio + scanner HIGH_OPT_IMP_VOLAT confirmation. Promoted Session 39."
     },
     "ApexScout": {
       "id": "ApexScout", "name": "Apex Scout", "family": "institutional_flow",
