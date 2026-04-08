@@ -1529,6 +1529,50 @@ def run_selection(skip_fetch: bool = False, session: Optional[str] = None) -> in
     else:
         log.warning("Step 1b: No contracts.toml found — skipping contract filter (ALL tickers eligible)")
 
+    # Step 1c: Session-aware contract injection — if no tickers survive for an
+    # open exchange, inject contracts directly from contracts.toml. This ensures
+    # Asian/European/US markets always have representation even if the universe
+    # master doesn't contain tickers for that region.
+    existing_exchanges = {t.get("exchange", "") for t in all_tickers}
+    injected_from_contracts = 0
+    for exch in open_exchanges:
+        if exch not in existing_exchanges and contract_symbols:
+            # Find contracts for this exchange
+            try:
+                if CONTRACTS_FILE.exists():
+                    exch_contracts = []
+                    if tomllib is not None:
+                        with open(CONTRACTS_FILE, "rb") as f:
+                            cdata = tomllib.load(f)
+                        exch_contracts = [
+                            c for c in cdata.get("contracts", [])
+                            if c.get("exchange") == exch and c.get("con_id", 0) > 0
+                        ]
+                    if exch_contracts:
+                        for c in exch_contracts[:10]:  # Cap at 10 per exchange
+                            all_tickers.append({
+                                "symbol": c["symbol"],
+                                "exchange": exch,
+                                "name": c.get("name", ""),
+                                "type": c.get("sec_type", "stock"),
+                                "sector": "Unknown",
+                                "currency": c.get("currency", ""),
+                                "isa_eligible": True,
+                                "leveraged": c.get("leverage", 1) > 1,
+                                "inverse": False,
+                                "leverage_factor": c.get("leverage", 1),
+                                "market_cap_usd": 0,
+                                "avg_daily_volume": 0,
+                                "validated": True,
+                                "source": "contracts_injection",
+                            })
+                            injected_from_contracts += 1
+            except Exception as e:
+                log.warning("Step 1c: Failed to inject contracts for %s: %s", exch, e)
+    if injected_from_contracts > 0:
+        log.info("Step 1c: Injected %d tickers from contracts.toml for underrepresented open exchanges",
+                 injected_from_contracts)
+
     # Step 2: Classify into tiers
     tier12_pool, tier3_pool, tier4_pool = classify_into_tiers(all_tickers)
 
