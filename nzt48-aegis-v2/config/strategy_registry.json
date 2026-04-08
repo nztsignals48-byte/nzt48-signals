@@ -203,7 +203,7 @@
     },
     "OptionsFlow": {
       "id": "OptionsFlow", "name": "Unusual Options Flow", "family": "options",
-      "status": "shadow", "type": "overlay", "description": "Overlay — fires through options_flow.py feature module. Unusual options activity detection from CBOE data. Session 27."
+      "status": "live", "type": "overlay", "description": "Overlay — fires through options_flow.py feature module. Unusual options activity detection from CBOE data. Promoted Session 39."
     },
     "CryptoFearGreed": {
       "id": "CryptoFearGreed", "name": "Crypto Fear/Greed Index", "family": "macro_overlay",
@@ -227,7 +227,7 @@
     },
     "LatencyArbitrage": {
       "id": "LatencyArbitrage", "name": "Latency Arbitrage (NAV vs Market)", "family": "arbitrage",
-      "status": "shadow", "description": "Book 195: NAV-vs-market-price latency arb. Detects temporary mispricing between iNAV and traded price. Session 33."
+      "status": "live", "description": "Book 195: NAV-vs-market-price latency arb. Detects temporary mispricing between iNAV and traded price. Promoted Session 39."
     },
     "MacroNowcast": {
       "id": "MacroNowcast", "name": "Macro Nowcasting", "family": "event_driven",
@@ -251,7 +251,7 @@
     },
     "PreMarketAnomaly": {
       "id": "PreMarketAnomaly", "name": "Pre-Market Volume Anomaly", "family": "institutional_flow",
-      "status": "shadow", "description": "Extended hours RVOL > 3.0 informed flow detection. Pre-market volume spikes predict RTH direction. US 11:00-14:30 UTC / LSE 05:00-08:00 UTC. Session 34."
+      "status": "live", "description": "Extended hours RVOL > 3.0 informed flow detection. Pre-market volume spikes predict RTH direction. US 11:00-14:30 UTC / LSE 05:00-08:00 UTC. Promoted Session 39."
     },
     "VolTermStructure": {
       "id": "VolTermStructure", "name": "Vol Term Structure", "family": "volatility",
@@ -259,7 +259,7 @@
     },
     "IEXAuctionFade": {
       "id": "IEXAuctionFade", "name": "IEX Auction Fade", "family": "microstructure",
-      "status": "shadow", "description": "IEX discretionary auction mean-reversion. Fades auction price vs NBBO mid when deviation > 3 bps. 350+ auctions/day. Session 35."
+      "status": "live", "description": "IEX discretionary auction mean-reversion. Fades auction price vs NBBO mid when deviation > 3 bps. 350+ auctions/day. Promoted Session 39."
     }
   },
   "regime_definitions": {

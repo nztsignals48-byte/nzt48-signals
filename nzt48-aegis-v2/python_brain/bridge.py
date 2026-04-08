@@ -6567,7 +6567,7 @@ def _generate_signals(ticker_id, msg, ticks, ind, conf_floor):
 
     # ── SESSION 27: CONGRESSIONAL TRADING OVERLAY ──
     try:
-        _cong_path = "/app/data/congressional_signals.json"
+        _cong_path = "/app/data/smart_money_signals.json"
         if os.path.exists(_cong_path):
             _cong_age = time.time() - os.path.getmtime(_cong_path)
             if _cong_age < 86400:
@@ -8805,8 +8805,8 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         pass  # Fail-open: portfolio optimizer output is advisory
 
     # ── OPTIONS SENTIMENT OVERLAY (put/call ratios from OPRA) ──
+    # Session 39: Strengthened overlay — wider range, volume confirmation, both directions.
     # Uses opt_call_oi, opt_put_oi, opt_call_vol, opt_put_vol from reqMktData.
-    # Extreme put/call ratios adjust confidence for Long signals.
     _call_oi = msg.get("opt_call_oi", 0)
     _put_oi = msg.get("opt_put_oi", 0)
     _call_vol = msg.get("opt_call_vol", 0)
@@ -8815,17 +8815,30 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
         _pc_oi_ratio = _put_oi / _call_oi
         _pc_vol_ratio = (_put_vol / _call_vol) if _call_vol > 0 else 0.0
         for sig in all_signals:
+            sig["pc_oi_ratio"] = round(_pc_oi_ratio, 3)
+            sig["pc_vol_ratio"] = round(_pc_vol_ratio, 3)
             if sig.get("direction") == "Long":
-                # Bullish OI (lots of calls vs puts) confirms Long
-                if _pc_oi_ratio < 0.6:
+                # Strong bullish: very few puts relative to calls
+                if _pc_oi_ratio < 0.5:
+                    sig["confidence"] = min(100, sig["confidence"] + 3)
+                    sig["options_sentiment"] = "very_bullish"
+                elif _pc_oi_ratio < 0.7:
                     sig["confidence"] = min(100, sig["confidence"] + 2)
                     sig["options_sentiment"] = "bullish"
-                # Bearish OI (lots of puts) opposes Long
-                elif _pc_oi_ratio > 1.8:
+                # Bearish: puts dominate — opposes Long
+                elif _pc_oi_ratio > 2.0:
+                    sig["confidence"] = max(0, sig["confidence"] - 5)
+                    sig["options_sentiment"] = "very_bearish"
+                elif _pc_oi_ratio > 1.5:
                     sig["confidence"] = max(0, sig["confidence"] - 3)
                     sig["options_sentiment"] = "bearish"
-                sig["pc_oi_ratio"] = round(_pc_oi_ratio, 3)
-                sig["pc_vol_ratio"] = round(_pc_vol_ratio, 3)
+                # Volume confirmation: if intraday put volume spikes > 2x call volume
+                if _pc_vol_ratio > 2.0 and _put_vol > 500:
+                    sig["confidence"] = max(0, sig["confidence"] - 3)
+                    sig["options_vol_warning"] = f"put_vol_spike_{_pc_vol_ratio:.1f}x"
+                elif _pc_vol_ratio < 0.5 and _call_vol > 500:
+                    sig["confidence"] = min(100, sig["confidence"] + 2)
+                    sig["options_vol_confirm"] = f"call_vol_spike_{_pc_vol_ratio:.1f}x"
 
     # ── MARK PRICE / AVG VOLUME ENRICHMENT ──
     # mark_price: IBKR's theoretical price for margining (better than last for thin books)
@@ -8860,6 +8873,30 @@ def _apply_adjustments(ticker_id, msg, ind, all_signals):
             sig["range_52wk_pct"] = round(_range_52wk_pct, 4)
             sig["high_52wk"] = _high_52wk
             sig["low_52wk"] = _low_52wk
+
+    # ── SESSION 39: SHORTABLE + REAL-TIME HISTORICAL VOL ENRICHMENT ──
+    # shortable: IBKR's shortable indicator (>0 = shares available). For ISA accounts
+    # we can't short, but low shortability signals crowded/hard-to-borrow = higher vol.
+    _shortable = msg.get("shortable", -1.0)
+    if _shortable >= 0:
+        for sig in all_signals:
+            sig["shortable"] = _shortable
+            # Very low shortability (<0.5) = hard to borrow = crowded trade = higher risk
+            if _shortable < 0.5 and _shortable >= 0:
+                sig["confidence"] = max(0, sig["confidence"] - 2)
+                sig["shortable_warning"] = "hard_to_borrow"
+
+    # rt_hist_vol: IBKR 30-day real-time historical volatility. More responsive than
+    # our bar-based RVOL calculation. Use as regime confirmation.
+    _rt_hist_vol = msg.get("rt_hist_vol", 0.0)
+    if _rt_hist_vol > 0:
+        for sig in all_signals:
+            sig["rt_hist_vol"] = round(_rt_hist_vol, 4)
+            # Extreme vol (>60% annualized) = reduce sizing via Kelly penalty
+            if _rt_hist_vol > 0.60:
+                sig["kelly_fraction"] *= 0.7
+                sig["shares"] = max(1, int(sig["shares"] * 0.7))
+                sig["rt_vol_penalty"] = f"high_{_rt_hist_vol:.0%}"
 
     # ── SHORT-TERM VOLUME (3/5/10 min RVOL ratio) ──
     # RVOL ratio = short_term_vol_3min / (avg_volume / 130 trading-periods-per-day).
