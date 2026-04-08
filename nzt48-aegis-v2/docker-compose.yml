@@ -76,6 +76,9 @@ services:
   # TRADING_MODE=live in .env.production — engine IS_LIVE=false prevents real orders
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
+    # IB Gateway only supports x86_64 reliably. On ARM hosts (Oracle Ampere),
+    # Docker QEMU emulation handles the translation transparently.
+    platform: linux/amd64
     container_name: aegis-ib-gateway
     restart: unless-stopped
     env_file:

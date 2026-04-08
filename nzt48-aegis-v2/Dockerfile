@@ -1,6 +1,6 @@
 # AEGIS V2 — Multi-stage build: Rust core + Python brain + Ouroboros cron
 # Phase 7.1: Builder → Runtime split reduces image from ~6.3GB to ~2.5GB
-# Target: x86_64 (EC2 c7i-flex.large)
+# Multi-arch: builds natively on both x86_64 (EC2) and aarch64 (Oracle ARM)
 
 # ════════════════════════════════════════════════════════════════
 # STAGE 1: Builder — compile Rust binary + PyO3 wheel
@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir maturin>=1.5
 COPY Cargo.toml Cargo.lock ./
 COPY rust_core/ rust_core/
 
-# Build aegis binary (release, optimized for icelake)
-ENV RUSTFLAGS="-C target-cpu=icelake-server"
+# Build aegis binary (release, native CPU optimization)
+# On x86_64: optimizes for server CPUs. On aarch64: uses neon SIMD.
 RUN cargo build --release --bin aegis 2>&1 \
     && strip target/release/aegis
 
@@ -47,12 +47,18 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && node --version && claude --version
 
 # Supercronic for Ouroboros nightly cron (no syslog needed)
-ARG SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64
-ARG SUPERCRONIC_SHA=feefa310da569c81b99e1027b86b27b51e6ee9ab647747b49099645120cfc671
-RUN curl -fsSLO "$SUPERCRONIC_URL" \
-    && echo "${SUPERCRONIC_SHA}  supercronic-linux-amd64" | sha256sum -c - \
-    && chmod +x supercronic-linux-amd64 \
-    && mv supercronic-linux-amd64 /usr/local/bin/supercronic
+# Multi-arch: detect platform and download correct binary
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-arm64"; \
+        SUPERCRONIC_BIN="supercronic-linux-arm64"; \
+    else \
+        SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64"; \
+        SUPERCRONIC_BIN="supercronic-linux-amd64"; \
+    fi && \
+    curl -fsSLO "$SUPERCRONIC_URL" && \
+    chmod +x "$SUPERCRONIC_BIN" && \
+    mv "$SUPERCRONIC_BIN" /usr/local/bin/supercronic
 
 WORKDIR /app
 
