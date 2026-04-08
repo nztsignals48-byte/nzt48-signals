@@ -85,6 +85,11 @@ _EXCHANGE_TO_YF_SUFFIX: Dict[str, str] = {
     "ASX": ".AX",         # Australia
     "EURONEXT_PA": ".PA", # Paris
     "EURONEXT_AS": ".AS", # Amsterdam
+    "SBF": ".PA",         # Euronext Paris (SBF = Société des Bourses Françaises)
+    "AEB": ".AS",         # Euronext Amsterdam (AEB = Amsterdam Exchange)
+    "FWB": ".F",          # Frankfurt Borse
+    "FWB2": ".F",         # Frankfurt Borse 2
+    "LSEIOB1": ".L",     # LSE International Order Book (GDRs)
     "SIX": ".SW",         # Switzerland
 }
 
@@ -100,6 +105,11 @@ _EXCHANGE_TO_BBG: Dict[str, str] = {
     "ASX": "AU",
     "EURONEXT_PA": "FP",
     "EURONEXT_AS": "NA",
+    "SBF": "FP",
+    "AEB": "NA",
+    "FWB": "GF",
+    "FWB2": "GF",
+    "LSEIOB1": "LI",
     "SIX": "SE",
 }
 

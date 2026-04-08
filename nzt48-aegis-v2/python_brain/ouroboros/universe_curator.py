@@ -109,6 +109,13 @@ T3_REGIME_SENSORS: Set[str] = {
     "EWG", "EWJ", "FXI",
     "1321.T",  # Nikkei 225 ETF
     "2800.HK",  # Hang Seng ETF
+    # Euronext Paris/Amsterdam — paid subscription, must consume
+    "SAN1", "TTE",  # Euronext Paris (SBF)
+    "UNVB", "WKL",  # Euronext Amsterdam (AEB)
+    # Samsung GDR + Korean Frankfurt cross-listings
+    "SMSN",  # Samsung GDR (LSEIOB1)
+    "HY9H",  # SK Hynix (FWB2)
+    "8ZT",   # LG Chem (FWB)
 }
 
 # T4: Breadth Pool — broader components for sector rotation/breadth signals

@@ -281,6 +281,11 @@ EXCHANGE_LOCAL_HOURS = {
     "AMEX":         (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # DST (EDT/EST)
     "SMART":        (9, 30, 16, 0,  "America/New_York",   None, None, None, None),    # IBKR smart routing (US hours)
     "IBIS":         (8, 0,  16, 30, "Europe/Berlin",      None, None, None, None),    # XETRA/IBIS (same hours)
+    "SBF":          (9, 0,  17, 30, "Europe/Paris",       None, None, None, None),    # Euronext Paris
+    "AEB":          (9, 0,  17, 30, "Europe/Amsterdam",   None, None, None, None),    # Euronext Amsterdam
+    "FWB":          (8, 0,  20, 0,  "Europe/Berlin",      None, None, None, None),    # Frankfurt Borse
+    "FWB2":         (8, 0,  20, 0,  "Europe/Berlin",      None, None, None, None),    # Frankfurt Borse 2
+    "LSEIOB1":      (8, 0,  16, 30, "Europe/London",      None, None, None, None),    # LSE IOB (GDRs)
     "TSEJ":         (9, 0,  15, 0,  "Asia/Tokyo",         None, None, None, None),    # Tokyo SE
     "SEHK":         (9, 30, 16, 0,  "Asia/Hong_Kong",     None, None, None, None),    # HKEX
 }
@@ -297,7 +302,7 @@ def _get_exchange_tz(tz_name: str):
 # Legacy session filtering (kept for backwards compatibility, not used in unified mode)
 SESSION_EXCHANGES = {
     "asian": {"HKEX", "TSE", "SGX", "KRX", "ASX", "NZX", "XNZE", "TSEJ", "SEHK"},
-    "european": {"LSE", "LSEETF", "XETRA", "IBIS", "EURONEXT_PA", "EURONEXT_AS", "SIX"},
+    "european": {"LSE", "LSEETF", "XETRA", "IBIS", "EURONEXT_PA", "EURONEXT_AS", "SIX", "SBF", "AEB", "FWB", "FWB2", "LSEIOB1"},
     "american": {"NYSE", "NASDAQ", "AMEX", "SMART"},
 }
 
@@ -418,7 +423,8 @@ MAX_NEGATIVE_MOMENTUM = -0.03 # Disqualify tickers with worse than -3% momentum 
 EXCHANGE_PRIORITY = {
     "NYSE": 1.0, "NASDAQ": 1.0, "SMART": 1.0, "AMEX": 0.8,
     "LSE": 0.9, "LSEETF": 0.9, "XETRA": 0.7, "IBIS": 0.7,
-    "EURONEXT_PA": 0.7, "EURONEXT_AS": 0.7,
+    "EURONEXT_PA": 0.7, "EURONEXT_AS": 0.7, "SBF": 0.7, "AEB": 0.7,
+    "FWB": 0.6, "FWB2": 0.6, "LSEIOB1": 0.8,
     "TSE": 0.6, "TSEJ": 0.6, "HKEX": 0.6, "SEHK": 0.6, "TSX": 0.6,
     "SIX": 0.5, "KRX": 0.5, "SGX": 0.5,
 }
@@ -1106,10 +1112,48 @@ def generate_watchlist(
     # Take top 100
     top_100 = scored[:tier1_n]
 
+    # ── PAID EXCHANGE SLOT RESERVATION ──
+    # We pay for data on specific exchanges. Guarantee minimum representation
+    # from each paid exchange to maximise data ROI (£58/mo budget).
+    # If the scored list has tickers from a paid exchange but they didn't
+    # make top 100, inject the best ones from that exchange.
+    PAID_EXCHANGE_MIN_SLOTS = {
+        # Exchange: (min_slots, [exchange_codes_in_contracts])
+        "IBIS": 3,      # Xetra L2 (EUR 21.75/mo) — must consume
+        "SEHK": 3,      # HKEX L2 (HKD 225/mo) — must consume
+        "TSEJ": 3,      # Japan TSE L2 (JPY 380/mo) — must consume
+        "KSE": 2,       # Korea L2 (USD 2/mo) — must consume
+        "SBF": 3,       # Euronext Paris L1 (EUR 3/mo bundle) — must consume
+        "AEB": 2,       # Euronext Amsterdam L1 — part of bundle
+    }
+
+    top_100_syms = {t["symbol"] for t in top_100}
+    injected_count = 0
+    for exchange, min_slots in PAID_EXCHANGE_MIN_SLOTS.items():
+        # Count how many tickers from this exchange are already in top_100
+        current_count = sum(1 for t in top_100 if t.get("exchange") == exchange)
+        if current_count >= min_slots:
+            continue
+        # Find the best tickers from this exchange in the full scored list
+        exchange_tickers = [
+            t for t in scored
+            if t.get("exchange") == exchange and t["symbol"] not in top_100_syms
+        ]
+        # Sort by score descending, take what we need
+        exchange_tickers.sort(key=lambda t: t.get("composite_score", 0), reverse=True)
+        needed = min_slots - current_count
+        for t in exchange_tickers[:needed]:
+            top_100.append(t)
+            top_100_syms.add(t["symbol"])
+            injected_count += 1
+
+    if injected_count > 0:
+        log.info("Paid exchange slot reservation: injected %d tickers from underrepresented exchanges",
+                 injected_count)
+
     # Guaranteed observation residency: core LSE ETPs always appear in the
     # watchlist regardless of score. These are the primary ISA instruments
     # with zero FX cost. If any are missing from top_100, append them.
-    top_100_syms = {t["symbol"] for t in top_100}
     missing_core = CORE_LSE_ETPS - top_100_syms
     if missing_core:
         # Find them in the full scored list (before notional/threshold filters)

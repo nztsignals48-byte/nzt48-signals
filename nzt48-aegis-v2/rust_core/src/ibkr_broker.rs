@@ -794,21 +794,62 @@ impl IbkrBroker {
     /// Called after subscribe_all() / subscribe_all_mktdata().
     pub fn subscribe_all_depth(&mut self) -> u32 {
         // IBKR limits L2 depth to 3 concurrent streams for most account types.
-        // Prioritize watchlist tickers; stop at cap to avoid error 309 spam.
+        // EXCHANGE-AWARE ROTATION: distribute depth across paid L2 exchanges
+        // to maximise data ROI. We pay for LSE, XETRA, HKEX, TSE, KRX L2.
+        // Allocate 1 slot to the highest-priority paid L2 exchange with tickers,
+        // round-robin across exchanges rather than giving all 3 to LSE.
         const MAX_DEPTH_SUBS: u32 = 3;
-        let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
+
+        // Group tickers by exchange, prioritized by data cost (most expensive first)
+        let l2_priority_exchanges: &[&str] = &[
+            "LSEETF", "LSE",  // GBP 7/mo
+            "SEHK",           // HKD 225/mo
+            "IBIS",           // EUR 21.75/mo
+            "TSEJ",           // JPY 380/mo
+            "KSE",            // USD 2/mo
+            "AEB", "SBF",     // Euronext bundle EUR 3/mo
+        ];
+
         let mut count = 0u32;
-        for tid in ticker_ids {
+        let mut used_exchanges: Vec<String> = Vec::new();
+
+        // Round 1: one depth sub per unique paid L2 exchange
+        // Pre-collect (ticker_id, exchange) to avoid borrow conflicts
+        for &target_exchange in l2_priority_exchanges {
             if count >= MAX_DEPTH_SUBS {
                 break;
             }
-            if self.subscribe_depth(tid).is_ok() {
-                count += 1;
+            if used_exchanges.iter().any(|e| e == target_exchange) {
+                continue;
+            }
+            // Find first ticker on this exchange (collect to release borrow)
+            let candidate: Option<TickerId> = self.contract_map.iter()
+                .find(|(_, c)| c.exchange == target_exchange)
+                .map(|(tid, _)| *tid);
+            if let Some(tid) = candidate {
+                if self.subscribe_depth(tid).is_ok() {
+                    count += 1;
+                    used_exchanges.push(target_exchange.to_string());
+                }
             }
         }
+
+        // Round 2: fill remaining slots with any L2-eligible ticker
+        if count < MAX_DEPTH_SUBS {
+            let ticker_ids: Vec<TickerId> = self.contract_map.keys().copied().collect();
+            for tid in ticker_ids {
+                if count >= MAX_DEPTH_SUBS {
+                    break;
+                }
+                if self.subscribe_depth(tid).is_ok() {
+                    count += 1;
+                }
+            }
+        }
+
         eprintln!(
-            "SUBSCRIBE_DEPTH: {} reqMktDepth (L2) subscriptions active (cap={})",
-            count, MAX_DEPTH_SUBS
+            "SUBSCRIBE_DEPTH: {} reqMktDepth (L2) across {} exchanges (cap={})",
+            count, used_exchanges.len(), MAX_DEPTH_SUBS
         );
         count
     }
