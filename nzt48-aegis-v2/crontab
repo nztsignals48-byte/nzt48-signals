@@ -14,6 +14,15 @@
 # Sprint S05 (H1): Sequential Nightly Pipeline — replaces individual entries
 # Order: nightly_v6 → config_writer → win_loss_delta → claude_review → challenger → approval_gate
 # flock prevents parallel execution. set -euo pipefail aborts on critical failures.
+# Ticker Discovery — 04:40 UTC Mon-Fri (before curator + nightly pipeline)
+# Scans IBKR scanner, LSEETF sweep, index diffs for new IPOs/ETPs/additions.
+# Writes discovery_cache.json consumed by contract_expander.
+40 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.ticker_discovery >> /var/log/ticker_discovery.log 2>&1
+
+# Contract Expander — 04:45 UTC Mon-Fri (onboard discovered tickers)
+# Validates discovery_cache.json via IBKR reqContractDetails, appends to contracts.toml.
+45 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.contract_expander >> /var/log/contract_expander.log 2>&1
+
 # Universe Curator — 04:48 UTC Mon-Fri (before nightly pipeline)
 # Auto-curates radar_universe.toml: assigns tiers, promotes signal-active tickers, demotes dormant.
 48 4 * * 1-5 cd /app && python3 -m python_brain.ouroboros.universe_curator >> /var/log/universe_curator.log 2>&1

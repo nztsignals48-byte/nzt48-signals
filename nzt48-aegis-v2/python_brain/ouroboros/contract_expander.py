@@ -314,6 +314,39 @@ def load_candidates() -> List[Dict[str, Any]]:
         except Exception as e:
             log.warning("Failed to load pending_contracts.json: %s", e)
 
+    # Source 4: Discovery cache (from ticker_discovery.py nightly scan)
+    # Auto-discovered new IPOs, LSEETF products, IBKR scanner finds
+    discovery_path = DATA_DIR / "discovery_cache.json"
+    if discovery_path.exists():
+        try:
+            with open(discovery_path) as f:
+                discovery = json.load(f)
+            for t in discovery.get("candidates", []):
+                sym = t.get("symbol", "")
+                if not sym or sym in seen_symbols:
+                    continue
+                contract_sym = _yf_to_contract_symbol(sym)
+                if contract_sym in existing:
+                    continue
+                seen_symbols.add(sym)
+                # Discovery candidates get a base score of 0.5
+                # (they passed scanner/sweep filters but haven't been scored)
+                candidates.append({
+                    "symbol": sym,
+                    "contract_symbol": contract_sym,
+                    "composite_score": 0.5,
+                    "exchange": t.get("exchange", ""),
+                    "name": t.get("long_name", ""),
+                    "sector": t.get("reason", "Discovery"),
+                    "leverage_factor": 1,
+                    "source": f"discovery_{t.get('source', 'unknown')}",
+                    "con_id": t.get("con_id", 0),  # May already have con_id from IBKR scanner
+                })
+            log.info("  Discovery cache source: %d candidates",
+                     sum(1 for c in candidates if c["source"].startswith("discovery_")))
+        except Exception as e:
+            log.warning("Failed to load discovery_cache.json: %s", e)
+
     # Sort by score descending
     candidates.sort(key=lambda c: c["composite_score"], reverse=True)
     return candidates

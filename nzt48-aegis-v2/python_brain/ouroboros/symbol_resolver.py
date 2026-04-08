@@ -210,13 +210,56 @@ class SymbolResolver:
     # ── IBKR → other sources ──────────────────────────────────────────
 
     def to_yfinance(self, ibkr_symbol: str, exchange: str = "") -> str:
-        """Convert IBKR symbol to yfinance symbol."""
+        """Convert IBKR symbol to yfinance symbol.
+
+        If the symbol is known, returns the cached mapping.
+        If unknown, uses heuristic rules to infer the correct yfinance format.
+        This makes the resolver work for NEW tickers that aren't yet in contracts.toml.
+        """
+        # Fast path: known symbol
         if exchange:
             info = self._by_ibkr_exchange.get((ibkr_symbol, exchange))
             if info:
                 return info.yfinance
         info = self._by_ibkr.get(ibkr_symbol)
-        return info.yfinance if info else ibkr_symbol
+        if info:
+            return info.yfinance
+
+        # Unknown symbol — infer from structure
+        return self._infer_yfinance(ibkr_symbol, exchange)
+
+    def _infer_yfinance(self, symbol: str, exchange: str = "") -> str:
+        """Heuristic inference for unknown symbols.
+
+        Rules:
+        1. Symbol already has suffix (.L, .T, .HK, .DE) → pass through
+        2. Exchange provided → use exchange suffix mapping
+        3. No exchange, pure letters 1-5 chars → assume US stock (bare)
+        4. Starts with digit → likely LSEETF or Asian, needs context
+        """
+        # Already has a recognized suffix
+        for suffix in (".L", ".T", ".HK", ".DE", ".PA", ".AS", ".SW", ".AX", ".SI", ".KS"):
+            if symbol.endswith(suffix):
+                return symbol
+
+        # Exchange provided — use the mapping
+        if exchange:
+            yf_suffix = _EXCHANGE_TO_YF_SUFFIX.get(exchange, "")
+            if yf_suffix:
+                return symbol + yf_suffix
+            return symbol  # No suffix needed (US exchanges)
+
+        # No exchange context — guess from symbol structure
+        # GraniteShares/LevShares pattern: starts with digit → likely LSEETF
+        if symbol and symbol[0].isdigit():
+            return symbol + ".L"  # Most likely LSEETF
+
+        # 2-4 letter all-caps with no dots → US stock
+        if symbol.isalpha() and symbol.isupper() and 1 <= len(symbol) <= 5:
+            return symbol  # US, no suffix needed
+
+        # Default: return as-is
+        return symbol
 
     def to_bloomberg(self, ibkr_symbol: str, exchange: str = "") -> str:
         """Convert IBKR symbol to Bloomberg ticker."""
