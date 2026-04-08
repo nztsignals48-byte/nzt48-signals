@@ -579,7 +579,40 @@ impl IbkrBroker {
             eprintln!("SUBSCRIBE: {} watchlist tickers queued", ticker_ids.len());
         }
 
-        // Phase 2: Fill remaining slots — LSEETF leveraged ETPs (core edge)
+        // Phase 2: Reserve minimum slots for paid non-LSE exchanges FIRST.
+        // Without this, LSEETF (200+ tickers) fills all 100 slots and other
+        // paid exchanges (TSEJ, SEHK, IBIS, KSE, SBF) get nothing.
+        let paid_exchange_min: &[(&str, usize)] = &[
+            ("TSEJ", 3),   // Japan TSE — paid L2
+            ("SEHK", 3),   // Hong Kong — paid L2
+            ("IBIS", 3),   // Xetra — paid L2
+            ("KSE", 2),    // Korea — paid L2
+            ("SBF", 2),    // Euronext Paris — paid L1
+            ("AEB", 1),    // Euronext Amsterdam — paid L1
+            ("SMART", 5),  // US mega-caps via IBKR smart routing
+        ];
+        for &(exch, min_slots) in paid_exchange_min {
+            let mut exch_tids: Vec<TickerId> = self.contract_map.iter()
+                .filter(|(_, m)| m.exchange == exch && !subscribed_syms.contains(&m.symbol))
+                .map(|(&tid, _)| tid)
+                .collect();
+            exch_tids.sort_by_key(|t| t.0);
+            let mut added = 0usize;
+            for &tid in &exch_tids {
+                if added >= min_slots || ticker_ids.len() >= max_subs { break; }
+                if let Some(m) = self.contract_map.get(&tid)
+                    && !subscribed_syms.contains(&m.symbol) {
+                        ticker_ids.push(tid);
+                        subscribed_syms.insert(m.symbol.clone());
+                        added += 1;
+                }
+            }
+            if added > 0 {
+                eprintln!("SUBSCRIBE: Phase 2 reserved {} slots for {}", added, exch);
+            }
+        }
+
+        // Phase 3: Fill remaining slots with LSEETF leveraged ETPs (core edge)
         if ticker_ids.len() < max_subs {
             let mut lseetf: Vec<TickerId> = self.contract_map.iter()
                 .filter(|(_, m)| m.exchange == "LSEETF" && !subscribed_syms.contains(&m.symbol))
@@ -596,7 +629,7 @@ impl IbkrBroker {
             }
         }
 
-        // Phase 3: Fill remaining round-robin across other exchanges
+        // Phase 4: Fill any remaining slots round-robin across other exchanges
         let remaining = max_subs.saturating_sub(ticker_ids.len());
         if remaining > 0 {
             let mut by_exchange: std::collections::HashMap<String, Vec<TickerId>> = std::collections::HashMap::new();
@@ -608,7 +641,8 @@ impl IbkrBroker {
             for tids in by_exchange.values_mut() {
                 tids.sort_by_key(|t| t.0);
             }
-            let exchanges = ["LSE", "SMART", "TSE", "HKEX", "XETRA", "EURONEXT", "SGX", "KRX"];
+            // Use actual IBKR exchange codes (not human names)
+            let exchanges = ["LSE", "SMART", "TSEJ", "SEHK", "IBIS", "SBF", "AEB", "SGX", "KSE"];
             let per_exch = remaining / exchanges.len().max(1);
             let mut extra_slots = remaining - per_exch * exchanges.len();
             for exch in &exchanges {
