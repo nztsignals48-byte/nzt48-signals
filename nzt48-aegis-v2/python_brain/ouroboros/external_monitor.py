@@ -368,6 +368,66 @@ def check_independent_risk() -> Dict[str, Any]:
     return check
 
 
+def check_exchange_coverage() -> Dict[str, Any]:
+    """Validate that all paid exchanges have active subscriptions.
+
+    Detects the exact scenario that caused zero Asian market ticks: a greedy
+    subscription algorithm filling all slots with one exchange while paid
+    exchanges (TSEJ, SEHK, IBIS, KSE, SBF) get nothing.
+    """
+    check = {"name": "exchange_coverage", "status": "ok", "detail": "", "data": {}}
+    if not TELEMETRY_FILE.exists():
+        check["status"] = "info"
+        check["detail"] = "No telemetry"
+        return check
+
+    try:
+        with open(TELEMETRY_FILE) as f:
+            data = json.load(f)
+
+        sub_lines = data.get("sub_lines", 0)
+        # Parse exchange distribution from telemetry if available
+        exchange_dist = data.get("exchange_distribution", {})
+
+        # Check contracts.toml for what SHOULD be subscribed
+        contracts_path = CONFIG_DIR / "contracts.toml"
+        paid_exchanges = {"TSEJ": 3, "SEHK": 3, "IBIS": 3, "KSE": 2, "SBF": 2}
+        missing = []
+
+        if exchange_dist:
+            for exch, min_slots in paid_exchanges.items():
+                actual = exchange_dist.get(exch, 0)
+                if actual < min_slots:
+                    missing.append(f"{exch}({actual}/{min_slots})")
+                check["data"][exch] = actual
+        else:
+            # No distribution data — check if total subs is suspiciously low
+            if sub_lines > 0 and sub_lines < 20:
+                check["status"] = "warning"
+                check["detail"] = f"Only {sub_lines} subscriptions — possible coverage gap"
+                return check
+
+        if missing:
+            check["status"] = "warning"
+            check["detail"] = f"Paid exchange under-coverage: {', '.join(missing)}"
+        else:
+            check["detail"] = f"{sub_lines} subscriptions across all paid exchanges"
+
+        # Check for zero-tick exchanges during their trading hours
+        now_utc_h = datetime.now(timezone.utc).hour
+        asia_hours = (22 <= now_utc_h or now_utc_h < 8)  # 22:00-08:00 UTC
+        if asia_hours and exchange_dist:
+            asia_ticks = sum(exchange_dist.get(e, 0) for e in ["TSEJ", "SEHK", "KSE", "SGX"])
+            if asia_ticks == 0:
+                check["status"] = "critical"
+                check["detail"] = f"ZERO Asian exchange subs during Asia session ({now_utc_h:02d}:00 UTC)"
+
+    except (json.JSONDecodeError, OSError) as e:
+        check["status"] = "info"
+        check["detail"] = f"Coverage check skipped: {e}"
+    return check
+
+
 # ---------------------------------------------------------------------------
 # Main monitoring orchestrator
 # ---------------------------------------------------------------------------
@@ -384,6 +444,7 @@ def run_full_check() -> Dict[str, Any]:
         check_kill_switch(),
         check_ibkr_connection(),
         check_independent_risk(),
+        check_exchange_coverage(),
     ]
 
     # Determine overall status
