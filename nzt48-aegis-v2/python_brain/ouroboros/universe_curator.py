@@ -230,21 +230,29 @@ def _scan_delayed_data_promotions(t5_symbols: List[str], batch_size: int = 50) -
         log.warning("yfinance not installed — skipping delayed data promotions")
         return promotions
 
-    # Convert IBKR symbols to yfinance format
+    # Use SymbolResolver for accurate IBKR → yfinance conversion
+    try:
+        from python_brain.ouroboros.symbol_resolver import get_resolver
+        resolver = get_resolver()
+        log.info("Using SymbolResolver (%d contracts) for yfinance mapping", resolver.count)
+    except ImportError:
+        resolver = None
+        log.warning("SymbolResolver not available — using fallback symbol mapping")
+
     yf_symbols = []
-    ibkr_to_yf = {}
+    ibkr_to_yf = {}  # yfinance_sym → ibkr_sym (reverse map)
     for sym in t5_symbols[:500]:  # Cap at 500 to avoid timeout
-        yf_sym = sym
-        if sym.endswith(".L"):
-            yf_sym = sym  # yfinance uses .L for LSE
-        elif sym.endswith(".T"):
-            yf_sym = sym.replace(".T", ".T")  # Tokyo
-        elif sym.endswith(".HK"):
-            yf_sym = sym  # HKEX
-        elif sym.endswith(".DE"):
-            yf_sym = sym  # XETRA
-        yf_symbols.append(yf_sym)
-        ibkr_to_yf[yf_sym] = sym
+        if resolver:
+            yf_sym = resolver.to_yfinance(sym)
+        else:
+            # Fallback: naive suffix mapping
+            yf_sym = sym
+            if not any(sym.endswith(s) for s in (".L", ".T", ".HK", ".DE")):
+                # Check if it's an LSEETF ticker that needs .L
+                yf_sym = sym  # Can't determine without resolver
+        if yf_sym:
+            yf_symbols.append(yf_sym)
+            ibkr_to_yf[yf_sym] = sym
 
     if not yf_symbols:
         return promotions
