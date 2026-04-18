@@ -1,7 +1,8 @@
-"""Nightly meta-labeler retrain — called by ouroboros_v3.
+"""Nightly meta-labeler retrain — uses v4 trainer (7-feature schema).
 
-Wraps train_meta_labeler_v3 with consistent interface for Ouroboros.
-Name this file `retrain_meta_labeler.py` so supervisor/scheduler can grep it.
+IMPORTANT: v4 trains with the SAME 7 features that live inference
+(python_brain/quant/meta_labeler.py) produces. v3 used 10 features which
+caused silent 0.5 fallback at inference. Keep this pinned to v4.
 """
 from __future__ import annotations
 
@@ -15,14 +16,14 @@ sys.path.insert(0, str(ROOT))
 
 def retrain_meta_labeler() -> dict:
     """Retrain the meta-labeler from latest fills. Called nightly."""
-    from scripts.train_meta_labeler_v3 import train
+    from scripts.train_meta_labeler_v4 import train
     result = train()
     result["name"] = "retrain_meta_labeler"
+    result["trainer_version"] = "v4"
     return result
 
 
 def retrain_meta_labeler_cli():
-    """CLI entry for `python -m scripts.retrain_meta_labeler`."""
     result = retrain_meta_labeler()
     print(json.dumps(result, indent=2))
     return result
