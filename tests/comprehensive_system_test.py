@@ -396,9 +396,11 @@ def test_ouroboros(tr: TestRunner):
 
     def test_nightly_script_exists():
         from pathlib import Path
-        path = Path("/Users/rr/aegis-v5/scripts/ouroboros_v2_nightly.py")
+        # v2 archived → v3 canonical, v3_ext wraps hooks
+        path = Path("/Users/rr/aegis-v5/scripts/ouroboros_v3_nightly.py")
         assert path.exists(), f"missing {path}"
-        return {"has_nightly": True, "size": path.stat().st_size}
+        return {"has_nightly": True, "size": path.stat().st_size,
+                "ext_wrapper": Path("/Users/rr/aegis-v5/scripts/ouroboros_v3_ext.py").exists()}
 
     tr.run("ouroboros_import", "ouroboros", test_ouroboros_import)
     tr.run("ouroboros_nightly_script", "ouroboros", test_nightly_script_exists)
