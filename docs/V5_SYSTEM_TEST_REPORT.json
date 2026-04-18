@@ -114,7 +114,7 @@
       "details": {
         "dsr": 0.0
       },
-      "duration_ms": 325.6208896636963
+      "duration_ms": 345.55506706237793
     },
     {
       "name": "cost_model",
@@ -124,7 +124,7 @@
       "details": {
         "net_edge_bps": 43.41
       },
-      "duration_ms": 0.30803680419921875
+      "duration_ms": 1.0941028594970703
     },
     {
       "name": "cpcv_harness",
@@ -134,7 +134,7 @@
       "details": {
         "num_folds": 15
       },
-      "duration_ms": 0.6310939788818359
+      "duration_ms": 0.5519390106201172
     },
     {
       "name": "meta_labeler",
@@ -145,7 +145,7 @@
         "accept": true,
         "prob": 0.5
       },
-      "duration_ms": 0.3008842468261719
+      "duration_ms": 0.48995018005371094
     },
     {
       "name": "conformal_risk",
@@ -155,7 +155,7 @@
       "details": {
         "quantile_90pct": 1.462
       },
-      "duration_ms": 0.5056858062744141
+      "duration_ms": 0.4608631134033203
     },
     {
       "name": "l2_book_imbalance",
@@ -166,7 +166,7 @@
         "obi": 0.667,
         "predicted_bps": 29.5
       },
-      "duration_ms": 0.5271434783935547
+      "duration_ms": 0.7090568542480469
     },
     {
       "name": "spde_lob_simulator",
@@ -176,7 +176,7 @@
       "details": {
         "fills": 119
       },
-      "duration_ms": 3.1442642211914062
+      "duration_ms": 3.5126209259033203
     },
     {
       "name": "conformal_quantile_regression",
@@ -186,7 +186,7 @@
       "details": {
         "quantile_final": 0.952
       },
-      "duration_ms": 434.5078468322754
+      "duration_ms": 369.7237968444824
     },
     {
       "name": "bocpd_regime",
@@ -196,7 +196,7 @@
       "details": {
         "regime": "calm"
       },
-      "duration_ms": 1.2416839599609375
+      "duration_ms": 1.5108585357666016
     },
     {
       "name": "vpin_calculation",
@@ -206,7 +206,7 @@
       "details": {
         "vpin": 0.317
       },
-      "duration_ms": 0.0050067901611328125
+      "duration_ms": 0.0069141387939453125
     },
     {
       "name": "almgren_chriss",
@@ -217,7 +217,7 @@
         "slices": 4,
         "cost_bps": 5.67
       },
-      "duration_ms": 0.5047321319580078
+      "duration_ms": 0.7092952728271484
     },
     {
       "name": "impact_router_normal",
@@ -228,7 +228,7 @@
         "venue": "SMART",
         "order_type": "MARKETABLE_LIMIT"
       },
-      "duration_ms": 0.7278919219970703
+      "duration_ms": 0.7607936859130859
     },
     {
       "name": "impact_router_toxic_rejects",
@@ -239,7 +239,7 @@
         "venue": "DARK",
         "cost_bps": 8.0
       },
-      "duration_ms": 0.003814697265625
+      "duration_ms": 0.0040531158447265625
     },
     {
       "name": "var_cvar_monitor",
@@ -250,7 +250,7 @@
         "var95": 158.13,
         "cvar95": 183.41
       },
-      "duration_ms": 0.5121231079101562
+      "duration_ms": 0.6361007690429688
     },
     {
       "name": "cvar_stop_placement",
@@ -261,7 +261,7 @@
         "stop_price": 99.5065,
         "distance_bps": 49.35
       },
-      "duration_ms": 0.4038810729980469
+      "duration_ms": 0.27489662170410156
     },
     {
       "name": "tail_hedge_overlay",
@@ -272,7 +272,7 @@
         "regime": "stressed",
         "hedge_rec": "SH"
       },
-      "duration_ms": 0.2911090850830078
+      "duration_ms": 0.38504600524902344
     },
     {
       "name": "correlation_guard",
@@ -284,7 +284,7 @@
         "scale_factor": 0.21,
         "violations": 3
       },
-      "duration_ms": 0.44798851013183594
+      "duration_ms": 0.6208419799804688
     },
     {
       "name": "agent_swarm_fallback",
@@ -295,7 +295,7 @@
         "accept": true,
         "agents": 6
       },
-      "duration_ms": 365.89789390563965
+      "duration_ms": 371.4580535888672
     },
     {
       "name": "load_strategies",
@@ -314,7 +314,7 @@
           "MomentumBurst"
         ]
       },
-      "duration_ms": 12.839794158935547
+      "duration_ms": 16.271114349365234
     },
     {
       "name": "super_gate_init",
@@ -333,7 +333,7 @@
           "l2_boosted"
         ]
       },
-      "duration_ms": 11.446952819824219
+      "duration_ms": 11.60883903503418
     },
     {
       "name": "wal_directory",
@@ -344,7 +344,7 @@
         "wal_dir_exists": true,
         "num_wal_files": 3
       },
-      "duration_ms": 0.09441375732421875
+      "duration_ms": 0.08392333984375
     },
     {
       "name": "archive_directory",
@@ -355,7 +355,7 @@
         "archive_exists": true,
         "num_files": 31
       },
-      "duration_ms": 0.09322166442871094
+      "duration_ms": 0.08869171142578125
     },
     {
       "name": "models_directory",
@@ -363,9 +363,10 @@
       "passed": true,
       "error": "",
       "details": {
-        "models_dir_exists": false
+        "models_dir_exists": true,
+        "num_models": 0
       },
-      "duration_ms": 0.009059906005859375
+      "duration_ms": 0.05173683166503906
     },
     {
       "name": "fills_directory",
@@ -376,7 +377,7 @@
         "fills_dir_exists": true,
         "num_files": 1
       },
-      "duration_ms": 0.025033950805664062
+      "duration_ms": 0.024080276489257812
     },
     {
       "name": "ouroboros_import",
@@ -387,7 +388,7 @@
         "has_run_nightly": true,
         "has_result_class": true
       },
-      "duration_ms": 1.1568069458007812
+      "duration_ms": 2.087831497192383
     },
     {
       "name": "ouroboros_nightly_script",
@@ -408,7 +409,7 @@
       "details": {
         "file_size": 19977
       },
-      "duration_ms": 1.750946044921875
+      "duration_ms": 1.8858909606933594
     },
     {
       "name": "supervisor_services_count",
@@ -450,7 +451,7 @@
           "run_live_ibkr"
         ]
       },
-      "duration_ms": 0.8220672607421875
+      "duration_ms": 0.9262561798095703
     },
     {
       "name": "signal_through_gates",
@@ -464,7 +465,7 @@
         "corr_pass": true,
         "all_gates_pass": true
       },
-      "duration_ms": 0.026226043701171875
+      "duration_ms": 0.03409385681152344
     },
     {
       "name": "signal_rejection_path",
@@ -475,7 +476,7 @@
         "prob": 0.5,
         "accepted": true
       },
-      "duration_ms": 0.0059604644775390625
+      "duration_ms": 0.006198883056640625
     },
     {
       "name": "nats_listening",
@@ -485,7 +486,7 @@
       "details": {
         "nats_listening": true
       },
-      "duration_ms": 55.92918395996094
+      "duration_ms": 58.03203582763672
     },
     {
       "name": "rust_binary_built",
@@ -496,7 +497,7 @@
         "rust_binary_exists": true,
         "size_mb": 25.3
       },
-      "duration_ms": 0.08296966552734375
+      "duration_ms": 0.09202957153320312
     },
     {
       "name": "contracts_config",
@@ -504,9 +505,9 @@
       "passed": true,
       "error": "",
       "details": {
-        "num_contracts": 1001
+        "num_contracts": 2715
       },
-      "duration_ms": 0.5497932434082031
+      "duration_ms": 1.3797283172607422
     },
     {
       "name": "key_files_present",
@@ -517,7 +518,7 @@
         "missing": [],
         "all_present": true
       },
-      "duration_ms": 0.05698204040527344
+      "duration_ms": 0.06985664367675781
     }
   ]
 }

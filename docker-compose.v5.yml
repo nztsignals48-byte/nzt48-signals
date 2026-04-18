@@ -1,0 +1,38 @@
+version: '3.9'
+# V5 docker-compose — observability stack (supervisor still runs on host because
+# it needs macOS IB Gateway access)
+services:
+  nats:
+    image: nats:latest
+    container_name: v5_nats
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: v5_prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: v5_grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=aegis_v5
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana:/var/lib/grafana/dashboards
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  grafana_data:

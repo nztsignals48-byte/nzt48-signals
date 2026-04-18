@@ -1,0 +1,85 @@
+{
+  "uid": "v5_volkov_honest",
+  "title": "V5 Volkov Honest Dashboard",
+  "tags": ["v5", "volkov"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cost-Adjusted Mean PnL (bps per trade)",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_cost_adjusted_mean_bps"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [
+        {"color": "red", "value": null},
+        {"color": "yellow", "value": 0},
+        {"color": "green", "value": 2}
+      ]}}}
+    },
+    {
+      "id": 2,
+      "title": "Total Trades",
+      "type": "stat",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_fills_total"}]
+    },
+    {
+      "id": 3,
+      "title": "Win Rate %",
+      "type": "gauge",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_win_rate_pct"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 100}}
+    },
+    {
+      "id": 4,
+      "title": "Top Ticker Contribution % (concentration risk)",
+      "type": "bargauge",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_top_ticker_pct"}]
+    },
+    {
+      "id": 5,
+      "title": "PnL per Strategy (recent)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 6, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_pnl_by_strategy"}]
+    },
+    {
+      "id": 6,
+      "title": "Disabled Strategies (auto-kill)",
+      "type": "table",
+      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_disabled_strategies"}]
+    },
+    {
+      "id": 7,
+      "title": "Skew + Kurtosis (fat-tail detector)",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 14, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [{"expr": "v5_pnl_kurtosis"}]
+    },
+    {
+      "id": 8,
+      "title": "Net Liq vs SPY",
+      "type": "timeseries",
+      "gridPos": {"x": 18, "y": 14, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "cfjfa31v0fwu8d"},
+      "targets": [
+        {"expr": "v5_equity_gbp", "legendFormat": "V5"},
+        {"expr": "v5_spy_pnl_pct", "legendFormat": "SPY"}
+      ]
+    }
+  ]
+}
