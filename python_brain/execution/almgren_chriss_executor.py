@@ -109,15 +109,22 @@ def solve_almgren_chriss(
     t_grid = [k * dt for k in range(num_slices + 1)]
 
     # Optimal trajectory: x(t) = X * sinh(kappa*(T-t)) / sinh(kappa*T)
-    sinh_kT = math.sinh(kappa * horizon_s) if kappa * horizon_s < 50 else math.exp(kappa * horizon_s) / 2
+    # For very aggressive urgency, kappa*T can be huge. In that limit, the
+    # schedule collapses to "trade most upfront". Use numerically stable form.
+    kT = kappa * horizon_s
 
     x_remaining = []
     for t in t_grid:
-        if kappa * horizon_s < 1e-6:
+        if kT < 1e-6:
             # Near risk-neutral: linear (VWAP-like)
             x = abs_shares * (1 - t / horizon_s)
+        elif kT > 50:
+            # Extreme urgency: almost all traded in first fraction
+            # sinh(k(T-t))/sinh(kT) ≈ exp(-kt) for large kT
+            x = abs_shares * math.exp(-kappa * t)
         else:
-            sinh_term = math.sinh(kappa * (horizon_s - t)) if kappa * (horizon_s - t) < 50 else math.exp(kappa * (horizon_s - t)) / 2
+            sinh_kT = math.sinh(kT)
+            sinh_term = math.sinh(kappa * (horizon_s - t))
             x = abs_shares * sinh_term / sinh_kT
         x_remaining.append(int(round(x)))
 

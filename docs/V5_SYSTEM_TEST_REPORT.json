@@ -1,0 +1,523 @@
+{
+  "total": 34,
+  "passed": 34,
+  "failed": 0,
+  "by_category": {
+    "quant": {
+      "pass": 10,
+      "fail": 0,
+      "tests": [
+        "deflated_sharpe",
+        "cost_model",
+        "cpcv_harness",
+        "meta_labeler",
+        "conformal_risk",
+        "l2_book_imbalance",
+        "spde_lob_simulator",
+        "conformal_quantile_regression",
+        "bocpd_regime",
+        "vpin_calculation"
+      ]
+    },
+    "execution": {
+      "pass": 3,
+      "fail": 0,
+      "tests": [
+        "almgren_chriss",
+        "impact_router_normal",
+        "impact_router_toxic_rejects"
+      ]
+    },
+    "risk": {
+      "pass": 4,
+      "fail": 0,
+      "tests": [
+        "var_cvar_monitor",
+        "cvar_stop_placement",
+        "tail_hedge_overlay",
+        "correlation_guard"
+      ]
+    },
+    "llm": {
+      "pass": 1,
+      "fail": 0,
+      "tests": [
+        "agent_swarm_fallback"
+      ]
+    },
+    "strategies": {
+      "pass": 1,
+      "fail": 0,
+      "tests": [
+        "load_strategies"
+      ]
+    },
+    "super_gate": {
+      "pass": 1,
+      "fail": 0,
+      "tests": [
+        "super_gate_init"
+      ]
+    },
+    "persistence": {
+      "pass": 4,
+      "fail": 0,
+      "tests": [
+        "wal_directory",
+        "archive_directory",
+        "models_directory",
+        "fills_directory"
+      ]
+    },
+    "ouroboros": {
+      "pass": 2,
+      "fail": 0,
+      "tests": [
+        "ouroboros_import",
+        "ouroboros_nightly_script"
+      ]
+    },
+    "supervisor": {
+      "pass": 2,
+      "fail": 0,
+      "tests": [
+        "supervisor_syntax",
+        "supervisor_services_count"
+      ]
+    },
+    "pipeline": {
+      "pass": 2,
+      "fail": 0,
+      "tests": [
+        "signal_through_gates",
+        "signal_rejection_path"
+      ]
+    },
+    "infra": {
+      "pass": 4,
+      "fail": 0,
+      "tests": [
+        "nats_listening",
+        "rust_binary_built",
+        "contracts_config",
+        "key_files_present"
+      ]
+    }
+  },
+  "failures": [],
+  "all_results": [
+    {
+      "name": "deflated_sharpe",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "dsr": 0.0
+      },
+      "duration_ms": 325.6208896636963
+    },
+    {
+      "name": "cost_model",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "net_edge_bps": 43.41
+      },
+      "duration_ms": 0.30803680419921875
+    },
+    {
+      "name": "cpcv_harness",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "num_folds": 15
+      },
+      "duration_ms": 0.6310939788818359
+    },
+    {
+      "name": "meta_labeler",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "accept": true,
+        "prob": 0.5
+      },
+      "duration_ms": 0.3008842468261719
+    },
+    {
+      "name": "conformal_risk",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "quantile_90pct": 1.462
+      },
+      "duration_ms": 0.5056858062744141
+    },
+    {
+      "name": "l2_book_imbalance",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "obi": 0.667,
+        "predicted_bps": 29.5
+      },
+      "duration_ms": 0.5271434783935547
+    },
+    {
+      "name": "spde_lob_simulator",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "fills": 119
+      },
+      "duration_ms": 3.1442642211914062
+    },
+    {
+      "name": "conformal_quantile_regression",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "quantile_final": 0.952
+      },
+      "duration_ms": 434.5078468322754
+    },
+    {
+      "name": "bocpd_regime",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "regime": "calm"
+      },
+      "duration_ms": 1.2416839599609375
+    },
+    {
+      "name": "vpin_calculation",
+      "category": "quant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "vpin": 0.317
+      },
+      "duration_ms": 0.0050067901611328125
+    },
+    {
+      "name": "almgren_chriss",
+      "category": "execution",
+      "passed": true,
+      "error": "",
+      "details": {
+        "slices": 4,
+        "cost_bps": 5.67
+      },
+      "duration_ms": 0.5047321319580078
+    },
+    {
+      "name": "impact_router_normal",
+      "category": "execution",
+      "passed": true,
+      "error": "",
+      "details": {
+        "venue": "SMART",
+        "order_type": "MARKETABLE_LIMIT"
+      },
+      "duration_ms": 0.7278919219970703
+    },
+    {
+      "name": "impact_router_toxic_rejects",
+      "category": "execution",
+      "passed": true,
+      "error": "",
+      "details": {
+        "venue": "DARK",
+        "cost_bps": 8.0
+      },
+      "duration_ms": 0.003814697265625
+    },
+    {
+      "name": "var_cvar_monitor",
+      "category": "risk",
+      "passed": true,
+      "error": "",
+      "details": {
+        "var95": 158.13,
+        "cvar95": 183.41
+      },
+      "duration_ms": 0.5121231079101562
+    },
+    {
+      "name": "cvar_stop_placement",
+      "category": "risk",
+      "passed": true,
+      "error": "",
+      "details": {
+        "stop_price": 99.5065,
+        "distance_bps": 49.35
+      },
+      "duration_ms": 0.4038810729980469
+    },
+    {
+      "name": "tail_hedge_overlay",
+      "category": "risk",
+      "passed": true,
+      "error": "",
+      "details": {
+        "regime": "stressed",
+        "hedge_rec": "SH"
+      },
+      "duration_ms": 0.2911090850830078
+    },
+    {
+      "name": "correlation_guard",
+      "category": "risk",
+      "passed": true,
+      "error": "",
+      "details": {
+        "pass": false,
+        "scale_factor": 0.21,
+        "violations": 3
+      },
+      "duration_ms": 0.44798851013183594
+    },
+    {
+      "name": "agent_swarm_fallback",
+      "category": "llm",
+      "passed": true,
+      "error": "",
+      "details": {
+        "accept": true,
+        "agents": 6
+      },
+      "duration_ms": 365.89789390563965
+    },
+    {
+      "name": "load_strategies",
+      "category": "strategies",
+      "passed": true,
+      "error": "",
+      "details": {
+        "num_strategies": 7,
+        "strategies": [
+          "SentimentLongShort",
+          "FilingChangeDetect",
+          "IndexRecon",
+          "EarningsPattern",
+          "OvernightReturn",
+          "IbsMeanReversion",
+          "MomentumBurst"
+        ]
+      },
+      "duration_ms": 12.839794158935547
+    },
+    {
+      "name": "super_gate_init",
+      "category": "super_gate",
+      "passed": true,
+      "error": "",
+      "details": {
+        "portfolio_value": 10000,
+        "stats_keys": [
+          "signals_in",
+          "signals_passed",
+          "rejected_cost",
+          "rejected_corr",
+          "rejected_var",
+          "rejected_routing",
+          "l2_boosted"
+        ]
+      },
+      "duration_ms": 11.446952819824219
+    },
+    {
+      "name": "wal_directory",
+      "category": "persistence",
+      "passed": true,
+      "error": "",
+      "details": {
+        "wal_dir_exists": true,
+        "num_wal_files": 3
+      },
+      "duration_ms": 0.09441375732421875
+    },
+    {
+      "name": "archive_directory",
+      "category": "persistence",
+      "passed": true,
+      "error": "",
+      "details": {
+        "archive_exists": true,
+        "num_files": 31
+      },
+      "duration_ms": 0.09322166442871094
+    },
+    {
+      "name": "models_directory",
+      "category": "persistence",
+      "passed": true,
+      "error": "",
+      "details": {
+        "models_dir_exists": false
+      },
+      "duration_ms": 0.009059906005859375
+    },
+    {
+      "name": "fills_directory",
+      "category": "persistence",
+      "passed": true,
+      "error": "",
+      "details": {
+        "fills_dir_exists": true,
+        "num_files": 1
+      },
+      "duration_ms": 0.025033950805664062
+    },
+    {
+      "name": "ouroboros_import",
+      "category": "ouroboros",
+      "passed": true,
+      "error": "",
+      "details": {
+        "has_run_nightly": true,
+        "has_result_class": true
+      },
+      "duration_ms": 1.1568069458007812
+    },
+    {
+      "name": "ouroboros_nightly_script",
+      "category": "ouroboros",
+      "passed": true,
+      "error": "",
+      "details": {
+        "has_nightly": true,
+        "size": 5932
+      },
+      "duration_ms": 0.011920928955078125
+    },
+    {
+      "name": "supervisor_syntax",
+      "category": "supervisor",
+      "passed": true,
+      "error": "",
+      "details": {
+        "file_size": 19977
+      },
+      "duration_ms": 1.750946044921875
+    },
+    {
+      "name": "supervisor_services_count",
+      "category": "supervisor",
+      "passed": true,
+      "error": "",
+      "details": {
+        "num_services": 30,
+        "service_names": [
+          "rust_bridge",
+          "ibkr_scanner_v2",
+          "delayed_universe_streamer",
+          "universe_rotator_v2",
+          "paper_executor",
+          "signal_to_order",
+          "exit_to_order",
+          "portfolio_streamer",
+          "indicator_framer",
+          "scanner_momentum_fast",
+          "news_alpha_trader",
+          "news_reactor",
+          "llm_news_analyzer",
+          "agent_swarm",
+          "news_to_intel",
+          "adaptive_intel_seeder",
+          "external_api_puller",
+          "ibkr_fundamentals_puller",
+          "intelligence_runner",
+          "nats_archiver",
+          "compounding_tracker",
+          "regime_amplifier",
+          "reentry_manager",
+          "data_flow_monitor",
+          "vpin_daemon",
+          "bar_builder_5s",
+          "gateway_healer",
+          "ouroboros_daemon",
+          "super_institutional_gate",
+          "run_live_ibkr"
+        ]
+      },
+      "duration_ms": 0.8220672607421875
+    },
+    {
+      "name": "signal_through_gates",
+      "category": "pipeline",
+      "passed": true,
+      "error": "",
+      "details": {
+        "meta_accept": true,
+        "meta_prob": 0.5,
+        "net_edge_bps": 18.65,
+        "corr_pass": true,
+        "all_gates_pass": true
+      },
+      "duration_ms": 0.026226043701171875
+    },
+    {
+      "name": "signal_rejection_path",
+      "category": "pipeline",
+      "passed": true,
+      "error": "",
+      "details": {
+        "prob": 0.5,
+        "accepted": true
+      },
+      "duration_ms": 0.0059604644775390625
+    },
+    {
+      "name": "nats_listening",
+      "category": "infra",
+      "passed": true,
+      "error": "",
+      "details": {
+        "nats_listening": true
+      },
+      "duration_ms": 55.92918395996094
+    },
+    {
+      "name": "rust_binary_built",
+      "category": "infra",
+      "passed": true,
+      "error": "",
+      "details": {
+        "rust_binary_exists": true,
+        "size_mb": 25.3
+      },
+      "duration_ms": 0.08296966552734375
+    },
+    {
+      "name": "contracts_config",
+      "category": "infra",
+      "passed": true,
+      "error": "",
+      "details": {
+        "num_contracts": 1001
+      },
+      "duration_ms": 0.5497932434082031
+    },
+    {
+      "name": "key_files_present",
+      "category": "infra",
+      "passed": true,
+      "error": "",
+      "details": {
+        "missing": [],
+        "all_present": true
+      },
+      "duration_ms": 0.05698204040527344
+    }
+  ]
+}

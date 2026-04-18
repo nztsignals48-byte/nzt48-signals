@@ -1,0 +1,115 @@
+{
+  "indicator_framer_with_ticks": {
+    "status": "PASS",
+    "duration_ms": 8.2,
+    "data": {
+      "n_ticks": 100,
+      "vol_pct": 0.0187,
+      "mean_return_bps": -0.02,
+      "max_drawdown_pct": 0.2091,
+      "price_range": [
+        99.83,
+        100.04
+      ]
+    }
+  },
+  "l2_book_predicts_direction": {
+    "status": "PASS",
+    "duration_ms": 3.1,
+    "data": {
+      "buy_pressure_predicted_bps": 36.8,
+      "sell_pressure_predicted_bps": -36.8
+    }
+  },
+  "full_pipeline_happy_path": {
+    "status": "PASS",
+    "duration_ms": 393.8,
+    "data": {
+      "cost_check": {
+        "net_edge_bps": 27.39,
+        "passes": true
+      },
+      "meta_label": {
+        "prob": 0.5,
+        "accepts": true
+      },
+      "regime": {
+        "current": "calm",
+        "size_multiplier": 1.0
+      },
+      "correlation": {
+        "pass": true,
+        "violations": 0
+      },
+      "dsr_strategy_gate": 0.1265,
+      "final_decision": "APPROVED"
+    }
+  },
+  "risk_monitor_catches_breach": {
+    "status": "PASS",
+    "duration_ms": 0.6,
+    "data": {
+      "var_95": 645.94,
+      "cvar_95": 712.82,
+      "vol_annualized": 0.52,
+      "breaches_detected": 3,
+      "breaches": [
+        "VaR95 breach: 645.94 > 100.00",
+        "CVaR95 breach: 712.82 > 200.00",
+        "Drawdown breach: 23.44% > 5.00%"
+      ]
+    }
+  },
+  "execution_schedule_realistic": {
+    "status": "PASS",
+    "duration_ms": 1.2,
+    "data": {
+      "passive": {
+        "num_slices": 20,
+        "total_shares": 10000,
+        "cost_bps": 1.0
+      },
+      "normal": {
+        "num_slices": 4,
+        "total_shares": 10000,
+        "cost_bps": 1.0
+      },
+      "aggressive": {
+        "num_slices": 1,
+        "total_shares": 10000,
+        "cost_bps": 1.0
+      },
+      "immediate": {
+        "num_slices": 1,
+        "total_shares": 10000,
+        "cost_bps": 1.0
+      }
+    }
+  },
+  "spde_simulator_generates_fills": {
+    "status": "PASS",
+    "duration_ms": 18.9,
+    "data": {
+      "total_fills": 611,
+      "final_spread_bps": -2.25,
+      "mid_vol_bps": 0.63,
+      "our_order_fill_prob": 1.0
+    }
+  },
+  "tail_hedge_responds_to_crisis": {
+    "status": "PASS",
+    "duration_ms": 0.6,
+    "data": {
+      "tail_load": {
+        "drawdown_pct": 0.4229,
+        "downside_vol": 0.005
+      },
+      "regime": "crisis",
+      "hedge": {
+        "symbol": "SDS",
+        "ratio": 0.3,
+        "urgency": "high"
+      }
+    }
+  }
+}
