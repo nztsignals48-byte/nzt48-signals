@@ -1,0 +1,12 @@
+# AEGIS V4 — Safety Bounds for Learned Values
+# Medallion-style: allow small kelly (many positions) and high heat (diversification)
+
+kelly_fraction = [0.01, 0.10]       # £200-£2000 per position at £20K equity
+max_position_pct = [0.02, 0.15]
+max_heat_pct = [0.20, 0.80]         # Allow up to 80% of equity deployed
+chandelier_atr_mult = [2.0, 4.5]
+correlation_limit = [0.3, 0.85]
+risk_per_trade_pct = [0.005, 0.03]
+overnight_cap_pct = [0.10, 0.60]
+sector_cap_pct = [0.10, 0.50]
+min_position_gbp = [50.0, 1000.0]

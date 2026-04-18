@@ -1,0 +1,68 @@
+syntax = "proto3";
+package aegis.v5;
+
+message SignalReceived {
+  uint32 schema_version = 1;
+  string signal_id = 2;
+  string strategy_name = 3;
+  string strategy_version = 4;   // git short-sha
+  string ticker = 5;
+  string exchange = 6;
+  string account = 7;            // ISA | GIA | IG
+  uint64 timestamp_ns = 8;
+
+  map<string, double> feature_vector = 20;
+
+  double conviction_score = 30;
+  int32 portfolio_rank = 31;
+  string account_route_chosen = 32;
+  repeated string account_routes_available = 33;
+  double expected_fill_price = 34;
+
+  map<string, double> risk_deltas = 40;
+  double risk_final_confidence = 41;
+
+  string llm_provider = 50;
+  string llm_model_version = 51;
+  repeated string intel_sources_consulted = 52;
+}
+
+message TradeClosed {
+  uint32 schema_version = 1;
+  string signal_id = 2;
+  uint64 entry_timestamp_ns = 3;
+  uint64 exit_timestamp_ns = 4;
+  double entry_price = 5;
+  double exit_price = 6;
+  int64 size_shares = 7;
+
+  double spread_cost_bps = 10;
+  double commission_abs = 11;
+  double stamp_duty_abs = 12;
+  double financing_cost_abs = 13;
+  double slippage_bps_vs_arrival = 14;
+
+  double realized_pnl_abs = 20;
+  double realized_pnl_bps = 21;
+  double mae_bps = 22;
+  double mfe_bps = 23;
+
+  repeated double regime_at_entry = 30;
+  repeated double regime_at_exit = 31;
+
+  enum ExitReason {
+    UNSPECIFIED = 0;
+    CHANDELIER_STOP = 1;
+    FIXED_DAY_EXPIRY = 2;
+    EVENT_WINDOW_EXIT = 3;
+    NEXT_OPEN = 4;
+    PROFIT_TARGET_HIT = 5;
+    STOP_LOSS_GUARANTEED = 6;
+    KILL_FLATTEN = 7;
+    BROKER_REJECTED = 8;
+    CORP_ACTION_FLATTEN = 9;
+    MANUAL_CLOSE = 10;
+    THESIS_INVALID = 11;
+  }
+  ExitReason exit_reason = 40;
+}

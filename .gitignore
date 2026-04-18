@@ -1,0 +1,40 @@
+# Data + artifacts
+data/
+logs/
+/tmp/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Models
+*.pkl
+*.joblib
+
+# Env / secrets
+.env.anthropic
+.env
+*.key
+
+# Rust build
+rust_core/target/
+
+# Archives
+_archive/
+
+# Node/gen
+node_modules/
+
+# OS
+.DS_Store
+
+# Bus archives (run data, not code)
+data/bus/
+data/wal/
+data/archive/
+data/fills/
+data/models/
+data/intel/
+
+# IDE
+.vscode/
+.idea/

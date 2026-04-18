@@ -1,0 +1,38 @@
+{
+  "uid": "v5_llm_cost",
+  "title": "V5 LLM + News Pipeline",
+  "schemaVersion": 30,
+  "version": 1,
+  "refresh": "10s",
+  "time": {"from": "now-6h", "to": "now"},
+  "tags": ["aegis", "v5", "llm"],
+  "panels": [
+    {"id": 1, "type": "stat", "title": "News raw rate", "gridPos": {"x":0,"y":0,"w":6,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_news_raw_per_min","refId":"A"}],
+     "fieldConfig":{"defaults":{"unit":"cpm"}}},
+
+    {"id": 2, "type": "stat", "title": "LLM scored rate", "gridPos": {"x":6,"y":0,"w":6,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_news_alpha_per_min","refId":"A"}],
+     "fieldConfig":{"defaults":{"unit":"cpm"}}},
+
+    {"id": 3, "type": "stat", "title": "News tickers (10m)", "gridPos": {"x":12,"y":0,"w":6,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_news_unique_tickers","refId":"A"}]},
+
+    {"id": 10, "type": "timeseries", "title": "News pipeline throughput", "gridPos": {"x":0,"y":4,"w":24,"h":8},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[
+        {"expr":"v5_flow_news_raw_per_min","refId":"A","legendFormat":"news.raw (IBKR+Benzinga)"},
+        {"expr":"v5_flow_news_alpha_per_min","refId":"B","legendFormat":"news.alpha (LLM scored)"}
+     ]},
+
+    {"id": 20, "type": "timeseries", "title": "Total news (cumulative)", "gridPos": {"x":0,"y":12,"w":24,"h":8},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[
+        {"expr":"v5_flow_news_raw_total","refId":"A","legendFormat":"total raw"},
+        {"expr":"v5_flow_news_alpha_total","refId":"B","legendFormat":"total scored"}
+     ]}
+  ]
+}

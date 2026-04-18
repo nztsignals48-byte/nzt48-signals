@@ -1,0 +1,141 @@
+{
+  "uid": "v5_data_flow",
+  "title": "V5 Data Flow — Every Pipe, Live",
+  "schemaVersion": 30,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "",
+  "tags": ["aegis", "v5", "data-flow"],
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "IB Gateway",
+      "gridPos": {"x":0,"y":0,"w":3,"h":3},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_ibkr_up","refId":"A"}],
+      "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}],"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"red","value":null},{"color":"green","value":1}]}}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "NATS",
+      "gridPos": {"x":3,"y":0,"w":3,"h":3},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_nats_up","refId":"A"}],
+      "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}],"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"red","value":null},{"color":"green","value":1}]}}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "NATS connections",
+      "gridPos": {"x":6,"y":0,"w":3,"h":3},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_nats_connections","refId":"A"}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Active subjects",
+      "gridPos": {"x":9,"y":0,"w":3,"h":3},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_subjects_active","refId":"A"}],
+      "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"red","value":null},{"color":"green","value":5}]}}}
+    },
+    {
+      "id": 5, "type": "stat", "title": "SILENT subjects",
+      "gridPos": {"x":12,"y":0,"w":3,"h":3},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_subjects_silent","refId":"A"}],
+      "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"green","value":null},{"color":"orange","value":3},{"color":"red","value":8}]}}}
+    },
+
+    {
+      "id": 10, "type": "stat", "title": "Live tickers (real-time L1)",
+      "gridPos": {"x":0,"y":3,"w":6,"h":4},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_ticks_live_unique_tickers","refId":"A"}],
+      "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"red","value":null},{"color":"orange","value":30},{"color":"green","value":80}]}}}
+    },
+    {
+      "id": 11, "type": "stat", "title": "Delayed tickers (rotator)",
+      "gridPos": {"x":6,"y":3,"w":6,"h":4},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_ticks_delayed_unique_tickers","refId":"A"}]
+    },
+    {
+      "id": 12, "type": "stat", "title": "Scanner-surfaced tickers",
+      "gridPos": {"x":12,"y":3,"w":6,"h":4},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_scanner_unique_tickers","refId":"A"}]
+    },
+
+    {
+      "id": 20, "type": "timeseries", "title": "IBKR L1 ticks/min",
+      "gridPos": {"x":0,"y":7,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_ticks_live_all_per_min","refId":"A","legendFormat":"ticks.live.*"}]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "Delayed snapshots/min",
+      "gridPos": {"x":8,"y":7,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_ticks_delayed_all_per_min","refId":"A","legendFormat":"ticks.delayed.*"}]
+    },
+    {
+      "id": 22, "type": "timeseries", "title": "Scanner hits/min",
+      "gridPos": {"x":16,"y":7,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_scanner_hits_all_per_min","refId":"A","legendFormat":"scanner.hits.*"}]
+    },
+
+    {
+      "id": 30, "type": "timeseries", "title": "Indicators published/min",
+      "gridPos": {"x":0,"y":13,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[{"expr":"v5_flow_indicators_live_all_per_min","refId":"A","legendFormat":"indicators.live.*"}]
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "Signals.core / orders",
+      "gridPos": {"x":8,"y":13,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[
+        {"expr":"v5_flow_signals_core_per_min","refId":"A","legendFormat":"signals.core"},
+        {"expr":"v5_flow_orders_submit_per_min","refId":"B","legendFormat":"orders.submit"},
+        {"expr":"v5_flow_orders_filled_per_min","refId":"C","legendFormat":"orders.filled"},
+        {"expr":"v5_flow_fills_closed_per_min","refId":"D","legendFormat":"fills.closed"}
+      ]
+    },
+    {
+      "id": 32, "type": "timeseries", "title": "News pipeline",
+      "gridPos": {"x":16,"y":13,"w":8,"h":6},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[
+        {"expr":"v5_flow_news_raw_per_min","refId":"A","legendFormat":"news.raw"},
+        {"expr":"v5_flow_news_alpha_per_min","refId":"B","legendFormat":"news.alpha (LLM)"}
+      ]
+    },
+
+    {
+      "id": 40, "type": "table", "title": "Subject health (rate + age)",
+      "gridPos": {"x":0,"y":19,"w":24,"h":12},
+      "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+      "targets":[
+        {"expr":"v5_flow_ticks_live_all_per_min","refId":"A","legendFormat":"ticks.live.*","format":"time_series"},
+        {"expr":"v5_flow_ticks_delayed_all_per_min","refId":"B","legendFormat":"ticks.delayed.*"},
+        {"expr":"v5_flow_scanner_hits_all_per_min","refId":"C","legendFormat":"scanner.hits.*"},
+        {"expr":"v5_flow_indicators_live_all_per_min","refId":"D","legendFormat":"indicators.live.*"},
+        {"expr":"v5_flow_signals_core_per_min","refId":"E","legendFormat":"signals.core"},
+        {"expr":"v5_flow_orders_submit_per_min","refId":"F","legendFormat":"orders.submit"},
+        {"expr":"v5_flow_orders_filled_per_min","refId":"G","legendFormat":"orders.filled"},
+        {"expr":"v5_flow_orders_reject_per_min","refId":"H","legendFormat":"orders.reject"},
+        {"expr":"v5_flow_fills_closed_per_min","refId":"I","legendFormat":"fills.closed"},
+        {"expr":"v5_flow_news_raw_per_min","refId":"J","legendFormat":"news.raw"},
+        {"expr":"v5_flow_news_alpha_per_min","refId":"K","legendFormat":"news.alpha"},
+        {"expr":"v5_flow_intel_updated_per_min","refId":"L","legendFormat":"intel.updated"},
+        {"expr":"v5_flow_regime_amplifier_per_min","refId":"M","legendFormat":"regime.amplifier"},
+        {"expr":"v5_flow_regime_vpin_all_per_min","refId":"N","legendFormat":"regime.vpin.*"},
+        {"expr":"v5_flow_reentry_allowed_per_min","refId":"O","legendFormat":"reentry.allowed"},
+        {"expr":"v5_flow_universe_rotation_per_min","refId":"P","legendFormat":"universe.rotation"},
+        {"expr":"v5_flow_portfolio_equity_per_min","refId":"Q","legendFormat":"portfolio.equity"},
+        {"expr":"v5_flow_portfolio_positions_per_min","refId":"R","legendFormat":"portfolio.positions"},
+        {"expr":"v5_flow_ibkr_status_per_min","refId":"S","legendFormat":"ibkr.status"},
+        {"expr":"v5_flow_account_pnl_per_min","refId":"T","legendFormat":"account.pnl"},
+        {"expr":"v5_flow_account_summary_per_min","refId":"U","legendFormat":"account.summary"}
+      ]
+    }
+  ]
+}

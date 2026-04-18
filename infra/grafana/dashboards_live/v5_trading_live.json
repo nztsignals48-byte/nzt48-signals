@@ -1,0 +1,95 @@
+{
+  "title": "V5 Trading Live",
+  "uid": "v5_trading_live",
+  "schemaVersion": 39,
+  "version": 3,
+  "refresh": "5s",
+  "time": {"from": "now-2h", "to": "now"},
+  "panels": [
+    {"id": 1, "type": "stat", "title": "Equity (£)", "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyGBP", "decimals": 2}},
+     "targets": [{"expr": "v5_equity_gbp", "refId": "A"}]},
+
+    {"id": 2, "type": "stat", "title": "Unrealised P&L ($)", "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 2,
+       "thresholds": {"mode":"absolute", "steps":[{"color":"red","value":-999},{"color":"orange","value":-1},{"color":"green","value":0}]},
+       "color": {"mode": "thresholds"}}},
+     "targets": [{"expr": "v5_unrealised_pnl_usd", "refId": "A"}]},
+
+    {"id": 3, "type": "stat", "title": "Realised P&L (£)", "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyGBP", "decimals": 2,
+       "thresholds": {"mode":"absolute", "steps":[{"color":"red","value":-999},{"color":"green","value":0}]}}},
+     "targets": [{"expr": "v5_realised_pnl_gbp", "refId": "A"}]},
+
+    {"id": 4, "type": "stat", "title": "Market value ($)", "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 0}},
+     "targets": [{"expr": "v5_market_value_usd", "refId": "A"}]},
+
+    {"id": 5, "type": "stat", "title": "Fills today", "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "v5_fills_total", "refId": "A"}]},
+
+    {"id": 6, "type": "stat", "title": "LLM cost today ($)", "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 3}},
+     "targets": [{"expr": "v5_llm_cost_usd", "refId": "A"}]},
+
+    {"id": 7, "type": "timeseries", "title": "Unrealised P&L — per ticker ($)",
+     "gridPos": {"h": 10, "w": 12, "x": 0, "y": 4},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyUSD"}},
+     "targets": [{"expr": "v5_position_unrealised_usd", "refId": "A", "legendFormat": "{{ticker}}"}]},
+
+    {"id": 8, "type": "bargauge", "title": "Live positions ($ unrealised)",
+     "gridPos": {"h": 10, "w": 12, "x": 12, "y": 4},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyUSD",
+       "thresholds": {"mode":"absolute",
+         "steps":[{"color":"red","value":-999},{"color":"orange","value":-5},{"color":"green","value":0},{"color":"blue","value":20}]}}},
+     "targets": [{"expr": "v5_position_unrealised_usd", "refId": "A", "legendFormat": "{{ticker}}"}]},
+
+    {"id": 9, "type": "timeseries", "title": "Equity curve (£)",
+     "gridPos": {"h": 9, "w": 12, "x": 0, "y": 14},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "currencyGBP"}},
+     "targets": [{"expr": "v5_equity_gbp", "refId": "A", "legendFormat": "equity"},
+                 {"expr": "v5_hwm_gbp", "refId": "B", "legendFormat": "HWM"}]},
+
+    {"id": 10, "type": "timeseries", "title": "Drawdown %",
+     "gridPos": {"h": 9, "w": 12, "x": 12, "y": 14},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "fieldConfig": {"defaults": {"unit": "percent"}},
+     "targets": [{"expr": "v5_drawdown_pct", "refId": "A", "legendFormat": "DD%"}]},
+
+    {"id": 11, "type": "timeseries", "title": "Fills / minute",
+     "gridPos": {"h": 9, "w": 8, "x": 0, "y": 23},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "rate(v5_fills_total[1m]) * 60", "refId": "A", "legendFormat": "fills/min"}]},
+
+    {"id": 12, "type": "timeseries", "title": "News → LLM rate",
+     "gridPos": {"h": 9, "w": 8, "x": 8, "y": 23},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "rate(v5_news_raw_total[1m]) * 60", "refId": "A", "legendFormat": "news/min"},
+                 {"expr": "rate(v5_news_alpha_total[1m]) * 60", "refId": "B", "legendFormat": "alpha/min"}]},
+
+    {"id": 13, "type": "stat", "title": "Win / Loss",
+     "gridPos": {"h": 9, "w": 8, "x": 16, "y": 23},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "v5_trades_win", "refId": "A", "legendFormat": "Wins"},
+                 {"expr": "v5_trades_loss", "refId": "B", "legendFormat": "Losses"}]},
+
+    {"id": 14, "type": "bargauge", "title": "Open qty per ticker",
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "v5_position_qty", "refId": "A", "legendFormat": "{{ticker}}"}]},
+
+    {"id": 15, "type": "bargauge", "title": "Fills by strategy",
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+     "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+     "targets": [{"expr": "v5_fills_by_strategy", "refId": "A", "legendFormat": "{{strategy}}"}]}
+  ]
+}

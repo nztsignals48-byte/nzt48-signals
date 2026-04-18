@@ -1,0 +1,21 @@
+# AEGIS V5 — 3 critical Telegram alerts (MVP)
+# Fills in Phase 10.
+
+alerts:
+  - name: engine_crash
+    expr: absent_over_time(ticks_received_total[60s])
+    for: 60s
+    severity: critical
+    message: "Engine not receiving ticks for 60s"
+
+  - name: drawdown_over_5pct
+    expr: (equity_hwm_gbp - equity_total_gbp) / equity_hwm_gbp > 0.05
+    for: 60s
+    severity: critical
+    message: "Drawdown exceeds 5%"
+
+  - name: ibkr_disconnected
+    expr: ibkr_session_up == 0
+    for: 60s
+    severity: critical
+    message: "IBKR disconnected for 60s"

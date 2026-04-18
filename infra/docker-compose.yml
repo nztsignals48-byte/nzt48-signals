@@ -1,0 +1,96 @@
+# AEGIS V5 — single-host docker-compose.
+# 7 services. One host. One bus. No multi-port filesystem coupling.
+
+version: "3.9"
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: aegis_v5_nats
+    command: ["-js", "-m", "8222", "-c", "/etc/nats/jetstream.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ../infra/nats/jetstream.conf:/etc/nats/jetstream.conf:ro
+      - nats_data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aegis_v5_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../infra/prometheus/prometheus-live.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aegis_v5_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=aegis_v5
+    volumes:
+      - ../infra/grafana/dashboards_live:/var/lib/grafana/dashboards:ro
+      - ../infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+
+  loki:
+    # Phase 10 (deferred). Scaffolded so compose is complete.
+    image: grafana/loki:latest
+    container_name: aegis_v5_loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../infra/loki/loki.yml:/etc/loki/loki.yml:ro
+    command: -config.file=/etc/loki/loki.yml
+    profiles: ["phase10"]
+
+  engine:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.engine
+    container_name: aegis_v5_engine
+    depends_on: [nats]
+    environment:
+      - AEGIS_V5_KILL_PATH=/data/KILL
+      - AEGIS_V5_NATS_URL=nats://nats:4222
+    volumes:
+      - ../data:/data
+      - ../config:/config:ro
+    profiles: ["run"]
+
+  brain:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.brain
+    container_name: aegis_v5_brain
+    depends_on: [nats]
+    environment:
+      - AEGIS_V5_NATS_URL=nats://nats:4222
+    volumes:
+      - ../data:/data
+      - ../config:/config:ro
+    profiles: ["run"]
+
+  scanner:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.scanner
+    container_name: aegis_v5_scanner
+    depends_on: [nats]
+    environment:
+      - AEGIS_V5_NATS_URL=nats://nats:4222
+    volumes:
+      - ../data:/data
+      - ../config:/config:ro
+    profiles: ["run"]
+
+volumes:
+  nats_data:
+  prom_data:
+  grafana_data:

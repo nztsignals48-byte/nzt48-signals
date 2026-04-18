@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: aegis_engine_host
+    static_configs:
+      - targets: ["host.docker.internal:9101"]
+  - job_name: aegis_metrics_feeder
+    static_configs:
+      - targets: ["host.docker.internal:9103"]
+  - job_name: aegis_data_flow
+    static_configs:
+      - targets: ["host.docker.internal:9104"]

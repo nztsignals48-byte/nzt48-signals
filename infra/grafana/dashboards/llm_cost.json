@@ -1,0 +1,10 @@
+{
+  "title": "LLM Cost",
+  "uid": "llm_cost",
+  "panels": [
+    {"title": "LLM cost today USD", "type": "stat", "targets": [{"expr": "llm_cost_usd_total"}]},
+    {"title": "Per-agent spend", "type": "graph", "targets": [{"expr": "llm_cost_usd_total by (agent)"}]},
+    {"title": "Parse failure rate", "type": "graph", "targets": [{"expr": "rate(llm_parse_failure_total[5m])"}]},
+    {"title": "Conviction delta vs default", "type": "graph", "targets": [{"expr": "conviction_delta_vs_default"}]}
+  ]
+}

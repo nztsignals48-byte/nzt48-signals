@@ -1,0 +1,34 @@
+// AEGIS V5 engine — orchestrator.
+// Phase 0: scaffold. Each module compiles and exposes a tick-loop hook.
+// Phase 2A fills: wire ibkr_broker → bar_builder → indicators → risk_arbiter → exit_engine → event_store.
+
+mod nats_client;
+mod types;
+mod config;
+mod clock;
+mod exchange_profile;
+mod ibkr_broker;
+mod bar_builder;
+mod indicators;
+mod quant_core;
+mod risk_arbiter;
+mod exit_engine;
+mod order_router;
+mod broker_sync;
+mod corporate_actions;
+mod order_book;
+mod event_store;
+mod replay;
+mod health;
+mod metrics_export;
+
+use anyhow::Result;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    eprintln!("aegis-v5-engine starting (Phase 0 scaffold)");
+    let cfg = config::load_all()?;
+    let _nats = nats_client::NatsClient::connect(&cfg.nats.url).await?;
+    health::serve("0.0.0.0:9100").await?;
+    Ok(())
+}

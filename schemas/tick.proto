@@ -1,0 +1,40 @@
+syntax = "proto3";
+package aegis.v5;
+
+message Tick {
+  uint32 schema_version = 1;
+  string ticker = 2;
+  string exchange = 3;
+  uint64 timestamp_ns = 4;
+
+  double bid = 10;
+  double ask = 11;
+  double last = 12;
+  uint64 volume = 13;
+  uint64 bid_size = 14;
+  uint64 ask_size = 15;
+  double high = 16;
+  double low = 17;
+  double open = 18;
+  double close = 19;
+  double vwap = 20;
+
+  repeated double bid_depth_l2 = 30;
+  repeated double ask_depth_l2 = 31;
+
+  double mark_price = 40;
+  double rt_hist_vol = 41;
+  double avg_volume = 42;
+  bool shortable = 43;
+  bool halted = 44;
+  double auction_price = 45;
+  double auction_volume = 46;
+  double auction_imbalance = 47;
+  double etf_nav_close = 48;
+  double etf_nav_last = 49;
+  double opt_call_oi = 50;
+  double opt_put_oi = 51;
+  double opt_call_vol = 52;
+  double opt_put_vol = 53;
+  double opt_iv = 54;
+}

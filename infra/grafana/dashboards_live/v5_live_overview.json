@@ -1,0 +1,70 @@
+{
+  "title": "V5 Live Overview (IBKR)",
+  "uid": "v5_live_overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "IBKR connection",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}, "type": "value"}]}},
+      "targets": [{"expr": "ibkr_session_up", "refId": "A"}]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Live ticks (cumulative)",
+      "gridPos": {"h": 4, "w": 5, "x": 4, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "ibkr_live_ticks_total", "refId": "A"}]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Signals generated",
+      "gridPos": {"h": 4, "w": 5, "x": 9, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "signals_generated_total", "refId": "A"}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Open positions",
+      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "positions_open", "refId": "A"}]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Realised P&L (paper)",
+      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "currencyGBP", "decimals": 2}},
+      "targets": [{"expr": "realised_pnl_gbp", "refId": "A"}]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Live ticks per second",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(ibkr_live_ticks_total[1m])", "refId": "A"}]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Signals per minute",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(signals_generated_total[1m]) * 60", "refId": "A"}]
+    },
+    {
+      "id": 8, "type": "bargauge", "title": "Trades by strategy",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "strategy_trade_count", "refId": "A", "legendFormat": "{{strategy}}"}]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Equity (paper)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "currencyGBP"}},
+      "targets": [
+        {"expr": "equity_total_gbp", "refId": "A", "legendFormat": "Equity"},
+        {"expr": "equity_hwm_gbp", "refId": "B", "legendFormat": "HWM"}
+      ]
+    }
+  ]
+}

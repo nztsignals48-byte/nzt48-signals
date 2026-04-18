@@ -1,0 +1,8 @@
+# V5 operator overrides. Takes precedence over defaults.toml.
+# Keep this file minimal — only fields that differ from V4 defaults.
+
+# V5 uses client_id=105 so it never collides with V4 (101) or V4-scanner (103).
+ibkr_client_id = 105
+
+# Paper IB Gateway listens on 4002 (live would be 4001).
+ibkr_port = 4002

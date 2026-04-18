@@ -1,0 +1,11 @@
+{
+  "title": "Engine Health",
+  "uid": "engine_health",
+  "panels": [
+    {"title": "Ticks received / sec", "type": "graph", "targets": [{"expr": "rate(ticks_received_total[1m])"}]},
+    {"title": "Bars completed", "type": "stat", "targets": [{"expr": "bars_completed_total"}]},
+    {"title": "Bridge alive", "type": "stat", "targets": [{"expr": "nats_consumer_lag"}]},
+    {"title": "IBKR session", "type": "stat", "targets": [{"expr": "ibkr_session_up"}]},
+    {"title": "WAL writes / sec", "type": "graph", "targets": [{"expr": "rate(wal_events_total[1m])"}]}
+  ]
+}

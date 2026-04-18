@@ -1,0 +1,51 @@
+[package]
+name = "aegis-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+
+# IBKR
+ibapi = "2.11"
+
+# NATS (V5 architecture: single bus, no filesystem coupling)
+async-nats = "0.38"
+futures = "0.3"
+
+# IG spread bet REST client (Session 17 P1).
+# Blocking client so the trait can stay synchronous and call sites don't
+# need async. Order placement is not on the hot tick loop (< 1 RPS typical).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+# Error Handling
+thiserror = "2"
+anyhow = "1"
+
+# Observability
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+insta = { version = "1", features = ["json"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

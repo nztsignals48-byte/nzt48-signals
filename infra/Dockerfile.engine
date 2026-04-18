@@ -1,0 +1,12 @@
+FROM rust:1.80-slim as builder
+WORKDIR /build
+COPY rust_core/Cargo.toml rust_core/Cargo.toml
+COPY rust_core/src rust_core/src
+RUN cd rust_core && cargo build --release
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/rust_core/target/release/aegis-v5-engine /usr/local/bin/aegis-v5-engine
+ENV AEGIS_V5_KILL_PATH=/data/KILL
+EXPOSE 9100
+CMD ["/usr/local/bin/aegis-v5-engine"]

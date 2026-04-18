@@ -1,0 +1,9 @@
+// Exchange-aware clock. EOD, session, BST/GMT.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPhase { Pre, Open, Mid, LastHour, EOD30, EOD15, Closed }
+
+pub fn phase_for(_exchange: &str, _timestamp_ns: u64) -> SessionPhase {
+    // Phase 2A fills real mapping per exchange_profile.
+    SessionPhase::Open
+}

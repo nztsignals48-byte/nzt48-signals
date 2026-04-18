@@ -1,0 +1,707 @@
+# AEGIS V4 Contract Registry
+# US MEGA-CAPS FIRST (guaranteed subscription priority)
+# ============================================================================
+
+[[contracts]]
+symbol = "AAPL"
+con_id = 265598
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "MSFT"
+con_id = 272093
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "NVDA"
+con_id = 4815747
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "TSLA"
+con_id = 76792991
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "META"
+con_id = 107113386
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AMZN"
+con_id = 3691937
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "GOOGL"
+con_id = 208813719
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AMD"
+con_id = 4391
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "NFLX"
+con_id = 15124833
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "SPY"
+con_id = 756733
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "QQQ"
+con_id = 320227571
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AVGO"
+con_id = 313130367
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+[[contracts]]
+symbol = "3SSI"
+con_id = 123981904
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "IQE"
+con_id = 14075064
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "WLN"
+con_id = 158556311
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "APN"
+con_id = 737854294
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MFEA"
+con_id = 659912218
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HVO"
+con_id = 118857148
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "EZJ"
+con_id = 103665937
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "UOG"
+con_id = 212180412
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SIS"
+con_id = 139233041
+exchange = "BVME.ETF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3BSR"
+con_id = 454140844
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BMPS"
+con_id = 587052149
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "TSCO"
+con_id = 471204140
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "VRCI"
+con_id = 453419080
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "80M"
+con_id = 139463006
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "OCDO"
+con_id = 77478945
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BAMI"
+con_id = 259854200
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ETL"
+con_id = 37082760
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HDD"
+con_id = 4097038
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CWR"
+con_id = 328768119
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LGEN"
+con_id = 909110
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LLOY"
+con_id = 909301
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HAS"
+con_id = 957694
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BFF"
+con_id = 272334042
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BARC"
+con_id = 908940
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "QED"
+con_id = 141092628
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ENT"
+con_id = 125005888
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CON3"
+con_id = 532462863
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "869"
+con_id = 603521131
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3WHL"
+con_id = 212968817
+exchange = "LSE"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MFEB"
+con_id = 659912227
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3SOI"
+con_id = 717308220
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ITRK"
+con_id = 16644346
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "JUP"
+con_id = 76282550
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "7B7"
+con_id = 603516908
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "1BHA"
+con_id = 603481956
+exchange = "FWB"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LMI3"
+con_id = 630917094
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SGO"
+con_id = 123981899
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SRR"
+con_id = 790141963
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SSL"
+con_id = 835395654
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "S30"
+con_id = 340042790
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LCO"
+con_id = 608478493
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "3LMS"
+con_id = 647805800
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "3LSI"
+con_id = 123981902
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SPA"
+con_id = 785354815
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "5LU"
+con_id = 603515015
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LQ"
+con_id = 481220656
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3SIP"
+con_id = 785354868
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SMF"
+con_id = 566361181
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SVP"
+con_id = 713192682
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "5L30"
+con_id = 772483881
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LGS"
+con_id = 717308245
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LGO"
+con_id = 123981892
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LME"
+con_id = 647804810
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "3LMP"
+con_id = 647805799
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3HIM"
+con_id = 868938541
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3XD"
+con_id = 603481554
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "5LH0"
+con_id = 671561054
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LAP"
+con_id = 669452063
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "3LGP"
+con_id = 654705585
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LNE"
+con_id = 726401508
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LNF"
+con_id = 726401505
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "3LNP"
+con_id = 726401515
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LTE"
+con_id = 647804830
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3LVO"
+con_id = 662772593
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LZP"
+con_id = 654705606
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SAM"
+con_id = 810648291
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SM"
+con_id = 80789136
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "3SR"
+con_id = 603519467
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "5Q5"
+con_id = 445554317
+exchange = "FWB"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "5QN"
+con_id = 603519685
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "5QZ0"
+con_id = 831082799
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "5XQ"
+con_id = 603523906
+exchange = "FWB2"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "QS5L"
+con_id = 701708231
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SMI3"
+con_id = 785357600
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "GXI"
+con_id = 44632051
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "EKI"
+con_id = 126778285
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+

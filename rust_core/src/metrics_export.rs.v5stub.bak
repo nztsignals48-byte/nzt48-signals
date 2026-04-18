@@ -1,0 +1,17 @@
+// Prometheus metrics exporter. Phase 2A wires real counters.
+
+pub struct Counters {
+    pub ticks_received_total: u64,
+    pub bars_completed_total: u64,
+    pub wal_events_total: u64,
+    pub risk_deltas_total: u64,
+    pub fills_total: u64,
+    pub ibkr_session_up: u8,
+}
+
+impl Counters {
+    pub fn new() -> Self {
+        Self { ticks_received_total: 0, bars_completed_total: 0, wal_events_total: 0,
+               risk_deltas_total: 0, fills_total: 0, ibkr_session_up: 0 }
+    }
+}

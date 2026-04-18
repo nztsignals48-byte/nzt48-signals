@@ -1,0 +1,31 @@
+[
+  {"name": "top_movers_usd",      "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "TOP_PERC_GAIN",      "session": "us"},
+  {"name": "bottom_movers_usd",   "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "TOP_PERC_LOSE",      "session": "us"},
+  {"name": "top_volume_usd",      "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "MOST_ACTIVE",        "session": "us"},
+  {"name": "hot_by_price_usd",    "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "HOT_BY_PRICE",       "session": "us"},
+  {"name": "top_trade_count_usd", "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "TOP_TRADE_COUNT",    "session": "us"},
+  {"name": "high_opt_iv_usd",     "instrument": "STK", "locationCode": "STK.US.MAJOR",   "scanCode": "HIGH_OPT_IMP_VOLAT", "session": "us"},
+  {"name": "top_movers_nyse",     "instrument": "STK", "locationCode": "STK.NYSE",       "scanCode": "TOP_PERC_GAIN",      "session": "us"},
+  {"name": "top_movers_ndx",      "instrument": "STK", "locationCode": "STK.NASDAQ.NMS", "scanCode": "TOP_PERC_GAIN",      "session": "us"},
+
+  {"name": "top_movers_gbp",      "instrument": "STK", "locationCode": "STK.EU.LSE",     "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+  {"name": "top_volume_gbp",      "instrument": "STK", "locationCode": "STK.EU.LSE",     "scanCode": "MOST_ACTIVE",        "session": "eu"},
+  {"name": "top_movers_xetra",    "instrument": "STK", "locationCode": "STK.EU.IBIS",    "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+  {"name": "top_volume_xetra",    "instrument": "STK", "locationCode": "STK.EU.IBIS",    "scanCode": "MOST_ACTIVE",        "session": "eu"},
+  {"name": "top_movers_paris",    "instrument": "STK", "locationCode": "STK.EU.SBF",     "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+  {"name": "top_movers_milan",    "instrument": "STK", "locationCode": "STK.EU.BVME",    "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+  {"name": "top_movers_adam",     "instrument": "STK", "locationCode": "STK.EU.AEB",     "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+  {"name": "top_movers_madrid",   "instrument": "STK", "locationCode": "STK.EU.BM",      "scanCode": "TOP_PERC_GAIN",      "session": "eu"},
+
+  {"name": "top_movers_hk",       "instrument": "STK", "locationCode": "STK.HK.SEHK",    "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+  {"name": "top_volume_hk",       "instrument": "STK", "locationCode": "STK.HK.SEHK",    "scanCode": "MOST_ACTIVE",        "session": "asia"},
+  {"name": "top_movers_tw",       "instrument": "STK", "locationCode": "STK.TW.TWSE",    "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+  {"name": "top_movers_sg",       "instrument": "STK", "locationCode": "STK.SG.SGX",     "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+  {"name": "top_movers_asx",      "instrument": "STK", "locationCode": "STK.AU.ASX",     "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+  {"name": "top_volume_asx",      "instrument": "STK", "locationCode": "STK.AU.ASX",     "scanCode": "MOST_ACTIVE",        "session": "asia"},
+  {"name": "top_movers_jp",       "instrument": "STK", "locationCode": "STK.JP.TSE.JPN", "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+  {"name": "top_volume_jp",       "instrument": "STK", "locationCode": "STK.JP.TSE.JPN", "scanCode": "MOST_ACTIVE",        "session": "asia"},
+  {"name": "top_movers_kr",       "instrument": "STK", "locationCode": "STK.KR.KSE",     "scanCode": "TOP_PERC_GAIN",      "session": "asia"},
+
+  {"name": "top_movers_canada",   "instrument": "STK", "locationCode": "STK.NA.CANADA",  "scanCode": "TOP_PERC_GAIN",      "session": "us"}
+]

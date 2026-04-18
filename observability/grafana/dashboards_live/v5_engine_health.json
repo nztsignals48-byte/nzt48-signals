@@ -1,0 +1,60 @@
+{
+  "uid": "v5_engine_health",
+  "title": "V5 Engine Health",
+  "schemaVersion": 30,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "tags": ["aegis", "v5", "engine"],
+  "panels": [
+    {"id": 1, "type": "stat", "title": "IBKR", "gridPos": {"x":0,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_ibkr_up","refId":"A"}],
+     "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}]}}},
+
+    {"id": 2, "type": "stat", "title": "NATS", "gridPos": {"x":4,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_nats_up","refId":"A"}],
+     "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}]}}},
+
+    {"id": 3, "type": "stat", "title": "Live tickers", "gridPos": {"x":8,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_ticks_live_unique_tickers","refId":"A"}]},
+
+    {"id": 4, "type": "stat", "title": "Scanner universe", "gridPos": {"x":12,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_scanner_unique_tickers","refId":"A"}]},
+
+    {"id": 5, "type": "stat", "title": "Active subjects", "gridPos": {"x":16,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_subjects_active","refId":"A"}]},
+
+    {"id": 6, "type": "stat", "title": "SILENT subjects", "gridPos": {"x":20,"y":0,"w":4,"h":4},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[{"expr":"v5_flow_subjects_silent","refId":"A"}],
+     "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"steps":[{"color":"green","value":null},{"color":"orange","value":3},{"color":"red","value":8}]}}}},
+
+    {"id": 10, "type": "timeseries", "title": "Tick ingestion rate", "gridPos": {"x":0,"y":4,"w":12,"h":7},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[
+        {"expr":"v5_flow_ticks_live_all_per_min","refId":"A","legendFormat":"live"},
+        {"expr":"v5_flow_ticks_delayed_all_per_min","refId":"B","legendFormat":"delayed"}
+     ]},
+
+    {"id": 11, "type": "timeseries", "title": "Scanner hits / indicators", "gridPos": {"x":12,"y":4,"w":12,"h":7},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[
+        {"expr":"v5_flow_scanner_hits_all_per_min","refId":"A","legendFormat":"scanner"},
+        {"expr":"v5_flow_indicators_live_all_per_min","refId":"B","legendFormat":"indicators"}
+     ]},
+
+    {"id": 20, "type": "timeseries", "title": "Signal → Order pipeline", "gridPos": {"x":0,"y":11,"w":24,"h":8},
+     "datasource": {"type":"prometheus","uid":"cfjfa31v0fwu8d"},
+     "targets":[
+        {"expr":"v5_flow_signals_core_per_min","refId":"A","legendFormat":"signals.core"},
+        {"expr":"v5_flow_orders_submit_per_min","refId":"B","legendFormat":"orders.submit"},
+        {"expr":"v5_flow_orders_filled_per_min","refId":"C","legendFormat":"orders.filled"},
+        {"expr":"v5_flow_orders_reject_per_min","refId":"D","legendFormat":"orders.reject"}
+     ]}
+  ]
+}

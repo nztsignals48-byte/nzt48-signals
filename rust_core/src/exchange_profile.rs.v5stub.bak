@@ -1,0 +1,15 @@
+// 9-exchange profile: NYSE, NASDAQ, LSE, TSEJ, SEHK, KRX, IBIS, SGX, SBF.
+
+#[derive(Debug, Clone)]
+pub struct ExchangeProfile {
+    pub code: &'static str,
+    pub open_utc_min: u32,
+    pub close_utc_min: u32,
+    pub settlement_days: u8,
+    pub min_spread_bps: f64,
+}
+
+pub fn lookup(_code: &str) -> Option<&'static ExchangeProfile> {
+    // Phase 2A fills the table.
+    None
+}

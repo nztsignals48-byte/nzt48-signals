@@ -1,0 +1,62 @@
+{
+  "title": "P&L Attribution",
+  "uid": "pnl_attribution_live",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Realised P&L (£)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "currencyGBP", "decimals": 2}},
+      "targets": [{"expr": "realised_pnl_gbp", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "Unrealised P&L (£)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "currencyGBP", "decimals": 2}},
+      "targets": [{"expr": "unrealised_pnl_gbp", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Win rate",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 1}},
+      "targets": [{"expr": "win_rate", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "P&L per strategy",
+      "type": "timeseries",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"unit": "currencyGBP"}},
+      "targets": [{"expr": "strategy_realised_pnl_gbp", "refId": "A", "legendFormat": "{{strategy}}"}]
+    },
+    {
+      "id": 5,
+      "title": "Trades per strategy",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "strategy_trade_count", "refId": "A", "legendFormat": "{{strategy}}"}]
+    },
+    {
+      "id": 6,
+      "title": "Trades per ticker",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "ticker_trade_count", "refId": "A", "legendFormat": "{{ticker}}"}]
+    }
+  ]
+}

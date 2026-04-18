@@ -1,0 +1,56 @@
+# AEGIS V5 — default configuration (3-layer: defaults -> config -> learned)
+# bounds-checked on load; any value out of bounds.toml => refuse to start.
+
+schema_version = 1
+
+[portfolio]
+equity_start_gbp = 20000.0
+equity_hwm_gbp = 20000.0
+kelly_fraction = 0.15          # starting; Ouroboros updates via Bayesian EWMA
+min_position_gbp = 2000.0
+max_position_pct = 0.20
+max_heat_pct = 0.75
+max_concurrent_positions = 6
+max_per_ticker_pct = 0.10
+max_per_sector_pct = 0.40
+
+[risk]
+confidence_floor = 0.55
+confidence_floor_crisis = 0.70
+dd_yellow_pct = 0.03
+dd_orange_pct = 0.05
+dd_red_pct = 0.08
+dd_black_pct = 0.10
+consecutive_losses_halt = 8
+
+[exits]
+chandelier_rungs = [
+    [0.000, 1.00],
+    [0.005, 1.00],
+    [0.015, 0.95],
+    [0.025, 0.85],
+    [0.040, 0.75],
+    [0.060, 0.60],
+]
+fixed_day_expiry_days = 2
+event_window_buffer_min = 15
+profit_target_atr_mult = 2.0
+
+[llm]
+daily_cost_cap_usd = 15.0
+warning_cost_usd = 12.0
+phase = "haiku_only"           # haiku_only | ensemble | full
+
+[data_health]
+startup_block = true
+max_stale_hours = 6
+
+[nats]
+url = "nats://localhost:4222"
+stream_name = "AEGIS_V5"
+
+[ibkr]
+host = "127.0.0.1"
+port = 7497
+client_id_live = 101
+client_id_delayed = 103

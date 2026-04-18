@@ -1,0 +1,43 @@
+{
+  "title": "Signals Flow",
+  "uid": "signals_flow_live",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Signals generated / min",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(signals_generated_total[1m]) * 60", "refId": "A", "legendFormat": "{{strategy}}"}]
+    },
+    {
+      "id": 2,
+      "title": "Positions opened / min",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(positions_opened_total[1m]) * 60", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Signals by strategy (cumulative)",
+      "type": "piechart",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "signals_generated_total", "refId": "A", "legendFormat": "{{strategy}}"}]
+    },
+    {
+      "id": 4,
+      "title": "Average conviction by strategy",
+      "type": "bargauge",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "fieldConfig": {"defaults": {"min": 0, "max": 100, "unit": "percent"}},
+      "targets": [{"expr": "strategy_avg_conviction", "refId": "A", "legendFormat": "{{strategy}}"}]
+    }
+  ]
+}

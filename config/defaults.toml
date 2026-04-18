@@ -1,0 +1,85 @@
+# AEGIS V4 — Default Configuration
+# Medallion-inspired: many small positions, extreme diversification.
+# Layer 1: ships with code, sensible starting values.
+# Override in config.toml (Layer 2) or learned.toml (Layer 3).
+
+mode = "paper"
+
+# Position sizing — Medallion model: small positions, massive breadth
+# £20K equity × 0.035 kelly = £700 per position
+# 20 concurrent × £700 = £14K deployed (70% of equity)
+# Risk per position: £700 × 4.4% stop = £30.80
+# Total risk if ALL stopped: 20 × £30.80 = £616 (3.1% of equity)
+# Commission economics: £700 positions → £1.75 RT cost = 0.25% (acceptable)
+kelly_fraction = 0.035
+max_position_pct = 0.05
+max_heat_pct = 0.75
+max_concurrent = 20
+correlation_limit = 0.6
+sector_cap_pct = 0.30
+risk_per_trade_pct = 0.015
+overnight_cap_pct = 0.40
+min_position_gbp = 500.0       # Below £500, implicit costs destroy edge
+
+# Chandelier trailing stop defaults
+chandelier_atr_mult = 3.0
+# Rungs are (profit_pct_threshold, atr_mult_scale). At each rung the effective
+# trailing stop = chandelier_atr_mult * atr_mult_scale * atr. A 1.0 scale means
+# "do not tighten" — giving winners room to run through normal mean-reversion.
+#
+# Ride-winners philosophy (Session 14 2026-04-16):
+# - Keep full 3.0 ATR room below 1.5% profit (was tightening at +0.3%)
+# - Only tighten after meaningful profit cushion (>2% unrealized)
+# - Final rung at 5%+ locks in gains more aggressively
+chandelier_rungs = [
+    [0.000, 1.00],
+    [0.005, 1.00],
+    [0.015, 0.95],
+    [0.025, 0.85],
+    [0.040, 0.75],
+    [0.060, 0.60],
+]
+chandelier_eod_tightening = [
+    [30.0, 0.80],
+    [15.0, 0.60],
+]
+
+# Drawdown thresholds
+dd_yellow = -0.03
+dd_orange = -0.05
+dd_red = -0.08
+dd_black = -0.10
+dd_yellow_kelly_mult = 0.50
+dd_yellow_max_concurrent = 10
+
+# Pre-trade gates
+fat_finger_pct = 0.10
+price_collar_pct = 0.02
+max_orders_per_minute = 60
+max_spread_bps = 200.0
+data_freshness_max_s = 300.0
+
+# Bridge (Python brain)
+brain_host = "127.0.0.1"
+brain_port = 9100
+
+# IBKR connection
+ibkr_host = "127.0.0.1"
+ibkr_port = 4001
+ibkr_client_id = 101
+
+# Initial equity (GBP)
+initial_equity_isa = 20000.0
+initial_equity_ig = 0.0
+initial_equity_gia = 0.0
+
+# Regime thresholds
+[regime_thresholds]
+vix_steady_max = 22.0
+vix_crisis_min = 35.0
+
+[regime_thresholds.regime_scale]
+steady = 1.0
+inflation = 0.80
+woi = 0.53
+crisis = 0.27

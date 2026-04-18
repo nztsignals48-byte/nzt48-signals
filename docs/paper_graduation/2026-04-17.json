@@ -1,0 +1,19 @@
+{
+  "day": "2026-04-17",
+  "account": "DUM983136",
+  "source": "offline-archive",
+  "equity_gbp": null,
+  "hwm_gbp": null,
+  "drawdown_pct": null,
+  "realised_pnl_gbp": null,
+  "trades_win": 0,
+  "trades_loss": 0,
+  "win_rate": 0.0,
+  "profit_factor": 0.0,
+  "fills_total": 0,
+  "buys": 0,
+  "sells": 0,
+  "round_trip_count": 0,
+  "news_alpha_today": 2,
+  "ts_utc": "2026-04-17T15:49:48.995860+00:00"
+}

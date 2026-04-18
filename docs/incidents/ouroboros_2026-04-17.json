@@ -1,0 +1,13 @@
+{
+  "day": "2026-04-17",
+  "sell_fills": 0,
+  "realised_pnl_usd": 0.0,
+  "win_trades": 0,
+  "loss_trades": 0,
+  "profit_factor": 0.0,
+  "avg_win": 0.0,
+  "avg_loss": 0.0,
+  "kelly_fraction": 0.035,
+  "confidence_floor": 0.6,
+  "chandelier_atr_mult": 3.0
+}

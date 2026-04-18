@@ -1,0 +1,12 @@
+{
+  "title": "P&L Attribution",
+  "uid": "pnl_attribution",
+  "panels": [
+    {"title": "Per-strategy P&L", "type": "graph", "targets": [{"expr": "strategy_realized_pnl_abs"}]},
+    {"title": "Per-ticker P&L", "type": "graph", "targets": [{"expr": "ticker_realized_pnl_abs"}]},
+    {"title": "Brinson beta", "type": "stat", "targets": [{"expr": "brinson_beta"}]},
+    {"title": "Brinson sector", "type": "stat", "targets": [{"expr": "brinson_sector"}]},
+    {"title": "Brinson momentum", "type": "stat", "targets": [{"expr": "brinson_momentum"}]},
+    {"title": "Brinson reversal", "type": "stat", "targets": [{"expr": "brinson_reversal"}]}
+  ]
+}

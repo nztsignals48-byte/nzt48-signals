@@ -1,0 +1,7438 @@
+# AEGIS V5 contract universe (auto-generated + LSE ETP expansion)
+
+[[contracts]]
+symbol = "A"
+con_id = 1715006
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AAPL"
+con_id = 265598
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "ABBV"
+con_id = 118089500
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ABT"
+con_id = 4065
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ACGL"
+con_id = 10763362
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ACN"
+con_id = 67889930
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ADBE"
+con_id = 265768
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ADI"
+con_id = 4157
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ADM"
+con_id = 4165
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ADP"
+con_id = 4661
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AEE"
+con_id = 13181
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AEP"
+con_id = 4211
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AFL"
+con_id = 4227
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AIG"
+con_id = 61319701
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AJG"
+con_id = 4325
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ALB"
+con_id = 4347
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ALL"
+con_id = 4357
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AMD"
+con_id = 4391
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AME"
+con_id = 4392
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AMGN"
+con_id = 266145
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AMP"
+con_id = 35970258
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AMT"
+con_id = 99831145
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AMZN"
+con_id = 3691937
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AON"
+con_id = 414366114
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "APD"
+con_id = 4487
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "APH"
+con_id = 4493
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "APTV"
+con_id = 748351585
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ATO"
+con_id = 4644
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AVB"
+con_id = 5026974
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AVGO"
+con_id = 313130367
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "AWK"
+con_id = 50530752
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AXP"
+con_id = 4721
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AZO"
+con_id = 4750
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BA"
+con_id = 4762
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BAC"
+con_id = 10098
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BALL"
+con_id = 5052
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BAX"
+con_id = 8111188
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BDX"
+con_id = 4886
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BIIB"
+con_id = 26734397
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BKNG"
+con_id = 308728373
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BKR"
+con_id = 281316445
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BLDR"
+con_id = 34851874
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BLK"
+con_id = 729193719
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BMY"
+con_id = 5111
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BR"
+con_id = 43523793
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BRO"
+con_id = 6607613
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "BSX"
+con_id = 5270
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "C"
+con_id = 87335484
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CAH"
+con_id = 5407
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CARR"
+con_id = 410755397
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CAT"
+con_id = 5437
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CB"
+con_id = 218939694
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CBRE"
+con_id = 95514904
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CCI"
+con_id = 176571182
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CDNS"
+con_id = 5552
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CDW"
+con_id = 130432552
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CFG"
+con_id = 167955370
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CHD"
+con_id = 5651
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CHTR"
+con_id = 233674866
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CI"
+con_id = 346403540
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CL"
+con_id = 5749
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CLX"
+con_id = 5794
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CME"
+con_id = 45127739
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CMG"
+con_id = 37655664
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CMI"
+con_id = 6207
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CMS"
+con_id = 5840
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CNC"
+con_id = 13878278
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CNP"
+con_id = 8093
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "COO"
+con_id = 685217803
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "COP"
+con_id = 10885
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "COST"
+con_id = 272997
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "CPRT"
+con_id = 4728523
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CRM"
+con_id = 29624264
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CSCO"
+con_id = 268084
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CSGP"
+con_id = 6726677
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CSX"
+con_id = 6150
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CTAS"
+con_id = 268149
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CTSH"
+con_id = 4728759
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CTVA"
+con_id = 366239371
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CVS"
+con_id = 2585769
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "CVX"
+con_id = 5684
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DD"
+con_id = 365921621
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DE"
+con_id = 6393
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DELL"
+con_id = 346218218
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DG"
+con_id = 70212228
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DHI"
+con_id = 268627
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DHR"
+con_id = 6442
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DIS"
+con_id = 6459
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DLR"
+con_id = 31832526
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DOW"
+con_id = 356576040
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DRI"
+con_id = 661440
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DTE"
+con_id = 6585
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DUK"
+con_id = 110176011
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DVN"
+con_id = 754442
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DXC"
+con_id = 268960158
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "DXCM"
+con_id = 33837089
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EA"
+con_id = 268995
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ECL"
+con_id = 6682
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ED"
+con_id = 6691
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EIX"
+con_id = 11899
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ELV"
+con_id = 173962302
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EMR"
+con_id = 6842
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EOG"
+con_id = 6890
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EQR"
+con_id = 6917
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ES"
+con_id = 182880167
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ETN"
+con_id = 118017869
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EW"
+con_id = 8101142
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EXC"
+con_id = 11000
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "EXR"
+con_id = 30351205
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "F"
+con_id = 9599491
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FANG"
+con_id = 115441080
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FAST"
+con_id = 269120
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FCX"
+con_id = 7089
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FDX"
+con_id = 5100583
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FER"
+con_id = 702304865
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FIS"
+con_id = 37866641
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FITB"
+con_id = 269318
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FOX"
+con_id = 356858007
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FOXA"
+con_id = 356858008
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "FTNT"
+con_id = 70236214
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GD"
+con_id = 7496
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GEHC"
+con_id = 601776309
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GEV"
+con_id = 691984365
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GILD"
+con_id = 269753
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GIS"
+con_id = 7616
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GLW"
+con_id = 7655
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GM"
+con_id = 80986742
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GOOG"
+con_id = 208813720
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GOOGL"
+con_id = 208813719
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "GRMN"
+con_id = 76791198
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "GS"
+con_id = 4627828
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HAL"
+con_id = 7890
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HBAN"
+con_id = 270018
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HCA"
+con_id = 85076790
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HD"
+con_id = 7930
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "HLT"
+con_id = 257944570
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HON"
+con_id = 4350
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HPE"
+con_id = 209411798
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HPQ"
+con_id = 209411801
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HSY"
+con_id = 8199
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HUM"
+con_id = 8251
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "HWM"
+con_id = 403121976
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IBM"
+con_id = 8314
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ICE"
+con_id = 136370275
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IDXX"
+con_id = 270413
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IFF"
+con_id = 8385
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "INTC"
+con_id = 270639
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "INTU"
+con_id = 270662
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IQV"
+con_id = 295757261
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IR"
+con_id = 404509190
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IRM"
+con_id = 180350774
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ISRG"
+con_id = 9063285
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "IT"
+con_id = 4457287
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ITW"
+con_id = 8620
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "JNJ"
+con_id = 8719
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "JPM"
+con_id = 1520593
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "KDP"
+con_id = 324057162
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KEYS"
+con_id = 170167160
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KHC"
+con_id = 199169586
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KLAC"
+con_id = 270957
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KMB"
+con_id = 8864
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KMI"
+con_id = 83975037
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KO"
+con_id = 8894
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "KR"
+con_id = 8908
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LDOS"
+con_id = 134280621
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LEN"
+con_id = 9091
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LH"
+con_id = 703660032
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LHX"
+con_id = 371886040
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LIN"
+con_id = 617155599
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LLY"
+con_id = 9160
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "LMT"
+con_id = 611191
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LOW"
+con_id = 9199
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LRCX"
+con_id = 732440574
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LUV"
+con_id = 9282
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LVS"
+con_id = 32602412
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "LYB"
+con_id = 74866700
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MA"
+con_id = 38685693
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MAR"
+con_id = 9358
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MCD"
+con_id = 9408
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MCHP"
+con_id = 271568
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MCK"
+con_id = 9657
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MCO"
+con_id = 6497
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MDLZ"
+con_id = 113599091
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MDT"
+con_id = 181387075
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MET"
+con_id = 8093509
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "META"
+con_id = 107113386
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "MMM"
+con_id = 9720
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MNST"
+con_id = 196986496
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MO"
+con_id = 9769
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MPC"
+con_id = 89495776
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MRK"
+con_id = 70101545
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MS"
+con_id = 2841574
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MSCI"
+con_id = 47101335
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MSFT"
+con_id = 272093
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "MSI"
+con_id = 81581011
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MTB"
+con_id = 2585323
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MTD"
+con_id = 6477908
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "MU"
+con_id = 9939
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NDAQ"
+con_id = 29380756
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NEE"
+con_id = 75960201
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NEM"
+con_id = 10174
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NFLX"
+con_id = 15124833
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "NKE"
+con_id = 10291
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NOC"
+con_id = 10376
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NOW"
+con_id = 109911821
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NSC"
+con_id = 10497
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NTAP"
+con_id = 49921110
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NTRS"
+con_id = 272565
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NUE"
+con_id = 10557
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NVDA"
+con_id = 4815747
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "NVR"
+con_id = 755864
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "NXPI"
+con_id = 77791077
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "O"
+con_id = 10672
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ODFL"
+con_id = 272667
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "OMC"
+con_id = 10811
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ON"
+con_id = 8677881
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ORCL"
+con_id = 272800
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "ORLY"
+con_id = 82457808
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "OTIS"
+con_id = 410755402
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "OXY"
+con_id = 10880
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PAYX"
+con_id = 272942
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PCAR"
+con_id = 272992
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PCG"
+con_id = 2586035
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PEG"
+con_id = 11005
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PEP"
+con_id = 11017
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PFG"
+con_id = 11032
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PG"
+con_id = 11054
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PGR"
+con_id = 11080
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PH"
+con_id = 11094
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PLD"
+con_id = 88819288
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PM"
+con_id = 49588376
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PNC"
+con_id = 11240
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PPG"
+con_id = 11295
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PRU"
+con_id = 13865082
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PSA"
+con_id = 12002
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PSX"
+con_id = 105669270
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PTC"
+con_id = 121507047
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PWR"
+con_id = 6608432
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "PYPL"
+con_id = 199169591
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "QCOM"
+con_id = 273544
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RCL"
+con_id = 11520
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "REGN"
+con_id = 273733
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RF"
+con_id = 273815
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RJF"
+con_id = 11656
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RMD"
+con_id = 4817352
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ROK"
+con_id = 11697
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ROP"
+con_id = 2585629
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ROST"
+con_id = 273939
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RSG"
+con_id = 6478024
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "RTX"
+con_id = 415342104
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SBUX"
+con_id = 274105
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SCHW"
+con_id = 11905
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SHW"
+con_id = 12120
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SLB"
+con_id = 12200
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SNPS"
+con_id = 274499
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SO"
+con_id = 12300
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SPG"
+con_id = 2009113
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SPGI"
+con_id = 229629397
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SRE"
+con_id = 11020
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "STE"
+con_id = 358060563
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "STLD"
+con_id = 6478095
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "STT"
+con_id = 2730980
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "STZ"
+con_id = 276066
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SWK"
+con_id = 73354293
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SYK"
+con_id = 4430948
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "SYY"
+con_id = 12581
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "T"
+con_id = 37018770
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TDG"
+con_id = 38285434
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TEL"
+con_id = 731466408
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TFC"
+con_id = 393460310
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TGT"
+con_id = 6437
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TJX"
+con_id = 12814
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TMO"
+con_id = 12869
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TMUS"
+con_id = 125980227
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TPG"
+con_id = 537638912
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TRGP"
+con_id = 81671838
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TRV"
+con_id = 43150617
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TSCO"
+con_id = 6858322
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TSLA"
+con_id = 76792991
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "TSN"
+con_id = 275405
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TT"
+con_id = 406709270
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TTWO"
+con_id = 6478131
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "TXN"
+con_id = 13096
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "UAL"
+con_id = 79498203
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ULTA"
+con_id = 46970422
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "UNH"
+con_id = 13272
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "UNP"
+con_id = 13284
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "UPS"
+con_id = 6231002
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "URI"
+con_id = 3629755
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "USB"
+con_id = 11669769
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "V"
+con_id = 49462172
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "VICI"
+con_id = 292080616
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "VLO"
+con_id = 13497
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "VRSK"
+con_id = 69293559
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "VRTX"
+con_id = 275850
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "VZ"
+con_id = 4901
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WBD"
+con_id = 554208351
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WDC"
+con_id = 13681
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WEC"
+con_id = 198560237
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WELL"
+con_id = 207739931
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WFC"
+con_id = 10375
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WM"
+con_id = 13379
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WMB"
+con_id = 13805
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WMT"
+con_id = 13824
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "WRB"
+con_id = 266822
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "WST"
+con_id = 13909
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "XEL"
+con_id = 10517
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "XOM"
+con_id = 13977
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = true
+
+[[contracts]]
+symbol = "YUM"
+con_id = 3206042
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ZBH"
+con_id = 12851783
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "ZTS"
+con_id = 121665622
+exchange = "SMART"
+sec_type = "STK"
+currency = "USD"
+fast = false
+
+[[contracts]]
+symbol = "AAL"
+con_id = 788708135
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ABDN"
+con_id = 337997965
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ABF"
+con_id = 908924
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ADM"
+con_id = 38772705
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "AML"
+con_id = 460084303
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ANTO"
+con_id = 17628566
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ASC"
+con_id = 48845314
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ASHM"
+con_id = 41957229
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "AUTO"
+con_id = 187511156
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "AZN"
+con_id = 909330
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BARC"
+con_id = 908940
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BATS"
+con_id = 908931
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BEZ"
+con_id = 229115041
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BKG"
+con_id = 727513801
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BME"
+con_id = 859374088
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BNZL"
+con_id = 34777674
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BRBY"
+con_id = 15977601
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BT.A"
+con_id = 13672206
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "BWY"
+con_id = 16520541
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CBG"
+con_id = 12605023
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CCEP"
+con_id = 737178130
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CCH"
+con_id = 126945329
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CGS"
+con_id = 37102425
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CNA"
+con_id = 31765913
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CRDA"
+con_id = 362829916
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CRH"
+con_id = 97341412
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "CTEC"
+con_id = 253381733
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "DCC"
+con_id = 123584215
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "DGE"
+con_id = 3310674
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "DOCS"
+con_id = 468775053
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "DPLM"
+con_id = 35151287
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ENT"
+con_id = 125005888
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "EXPN"
+con_id = 41044864
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "EZJ"
+con_id = 103665937
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "FCIT"
+con_id = 12103847
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "FERG"
+con_id = 719706201
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "FRAS"
+con_id = 44650318
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "FRES"
+con_id = 51069466
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "GLEN"
+con_id = 88286963
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "GNS"
+con_id = 37099328
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "GSK"
+con_id = 574757089
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HAS"
+con_id = 957694
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HIK"
+con_id = 38772742
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HLMA"
+con_id = 15824399
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HLN"
+con_id = 573136108
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HSBA"
+con_id = 909083
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "HWDN"
+con_id = 12605132
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "IAG"
+con_id = 82965895
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ICG"
+con_id = 242485383
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "III"
+con_id = 45145440
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "IMB"
+con_id = 2117419
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "IMI"
+con_id = 144206341
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "INF"
+con_id = 152238054
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "INVP"
+con_id = 40714473
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ITRK"
+con_id = 16644346
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ITV"
+con_id = 909056
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "JMAT"
+con_id = 218457806
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "KGF"
+con_id = 909096
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LAND"
+con_id = 288529684
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LGEN"
+con_id = 909110
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LLOY"
+con_id = 909301
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LMP"
+con_id = 79699121
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "LSEG"
+con_id = 39234929
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MKS"
+con_id = 909136
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MNDI"
+con_id = 680537912
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MNG"
+con_id = 387353678
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MRO"
+con_id = 618443784
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "NCC"
+con_id = 69361142
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "NWG"
+con_id = 581444942
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "NXT"
+con_id = 957975
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "OCDO"
+con_id = 77478945
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "PRU"
+con_id = 909164
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "PSH"
+con_id = 274797523
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "PSN"
+con_id = 12605003
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "PSON"
+con_id = 909170
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "REL"
+con_id = 48005591
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "RIO"
+con_id = 2852762
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "RKT"
+con_id = 851166531
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "RMV"
+con_id = 331862780
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "RS1"
+con_id = 12103838
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "RTO"
+con_id = 909192
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SBRY"
+con_id = 29911784
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SDR"
+con_id = 586245618
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SGE"
+con_id = 129028068
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SGRO"
+con_id = 64769359
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SHEL"
+con_id = 542125742
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SMIN"
+con_id = 44668420
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SMT"
+con_id = 158725708
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SPI"
+con_id = 160954868
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SPX"
+con_id = 196961203
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SSE"
+con_id = 2570998
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "STAN"
+con_id = 909271
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SVT"
+con_id = 41172884
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SYNC"
+con_id = 116511725
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "TPK"
+con_id = 484706721
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "TRAC"
+con_id = 527974163
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "TSCO"
+con_id = 471204140
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "ULVR"
+con_id = 837455630
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "VOD"
+con_id = 140148322
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "WEIR"
+con_id = 21915985
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "WIZZ"
+con_id = 185320420
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "WPP"
+con_id = 119773886
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "WTB"
+con_id = 42402491
+exchange = "LSE"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LAZ"
+con_id = 666924983
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LBA"
+con_id = 669452036
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LBP"
+con_id = 664156617
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LDE"
+con_id = 124695812
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LGO"
+con_id = 123981892
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LGS"
+con_id = 717308245
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LNP"
+con_id = 726401515
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LRI"
+con_id = 666924984
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SAM"
+con_id = 810648291
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SAZ"
+con_id = 662772596
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SBA"
+con_id = 661236779
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SBP"
+con_id = 632410926
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SDE"
+con_id = 124695824
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SGO"
+con_id = 123981899
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SMC"
+con_id = 798822370
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SNP"
+con_id = 788704038
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SRI"
+con_id = 618310892
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SSL"
+con_id = 835395654
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SSM"
+con_id = 798822375
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SXO"
+con_id = 631368199
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "MSTP"
+con_id = 791099641
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "1COV"
+con_id = 208908717
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ADS"
+con_id = 79780521
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "AIR"
+con_id = 29612256
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ALV"
+con_id = 14079
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BAS"
+con_id = 77680640
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BAYN"
+con_id = 68598660
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BEI"
+con_id = 14362
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BMW"
+con_id = 14094
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BNR"
+con_id = 73937862
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BOSS"
+con_id = 108827295
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CBK"
+con_id = 125839555
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CON"
+con_id = 14106
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DB1"
+con_id = 11490214
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DBK"
+con_id = 14121
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DHL"
+con_id = 10749447
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DTE"
+con_id = 2254332
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ENR"
+con_id = 447545380
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "EOAN"
+con_id = 53028906
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "EVT"
+con_id = 6223268
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "FME"
+con_id = 2125938
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "FRA"
+con_id = 13037536
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "FRE"
+con_id = 4811328
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "GXI"
+con_id = 44632051
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HEI"
+con_id = 14727
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HEN3"
+con_id = 14141
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HNR1"
+con_id = 11055810
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "IFX"
+con_id = 7747731
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LEG"
+con_id = 121764205
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LHA"
+con_id = 14171
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LIN"
+con_id = 617155589
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MBG"
+con_id = 29622935
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MRK"
+con_id = 1015559
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MTX"
+con_id = 34759096
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MUV2"
+con_id = 14189
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "P911"
+con_id = 588392767
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "PAH3"
+con_id = 53610946
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "PUM"
+con_id = 15050
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "QIA"
+con_id = 840414910
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "RHM"
+con_id = 15085
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "RWE"
+con_id = 14198
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "S92"
+con_id = 52164436
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SAP"
+con_id = 14204
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SHL"
+con_id = 310520441
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SIE"
+con_id = 14217
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SRT3"
+con_id = 13891889
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SY1"
+con_id = 41963116
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "TKA"
+con_id = 4465866
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "VNA"
+con_id = 130946869
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "VOS"
+con_id = 3490932
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "VOW3"
+con_id = 14237
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ZAL"
+con_id = 168731675
+exchange = "IBIS"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ACA"
+con_id = 29612223
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "AI"
+con_id = 29612135
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "AIR"
+con_id = 29612256
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ATO"
+con_id = 767901404
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BN"
+con_id = 29612111
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BNP"
+con_id = 29612163
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CA"
+con_id = 29612172
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CAP"
+con_id = 29612147
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CS"
+con_id = 29612141
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DG"
+con_id = 29612226
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "DSY"
+con_id = 500760943
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "EL"
+con_id = 1321740
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "EN"
+con_id = 29612166
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ENGI"
+con_id = 35052259
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ERF"
+con_id = 455926540
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "GLE"
+con_id = 29612232
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "KER"
+con_id = 29612178
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LR"
+con_id = 38715873
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MC"
+con_id = 29612150
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ML"
+con_id = 562418770
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "OR"
+con_id = 29612116
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ORA"
+con_id = 29612252
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "PUB"
+con_id = 1254581
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "RI"
+con_id = 917758
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "RMS"
+con_id = 1254605
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SAF"
+con_id = 1322028
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SGO"
+con_id = 29612189
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "STLAP"
+con_id = 463647471
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SU"
+con_id = 29612196
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "TEP"
+con_id = 1322000
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "TTE"
+con_id = 29612193
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "URW"
+con_id = 320358733
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "VIE"
+con_id = 29612206
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "VIV"
+con_id = 29612113
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "WLN"
+con_id = 158556311
+exchange = "SBF"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "A2A"
+con_id = 4430467
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BAMI"
+con_id = 259854200
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BMPS"
+con_id = 587052149
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "BPE"
+con_id = 11516717
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "CPR"
+con_id = 431811326
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ENEL"
+con_id = 29816333
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ENI"
+con_id = 29816844
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "FCT"
+con_id = 709215810
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "G"
+con_id = 29816322
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "HER"
+con_id = 26319230
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "ISP"
+con_id = 29816328
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "LDO"
+con_id = 35162453
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MB"
+con_id = 917595
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "MONC"
+con_id = 140054327
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "NEXI"
+con_id = 360973398
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "PST"
+con_id = 211008268
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "SRG"
+con_id = 14075063
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "TIT"
+con_id = 29816348
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "UCG"
+con_id = 262695149
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "UNI"
+con_id = 105387889
+exchange = "BVME"
+sec_type = "STK"
+currency = "EUR"
+fast = false
+
+[[contracts]]
+symbol = "1038"
+con_id = 280529561
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1044"
+con_id = 71431717
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1088"
+con_id = 46636749
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1093"
+con_id = 14488528
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1109"
+con_id = 3884658
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1113"
+con_id = 290000373
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1177"
+con_id = 42452539
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1209"
+con_id = 457716528
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1211"
+con_id = 46652429
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1299"
+con_id = 80423421
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1398"
+con_id = 46652361
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1810"
+con_id = 323608988
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1876"
+con_id = 374165090
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1928"
+con_id = 70670354
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "1997"
+con_id = 295731907
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2018"
+con_id = 110368950
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2020"
+con_id = 45089052
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2269"
+con_id = 455575398
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2313"
+con_id = 42446325
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2318"
+con_id = 46652400
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2319"
+con_id = 42446330
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2382"
+con_id = 44582470
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2388"
+con_id = 16511977
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2628"
+con_id = 46652350
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2688"
+con_id = 79403968
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "3328"
+con_id = 46636720
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "3690"
+con_id = 332623976
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "3968"
+con_id = 46639417
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "3988"
+con_id = 46639425
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "6098"
+con_id = 320354559
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "6862"
+con_id = 332968779
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "9618"
+con_id = 426228059
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "9888"
+con_id = 476787454
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "9988"
+con_id = 391638829
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "9999"
+con_id = 425145098
+exchange = "SEHK"
+sec_type = "STK"
+currency = "HKD"
+fast = false
+
+[[contracts]]
+symbol = "2914"
+con_id = 13905344
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "3382"
+con_id = 35802542
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4063"
+con_id = 13905438
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4452"
+con_id = 13905453
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4502"
+con_id = 13905462
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4503"
+con_id = 13905465
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4519"
+con_id = 14015627
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4543"
+con_id = 13905488
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4568"
+con_id = 35928149
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4578"
+con_id = 81835552
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "4661"
+con_id = 14015752
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "5108"
+con_id = 13905522
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6098"
+con_id = 166623148
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6273"
+con_id = 14016451
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6301"
+con_id = 13905624
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6367"
+con_id = 13857203
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6501"
+con_id = 13905665
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6503"
+con_id = 13905675
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6723"
+con_id = 31676917
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6752"
+con_id = 13905699
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6758"
+con_id = 13905705
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6861"
+con_id = 14017040
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6902"
+con_id = 13905745
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "6954"
+con_id = 13905758
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "7011"
+con_id = 13905782
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "7203"
+con_id = 13905804
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "7267"
+con_id = 13905825
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "7751"
+con_id = 13905840
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "7974"
+con_id = 14017724
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8031"
+con_id = 13905878
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8035"
+con_id = 13905881
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8058"
+con_id = 13905888
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8306"
+con_id = 13905935
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8411"
+con_id = 17301320
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8604"
+con_id = 13905980
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8766"
+con_id = 14726160
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8801"
+con_id = 13906000
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "8802"
+con_id = 13906005
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "9022"
+con_id = 14018918
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "9101"
+con_id = 13906045
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "9432"
+con_id = 13906070
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "9433"
+con_id = 13906073
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "9984"
+con_id = 14019490
+exchange = "TSEJ"
+sec_type = "STK"
+currency = "JPY"
+fast = false
+
+[[contracts]]
+symbol = "A17U"
+con_id = 47527231
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "BN4"
+con_id = 92216592
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "C07"
+con_id = 47527226
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "C09"
+con_id = 15785543
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "C38U"
+con_id = 95173090
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "C52"
+con_id = 38558065
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "C6L"
+con_id = 92216536
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "D05"
+con_id = 15785538
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "F34"
+con_id = 47990698
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "G13"
+con_id = 320989025
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "M44U"
+con_id = 117901223
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "N2IU"
+con_id = 117901259
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "O39"
+con_id = 15785520
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "S58"
+con_id = 92215448
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "S63"
+con_id = 15785255
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "S68"
+con_id = 39861749
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "T82U"
+con_id = 113532998
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "U11"
+con_id = 15785555
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "U14"
+con_id = 38558068
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "U96"
+con_id = 15785505
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "V03"
+con_id = 15785535
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "Y92"
+con_id = 92215811
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "Z74"
+con_id = 43626350
+exchange = "SGX"
+sec_type = "STK"
+currency = "SGD"
+fast = false
+
+[[contracts]]
+symbol = "AGL"
+con_id = 4506298
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "ALL"
+con_id = 12294122
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "AMC"
+con_id = 4109657
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "ANZ"
+con_id = 4109645
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "APA"
+con_id = 10129283
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "BHP"
+con_id = 4036812
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "BSL"
+con_id = 15192570
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "BXB"
+con_id = 41881274
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "CAR"
+con_id = 185186710
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "CBA"
+con_id = 4036818
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "COL"
+con_id = 342697717
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "CPU"
+con_id = 11289549
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "CSL"
+con_id = 11294198
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "EVN"
+con_id = 96616475
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "FMG"
+con_id = 34805876
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "GMG"
+con_id = 45079010
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "IAG"
+con_id = 9992848
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "ILU"
+con_id = 4708370
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "JBH"
+con_id = 30865337
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "LLC"
+con_id = 4109651
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "MGR"
+con_id = 4757194
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "MIN"
+con_id = 44202881
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "MQG"
+con_id = 47028156
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "NAB"
+con_id = 4036823
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "NST"
+con_id = 44202785
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "ORG"
+con_id = 7202087
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "PMGOLD"
+con_id = 594315782
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "QAN"
+con_id = 4506336
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "QBE"
+con_id = 11294204
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "REA"
+con_id = 14065335
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "RIO"
+con_id = 4109654
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "RMD"
+con_id = 9508748
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "S32"
+con_id = 193494541
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "SCG"
+con_id = 156106374
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "SHL"
+con_id = 12370176
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "STO"
+con_id = 4109694
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "SUN"
+con_id = 12101107
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "TAH"
+con_id = 4506346
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "TCL"
+con_id = 14066073
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "TLS"
+con_id = 4081863
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WBC"
+con_id = 4036833
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WDS"
+con_id = 564155292
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WES"
+con_id = 11910870
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WOR"
+con_id = 28109231
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WOW"
+con_id = 4109712
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "WTC"
+con_id = 228870348
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "XRO"
+con_id = 116775084
+exchange = "ASX"
+sec_type = "STK"
+currency = "AUD"
+fast = false
+
+[[contracts]]
+symbol = "3LBC"
+con_id = 664156626
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LDO"
+con_id = 666924978
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LES"
+con_id = 269578192
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LFP"
+con_id = 647804815
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LIP"
+con_id = 788704014
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LLL"
+con_id = 664156620
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LMP"
+con_id = 647805799
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LTP"
+con_id = 647804827
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LUP"
+con_id = 647805777
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LUS"
+con_id = 269578231
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LVO"
+con_id = 662772593
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3LVP"
+con_id = 708624395
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SBC"
+con_id = 790141966
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SDO"
+con_id = 665364718
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SFP"
+con_id = 653027455
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SIP"
+con_id = 785354868
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SLL"
+con_id = 662772591
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SMP"
+con_id = 669452046
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SPY"
+con_id = 566361450
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3STP"
+con_id = 787556757
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SUS"
+con_id = 664682502
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SVO"
+con_id = 665364715
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3SVP"
+con_id = 713192682
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3UKL"
+con_id = 118430660
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "3UKS"
+con_id = 118503776
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+[[contracts]]
+symbol = "SPXL"
+con_id = 663577700
+exchange = "LSEETF"
+sec_type = "STK"
+currency = "GBP"
+fast = false
+
+# Major US ETFs — added manually. Proper con_ids from IBKR.
+[[contracts]]
+symbol = "SPY"
+exchange = "SMART"
+currency = "USD"
+con_id = 756733
+
+[[contracts]]
+symbol = "QQQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 320227571
+
+[[contracts]]
+symbol = "IWM"
+exchange = "SMART"
+currency = "USD"
+con_id = 9579970
+
+[[contracts]]
+symbol = "DIA"
+exchange = "SMART"
+currency = "USD"
+con_id = 756675
+
+[[contracts]]
+symbol = "VTI"
+exchange = "SMART"
+currency = "USD"
+con_id = 11194
+
+[[contracts]]
+symbol = "AACBR"
+exchange = "SMART"
+currency = "USD"
+con_id = 773701113
+
+[[contracts]]
+symbol = "ABLV"
+exchange = "SMART"
+currency = "USD"
+con_id = 649166469
+
+[[contracts]]
+symbol = "ABTS"
+exchange = "SMART"
+currency = "USD"
+con_id = 766915744
+
+[[contracts]]
+symbol = "AGAE"
+exchange = "SMART"
+currency = "USD"
+con_id = 378605914
+
+[[contracts]]
+symbol = "AGCC"
+exchange = "SMART"
+currency = "USD"
+con_id = 825138687
+
+[[contracts]]
+symbol = "AIFU"
+exchange = "SMART"
+currency = "USD"
+con_id = 786031983
+
+[[contracts]]
+symbol = "AIMD"
+exchange = "SMART"
+currency = "USD"
+con_id = 795432422
+
+[[contracts]]
+symbol = "ALBG"
+exchange = "SMART"
+currency = "USD"
+con_id = 845307858
+
+[[contracts]]
+symbol = "ALK"
+exchange = "SMART"
+currency = "USD"
+con_id = 4352
+
+[[contracts]]
+symbol = "ALLY"
+exchange = "SMART"
+currency = "USD"
+con_id = 148233980
+
+[[contracts]]
+symbol = "ALTG"
+exchange = "SMART"
+currency = "USD"
+con_id = 403671928
+
+[[contracts]]
+symbol = "AMBQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 802476467
+
+[[contracts]]
+symbol = "ANL"
+exchange = "SMART"
+currency = "USD"
+con_id = 657138790
+
+[[contracts]]
+symbol = "ANNA"
+exchange = "SMART"
+currency = "USD"
+con_id = 748347031
+
+[[contracts]]
+symbol = "ANTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 552594883
+
+[[contracts]]
+symbol = "ASST"
+exchange = "SMART"
+currency = "USD"
+con_id = 852120292
+
+[[contracts]]
+symbol = "AVTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 674693864
+
+[[contracts]]
+symbol = "BAND"
+exchange = "SMART"
+currency = "USD"
+con_id = 295757247
+
+[[contracts]]
+symbol = "BATL"
+exchange = "SMART"
+currency = "USD"
+con_id = 403525393
+
+[[contracts]]
+symbol = "BATRK"
+exchange = "SMART"
+currency = "USD"
+con_id = 641665729
+
+[[contracts]]
+symbol = "BBBY"
+exchange = "SMART"
+currency = "USD"
+con_id = 15130059
+
+[[contracts]]
+symbol = "BBGI"
+exchange = "SMART"
+currency = "USD"
+con_id = 730637242
+
+[[contracts]]
+symbol = "BBWI"
+exchange = "SMART"
+currency = "USD"
+con_id = 502252263
+
+[[contracts]]
+symbol = "BGL"
+exchange = "SMART"
+currency = "USD"
+con_id = 794922628
+
+[[contracts]]
+symbol = "BHVN"
+exchange = "SMART"
+currency = "USD"
+con_id = 586873967
+
+[[contracts]]
+symbol = "BITO"
+exchange = "SMART"
+currency = "USD"
+con_id = 521525019
+
+[[contracts]]
+symbol = "BMEA"
+exchange = "SMART"
+currency = "USD"
+con_id = 482017090
+
+[[contracts]]
+symbol = "BMI"
+exchange = "SMART"
+currency = "USD"
+con_id = 764657
+
+[[contracts]]
+symbol = "BMNG"
+exchange = "SMART"
+currency = "USD"
+con_id = 826120829
+
+[[contracts]]
+symbol = "BMNR"
+exchange = "SMART"
+currency = "USD"
+con_id = 785071865
+
+[[contracts]]
+symbol = "BMNU"
+exchange = "SMART"
+currency = "USD"
+con_id = 817579037
+
+[[contracts]]
+symbol = "BOBS"
+exchange = "SMART"
+currency = "USD"
+con_id = 851509154
+
+[[contracts]]
+symbol = "BRBI"
+exchange = "SMART"
+currency = "USD"
+con_id = 814542355
+
+[[contracts]]
+symbol = "BTGO"
+exchange = "SMART"
+currency = "USD"
+con_id = 847099374
+
+[[contracts]]
+symbol = "BWET"
+exchange = "SMART"
+currency = "USD"
+con_id = 685215304
+
+[[contracts]]
+symbol = "BYND"
+exchange = "SMART"
+currency = "USD"
+con_id = 364036112
+
+[[contracts]]
+symbol = "BZAI"
+exchange = "SMART"
+currency = "USD"
+con_id = 754087637
+
+[[contracts]]
+symbol = "BZH"
+exchange = "SMART"
+currency = "USD"
+con_id = 114945521
+
+[[contracts]]
+symbol = "CADL"
+exchange = "SMART"
+currency = "USD"
+con_id = 504262800
+
+[[contracts]]
+symbol = "CALY"
+exchange = "SMART"
+currency = "USD"
+con_id = 6808
+
+[[contracts]]
+symbol = "CANG"
+exchange = "SMART"
+currency = "USD"
+con_id = 831089019
+
+[[contracts]]
+symbol = "CAPS"
+exchange = "SMART"
+currency = "USD"
+con_id = 382532121
+
+[[contracts]]
+symbol = "CBUS"
+exchange = "SMART"
+currency = "USD"
+con_id = 634517119
+
+[[contracts]]
+symbol = "CCL"
+exchange = "SMART"
+currency = "USD"
+con_id = 5516
+
+[[contracts]]
+symbol = "CD"
+exchange = "SMART"
+currency = "USD"
+con_id = 617184867
+
+[[contracts]]
+symbol = "CELU"
+exchange = "SMART"
+currency = "USD"
+con_id = 687273279
+
+[[contracts]]
+symbol = "CHPGR"
+exchange = "SMART"
+currency = "USD"
+con_id = 793105133
+
+[[contracts]]
+symbol = "CIFG"
+exchange = "SMART"
+currency = "USD"
+con_id = 837874847
+
+[[contracts]]
+symbol = "CIFR"
+exchange = "SMART"
+currency = "USD"
+con_id = 511470142
+
+[[contracts]]
+symbol = "CIFU"
+exchange = "SMART"
+currency = "USD"
+con_id = 832444237
+
+[[contracts]]
+symbol = "CLGN"
+exchange = "SMART"
+currency = "USD"
+con_id = 495264677
+
+[[contracts]]
+symbol = "CMCI"
+exchange = "SMART"
+currency = "USD"
+con_id = 650082824
+
+[[contracts]]
+symbol = "CMND"
+exchange = "SMART"
+currency = "USD"
+con_id = 838290137
+
+[[contracts]]
+symbol = "COLAR"
+exchange = "SMART"
+currency = "USD"
+con_id = 768552424
+
+[[contracts]]
+symbol = "COMP"
+exchange = "SMART"
+currency = "USD"
+con_id = 479630127
+
+[[contracts]]
+symbol = "CRML"
+exchange = "SMART"
+currency = "USD"
+con_id = 687273967
+
+[[contracts]]
+symbol = "CRMT"
+exchange = "SMART"
+currency = "USD"
+con_id = 4728345
+
+[[contracts]]
+symbol = "CRMU"
+exchange = "SMART"
+currency = "USD"
+con_id = 853415312
+
+[[contracts]]
+symbol = "CRMX"
+exchange = "SMART"
+currency = "USD"
+con_id = 859589320
+
+[[contracts]]
+symbol = "CRVS"
+exchange = "SMART"
+currency = "USD"
+con_id = 227267069
+
+[[contracts]]
+symbol = "CTAAR"
+exchange = "SMART"
+currency = "USD"
+con_id = 873537656
+
+[[contracts]]
+symbol = "CTKB"
+exchange = "SMART"
+currency = "USD"
+con_id = 504262805
+
+[[contracts]]
+symbol = "CTNT"
+exchange = "SMART"
+currency = "USD"
+con_id = 737376810
+
+[[contracts]]
+symbol = "CVNX"
+exchange = "SMART"
+currency = "USD"
+con_id = 787979416
+
+[[contracts]]
+symbol = "DCGO"
+exchange = "SMART"
+currency = "USD"
+con_id = 525260308
+
+[[contracts]]
+symbol = "DECM"
+exchange = "SMART"
+currency = "USD"
+con_id = 749849641
+
+[[contracts]]
+symbol = "DERM"
+exchange = "SMART"
+currency = "USD"
+con_id = 526175559
+
+[[contracts]]
+symbol = "DEVS"
+exchange = "SMART"
+currency = "USD"
+con_id = 804982267
+
+[[contracts]]
+symbol = "DFH"
+exchange = "SMART"
+currency = "USD"
+con_id = 466860974
+
+[[contracts]]
+symbol = "DFNS"
+exchange = "SMART"
+currency = "USD"
+con_id = 737381221
+
+[[contracts]]
+symbol = "DH"
+exchange = "SMART"
+currency = "USD"
+con_id = 514318680
+
+[[contracts]]
+symbol = "DHDG"
+exchange = "SMART"
+currency = "USD"
+con_id = 736374569
+
+[[contracts]]
+symbol = "DRIP"
+exchange = "SMART"
+currency = "USD"
+con_id = 546185312
+
+[[contracts]]
+symbol = "DVLT"
+exchange = "SMART"
+currency = "USD"
+con_id = 696511292
+
+[[contracts]]
+symbol = "DXLG"
+exchange = "SMART"
+currency = "USD"
+con_id = 123279032
+
+[[contracts]]
+symbol = "DYAI"
+exchange = "SMART"
+currency = "USD"
+con_id = 30209041
+
+[[contracts]]
+symbol = "EFOI"
+exchange = "SMART"
+currency = "USD"
+con_id = 637687686
+
+[[contracts]]
+symbol = "EGHAR"
+exchange = "SMART"
+currency = "USD"
+con_id = 795742641
+
+[[contracts]]
+symbol = "ELAB"
+exchange = "SMART"
+currency = "USD"
+con_id = 861863560
+
+[[contracts]]
+symbol = "ELME"
+exchange = "SMART"
+currency = "USD"
+con_id = 758160
+
+[[contracts]]
+symbol = "ENLV"
+exchange = "SMART"
+currency = "USD"
+con_id = 355965337
+
+[[contracts]]
+symbol = "ENTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 324062308
+
+[[contracts]]
+symbol = "ENVB"
+exchange = "SMART"
+currency = "USD"
+con_id = 826119271
+
+[[contracts]]
+symbol = "ESAB"
+exchange = "SMART"
+currency = "USD"
+con_id = 550617891
+
+[[contracts]]
+symbol = "EURKR"
+exchange = "SMART"
+currency = "USD"
+con_id = 727984333
+
+[[contracts]]
+symbol = "FBYD"
+exchange = "SMART"
+currency = "USD"
+con_id = 658409786
+
+[[contracts]]
+symbol = "FCHL"
+exchange = "SMART"
+currency = "USD"
+con_id = 866505734
+
+[[contracts]]
+symbol = "FENC"
+exchange = "SMART"
+currency = "USD"
+con_id = 165875335
+
+[[contracts]]
+symbol = "FFAI"
+exchange = "SMART"
+currency = "USD"
+con_id = 723432897
+
+[[contracts]]
+symbol = "FGI"
+exchange = "SMART"
+currency = "USD"
+con_id = 802999989
+
+[[contracts]]
+symbol = "FGNX"
+exchange = "SMART"
+currency = "USD"
+con_id = 854075530
+
+[[contracts]]
+symbol = "FHTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 451730057
+
+[[contracts]]
+symbol = "FIG"
+exchange = "SMART"
+currency = "USD"
+con_id = 802794976
+
+[[contracts]]
+symbol = "FIGG"
+exchange = "SMART"
+currency = "USD"
+con_id = 822465597
+
+[[contracts]]
+symbol = "FLD"
+exchange = "SMART"
+currency = "USD"
+con_id = 543046219
+
+[[contracts]]
+symbol = "FLS"
+exchange = "SMART"
+currency = "USD"
+con_id = 6477749
+
+[[contracts]]
+symbol = "FLYD"
+exchange = "SMART"
+currency = "USD"
+con_id = 854937674
+
+[[contracts]]
+symbol = "FRMM"
+exchange = "SMART"
+currency = "USD"
+con_id = 823801717
+
+[[contracts]]
+symbol = "FSI"
+exchange = "SMART"
+currency = "USD"
+con_id = 355090940
+
+[[contracts]]
+symbol = "GAB RT"
+exchange = "SMART"
+currency = "USD"
+con_id = 855788181
+
+[[contracts]]
+symbol = "GAIA"
+exchange = "SMART"
+currency = "USD"
+con_id = 240610487
+
+[[contracts]]
+symbol = "GEMG"
+exchange = "SMART"
+currency = "USD"
+con_id = 828640872
+
+[[contracts]]
+symbol = "GENVR"
+exchange = "SMART"
+currency = "USD"
+con_id = 777715195
+
+[[contracts]]
+symbol = "GLED RT"
+exchange = "SMART"
+currency = "USD"
+con_id = 872502400
+
+[[contracts]]
+symbol = "GLGG"
+exchange = "SMART"
+currency = "USD"
+con_id = 808834431
+
+[[contracts]]
+symbol = "GLND"
+exchange = "SMART"
+currency = "USD"
+con_id = 868507595
+
+[[contracts]]
+symbol = "GNLN"
+exchange = "SMART"
+currency = "USD"
+con_id = 870512079
+
+[[contracts]]
+symbol = "GPAC"
+exchange = "SMART"
+currency = "USD"
+con_id = 848786357
+
+[[contracts]]
+symbol = "GRAB"
+exchange = "SMART"
+currency = "USD"
+con_id = 530319709
+
+[[contracts]]
+symbol = "GRCE"
+exchange = "SMART"
+currency = "USD"
+con_id = 733969323
+
+[[contracts]]
+symbol = "GRDX"
+exchange = "SMART"
+currency = "USD"
+con_id = 807383439
+
+[[contracts]]
+symbol = "GYRE"
+exchange = "SMART"
+currency = "USD"
+con_id = 663134311
+
+[[contracts]]
+symbol = "HIMS"
+exchange = "SMART"
+currency = "USD"
+con_id = 466188387
+
+[[contracts]]
+symbol = "HIMZ"
+exchange = "SMART"
+currency = "USD"
+con_id = 865203888
+
+[[contracts]]
+symbol = "HIVE"
+exchange = "SMART"
+currency = "USD"
+con_id = 641568851
+
+[[contracts]]
+symbol = "HLLY"
+exchange = "SMART"
+currency = "USD"
+con_id = 502415300
+
+[[contracts]]
+symbol = "HOOD"
+exchange = "SMART"
+currency = "USD"
+con_id = 504546674
+
+[[contracts]]
+symbol = "HOV"
+exchange = "SMART"
+currency = "USD"
+con_id = 358159257
+
+[[contracts]]
+symbol = "HUBC"
+exchange = "SMART"
+currency = "USD"
+con_id = 845913331
+
+[[contracts]]
+symbol = "HUTG"
+exchange = "SMART"
+currency = "USD"
+con_id = 845307863
+
+[[contracts]]
+symbol = "HYG"
+exchange = "SMART"
+currency = "USD"
+con_id = 43652089
+
+[[contracts]]
+symbol = "HYPR"
+exchange = "SMART"
+currency = "USD"
+con_id = 534577583
+
+[[contracts]]
+symbol = "IBIT"
+exchange = "SMART"
+currency = "USD"
+con_id = 677037673
+
+[[contracts]]
+symbol = "IESC"
+exchange = "SMART"
+currency = "USD"
+con_id = 234843378
+
+[[contracts]]
+symbol = "IFRX"
+exchange = "SMART"
+currency = "USD"
+con_id = 295404306
+
+[[contracts]]
+symbol = "IGV"
+exchange = "SMART"
+currency = "USD"
+con_id = 12658199
+
+[[contracts]]
+symbol = "IMDX"
+exchange = "SMART"
+currency = "USD"
+con_id = 644574609
+
+[[contracts]]
+symbol = "INCR"
+exchange = "SMART"
+currency = "USD"
+con_id = 489132236
+
+[[contracts]]
+symbol = "INFQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 854083840
+
+[[contracts]]
+symbol = "INTG"
+exchange = "SMART"
+currency = "USD"
+con_id = 4813548
+
+[[contracts]]
+symbol = "IONQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 517593749
+
+[[contracts]]
+symbol = "ISPC"
+exchange = "SMART"
+currency = "USD"
+con_id = 728485720
+
+[[contracts]]
+symbol = "IVA"
+exchange = "SMART"
+currency = "USD"
+con_id = 433163489
+
+[[contracts]]
+symbol = "IXHL"
+exchange = "SMART"
+currency = "USD"
+con_id = 858465700
+
+[[contracts]]
+symbol = "JACS RT"
+exchange = "SMART"
+currency = "USD"
+con_id = 756555617
+
+[[contracts]]
+symbol = "JHX"
+exchange = "SMART"
+currency = "USD"
+con_id = 794909199
+
+[[contracts]]
+symbol = "JLHL"
+exchange = "SMART"
+currency = "USD"
+con_id = 794922960
+
+[[contracts]]
+symbol = "JNEU"
+exchange = "SMART"
+currency = "USD"
+con_id = 707171168
+
+[[contracts]]
+symbol = "KITT"
+exchange = "SMART"
+currency = "USD"
+con_id = 811735330
+
+[[contracts]]
+symbol = "KLTR"
+exchange = "SMART"
+currency = "USD"
+con_id = 479630122
+
+[[contracts]]
+symbol = "KMTS"
+exchange = "SMART"
+currency = "USD"
+con_id = 766495600
+
+[[contracts]]
+symbol = "LAKE"
+exchange = "SMART"
+currency = "USD"
+con_id = 271092
+
+[[contracts]]
+symbol = "LDI"
+exchange = "SMART"
+currency = "USD"
+con_id = 469015102
+
+[[contracts]]
+symbol = "LION"
+exchange = "SMART"
+currency = "USD"
+con_id = 781540521
+
+[[contracts]]
+symbol = "LNZA"
+exchange = "SMART"
+currency = "USD"
+con_id = 807649689
+
+[[contracts]]
+symbol = "LOAR"
+exchange = "SMART"
+currency = "USD"
+con_id = 699030008
+
+[[contracts]]
+symbol = "LOOP"
+exchange = "SMART"
+currency = "USD"
+con_id = 212708817
+
+[[contracts]]
+symbol = "LTRN"
+exchange = "SMART"
+currency = "USD"
+con_id = 426537589
+
+[[contracts]]
+symbol = "LVWR"
+exchange = "SMART"
+currency = "USD"
+con_id = 587842007
+
+[[contracts]]
+symbol = "LZM"
+exchange = "SMART"
+currency = "USD"
+con_id = 640331692
+
+[[contracts]]
+symbol = "LZMH"
+exchange = "SMART"
+currency = "USD"
+con_id = 764486299
+
+[[contracts]]
+symbol = "MAAS"
+exchange = "SMART"
+currency = "USD"
+con_id = 793092212
+
+[[contracts]]
+symbol = "MARA"
+exchange = "SMART"
+currency = "USD"
+con_id = 474219659
+
+[[contracts]]
+symbol = "MATH"
+exchange = "SMART"
+currency = "USD"
+con_id = 290085887
+
+[[contracts]]
+symbol = "MAYU"
+exchange = "SMART"
+currency = "USD"
+con_id = 700321450
+
+[[contracts]]
+symbol = "MCHX"
+exchange = "SMART"
+currency = "USD"
+con_id = 28476362
+
+[[contracts]]
+symbol = "MCOW"
+exchange = "SMART"
+currency = "USD"
+con_id = 810314327
+
+[[contracts]]
+symbol = "MLACR"
+exchange = "SMART"
+currency = "USD"
+con_id = 758564154
+
+[[contracts]]
+symbol = "MODD"
+exchange = "SMART"
+currency = "USD"
+con_id = 868971125
+
+[[contracts]]
+symbol = "MRLN"
+exchange = "SMART"
+currency = "USD"
+con_id = 864856617
+
+[[contracts]]
+symbol = "MRNO"
+exchange = "SMART"
+currency = "USD"
+con_id = 692396129
+
+[[contracts]]
+symbol = "MSDD"
+exchange = "SMART"
+currency = "USD"
+con_id = 790411552
+
+[[contracts]]
+symbol = "MST"
+exchange = "SMART"
+currency = "USD"
+con_id = 866502691
+
+[[contracts]]
+symbol = "MSTR"
+exchange = "SMART"
+currency = "USD"
+con_id = 272110
+
+[[contracts]]
+symbol = "MSTU"
+exchange = "SMART"
+currency = "USD"
+con_id = 833844154
+
+[[contracts]]
+symbol = "MSTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 865203863
+
+[[contracts]]
+symbol = "MSTZ"
+exchange = "SMART"
+currency = "USD"
+con_id = 747326053
+
+[[contracts]]
+symbol = "MTRN"
+exchange = "SMART"
+currency = "USD"
+con_id = 84822089
+
+[[contracts]]
+symbol = "MVO"
+exchange = "SMART"
+currency = "USD"
+con_id = 42357298
+
+[[contracts]]
+symbol = "MXCT"
+exchange = "SMART"
+currency = "USD"
+con_id = 505799182
+
+[[contracts]]
+symbol = "MXL"
+exchange = "SMART"
+currency = "USD"
+con_id = 73342855
+
+[[contracts]]
+symbol = "NDRA"
+exchange = "SMART"
+currency = "USD"
+con_id = 739810414
+
+[[contracts]]
+symbol = "NEXA"
+exchange = "SMART"
+currency = "USD"
+con_id = 293795910
+
+[[contracts]]
+symbol = "NFLP"
+exchange = "SMART"
+currency = "USD"
+con_id = 742759313
+
+[[contracts]]
+symbol = "NFLU"
+exchange = "SMART"
+currency = "USD"
+con_id = 731690792
+
+[[contracts]]
+symbol = "NFLW"
+exchange = "SMART"
+currency = "USD"
+con_id = 792065908
+
+[[contracts]]
+symbol = "NFLY"
+exchange = "SMART"
+currency = "USD"
+con_id = 646793848
+
+[[contracts]]
+symbol = "NFXL"
+exchange = "SMART"
+currency = "USD"
+con_id = 733168177
+
+[[contracts]]
+symbol = "NFXS"
+exchange = "SMART"
+currency = "USD"
+con_id = 733168175
+
+[[contracts]]
+symbol = "NKTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 433163492
+
+[[contracts]]
+symbol = "NNBR"
+exchange = "SMART"
+currency = "USD"
+con_id = 272425
+
+[[contracts]]
+symbol = "NOEMR"
+exchange = "SMART"
+currency = "USD"
+con_id = 754542645
+
+[[contracts]]
+symbol = "NPT"
+exchange = "SMART"
+currency = "USD"
+con_id = 824878220
+
+[[contracts]]
+symbol = "NRGU"
+exchange = "SMART"
+currency = "USD"
+con_id = 762285138
+
+[[contracts]]
+symbol = "NRT"
+exchange = "SMART"
+currency = "USD"
+con_id = 10182
+
+[[contracts]]
+symbol = "NTCL"
+exchange = "SMART"
+currency = "USD"
+con_id = 748085476
+
+[[contracts]]
+symbol = "ODV"
+exchange = "SMART"
+currency = "USD"
+con_id = 559723037
+
+[[contracts]]
+symbol = "ONDS"
+exchange = "SMART"
+currency = "USD"
+con_id = 455415330
+
+[[contracts]]
+symbol = "ONEW"
+exchange = "SMART"
+currency = "USD"
+con_id = 403103961
+
+[[contracts]]
+symbol = "ONFO"
+exchange = "SMART"
+currency = "USD"
+con_id = 569570295
+
+[[contracts]]
+symbol = "ONTO"
+exchange = "SMART"
+currency = "USD"
+con_id = 387597494
+
+[[contracts]]
+symbol = "OPTU"
+exchange = "SMART"
+currency = "USD"
+con_id = 280153137
+
+[[contracts]]
+symbol = "OPTX"
+exchange = "SMART"
+currency = "USD"
+con_id = 664690505
+
+[[contracts]]
+symbol = "ORBS"
+exchange = "SMART"
+currency = "USD"
+con_id = 722696516
+
+[[contracts]]
+symbol = "PACK"
+exchange = "SMART"
+currency = "USD"
+con_id = 368681400
+
+[[contracts]]
+symbol = "PBM"
+exchange = "SMART"
+currency = "USD"
+con_id = 846773110
+
+[[contracts]]
+symbol = "PII"
+exchange = "SMART"
+currency = "USD"
+con_id = 611242
+
+[[contracts]]
+symbol = "PLTR"
+exchange = "SMART"
+currency = "USD"
+con_id = 444857009
+
+[[contracts]]
+symbol = "PLUG"
+exchange = "SMART"
+currency = "USD"
+con_id = 88385302
+
+[[contracts]]
+symbol = "PMNT"
+exchange = "SMART"
+currency = "USD"
+con_id = 679723622
+
+[[contracts]]
+symbol = "PPBT"
+exchange = "SMART"
+currency = "USD"
+con_id = 859001506
+
+[[contracts]]
+symbol = "PRPL"
+exchange = "SMART"
+currency = "USD"
+con_id = 305576762
+
+[[contracts]]
+symbol = "PRTS"
+exchange = "SMART"
+currency = "USD"
+con_id = 436736653
+
+[[contracts]]
+symbol = "PSQH"
+exchange = "SMART"
+currency = "USD"
+con_id = 642848418
+
+[[contracts]]
+symbol = "PSTL"
+exchange = "SMART"
+currency = "USD"
+con_id = 365214696
+
+[[contracts]]
+symbol = "PVL"
+exchange = "SMART"
+currency = "USD"
+con_id = 332274915
+
+[[contracts]]
+symbol = "QBTS"
+exchange = "SMART"
+currency = "USD"
+con_id = 578031277
+
+[[contracts]]
+symbol = "QVCGA"
+exchange = "SMART"
+currency = "USD"
+con_id = 786559455
+
+[[contracts]]
+symbol = "QVCGP"
+exchange = "SMART"
+currency = "USD"
+con_id = 442948738
+
+[[contracts]]
+symbol = "RB"
+exchange = "SMART"
+currency = "USD"
+con_id = 794639079
+
+[[contracts]]
+symbol = "RCAX"
+exchange = "SMART"
+currency = "USD"
+con_id = 851519018
+
+[[contracts]]
+symbol = "RCON"
+exchange = "SMART"
+currency = "USD"
+con_id = 700289495
+
+[[contracts]]
+symbol = "RDI"
+exchange = "SMART"
+currency = "USD"
+con_id = 14570971
+
+[[contracts]]
+symbol = "RDWU"
+exchange = "SMART"
+currency = "USD"
+con_id = 850319479
+
+[[contracts]]
+symbol = "RFL"
+exchange = "SMART"
+currency = "USD"
+con_id = 310171667
+
+[[contracts]]
+symbol = "RH"
+exchange = "SMART"
+currency = "USD"
+con_id = 258821404
+
+[[contracts]]
+symbol = "ROAD"
+exchange = "SMART"
+currency = "USD"
+con_id = 316805141
+
+[[contracts]]
+symbol = "RPAY"
+exchange = "SMART"
+currency = "USD"
+con_id = 374554989
+
+[[contracts]]
+symbol = "SCO"
+exchange = "SMART"
+currency = "USD"
+con_id = 562283007
+
+[[contracts]]
+symbol = "SENEB"
+exchange = "SMART"
+currency = "USD"
+con_id = 4817936
+
+[[contracts]]
+symbol = "SGI"
+exchange = "SMART"
+currency = "USD"
+con_id = 27059190
+
+[[contracts]]
+symbol = "SHMD"
+exchange = "SMART"
+currency = "USD"
+con_id = 700612615
+
+[[contracts]]
+symbol = "SILC"
+exchange = "SMART"
+currency = "USD"
+con_id = 4818091
+
+[[contracts]]
+symbol = "SITE"
+exchange = "SMART"
+currency = "USD"
+con_id = 233089461
+
+[[contracts]]
+symbol = "SKY"
+exchange = "SMART"
+currency = "USD"
+con_id = 12190
+
+[[contracts]]
+symbol = "SKYQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 863831941
+
+[[contracts]]
+symbol = "SLAI"
+exchange = "SMART"
+currency = "USD"
+con_id = 602596427
+
+[[contracts]]
+symbol = "SLV"
+exchange = "SMART"
+currency = "USD"
+con_id = 39039301
+
+[[contracts]]
+symbol = "SMR"
+exchange = "SMART"
+currency = "USD"
+con_id = 559289446
+
+[[contracts]]
+symbol = "SMSI"
+exchange = "SMART"
+currency = "USD"
+con_id = 696323316
+
+[[contracts]]
+symbol = "SMST"
+exchange = "SMART"
+currency = "USD"
+con_id = 786554160
+
+[[contracts]]
+symbol = "SMU"
+exchange = "SMART"
+currency = "USD"
+con_id = 859589359
+
+[[contracts]]
+symbol = "SMUP"
+exchange = "SMART"
+currency = "USD"
+con_id = 868736195
+
+[[contracts]]
+symbol = "SMZ"
+exchange = "SMART"
+currency = "USD"
+con_id = 853415351
+
+[[contracts]]
+symbol = "SNAP"
+exchange = "SMART"
+currency = "USD"
+con_id = 268060148
+
+[[contracts]]
+symbol = "SNBR"
+exchange = "SMART"
+currency = "USD"
+con_id = 294630845
+
+[[contracts]]
+symbol = "SNWV"
+exchange = "SMART"
+currency = "USD"
+con_id = 736356966
+
+[[contracts]]
+symbol = "SOBR"
+exchange = "SMART"
+currency = "USD"
+con_id = 773298854
+
+[[contracts]]
+symbol = "SOFI"
+exchange = "SMART"
+currency = "USD"
+con_id = 494162724
+
+[[contracts]]
+symbol = "SOXL"
+exchange = "SMART"
+currency = "USD"
+con_id = 73340487
+
+[[contracts]]
+symbol = "SOXS"
+exchange = "SMART"
+currency = "USD"
+con_id = 854072548
+
+[[contracts]]
+symbol = "SQQQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 831082828
+
+[[contracts]]
+symbol = "SRFM"
+exchange = "SMART"
+currency = "USD"
+con_id = 722282314
+
+[[contracts]]
+symbol = "STKS"
+exchange = "SMART"
+currency = "USD"
+con_id = 158060562
+
+[[contracts]]
+symbol = "STRZ"
+exchange = "SMART"
+currency = "USD"
+con_id = 781686697
+
+[[contracts]]
+symbol = "SUNB"
+exchange = "SMART"
+currency = "USD"
+con_id = 858494169
+
+[[contracts]]
+symbol = "SVAQU"
+exchange = "SMART"
+currency = "USD"
+con_id = 839412769
+
+[[contracts]]
+symbol = "TBI"
+exchange = "SMART"
+currency = "USD"
+con_id = 47619256
+
+[[contracts]]
+symbol = "TEAD"
+exchange = "SMART"
+currency = "USD"
+con_id = 504262517
+
+[[contracts]]
+symbol = "TELA"
+exchange = "SMART"
+currency = "USD"
+con_id = 390910785
+
+[[contracts]]
+symbol = "TKNO"
+exchange = "SMART"
+currency = "USD"
+con_id = 499023807
+
+[[contracts]]
+symbol = "TMDE"
+exchange = "SMART"
+currency = "USD"
+con_id = 777715198
+
+[[contracts]]
+symbol = "TOVX"
+exchange = "SMART"
+currency = "USD"
+con_id = 723659075
+
+[[contracts]]
+symbol = "TQQQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 72539702
+
+[[contracts]]
+symbol = "TRUG"
+exchange = "SMART"
+currency = "USD"
+con_id = 868497444
+
+[[contracts]]
+symbol = "TSLG"
+exchange = "SMART"
+currency = "USD"
+con_id = 748093817
+
+[[contracts]]
+symbol = "TSLL"
+exchange = "SMART"
+currency = "USD"
+con_id = 578561429
+
+[[contracts]]
+symbol = "TSM"
+exchange = "SMART"
+currency = "USD"
+con_id = 6223250
+
+[[contracts]]
+symbol = "TURB"
+exchange = "SMART"
+currency = "USD"
+con_id = 655647243
+
+[[contracts]]
+symbol = "TVAIR"
+exchange = "SMART"
+currency = "USD"
+con_id = 796365801
+
+[[contracts]]
+symbol = "TVGN"
+exchange = "SMART"
+currency = "USD"
+con_id = 860926070
+
+[[contracts]]
+symbol = "TZA"
+exchange = "SMART"
+currency = "USD"
+con_id = 468796852
+
+[[contracts]]
+symbol = "UCAR"
+exchange = "SMART"
+currency = "USD"
+con_id = 869892469
+
+[[contracts]]
+symbol = "UMC"
+exchange = "SMART"
+currency = "USD"
+con_id = 46613372
+
+[[contracts]]
+symbol = "USGG"
+exchange = "SMART"
+currency = "USD"
+con_id = 845307869
+
+[[contracts]]
+symbol = "USO"
+exchange = "SMART"
+currency = "USD"
+con_id = 418893644
+
+[[contracts]]
+symbol = "UXAP"
+exchange = "SMART"
+currency = "USD"
+con_id = 777715207
+
+[[contracts]]
+symbol = "VCX"
+exchange = "SMART"
+currency = "USD"
+con_id = 863841644
+
+[[contracts]]
+symbol = "VG"
+exchange = "SMART"
+currency = "USD"
+con_id = 756373540
+
+[[contracts]]
+symbol = "WAFD"
+exchange = "SMART"
+currency = "USD"
+con_id = 276037
+
+[[contracts]]
+symbol = "WBX"
+exchange = "SMART"
+currency = "USD"
+con_id = 792307606
+
+[[contracts]]
+symbol = "WRBY"
+exchange = "SMART"
+currency = "USD"
+con_id = 517203799
+
+[[contracts]]
+symbol = "WULF"
+exchange = "SMART"
+currency = "USD"
+con_id = 532497563
+
+[[contracts]]
+symbol = "XAIR"
+exchange = "SMART"
+currency = "USD"
+con_id = 798492913
+
+[[contracts]]
+symbol = "XLE"
+exchange = "SMART"
+currency = "USD"
+con_id = 4215217
+
+[[contracts]]
+symbol = "YETI"
+exchange = "SMART"
+currency = "USD"
+con_id = 338719595
+
+[[contracts]]
+symbol = "YQ"
+exchange = "SMART"
+currency = "USD"
+con_id = 672370108
+
+[[contracts]]
+symbol = "YSG"
+exchange = "SMART"
+currency = "USD"
+con_id = 689683761
+
+[[contracts]]
+symbol = "YXT"
+exchange = "SMART"
+currency = "USD"
+con_id = 723463963
+
+[[contracts]]
+symbol = "ZEPP"
+exchange = "SMART"
+currency = "USD"
+con_id = 727524354
+
+[[contracts]]
+symbol = "ZSPC"
+exchange = "SMART"
+currency = "USD"
+con_id = 745938908

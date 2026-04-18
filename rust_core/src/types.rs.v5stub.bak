@@ -1,0 +1,52 @@
+// MarketTick — 42 fields. Every field is registered in FIELD_CONSUMPTION_LEDGER.md.
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MarketTick {
+    pub schema_version: u16,
+    pub ticker: String,
+    pub exchange: String,
+    pub timestamp_ns: u64,
+
+    pub bid: f64,
+    pub ask: f64,
+    pub last: f64,
+    pub volume: u64,
+    pub bid_size: u64,
+    pub ask_size: u64,
+    pub high: f64,
+    pub low: f64,
+    pub open: f64,
+    pub close: f64,
+    pub vwap: f64,
+
+    pub bid_depth_l2: [f64; 5],
+    pub ask_depth_l2: [f64; 5],
+
+    pub mark_price: f64,
+    pub rt_hist_vol: f64,
+    pub avg_volume: f64,
+    pub shortable: bool,
+    pub halted: bool,
+    pub auction_price: f64,
+    pub auction_volume: f64,
+    pub auction_imbalance: f64,
+    pub etf_nav_close: f64,
+    pub etf_nav_last: f64,
+    pub opt_call_oi: f64,
+    pub opt_put_oi: f64,
+    pub opt_call_vol: f64,
+    pub opt_put_vol: f64,
+    pub opt_iv: f64,
+}
+
+/// Sacred engine invariants. See AEGIS_V5_MASTER_PLAN Part -1.
+pub const INVARIANTS: &[&str] = &[
+    "hot path never blocks on Python",
+    "exit monitor runs every tick",
+    "8 consecutive losses halts",
+    "every risk check is a weighted delta, never a hard None",
+    "every open position has a server-side STP mirror",
+    "WAL is append-only, hash-chained, daily-rotated",
+    "every paid field has a reader or is SHADOW/UNWIRED and explicit",
+];

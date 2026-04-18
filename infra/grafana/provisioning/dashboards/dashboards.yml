@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: aegis_v5
+    orgId: 1
+    folder: AEGIS V5
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

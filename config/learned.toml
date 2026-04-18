@@ -1,0 +1,4 @@
+# Ouroboros nightly output. Bounded by bounds.toml. DO NOT EDIT BY HAND.
+kelly_fraction = 0.035
+confidence_floor = 0.6
+chandelier_atr_mult = 3.0

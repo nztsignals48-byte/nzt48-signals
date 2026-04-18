@@ -1,0 +1,46 @@
+# MVP registry — 6 strategies. Everything else goes in strategies/shadow/ until Gate 0-2 proves edge.
+# Per § PART -0.5 simulation-first reframe + § PART -0.3 4-R9.
+
+schema_version = 1
+
+[[strategies]]
+name = "sentiment_long_short"
+module = "python_brain.strategies.sentiment"
+enabled = true
+exit_method = "ChandelierStop"
+evidence = "V3 Gate-2 PF=3.68"
+
+[[strategies]]
+name = "filing_change_detect"
+module = "python_brain.strategies.filing_change"
+enabled = true
+exit_method = "FixedDayExpiry"
+evidence = "V3 Gate-2 PF=2.49"
+
+[[strategies]]
+name = "index_recon"
+module = "python_brain.strategies.index_recon"
+enabled = true
+exit_method = "EventWindowExit"
+evidence = "V3 Gate-2 PF=2.30"
+
+[[strategies]]
+name = "earnings_pattern"
+module = "python_brain.strategies.earnings_pattern"
+enabled = true
+exit_method = "FixedDayExpiry"
+evidence = "V3 Gate-2 PF=1.40"
+
+[[strategies]]
+name = "overnight_return"
+module = "python_brain.strategies.overnight_return"
+enabled = true
+exit_method = "NextOpen"
+evidence = "Lou et al. t-stat 17, V2-validated"
+
+[[strategies]]
+name = "ibs_mean_reversion"
+module = "python_brain.strategies.ibs_mean_reversion"
+enabled = true
+exit_method = "FixedDayExpiry"
+evidence = "V2 +14K PnL/sh"

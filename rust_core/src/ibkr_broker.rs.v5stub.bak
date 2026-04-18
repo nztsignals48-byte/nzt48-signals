@@ -1,0 +1,11 @@
+// IBKR broker integration. Phase 2A fills with ibapi crate or rolled TCP.
+// Scaffold just exposes the types the rest of the engine depends on.
+
+use crate::types::MarketTick;
+
+pub struct IbkrBroker { pub client_id: u16 }
+
+impl IbkrBroker {
+    pub fn new(client_id: u16) -> Self { Self { client_id } }
+    pub async fn next_tick(&mut self) -> Option<MarketTick> { None }
+}

@@ -1,0 +1,21 @@
+// 3-layer config: defaults.toml -> config.toml -> learned.toml. Bounds-checked.
+// Phase 0: scaffold load returning a minimal struct.
+
+use anyhow::Result;
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NatsCfg { pub url: String, pub stream_name: String }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config { pub nats: NatsCfg }
+
+pub fn load_all() -> Result<Config> {
+    // Scaffold — Phase 1 fills bounds validation.
+    Ok(Config {
+        nats: NatsCfg {
+            url: std::env::var("AEGIS_V5_NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into()),
+            stream_name: "AEGIS_V5".into(),
+        },
+    })
+}

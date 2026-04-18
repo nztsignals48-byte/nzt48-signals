@@ -1,0 +1,13 @@
+# External watchdog — Hetzner CX22. Independent infra. NATS mirror + Telegram alert bot.
+# Phase 10.1 fills.
+version: "3.9"
+services:
+  watchdog:
+    image: python:3.12-slim
+    command: ["python", "-m", "watchdog.main"]
+    environment:
+      - AEGIS_V5_PRIMARY_HEALTH_URL=https://primary.example.com/health
+      - TELEGRAM_BOT_TOKEN=scaffold
+    volumes:
+      - ./:/app
+    working_dir: /app

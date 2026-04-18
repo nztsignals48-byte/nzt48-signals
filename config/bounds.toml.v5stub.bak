@@ -1,0 +1,23 @@
+# AEGIS V5 — parameter bounds. Any learned.toml value outside these bounds => Ouroboros refuses to write.
+
+schema_version = 1
+
+[kelly_fraction]
+min = 0.02
+max = 0.30
+
+[chandelier_atr_mult]
+min = 1.5
+max = 3.0
+
+[heat_limit]
+min = 0.05
+max = 0.10
+
+[confidence_floor]
+min = 0.55
+max = 0.80
+
+[regime_scale]
+min = 0.25
+max = 1.00

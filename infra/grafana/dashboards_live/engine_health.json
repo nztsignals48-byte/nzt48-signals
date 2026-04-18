@@ -1,0 +1,58 @@
+{
+  "title": "Engine Health",
+  "uid": "engine_health_live",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Ticks received / sec",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(ticks_received_total[1m])", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "Signals generated (cumulative)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "signals_generated_total", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Positions open",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "positions_open", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "WAL events / sec",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "rate(wal_events_total[1m])", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "title": "Positions closed (cumulative)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "positions_closed_total", "refId": "A"}]
+    },
+    {
+      "id": 6,
+      "title": "Engine uptime (sec)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [{"expr": "engine_uptime_seconds", "refId": "A"}]
+    }
+  ]
+}
