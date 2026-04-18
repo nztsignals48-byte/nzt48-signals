@@ -2,3 +2,15 @@
 kelly_fraction = 0.035
 confidence_floor = 0.6
 chandelier_atr_mult = 3.0
+
+# learned.toml — written by capital_bandit
+# ts = 1776555465.352891
+
+# learned.toml — written by capital_bandit
+# ts = 1776555637.258052
+
+[bandit]
+# bad: alpha=1.00 beta=21.00 n_updates=20
+kelly_bad = 0.0095
+# good: alpha=21.00 beta=1.00 n_updates=20
+kelly_good = 0.0477
