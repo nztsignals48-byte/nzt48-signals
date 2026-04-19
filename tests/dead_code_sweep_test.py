@@ -75,8 +75,13 @@ TRACKED_MODULES = [
     # Ouroboros
     ("ouroboros", "options_flow_tracker"),
     ("ouroboros", "retrain_hooks"),
+    ("ouroboros", "retrain_hooks_v2"),
+    ("ouroboros", "drift_check"),
     # Core
     ("core", "paths"),
+    # New daemons wired this pass
+    ("quant", "gmm_regime_daemon"),
+    ("quant", "sector_regime_daemon"),
 ]
 
 
