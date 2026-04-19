@@ -1,7 +1,7 @@
 {
   "indicator_framer_with_ticks": {
     "status": "PASS",
-    "duration_ms": 8.3,
+    "duration_ms": 10.0,
     "data": {
       "n_ticks": 100,
       "vol_pct": 0.0187,
@@ -15,7 +15,7 @@
   },
   "l2_book_predicts_direction": {
     "status": "PASS",
-    "duration_ms": 3.1,
+    "duration_ms": 3.5,
     "data": {
       "buy_pressure_predicted_bps": 36.8,
       "sell_pressure_predicted_bps": -36.8
@@ -23,7 +23,7 @@
   },
   "full_pipeline_happy_path": {
     "status": "PASS",
-    "duration_ms": 723.2,
+    "duration_ms": 721.3,
     "data": {
       "cost_check": {
         "net_edge_bps": 27.39,
@@ -62,7 +62,7 @@
   },
   "execution_schedule_realistic": {
     "status": "PASS",
-    "duration_ms": 0.5,
+    "duration_ms": 0.6,
     "data": {
       "passive": {
         "num_slices": 20,
@@ -88,7 +88,7 @@
   },
   "spde_simulator_generates_fills": {
     "status": "PASS",
-    "duration_ms": 19.5,
+    "duration_ms": 18.7,
     "data": {
       "total_fills": 611,
       "final_spread_bps": -2.25,
@@ -98,7 +98,7 @@
   },
   "tail_hedge_responds_to_crisis": {
     "status": "PASS",
-    "duration_ms": 0.4,
+    "duration_ms": 0.5,
     "data": {
       "tail_load": {
         "drawdown_pct": 0.4229,

@@ -33,7 +33,7 @@ def build_services() -> list[Service]:
     py = sys.executable
     return [
         Service("gmm_regime_daemon",
-                cmd=[py, "-u", "python_brain/quant/gmm_regime_daemon.py"],
+                cmd=[py, "-u", "python_brain/quant/gmm_regime_daemon_v2.py"],
                 tier=2),
         Service("sector_regime_daemon",
                 cmd=[py, "-u", "python_brain/quant/sector_regime_daemon.py"],

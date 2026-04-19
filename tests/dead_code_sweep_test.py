@@ -82,6 +82,9 @@ TRACKED_MODULES = [
     # New daemons wired this pass
     ("quant", "gmm_regime_daemon"),
     ("quant", "sector_regime_daemon"),
+    # Fix pass: v2 GMM daemon + v2 macro buffer (correct daily-return semantics)
+    ("quant", "gmm_regime_daemon_v2"),
+    ("quant", "macro_feature_buffer_v2"),
 ]
 
 
